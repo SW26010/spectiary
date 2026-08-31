@@ -805,6 +805,13 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::Pause, "Pause", "暂停"},
         ExpectedText{UiTextId::Delete, "Delete", "删除"},
         ExpectedText{UiTextId::SelectLabelingTask, "Select labeling task", "选择标注任务"},
+        ExpectedText{UiTextId::LabelingTaskName, "Task name", "任务名称"},
+        ExpectedText{UiTextId::LabelingTaskId, "Task ID: %s", "任务 ID：%s"},
+        ExpectedText{UiTextId::CopyLabelingTaskId, "Copy ID", "复制 ID"},
+        ExpectedText{
+            UiTextId::InvalidLabelingTaskName,
+            "Enter a valid UTF-8 task name containing at least one non-whitespace character.",
+            "请输入有效的 UTF-8 任务名称，且至少包含一个非空白字符。"},
         ExpectedText{UiTextId::NewLabelingTask, "New labeling task", "新建标注任务"},
         ExpectedText{UiTextId::TemporaryLabelingTask, "Temporary labeling task", "临时标注任务"},
         ExpectedText{UiTextId::TemporaryLabelingDraft, "Temporary labeling draft", "临时标注草稿"},

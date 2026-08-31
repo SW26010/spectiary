@@ -103,6 +103,7 @@ Require-LiteralOrder `
     $immersiveBody `
     @(
         "RenderImmersivePlot(status);",
+        "FinalizeTaskNameEdit(",
         "FinalizeNavigationInputEdits(",
         "TakeAction()",
         "HandleSampleWorkflowShortcut();",
@@ -116,6 +117,8 @@ Require-LiteralOrder `
         "RenderNavigationPanel(",
         "RenderFiltersPanel(",
         "RenderSortingPanel(",
+        "if (!application_settings_.View().panel_visibility.labeling)",
+        "FinalizeTaskNameEdit(",
         "FinalizeNavigationInputEdits(",
         "TakeAction()",
         "HandleSampleWorkflowShortcut();"
@@ -127,6 +130,13 @@ $finalizeCount = [regex]::Matches(
     'FinalizeNavigationInputEdits\s*\(').Count
 if ($finalizeCount -ne 2) {
     throw "ShellUi::Render must contain exactly two Navigation finalization sites; found $finalizeCount."
+}
+
+$taskNameFinalizeCount = [regex]::Matches(
+    $renderBody,
+    'FinalizeTaskNameEdit\s*\(').Count
+if ($taskNameFinalizeCount -ne 2) {
+    throw "ShellUi::Render must finalize task-name edits in both hidden-panel paths; found $taskNameFinalizeCount sites."
 }
 
 Write-Host "Panel session render architecture checks passed."

@@ -308,6 +308,18 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::DeleteActiveLabelingTask(
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::RenameActiveLabelingTask(
+    std::string expected_task_id,
+    std::string requested_name)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind =
+        ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask;
+    intent.task_id = std::move(expected_task_id);
+    intent.requested_name = std::move(requested_name);
+    return intent;
+}
+
 ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::UpsertActiveLabel(SampleLabelDefinition label)
 {
     ActiveSampleWorkflowIntent intent;

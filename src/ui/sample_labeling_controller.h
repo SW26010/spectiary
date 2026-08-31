@@ -259,7 +259,9 @@ public:
         SampleLabelDefinition label,
         bool allow_used_code_change);
     [[nodiscard]] SampleLabelingOperationResult RemoveActiveLabel(int code);
-    [[nodiscard]] SampleLabelingOperationResult RenameActiveTask(std::string task_name);
+    [[nodiscard]] SampleLabelingOperationResult RenameActiveTask(
+        std::string_view expected_task_id,
+        std::string task_name);
     [[nodiscard]] SampleLabelingOperationResult SetActiveAutoAdvance(bool enabled);
     [[nodiscard]] SampleLabelingOperationResult SetActiveSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SampleLabelingOperationResult SaveActiveTemporaryTaskToOutput(

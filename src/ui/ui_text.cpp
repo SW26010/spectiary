@@ -665,6 +665,12 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Select labeling task",
         "选择标注任务"},
+    UiTextEntry{"Task name", "任务名称"},
+    UiTextEntry{"Task ID: %s", "任务 ID：%s"},
+    UiTextEntry{"Copy ID", "复制 ID"},
+    UiTextEntry{
+        "Enter a valid UTF-8 task name containing at least one non-whitespace character.",
+        "请输入有效的 UTF-8 任务名称，且至少包含一个非空白字符。"},
     UiTextEntry{
         "New labeling task",
         "新建标注任务"},

@@ -1174,6 +1174,9 @@ void ShellUi::Render(const ShellStatus& status)
     sample_workflow_shortcut_ = {};
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
+        sample_workflow_panel_ui_.FinalizeTaskNameEdit(
+            panel_session_interaction_,
+            application_settings_.View().language);
         source_collection_panel_ui_.FinalizeNavigationInputEdits(
             panel_session_interaction_);
         HandleSessionAction(
@@ -1249,6 +1252,14 @@ void ShellUi::Render(const ShellStatus& status)
             ApplicationPanel::SpectralLines);
     }
     RenderSettingsPanel(status);
+    if (!application_settings_.View().panel_visibility.labeling) {
+        // The window close button and the View menu both stop future
+        // RenderLabeling calls. Finalize while this frame can still dispatch
+        // the guarded rename intent.
+        sample_workflow_panel_ui_.FinalizeTaskNameEdit(
+            panel_session_interaction_,
+            application_settings_.View().language);
+    }
     // Blur commits must observe every same-frame panel mutation, especially
     // sample filtering and sorting rendered after Navigation.
     source_collection_panel_ui_.FinalizeNavigationInputEdits(
@@ -2691,6 +2702,11 @@ void ShellUi::RenderLabelingPanel(bool panel_open)
                 format);
         },
         shortcut);
+    if (!panel_open) {
+        sample_workflow_panel_ui_.FinalizeTaskNameEdit(
+            panel_session_interaction_,
+            application_settings_.View().language);
+    }
     HandleSessionAction(
         panel_session_interaction_.TakeAction());
     SetPanelVisibility(

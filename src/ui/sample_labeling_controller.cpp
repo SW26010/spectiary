@@ -2493,15 +2493,21 @@ SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int co
             : TaskProjectionEffect::Unchanged);
 }
 
-SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(std::string task_name)
+SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(
+    std::string_view expected_task_id,
+    std::string task_name)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr ||
-        !IsValidUtf8WithNonWhitespace(task_name) ||
+    if (task == nullptr || task->task_id != expected_task_id) {
+        return RejectEditTargetChanged();
+    }
+
+    const bool valid_name =
+        IsValidUtf8WithNonWhitespace(task_name);
+    if (!valid_name ||
         task->task_name == task_name) {
         SampleLabelingOperationResult result = RejectOperation();
-        result.accepted = task != nullptr &&
-            IsValidUtf8WithNonWhitespace(task_name);
+        result.accepted = valid_name;
         return result;
     }
 

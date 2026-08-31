@@ -270,7 +270,10 @@ void TestTaskLifecycleUsesInjectedUuidAndSemanticClock()
                 timestamps[5],
         "removing a label definition should advance modified_at");
     Require(
-        controller.RenameActiveTask("复核任务").changed &&
+        controller.RenameActiveTask(
+                       kFirstId,
+                       "复核任务")
+                .changed &&
             ActiveTask(controller)->canonical_metadata.modified_at ==
                 timestamps[6],
         "committing a task-name rename should advance modified_at");
@@ -1741,6 +1744,40 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
         initial_generation = initial_projection->labeling_document;
     const specforge::CanonicalTimestamp initial_modified_at =
         ActiveTask(controller)->canonical_metadata.modified_at;
+    const std::string original_task_id =
+        ActiveTask(controller)->task_id;
+    const std::string original_task_name =
+        ActiveTask(controller)->task_name;
+    const std::optional<std::filesystem::path>
+        original_output_path =
+            ActiveTask(controller)->output_path;
+
+    const specforge::SampleLabelingOperationResult stale_rename =
+        controller.RenameActiveTask(
+            "00000000-0000-4000-8000-000000000099",
+            "Must not reach the active task");
+    const specforge::SampleLabelingOperationResult unchanged_name =
+        controller.RenameActiveTask(
+            original_task_id,
+            original_task_name);
+    Require(
+        !stale_rename.accepted && !stale_rename.changed &&
+            stale_rename.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            unchanged_name.accepted && !unchanged_name.changed &&
+            !unchanged_name.output_save_attempted &&
+            document_publication_calls == 0 &&
+            values_publication_calls == 0 &&
+            semantic_clock_calls == 0 &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == original_task_id &&
+            ActiveTask(controller)->task_name == original_task_name &&
+            ActiveTask(controller)->output_path == original_output_path &&
+            ActiveTask(controller)
+                    ->canonical_metadata.modified_at ==
+                initial_modified_at,
+        "a stale expected task ID must reject the rename, while an unchanged name is accepted without mutation or publication");
 
     const specforge::SampleLabelingOperationResult unchanged =
         controller.UpdateActiveLabel(
@@ -1761,6 +1798,7 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
 
     const specforge::SampleLabelingOperationResult renamed =
         controller.RenameActiveTask(
+            "00000000-0000-4000-8000-000000000006",
             "Locally renamed canonical task");
     const specforge::SampleLabelingOperationResult added =
         controller.UpsertActiveLabel({9, "temporary", 't'});
@@ -1789,8 +1827,11 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
             document_publication_calls == 5 &&
             values_publication_calls == 0 &&
             semantic_clock_calls == 5 &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == original_task_id &&
+            ActiveTask(controller)->output_path == original_output_path &&
             !controller.NextMaintenanceDeadline(),
-        "canonical metadata mutations should publish and reopen one full document generation each");
+        "canonical metadata mutations should publish and reopen one full document generation each without changing task identity or output ownership");
 
     const specforge::SampleLabelingAsdfStoreOpenResult published =
         specforge::OpenSampleLabelingAsdfDocumentStore(
@@ -1871,6 +1912,10 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
     SaveCanonicalOwnerCache(cache_path, asdf_path);
 
     std::size_t document_publication_calls = 0;
+    std::size_t semantic_clock_calls = 0;
+    const specforge::CanonicalTimestamp rename_mutation_time =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T10:30:00.000Z");
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
@@ -1912,6 +1957,22 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
                     snapshot,
                     document,
                     specforge::SampleLabelingCompatibilityView(source));
+        },
+        [](const std::filesystem::path& path,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                path,
+                document,
+                specforge::SampleLabelingCompatibilityView(source));
+        },
+        []() -> std::optional<std::string> {
+            return std::string{
+                "00000000-0000-4000-8000-000000000100"};
+        },
+        [&semantic_clock_calls, rename_mutation_time]() {
+            ++semantic_clock_calls;
+            return rename_mutation_time;
         });
     controller.ActivateSource(
         CanonicalOwnerSourceIdentity(),
@@ -1927,6 +1988,7 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
 
     const specforge::SampleLabelingOperationResult failed =
         controller.RenameActiveTask(
+            "00000000-0000-4000-8000-000000000006",
             "Renamed through retry");
     const specforge::SampleLabelingTask* failed_task =
         ActiveTask(controller);
@@ -1942,13 +2004,19 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
             !failed.output_saved &&
             failed.output_retry_scheduled &&
             document_publication_calls == 1 &&
+            semantic_clock_calls == 1 &&
             failed_task != nullptr &&
             failed_task->metadata_save_pending &&
+            failed_task->canonical_metadata.modified_at ==
+                rename_mutation_time &&
             !controller.ActiveCanonicalAsdfAnnotationProjection() &&
             replaced_generation.succeeded() &&
             replaced_generation.snapshot->document().labeling.name ==
-                "Renamed through retry",
-        "a post-rewrite reopen failure must remain pending and discard the stale active snapshot instead of reporting success");
+                "Renamed through retry" &&
+            replaced_generation.snapshot->document()
+                    .labeling.canonical_metadata.modified_at ==
+                rename_mutation_time,
+        "a post-rewrite reopen failure must remain pending with the original rename timestamp and discard the stale active snapshot instead of reporting success");
 
     std::vector<unsigned char> newer_bytes =
         ReadBinaryFile(asdf_path);
@@ -1974,6 +2042,7 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
             "00000000-0000-4000-8000-000000000006");
     Require(
         document_publication_calls == 2 &&
+            semantic_clock_calls == 1 &&
             maintenance.output_retry_attempted &&
             maintenance.canonical_output_published &&
             retried_task != nullptr &&
@@ -1985,11 +2054,18 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
                 initial_generation &&
             retried_projection->labeling_document->labeling.name ==
                 "Renamed through retry" &&
+            retried_task->canonical_metadata.modified_at ==
+                rename_mutation_time &&
+            retried_projection->labeling_document->labeling
+                    .canonical_metadata.modified_at ==
+                rename_mutation_time &&
             BinaryFileContains(asdf_path, "new-generation") &&
             !BinaryFileContains(asdf_path, "old-generation") &&
             clean_task != nullptr &&
-            !clean_task->metadata_save_pending,
-        "retry must reopen the current durable generation before rewriting so stale unknown metadata cannot overwrite a newer file");
+            !clean_task->metadata_save_pending &&
+            clean_task->canonical_metadata.modified_at ==
+                rename_mutation_time,
+        "retry must reuse the original rename timestamp and reopen the current durable generation so stale unknown metadata cannot overwrite a newer file");
 }
 
 void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()

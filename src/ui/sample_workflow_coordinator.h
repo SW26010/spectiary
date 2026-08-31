@@ -242,6 +242,9 @@ private:
     [[nodiscard]] SampleWorkflowTransitionOutcome ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
     [[nodiscard]] SampleWorkflowTransitionOutcome DeleteActiveLabelingTask();
+    [[nodiscard]] SampleWorkflowTransitionOutcome RenameActiveLabelingTask(
+        std::string expected_task_id,
+        std::string requested_name);
     [[nodiscard]] SampleWorkflowTransitionOutcome UpsertActiveLabel(
         SampleLabelDefinition label);
     [[nodiscard]] SampleWorkflowTransitionOutcome UpdateActiveLabel(

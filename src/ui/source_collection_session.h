@@ -74,6 +74,7 @@ enum class ActiveSampleWorkflowIntentKind {
     DeleteTemporaryLabelingTask,
     ActivateLabelingTaskFromAnnotation,
     DeleteActiveLabelingTask,
+    RenameActiveLabelingTask,
     UpsertActiveLabel,
     UpdateActiveLabel,
     RemoveActiveLabel,
@@ -157,6 +158,9 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeleteActiveLabelingTask();
+    [[nodiscard]] static ActiveSampleWorkflowIntent RenameActiveLabelingTask(
+        std::string expected_task_id,
+        std::string requested_name);
     [[nodiscard]] static ActiveSampleWorkflowIntent UpsertActiveLabel(SampleLabelDefinition label);
     [[nodiscard]] static ActiveSampleWorkflowIntent UpdateActiveLabel(
         int original_code,
@@ -186,6 +190,7 @@ private:
     std::filesystem::path path;
     std::string source_identity;
     std::string task_id;
+    std::string requested_name;
     SampleLabelDefinition label;
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;

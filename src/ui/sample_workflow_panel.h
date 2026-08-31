@@ -82,6 +82,9 @@ public:
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
         const SampleLabelExportPathChooser& choose_export_path,
         SampleWorkflowShortcut& shortcut);
+    void FinalizeTaskNameEdit(
+        PanelSessionInteraction& interaction,
+        UiLanguage language);
 
     void RenderFilters(
         PanelSessionInteraction& interaction,
@@ -115,6 +118,22 @@ private:
     };
 
     void ResetLabelShortcutCapture();
+    void ResetTaskNameEditState();
+    void SyncTaskNameEditTarget(
+        const SourceCollectionLabelingView& labeling_view);
+    void RecordTaskNameEdit(
+        bool item_active,
+        bool enter_pressed,
+        bool deactivated_after_edit,
+        UiLanguage language);
+    void RequestTaskNameEditFinalize(bool deferred);
+    void SettlePendingTaskNameEdit(
+        PanelSessionInteraction& interaction,
+        UiLanguage language);
+    void RenderTaskNameEditor(
+        const SourceCollectionLabelingView& labeling_view,
+        PanelSessionInteraction& interaction,
+        UiLanguage language);
     [[nodiscard]] std::string LabelShortcutNotice(
         UiLanguage language) const;
     void CaptureLabelingOperationResult(
@@ -123,11 +142,21 @@ private:
     void SetPendingAnnotationActivation(
         const SourceCollectionAnnotationValueView& annotation);
     void ClearLabelingOperationMessage();
+    [[nodiscard]] static std::string ValidateTaskName(
+        UiLanguage language,
+        std::string_view task_name);
     [[nodiscard]] static std::string RecoveryDraftRowToken(
         const SourceCollectionLabelingView& labeling_view,
         std::size_t draft_index);
 
     std::string active_task_id_;
+    std::string task_name_edit_task_id_;
+    std::string task_name_edit_buffer_;
+    std::string task_name_edit_baseline_;
+    bool task_name_edit_focused_ = false;
+    bool task_name_finalize_pending_ = false;
+    bool task_name_finalize_deferred_ = false;
+    std::string task_name_edit_validation_message_;
     std::string labeling_operation_message_;
     std::optional<UiTextId> labeling_operation_text_id_;
     std::optional<int> editing_label_code_;
@@ -158,6 +187,8 @@ private:
     std::unordered_map<std::string, std::string>
         recovery_draft_fingerprints_;
     std::optional<std::array<float, 4>> labeling_selector_rect_;
+    std::optional<std::array<float, 4>> labeling_task_name_rect_;
+    std::optional<std::array<float, 4>> labeling_task_id_copy_rect_;
     std::optional<std::array<float, 4>> labeling_pause_rect_;
     std::optional<std::array<float, 4>> labeling_delete_rect_;
     std::optional<std::array<float, 4>> labeling_recovery_rect_;

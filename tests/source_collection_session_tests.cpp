@@ -782,6 +782,16 @@ specforge::SourceCollectionSessionIntent StartOrResumeTemporaryLabelingTask()
         specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask());
 }
 
+specforge::SourceCollectionSessionIntent RenameActiveLabelingTask(
+    std::string expected_task_id,
+    std::string requested_name)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::RenameActiveLabelingTask(
+            std::move(expected_task_id),
+            std::move(requested_name)));
+}
+
 specforge::SourceCollectionSessionIntent RecoverTemporaryLabelingTask(
     std::string source_identity,
     std::string task_id)
@@ -1063,6 +1073,55 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     Require(
         loaded_indices == std::vector<std::size_t>({0, 1, 0}),
         "session should load only the opened, auto-advanced, and verified sample snapshots");
+}
+
+void TestTaskRenameIntentPreservesExactNameAndRejectsStaleTarget()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(
+        session,
+        OpenSourceCollection(source_path, 0));
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+
+    const std::string task_id =
+        session.View().labeling.task_id;
+    const std::string original_name =
+        session.View().labeling.task_name;
+    const specforge::SourceCollectionSessionResult stale =
+        Submit(
+            session,
+            RenameActiveLabelingTask(
+                "00000000-0000-4000-8000-000000000000",
+                "Wrong target"));
+    Require(
+        !stale.changed &&
+            stale.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            session.View().labeling.task_id == task_id &&
+            session.View().labeling.task_name == original_name,
+        "a stale expected task ID must not rename the active task");
+
+    const std::string requested_name =
+        "  \xE5\xA4\x8D\xE6\xA0\xB8 \xF0\x9F\x99\x82  ";
+    const specforge::SourceCollectionSessionResult renamed =
+        Submit(
+            session,
+            RenameActiveLabelingTask(
+                task_id,
+                requested_name));
+    Require(
+        renamed.changed && renamed.view_invalidated &&
+            session.View().labeling.task_id == task_id &&
+            session.View().labeling.task_name == requested_name &&
+            !session.View().labeling.output_path,
+        "the rename intent must reach the guarded controller and preserve the requested UTF-8 bytes without changing task identity or ownership");
 }
 
 std::string ReadBinaryFile(const std::filesystem::path& path)
@@ -11111,6 +11170,7 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
 void RunAllTests()
 {
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
+    TestTaskRenameIntentPreservesExactNameAndRejectsStaleTarget();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelAutoAdvanceExposesNonAdjacentFilteredTransition();
     TestLabelUndoRestoresValueAndAutoAdvancePosition();

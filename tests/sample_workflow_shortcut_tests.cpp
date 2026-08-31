@@ -39,6 +39,13 @@ struct SourceCollectionPanelUiTestAccess {
         return intent.active_sample_workflow.task_id;
     }
 
+    [[nodiscard]] static std::string_view
+    ActiveWorkflowRequestedName(
+        const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.requested_name;
+    }
+
     [[nodiscard]] static SampleLabelExportFormat
     ActiveWorkflowExportFormat(
         const SourceCollectionSessionIntent& intent)
@@ -109,6 +116,51 @@ struct SampleWorkflowPanelUiTestAccess {
     LabelingSelectorRect(const SampleWorkflowPanelUi& panel)
     {
         return panel.labeling_selector_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingTaskNameRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_task_name_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingTaskIdCopyRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_task_id_copy_rect_;
+    }
+
+    [[nodiscard]] static std::string_view TaskNameEditTaskId(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.task_name_edit_task_id_;
+    }
+
+    [[nodiscard]] static std::string_view TaskNameEditBuffer(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.task_name_edit_buffer_;
+    }
+
+    [[nodiscard]] static std::string_view TaskNameEditBaseline(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.task_name_edit_baseline_;
+    }
+
+    [[nodiscard]] static std::string_view TaskNameValidationMessage(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.task_name_edit_validation_message_;
+    }
+
+    [[nodiscard]] static std::string ValidateTaskName(
+        UiLanguage language,
+        std::string_view task_name)
+    {
+        return SampleWorkflowPanelUi::ValidateTaskName(
+            language,
+            task_name);
     }
 
     [[nodiscard]] static std::optional<std::array<float, 4>>
@@ -270,12 +322,28 @@ public:
         int font_height = 0;
         io.Fonts->GetTexDataAsRGBA32(&font_pixels, &font_width, &font_height);
         Require(font_pixels != nullptr && font_width > 0 && font_height > 0, "ImGui font atlas should build");
+        ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+        platform_io.Platform_ClipboardUserData = &clipboard_text_;
+        platform_io.Platform_SetClipboardTextFn =
+            [](ImGuiContext* context, const char* text) {
+                auto* clipboard_text = static_cast<std::string*>(
+                    context->PlatformIO.Platform_ClipboardUserData);
+                *clipboard_text = text != nullptr ? text : "";
+            };
     }
 
     ~ScopedImGuiContext()
     {
         ImGui::DestroyContext();
     }
+
+    [[nodiscard]] const std::string& clipboard_text() const
+    {
+        return clipboard_text_;
+    }
+
+private:
+    std::string clipboard_text_;
 };
 
 void BeginFrame()
@@ -525,6 +593,172 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
         shortcut);
     ImGui::EndFrame();
     return shortcut;
+}
+
+struct LabelingTaskNameFrameObservation {
+    int submission_count = 0;
+    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+        submitted_workflow_kind;
+    std::string submitted_task_id;
+    std::string submitted_name;
+    std::string logged_text;
+};
+
+LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view,
+    bool capture_text = false,
+    bool collapsed = false,
+    ImVec2 window_size = ImVec2(620.0f, 700.0f))
+{
+    BeginFrame();
+    ImGui::SetNextWindowPos(
+        ImVec2(20.0f, 20.0f),
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        window_size,
+        ImGuiCond_Always);
+    ImGui::SetNextWindowCollapsed(
+        collapsed,
+        ImGuiCond_Always);
+    bool open = true;
+    LabelingTaskNameFrameObservation observation;
+    if (capture_text) {
+        ImGui::LogToBuffer();
+    }
+    specforge::PanelSessionInteraction interaction(
+        [&observation](
+            specforge::SourceCollectionSessionIntent intent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            ++observation.submission_count;
+            if (intent.intent_kind() ==
+                specforge::SourceCollectionSessionIntentKind::
+                    ActiveSampleWorkflow) {
+                observation.submitted_workflow_kind =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowKind(intent);
+                observation.submitted_task_id =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowTaskId(intent);
+                observation.submitted_name =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowRequestedName(intent);
+            }
+            specforge::SourceCollectionSessionResult result;
+            result.changed = true;
+            result.action.workflow_changed = true;
+            return result;
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    specforge::SampleWorkflowShortcut shortcut;
+    panel.RenderLabeling(
+        interaction,
+        &open,
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
+        [](specforge::SampleLabelExportFormat)
+            -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
+        shortcut);
+    if (capture_text) {
+        observation.logged_text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
+LabelingTaskNameFrameObservation FinalizeLabelingTaskNameEdit(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view)
+{
+    LabelingTaskNameFrameObservation observation;
+    specforge::PanelSessionInteraction interaction(
+        [&observation](
+            specforge::SourceCollectionSessionIntent intent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            ++observation.submission_count;
+            if (intent.intent_kind() ==
+                specforge::SourceCollectionSessionIntentKind::
+                    ActiveSampleWorkflow) {
+                observation.submitted_workflow_kind =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowKind(intent);
+                observation.submitted_task_id =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowTaskId(intent);
+                observation.submitted_name =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowRequestedName(intent);
+            }
+            specforge::SourceCollectionSessionResult result;
+            result.changed = true;
+            result.action.workflow_changed = true;
+            return result;
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    panel.FinalizeTaskNameEdit(
+        interaction,
+        specforge::UiLanguage::English);
+    return observation;
+}
+
+ImVec2 RectCenter(const std::array<float, 4>& rect)
+{
+    return ImVec2(
+        (rect[0] + rect[2]) * 0.5f,
+        (rect[1] + rect[3]) * 0.5f);
+}
+
+void FocusLabelingTaskNameField(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view)
+{
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    const auto field_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingTaskNameRect(panel);
+    Require(
+        field_rect.has_value(),
+        "an active task should expose its task-name field rectangle");
+    const ImVec2 field_center = RectCenter(*field_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        field_center.x,
+        field_center.y);
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderLabelingTaskNameFrame(panel, view);
+}
+
+void ReplaceFocusedText(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view,
+    std::string_view replacement)
+{
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
+    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddInputCharactersUTF8(
+        std::string(replacement).c_str());
 }
 
 struct LabelingExportFrameObservation {
@@ -3246,17 +3480,706 @@ void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
     }
 }
 
+void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "28f66393-e877-400a-a748-563d623cbd47";
+    view.labeling.task_name = "Formal review";
+
+    const LabelingTaskNameFrameObservation formal =
+        RenderLabelingTaskNameFrame(panel, view, true);
+    Require(
+        formal.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingTaskNameRect(panel)
+                .has_value() &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingTaskIdCopyRect(panel)
+                .has_value(),
+        "a formal task should always render the name editor and task ID copy control");
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditTaskId(panel) == view.labeling.task_id &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) == view.labeling.task_name &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBaseline(panel) == view.labeling.task_name,
+        "the name editor should initialize from the formal task projection");
+
+    view.labeling.active_task_is_temporary = true;
+    view.labeling.task_id =
+        "3d7420df-a7a1-4f00-a963-fba1865612fe";
+    view.labeling.task_name = "Draft triage";
+    const LabelingTaskNameFrameObservation draft =
+        RenderLabelingTaskNameFrame(panel, view, true);
+    Require(
+        draft.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingTaskNameRect(panel)
+                .has_value() &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) == "Draft triage",
+        "an outputless draft should use the same persistent task-name editor with its real name");
+    Require(
+        draft.logged_text.find("Draft triage") !=
+                std::string::npos &&
+            draft.logged_text.find(
+                specforge::UiText(
+                    specforge::UiLanguage::English,
+                    specforge::UiTextId::TemporaryLabelingTask)) ==
+                std::string::npos,
+        "the draft selector should show its persisted name rather than a fixed temporary-task label");
+}
+
+void TestLabelingPanelOpenSelectorUsesRealDraftName()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeActiveTemporaryRecoveryPanelView();
+    view.labeling.task_name = "Review ## batch ### alpha";
+    view.labeling.recovery_drafts.front().task_name =
+        view.labeling.task_name;
+    specforge::SourceCollectionSessionView latest_view = view;
+    const ImVec2 window_size(650.0f, 700.0f);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        window_size);
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "the active draft should expose its task selector rectangle");
+    const ImVec2 selector_center = RectCenter(*selector_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_center.x,
+        selector_center.y);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_center.x,
+        selector_center.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const RecoveryFrameObservation opened = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size,
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+
+    const std::size_t preview_name = opened.logged_text.find(
+        view.labeling.task_name);
+    const std::size_t selectable_name = preview_name == std::string::npos
+        ? std::string::npos
+        : opened.logged_text.find(
+              view.labeling.task_name,
+              preview_name + view.labeling.task_name.size());
+    Require(
+        opened.popup_open &&
+            selectable_name != std::string::npos &&
+            opened.logged_text.find(std::string(specforge::UiText(
+                specforge::UiLanguage::English,
+                specforge::UiTextId::TemporaryLabelingDraft))) !=
+                std::string::npos,
+        "the open selector should use the real draft name as its selectable label and show temporary ownership separately");
+}
+
+void TestLabelingPanelOpenSelectorUsesRealFormalName()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_name = "Formal ## review ### alpha";
+    view.labeling.output_path = "formal-review.asdf";
+    view.navigation.current_annotations.push_back(
+        {
+            .name = view.labeling.task_name,
+            .path = *view.labeling.output_path,
+            .relationship =
+                specforge::SampleAnnotationWorkflowRelationship::
+                    LocalLabelingTask,
+            .can_activate_labeling = true,
+        });
+    specforge::SourceCollectionSessionView latest_view = view;
+    const ImVec2 window_size(650.0f, 700.0f);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        window_size);
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "the formal task should expose its task selector rectangle");
+    const ImVec2 selector_center = RectCenter(*selector_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_center.x,
+        selector_center.y);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_center.x,
+        selector_center.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const RecoveryFrameObservation opened = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size,
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+
+    const std::size_t preview_name = opened.logged_text.find(
+        view.labeling.task_name);
+    const std::size_t selectable_name = preview_name == std::string::npos
+        ? std::string::npos
+        : opened.logged_text.find(
+              view.labeling.task_name,
+              preview_name + view.labeling.task_name.size());
+    Require(
+        opened.popup_open &&
+            selectable_name != std::string::npos,
+        "the open selector should render a formal task name containing ## or ### verbatim");
+}
+
+void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "5fd04692-4eb7-4b1c-b356-39db30b13799";
+    FocusLabelingTaskNameField(panel, view);
+
+    const std::string requested_name =
+        "  中日韩 review  ";
+    ReplaceFocusedText(panel, view, requested_name);
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, view);
+    Require(
+        typed.submission_count == 0,
+        "typing a task name must not submit a per-keystroke rename");
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+            TaskNameEditBuffer(panel) == requested_name,
+        "the task-name editor should preserve whitespace and UTF-8 text exactly");
+
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    const LabelingTaskNameFrameObservation submitted =
+        RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    const LabelingTaskNameFrameObservation released =
+        RenderLabelingTaskNameFrame(panel, view);
+    const LabelingTaskNameFrameObservation settled =
+        RenderLabelingTaskNameFrame(panel, view);
+    Require(
+        submitted.submission_count == 1 &&
+            submitted.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RenameActiveLabelingTask &&
+            submitted.submitted_task_id == view.labeling.task_id &&
+            submitted.submitted_name == requested_name,
+        "Enter should submit one exact rename intent with the expected task ID");
+    Require(
+        released.submission_count == 0 &&
+            settled.submission_count == 0,
+        "the Enter release and ordinary refresh must not duplicate a rename");
+}
+
+void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "825508a7-7e87-41c4-8d2b-5eecaa3b518b";
+    FocusLabelingTaskNameField(panel, view);
+    ReplaceFocusedText(panel, view, "Blur rename");
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, view);
+    Require(
+        typed.submission_count == 0,
+        "editing before blur must not emit a rename");
+
+    const auto copy_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingTaskIdCopyRect(panel);
+    Require(
+        copy_rect.has_value(),
+        "the full task ID should have a copy button beside it");
+    const ImVec2 copy_center = RectCenter(*copy_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        copy_center.x,
+        copy_center.y);
+    const LabelingTaskNameFrameObservation hovered =
+        RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    const LabelingTaskNameFrameObservation pressed =
+        RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingTaskNameFrameObservation released =
+        RenderLabelingTaskNameFrame(panel, view);
+    const LabelingTaskNameFrameObservation settled =
+        RenderLabelingTaskNameFrame(panel, view);
+    Require(
+        hovered.submission_count + pressed.submission_count +
+                released.submission_count ==
+            1 &&
+            settled.submission_count == 0,
+        "leaving the edited field should submit exactly one rename");
+    Require(
+        context.clipboard_text() == view.labeling.task_id,
+        "the copy control should copy the complete task UUID");
+}
+
+void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "b5402a3a-aef5-4cfe-8cb2-e58189602ea5";
+    FocusLabelingTaskNameField(panel, view);
+    ReplaceFocusedText(panel, view, "Collapsed rename");
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, view);
+    const LabelingTaskNameFrameObservation collapsed =
+        RenderLabelingTaskNameFrame(panel, view, false, true);
+    const LabelingTaskNameFrameObservation reopened =
+        RenderLabelingTaskNameFrame(panel, view);
+
+    Require(
+        typed.submission_count == 0 &&
+            collapsed.submission_count == 1 &&
+            collapsed.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RenameActiveLabelingTask &&
+            collapsed.submitted_task_id == view.labeling.task_id &&
+            collapsed.submitted_name == "Collapsed rename" &&
+            reopened.submission_count == 0,
+        "collapsing or hiding the panel should settle one pending task-name edit without duplicating it on reopen");
+}
+
+void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "84f767c2-f7b8-4f8c-8e03-367a9457c695";
+    FocusLabelingTaskNameField(panel, view);
+    constexpr std::string_view requested_name =
+        "Zero-match review";
+    ReplaceFocusedText(
+        panel,
+        view,
+        requested_name);
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, view);
+    const auto copy_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingTaskIdCopyRect(panel);
+    Require(
+        typed.submission_count == 0 &&
+            copy_rect.has_value(),
+        "the zero-match fixture should begin with an unsubmitted task-name edit");
+
+    const ImVec2 copy_center = RectCenter(*copy_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        copy_center.x,
+        copy_center.y);
+    const LabelingTaskNameFrameObservation hovered =
+        RenderLabelingTaskNameFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    const LabelingTaskNameFrameObservation pressed =
+        RenderLabelingTaskNameFrame(panel, view);
+
+    specforge::SourceCollectionSessionView zero_match_view = view;
+    zero_match_view.labeling.current_index.reset();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingTaskNameFrameObservation released =
+        RenderLabelingTaskNameFrame(
+            panel,
+            zero_match_view);
+    zero_match_view.labeling.task_name =
+        std::string(requested_name);
+    const LabelingTaskNameFrameObservation settled =
+        RenderLabelingTaskNameFrame(
+            panel,
+            zero_match_view);
+
+    Require(
+        hovered.submission_count + pressed.submission_count +
+                released.submission_count ==
+            1 &&
+            released.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RenameActiveLabelingTask &&
+            released.submitted_task_id == view.labeling.task_id &&
+            released.submitted_name == requested_name &&
+            settled.submission_count == 0,
+        "a zero-match filter should allow the deferred blur rename to submit exactly once");
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingTaskNameRect(panel)
+                .has_value() &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingTaskIdCopyRect(panel)
+                .has_value() &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditTaskId(panel) ==
+                zero_match_view.labeling.task_id &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) == requested_name,
+        "an active task should retain its task-name and task-ID controls when filters match no samples");
+}
+
+void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "f33d04d4-c6b0-47d2-b92f-98cd1963308c";
+    FocusLabelingTaskNameField(panel, view);
+    ReplaceFocusedText(panel, view, "Hidden panel rename");
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, view);
+    const LabelingTaskNameFrameObservation hidden =
+        FinalizeLabelingTaskNameEdit(panel, view);
+    const LabelingTaskNameFrameObservation repeated =
+        FinalizeLabelingTaskNameEdit(panel, view);
+
+    Require(
+        typed.submission_count == 0 &&
+            hidden.submission_count == 1 &&
+            hidden.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RenameActiveLabelingTask &&
+            hidden.submitted_task_id == view.labeling.task_id &&
+            hidden.submitted_name == "Hidden panel rename" &&
+            repeated.submission_count == 0,
+        "stopping Labeling rendering should finalize one guarded rename without requiring the panel to reopen");
+
+    specforge::SampleWorkflowPanelUi stale_panel;
+    FocusLabelingTaskNameField(stale_panel, view);
+    ReplaceFocusedText(stale_panel, view, "Stale hidden rename");
+    (void)RenderLabelingTaskNameFrame(stale_panel, view);
+    specforge::SourceCollectionSessionView switched_view = view;
+    switched_view.labeling.task_id =
+        "743a894d-d942-4050-8e45-c5a766464d4d";
+    switched_view.labeling.task_name = "Switched task";
+    const LabelingTaskNameFrameObservation stale =
+        FinalizeLabelingTaskNameEdit(
+            stale_panel,
+            switched_view);
+    Require(
+        stale.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditTaskId(stale_panel).empty(),
+        "hidden-panel finalization should discard the edit when the expected task ID is stale");
+}
+
+void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.task_id =
+        "752d5d70-c699-4f39-9f32-e8b5b496e2e7";
+    constexpr float window_x = 20.0f;
+    constexpr float narrow_width = 233.0f;
+    const ImVec2 narrow_size(narrow_width, 700.0f);
+    const LabelingTaskNameFrameObservation rendered =
+        RenderLabelingTaskNameFrame(
+            panel,
+            view,
+            true,
+            false,
+            narrow_size);
+    const auto copy_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingTaskIdCopyRect(panel);
+    Require(
+        copy_rect.has_value() &&
+            (*copy_rect)[0] >= window_x &&
+            (*copy_rect)[2] <= window_x + narrow_width &&
+            rendered.logged_text.find(view.labeling.task_id) !=
+                std::string::npos,
+        "the default narrow dock should wrap the full task ID and keep Copy ID inside the visible panel");
+
+    const ImVec2 copy_center = RectCenter(*copy_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        copy_center.x,
+        copy_center.y);
+    (void)RenderLabelingTaskNameFrame(
+        panel,
+        view,
+        false,
+        false,
+        narrow_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingTaskNameFrame(
+        panel,
+        view,
+        false,
+        false,
+        narrow_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderLabelingTaskNameFrame(
+        panel,
+        view,
+        false,
+        false,
+        narrow_size);
+    Require(
+        context.clipboard_text() == view.labeling.task_id,
+        "the visible narrow-dock Copy ID button should copy the complete UUID");
+}
+
+void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView frame_view =
+        MakeFormalTaskWithRecoveryDraftView();
+    specforge::SourceCollectionSessionView latest_view = frame_view;
+    specforge::SourceCollectionSessionView recovered_view = frame_view;
+    recovered_view.labeling.active_task_is_temporary = true;
+    recovered_view.labeling.task_id =
+        frame_view.labeling.recovery_drafts.front().task_id;
+    recovered_view.labeling.task_name =
+        frame_view.labeling.recovery_drafts.front().task_name;
+    recovered_view.labeling.recovery_drafts.front().status =
+        specforge::SampleLabelingRecoveryDraftStatus::Current;
+
+    FocusLabelingTaskNameField(panel, frame_view);
+    ReplaceFocusedText(panel, frame_view, "Must not rename formal task");
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, frame_view);
+    Require(
+        typed.submission_count == 0,
+        "editing the old task should remain local before a recovery switch");
+
+    const ImVec2 recovery_window_size(650.0f, 700.0f);
+    const RecoveryFrameObservation recovery_layout = RenderRecoveryFrame(
+        panel,
+        frame_view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        recovery_window_size);
+    Require(
+        recovery_layout.submission_count == 0,
+        "laying out the recovery controls should not settle a focused edit");
+
+    const auto recovery_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+            panel,
+            frame_view,
+            0,
+            "SpecForgeRecoverTemporaryDraft");
+    Require(
+        recovery_rect.has_value(),
+        "the recovery switch should expose its deterministic action rectangle");
+    const ImVec2 recovery_center = RectCenter(*recovery_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        recovery_center.x,
+        recovery_center.y);
+    const RecoveryFrameObservation hovered = RenderRecoveryFrame(
+        panel,
+        frame_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        recovery_window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    const RecoveryFrameObservation pressed = RenderRecoveryFrame(
+        panel,
+        frame_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        recovery_window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const RecoveryFrameObservation released = RenderRecoveryFrame(
+        panel,
+        frame_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        recovery_window_size,
+        specforge::SampleLabelingOperationResult::Issue::None,
+        false,
+        &recovered_view);
+
+    Require(
+        hovered.submission_count == 0 &&
+            pressed.submission_count == 0 &&
+            released.submission_count == 1 &&
+            released.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RecoverTemporaryLabelingTask &&
+            released.submitted_task_id ==
+                recovered_view.labeling.task_id,
+        "clicking Recover should switch tasks without first renaming the blurred old task");
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditTaskId(panel) != frame_view.labeling.task_id &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) !=
+                    "Must not rename formal task",
+        "the switched task should discard the old task's pending edit buffer");
+}
+
+void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView first_view =
+        MakeLabelingPanelView(8, 'g');
+    first_view.labeling.task_id =
+        "f18a69c5-408e-47df-8504-4803f9cc1634";
+    FocusLabelingTaskNameField(panel, first_view);
+    const std::string whitespace_name = " \xE3\x80\x80 ";
+    ReplaceFocusedText(panel, first_view, whitespace_name);
+    const LabelingTaskNameFrameObservation typed =
+        RenderLabelingTaskNameFrame(panel, first_view);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    const LabelingTaskNameFrameObservation rejected =
+        RenderLabelingTaskNameFrame(panel, first_view);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    (void)RenderLabelingTaskNameFrame(panel, first_view);
+    Require(
+        typed.submission_count == 0 &&
+            rejected.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) == whitespace_name &&
+            !specforge::SampleWorkflowPanelUiTestAccess::
+                 TaskNameValidationMessage(panel)
+                 .empty(),
+        "Unicode-whitespace-only names should remain visible with an inline error and no command");
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::ValidateTaskName(
+             specforge::UiLanguage::English,
+             std::string("bad\xFF", 4))
+             .empty(),
+        "the task-name validator should reject malformed UTF-8 before submission");
+
+    FocusLabelingTaskNameField(panel, first_view);
+    ReplaceFocusedText(panel, first_view, "Unsubmitted first task name");
+    (void)RenderLabelingTaskNameFrame(panel, first_view);
+    specforge::SourceCollectionSessionView refreshed_view = first_view;
+    refreshed_view.labeling.task_name = "Ordinary view refresh";
+    const LabelingTaskNameFrameObservation refreshed =
+        RenderLabelingTaskNameFrame(panel, refreshed_view);
+    Require(
+        refreshed.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) ==
+                "Unsubmitted first task name",
+        "an ordinary same-task view refresh must not overwrite an edit in progress");
+
+    specforge::SourceCollectionSessionView second_view = first_view;
+    second_view.labeling.task_id =
+        "237ba83f-814b-4a77-b814-8627f82cc884";
+    second_view.labeling.task_name = "Second task";
+    const LabelingTaskNameFrameObservation switched =
+        RenderLabelingTaskNameFrame(panel, second_view);
+    Require(
+        switched.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditTaskId(panel) == second_view.labeling.task_id &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBuffer(panel) == "Second task" &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                TaskNameEditBaseline(panel) == "Second task",
+        "switching tasks should discard the old edit buffer without targeting either task");
+}
+
 void TestLabelingPanelLocalizesBuiltInRecoveryPresentation()
 {
     const std::string built_in_name(specforge::kTemporarySampleLabelingTaskName);
     Require(
         specforge::SampleWorkflowTemporaryDraftTaskName(
             specforge::UiLanguage::SimplifiedChinese,
-            built_in_name) ==
-            specforge::UiText(
-                specforge::UiLanguage::SimplifiedChinese,
-                specforge::UiTextId::TemporaryLabelingTask),
-        "the built-in temporary task name should use the selected UI language in recovery rows");
+            built_in_name) == built_in_name,
+        "recovery rows should show the draft's persisted name instead of replacing it from ownership state");
     Require(
         specforge::SampleWorkflowTemporaryDraftTaskName(
             specforge::UiLanguage::SimplifiedChinese,
@@ -3948,6 +4871,17 @@ int main()
     TestLabelingPanelRejectsCrossFrameCurrentTaskDelete();
     TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft();
     TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth();
+    TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks();
+    TestLabelingPanelOpenSelectorUsesRealDraftName();
+    TestLabelingPanelOpenSelectorUsesRealFormalName();
+    TestLabelingPanelSubmitsTaskNameOnlyOnEnter();
+    TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId();
+    TestLabelingPanelSettlesTaskNameWhenWindowCollapses();
+    TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter();
+    TestLabelingPanelFinalizesTaskNameWhenRenderingStops();
+    TestLabelingPanelKeepsCopyIdReachableInNarrowDock();
+    TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName();
+    TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch();
     TestLabelingPanelLocalizesBuiltInRecoveryPresentation();
     TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip();
     TestLabelingPanelShowsPausedDraftSaveFailure();

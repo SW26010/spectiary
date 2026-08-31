@@ -565,6 +565,11 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     case ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask:
         outcome = DeleteActiveLabelingTask();
         break;
+    case ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask:
+        outcome = RenameActiveLabelingTask(
+            std::move(intent.task_id),
+            std::move(intent.requested_name));
+        break;
     case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
         outcome = UpsertActiveLabel(std::move(intent.label));
         break;
@@ -1657,6 +1662,25 @@ SampleWorkflowCoordinator::DeleteActiveLabelingTask()
                 .workflow_changed = true,
                 .filters_changed = true,
                 .sorting_changed = true}));
+    return outcome;
+}
+
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RenameActiveLabelingTask(
+    std::string expected_task_id,
+    std::string requested_name)
+{
+    SampleWorkflowTransitionOutcome outcome;
+    const SampleLabelingOperationResult operation =
+        labeling_.RenameActiveTask(
+            expected_task_id,
+            std::move(requested_name));
+    outcome.changed = operation.changed;
+    ApplyLabelingLeaseIssue(outcome, operation);
+    if (operation.output_saved) {
+        (void)SynchronizeActiveCanonicalAsdfAttachment(
+            &outcome.action);
+    }
     return outcome;
 }
 

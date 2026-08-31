@@ -120,13 +120,15 @@ projection. Adoption itself neither copies nor rewrites the ASDF bytes.
 ## Manual Labeling
 
 Manual labeling normally starts with the source collection's single temporary
-sample labeling draft slot. It has a stable task id, the stable persisted/domain
-name `Temporary labeling task` (localized by the UI according to the selected
-language), one sample label set, and workflow choices such as auto-advance
-behavior. Historical, conflicting, or damaged cache state may still expose
-more than one recovery draft; those rows are handled through the identity-bearing
-recovery list. Labeling does not ask for a task name when this draft is created
-or resumed.
+sample labeling draft slot. It has a stable task id, starts with the default
+name `Temporary labeling task`, and owns one sample label set plus workflow
+choices such as auto-advance behavior. The default name is ordinary persisted
+task data, not a fixed temporary-state label: the UI displays it verbatim and
+keeps it editable without localizing or replacing it to communicate temporary
+ownership. Historical, conflicting, or damaged cache state may still expose
+more than one recovery draft; those rows are handled through the
+identity-bearing recovery list. Labeling does not ask for a task name when this
+draft is created or resumed.
 
 Starting a new temporary sample labeling task should start with every sample
 unlabeled. The initial label result is therefore a one-dimensional array filled
@@ -204,20 +206,27 @@ The visible active manual labeling window should be named `Labeling`. In this
 document, `Sample labeling task` and `active manual labeling` remain the domain
 terms for the task and workflow behind that window.
 
-The first row of `Labeling` should use one compact task selector rather than
-separate task-name, create/resume, and annotation-drop rows. Its permanent first
-item is `New labeling task` when no temporary draft exists, `Resume labeling
-draft` when exactly one draft is paused, and the selected temporary draft while
-that draft is active. When multiple drafts exist, recovery rows carrying their
+The first row of `Labeling` should use one compact task selector for task
+activation, create/resume, and annotation drop. Its permanent first item is
+`New labeling task` when no temporary draft exists, `Resume labeling draft`
+when exactly one draft is paused, and the selected temporary draft while that
+draft is active. When multiple drafts exist, recovery rows carrying their
 source/task identities are the only activation route. Remaining items are the
 source collection's formal local labeling annotations. The selector itself
-remains the drag target for compatible rows
-from `Annotations`. Pause and delete controls belong immediately to the
-selector's right on the same row. Switching through the selector or drag target
-must honor the same pending/failed output-save guard as explicit close.
-The temporary-draft recovery list is rendered below this selector row so the
-primary task control remains the first row of `Labeling`, including when the
-list contains multiple drafts or the dock is narrow.
+remains the drag target for compatible rows from `Annotations`. Pause and
+delete controls belong immediately to the selector's right on the same row.
+Switching through the selector or drag target must honor the same pending/failed
+output-save guard as explicit close.
+
+Whenever a task is active, a persistent `Task name` UTF-8 edit field appears
+directly below the selector for both temporary drafts and formal tasks. Enter or
+focus loss submits an actual change; task switching discards an edit aimed at
+the previous task. The task header also shows the complete task id read-only
+and provides a `Copy ID` button that remains accessible in a narrow dock. These
+controls remain visible even when the active sample filter has no matching
+sample. The temporary-draft recovery list follows this task header so the
+primary task controls remain at the top of `Labeling`, including when the list
+contains multiple drafts or the dock is narrow.
 
 Pausing or closing a sample labeling task should deactivate the active sample
 labeling task rather than hide the `Labeling` window or delete the task record.
