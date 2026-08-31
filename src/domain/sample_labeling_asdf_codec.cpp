@@ -666,7 +666,8 @@ void ValidateBlockIndex(std::istream& input,
                 header.begin() + 48,
                 [](unsigned char byte) { return byte != 0; })) {
             Fail(SampleLabelingAsdfErrorKind::UnsupportedProfile,
-                "checksummed ASDF blocks are outside the v1 profile");
+                "checksummed ASDF blocks are outside the supported "
+                "production profile");
         }
         if (used > allocated || (uncompressed && decoded != used)) {
             Fail(SampleLabelingAsdfErrorKind::MalformedDocument,

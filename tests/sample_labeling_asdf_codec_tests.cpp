@@ -1,5 +1,6 @@
 #include "app/local_user_state_json.h"
 #include "domain/sample_labeling_asdf_codec.h"
+#include "domain/sample_labeling_asdf_store.h"
 #include "platform/file_sha256.h"
 
 #include <algorithm>
@@ -537,6 +538,117 @@ specforge::SampleLabelingAsdfWriteResult WriteDocument(
     return result;
 }
 
+std::string_view CodecErrorKindName(
+    specforge::SampleLabelingAsdfErrorKind kind)
+{
+    using Kind = specforge::SampleLabelingAsdfErrorKind;
+    switch (kind) {
+    case Kind::None:
+        return "None";
+    case Kind::OpenFailed:
+        return "OpenFailed";
+    case Kind::IoFailure:
+        return "IoFailure";
+    case Kind::MalformedDocument:
+        return "MalformedDocument";
+    case Kind::UnsupportedProfile:
+        return "UnsupportedProfile";
+    case Kind::ResourceLimitExceeded:
+        return "ResourceLimitExceeded";
+    case Kind::SemanticValidationFailed:
+        return "SemanticValidationFailed";
+    }
+    return "Unknown";
+}
+
+std::string_view StoreErrorKindName(
+    specforge::SampleLabelingAsdfStoreErrorKind kind)
+{
+    using Kind = specforge::SampleLabelingAsdfStoreErrorKind;
+    switch (kind) {
+    case Kind::None:
+        return "None";
+    case Kind::CodecFailure:
+        return "CodecFailure";
+    case Kind::SourceMismatch:
+        return "SourceMismatch";
+    case Kind::PreservationIdentityMismatch:
+        return "PreservationIdentityMismatch";
+    case Kind::DurableBaseUnavailable:
+        return "DurableBaseUnavailable";
+    case Kind::AtomicWriteFailure:
+        return "AtomicWriteFailure";
+    case Kind::PublishedGenerationMismatch:
+        return "PublishedGenerationMismatch";
+    }
+    return "Unknown";
+}
+
+void WriteJsonField(std::ostream& output,
+    std::string_view name,
+    std::string_view value,
+    bool trailing_comma = true)
+{
+    specforge::WriteJsonString(output, name);
+    output << ':';
+    specforge::WriteJsonString(output, value);
+    if (trailing_comma) {
+        output << ',';
+    }
+}
+
+int RunReadProductionChecksumOracle(const std::filesystem::path& path)
+{
+    const specforge::SampleLabelingAsdfReadResult read =
+        specforge::ReadSampleLabelingAsdfDocument(path);
+    const bool semantic_matches = read.succeeded() &&
+        JsonEquals(
+            SemanticSummary(*read.document),
+            SemanticSummary(ProductionDocument()));
+    std::cout << '{';
+    std::cout << "\"succeeded\":" << (read.succeeded() ? "true" : "false")
+              << ',';
+    WriteJsonField(std::cout, "error_kind", CodecErrorKindName(read.error.kind));
+    WriteJsonField(std::cout, "message", read.error.message);
+    std::cout << "\"values\":[";
+    if (read.succeeded()) {
+        for (std::size_t index = 0;
+            index < read.document->annotation.values.size();
+            ++index) {
+            if (index != 0) {
+                std::cout << ',';
+            }
+            std::cout << read.document->annotation.values[index];
+        }
+    }
+    std::cout << "],";
+    std::cout << "\"semantic_matches_production_document\":"
+              << (semantic_matches ? "true" : "false") << ','
+              << "\"durable_base_available\":"
+              << (read.durable_base.has_value() ? "true" : "false")
+              << "}\n";
+    return 0;
+}
+
+int RunOverwriteProductionChecksumOracle(const std::filesystem::path& path)
+{
+    const specforge::SampleLabelingAsdfStoreWriteResult write =
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            path, ProductionDocument());
+    std::cout << '{';
+    std::cout << "\"succeeded\":" << (write.succeeded() ? "true" : "false")
+              << ',';
+    WriteJsonField(
+        std::cout, "error_kind", StoreErrorKindName(write.error.kind));
+    WriteJsonField(
+        std::cout,
+        "codec_error_kind",
+        CodecErrorKindName(write.error.codec_kind));
+    WriteJsonField(std::cout, "message", write.error.message, false);
+    std::cout << "}\n";
+    return 0;
+}
+
 void WriteYamlAliasAmplificationFixture(
     const std::filesystem::path& path,
     std::size_t label_count,
@@ -950,6 +1062,11 @@ void TestRejectsMalformedCorruptAndUnsupportedInputs()
         checksum.error.kind ==
             specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
         "nonzero checksum should be an unsupported-profile error");
+    Require(
+        checksum.error.message ==
+            "checksummed ASDF blocks are outside the supported "
+            "production profile",
+        "checksum rejection should describe the production wire profile");
 
     const specforge::SampleLabelingAsdfReadResult missing =
         specforge::ReadSampleLabelingAsdfDocument(
@@ -2667,6 +2784,15 @@ int main(int argc, char* argv[])
                 return 1;
             }
             return 0;
+        }
+        if (argc == 3 &&
+            std::string_view(argv[1]) == "read-production-checksum-oracle") {
+            return RunReadProductionChecksumOracle(argv[2]);
+        }
+        if (argc == 3 &&
+            std::string_view(argv[1]) ==
+                "overwrite-production-checksum-oracle") {
+            return RunOverwriteProductionChecksumOracle(argv[2]);
         }
         if (argc == 4 &&
             std::string_view(argv[1]) == "rewrite-explicit-roster-oracle") {
