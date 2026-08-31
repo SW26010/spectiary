@@ -2179,14 +2179,19 @@ void ShellUi::OpenAnnotationFromFilePicker()
     if (std::optional<std::filesystem::path> path =
             ShowAnnotationFilePicker(
                 application_settings_.View().language)) {
+        source_collection_panel_ui_.
+            PrepareAnnotationImportAttempt(
+                SessionView(),
+                *path);
         SourceCollectionSessionResult result =
             SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
                 SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
-        if (result.loaded) {
-            SetPanelVisibility(
-                ApplicationPanel::Annotations,
-                true);
-        }
+        source_collection_panel_ui_.
+            CompleteAnnotationImportAttempt(
+                result.loaded);
+        SetPanelVisibility(
+            ApplicationPanel::Annotations,
+            true);
     }
 }
 
@@ -2272,6 +2277,16 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
 {
+    if (action.snapshot_change_reason ==
+            SourceCollectionSnapshotChangeReason::
+                SourceCollectionChanged ||
+        action.snapshot_change_reason ==
+            SourceCollectionSnapshotChangeReason::
+                SourceCollectionCleared) {
+        source_collection_panel_ui_.
+            SyncAnnotationDiagnosticSource(
+                SessionView());
+    }
     if (action.workflow_changed) {
         sample_workflow_panel_ui_.ResetForSampleWorkflow();
     }

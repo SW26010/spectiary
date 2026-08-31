@@ -6666,6 +6666,59 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         "opening another source must not overwrite the untrusted labeling cache");
 }
 
+void TestRejectedAnnotationImportRefreshesDiagnosticProjection()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_wrong_roster.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "rejected-annotation",
+        "Rejected annotation",
+        {1, 2},
+        specforge::SampleLabelSet{},
+        false);
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    const specforge::SourceCollectionSessionView before =
+        session.View();
+    Require(
+        before.navigation.current_annotations.empty() &&
+            before.navigation.annotation_diagnostics.empty(),
+        "rejected-import fixture should start without annotations or diagnostics");
+
+    const specforge::SourceCollectionSessionResult result =
+        Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(
+        !result.loaded,
+        "an annotation whose value count does not match the active source must be rejected");
+
+    const specforge::SourceCollectionSessionView after =
+        session.View();
+    Require(
+        after.navigation.current_annotations.empty(),
+        "a rejected annotation import must not enter the annotation roster");
+    Require(
+        std::any_of(
+            after.navigation.annotation_diagnostics.begin(),
+            after.navigation.annotation_diagnostics.end(),
+            [&annotation_path](
+                const specforge::SourceCollectionManifestDiagnostic&
+                    diagnostic) {
+                return diagnostic.kind ==
+                           specforge::
+                               SourceCollectionManifestDiagnosticKind::
+                                   AnnotationIgnored &&
+                    diagnostic.path == annotation_path &&
+                    !diagnostic.detail.empty();
+            }),
+        "a rejected annotation import must invalidate and refresh the structured diagnostic projection");
+}
+
 void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
 {
     const std::filesystem::path source_path =
@@ -11222,6 +11275,7 @@ void RunAllTests()
     TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration();
     TestInactiveCanonicalOwnerRepairsAttachmentProjection();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
+    TestRejectedAnnotationImportRefreshesDiagnosticProjection();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
     TestActiveLegacyOwnerCanMigrateToCanonicalAsdf();

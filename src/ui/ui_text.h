@@ -222,6 +222,7 @@ enum class UiTextId {
     DataSources,
     CopyDocument,
     Close,
+    Dismiss,
     LegalDocumentUnavailable,
     PerformanceLogs,
     OpenLogFolder,

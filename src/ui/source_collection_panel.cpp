@@ -1,7 +1,9 @@
 #include "ui/source_collection_panel.h"
 
 #include "app/local_user_state.h"
+#include "domain/source_path_identity.h"
 #include "ui/sample_name_autocomplete.h"
+#include "ui/theme.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -13,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -137,6 +140,64 @@ std::string PathToUtf8(const std::filesystem::path& path)
 std::string NarrowPath(const std::filesystem::path& path)
 {
     return UserPathDisplayText(path);
+}
+
+std::string NormalizedDiagnosticPath(
+    const std::filesystem::path& path)
+{
+    std::string normalized = SourcePathIdentityKey(path);
+    if (normalized.empty() && !path.empty()) {
+        normalized = PathToUtf8(path.lexically_normal());
+    }
+    return normalized;
+}
+
+void AppendDiagnosticKeyPart(
+    std::string& key,
+    std::string_view part)
+{
+    key += std::to_string(part.size());
+    key.push_back(':');
+    key.append(part);
+}
+
+std::string AnnotationDiagnosticDismissalKey(
+    std::string_view source_identity,
+    const SourceCollectionManifestDiagnostic& diagnostic)
+{
+    std::string key;
+    const std::string normalized_path =
+        NormalizedDiagnosticPath(diagnostic.path);
+    key.reserve(
+        source_identity.size() + normalized_path.size() +
+        diagnostic.detail.size() + 48U);
+    AppendDiagnosticKeyPart(key, source_identity);
+    AppendDiagnosticKeyPart(
+        key,
+        std::to_string(static_cast<int>(diagnostic.kind)));
+    AppendDiagnosticKeyPart(key, normalized_path);
+    AppendDiagnosticKeyPart(key, diagnostic.detail);
+    return key;
+}
+
+std::string ActiveAnnotationSourceIdentity(
+    const SourceCollectionSessionView& view)
+{
+    if (!view.labeling.source_identity.empty()) {
+        return view.labeling.source_identity;
+    }
+    if (view.current_source_index &&
+        *view.current_source_index < view.sources.size()) {
+        const std::string source_path_identity =
+            SourcePathIdentityKey(
+                view.sources[*view.current_source_index].path);
+        if (!source_path_identity.empty()) {
+            return source_path_identity;
+        }
+    }
+    return view.snapshot
+        ? SourcePathIdentityKey(view.snapshot->source.path)
+        : std::string{};
 }
 
 std::string TrimAscii(std::string_view value)
@@ -1318,12 +1379,175 @@ void SourceCollectionPanelUi::RenderSampleNameSearch(
     }
 }
 
+bool SourceCollectionPanelUi::RenderAnnotationImportDiagnostic(
+    const SourceCollectionManifestDiagnostic& diagnostic,
+    std::string_view source_identity,
+    UiLanguage language)
+{
+    const std::string dismissal_key =
+        AnnotationDiagnosticDismissalKey(
+            source_identity,
+            diagnostic);
+    if (dismissed_annotation_diagnostic_keys_.contains(
+            dismissal_key)) {
+        return false;
+    }
+
+    std::string filename = NarrowPath(
+        diagnostic.path.filename());
+    if (filename.empty()) {
+        filename = UiText(
+            language,
+            UiTextId::UnknownValue);
+    }
+    const std::string_view detail = diagnostic.detail.empty()
+        ? UiText(language, UiTextId::UnknownValue)
+        : std::string_view{diagnostic.detail};
+    const SemanticPalette& palette = ActiveSemanticPalette();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 card_min = ImGui::GetCursorScreenPos();
+    const float card_width = std::max(
+        1.0f,
+        ImGui::GetContentRegionAvail().x);
+
+    ImGui::PushID(dismissal_key.c_str());
+    ImGui::Dummy(ImVec2(0.0f, style.FramePadding.y));
+    ImGui::Indent(style.FramePadding.x);
+    ImGui::TextColored(palette.warning, "!");
+    ImGui::SameLine();
+    ImGui::PushTextWrapPos(
+        card_min.x + card_width - style.FramePadding.x);
+    ImGui::TextUnformatted(
+        filename.data(),
+        filename.data() + filename.size());
+    ImGui::TextUnformatted(
+        detail.data(),
+        detail.data() + detail.size());
+    ImGui::PopTextWrapPos();
+
+    const std::string dismiss_label = StableUiLabel(
+        language,
+        UiTextId::Dismiss,
+        "SpecForgeAnnotationImportDiagnosticDismiss");
+    const float dismiss_width =
+        ImGui::CalcTextSize(
+            dismiss_label.c_str(),
+            nullptr,
+            true)
+            .x +
+        style.FramePadding.x * 2.0f;
+    const ImVec2 dismiss_cursor = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(ImVec2(
+        std::max(
+            dismiss_cursor.x,
+            card_min.x + card_width -
+                style.FramePadding.x - dismiss_width),
+        dismiss_cursor.y));
+    const bool dismissed = ImGui::Button(
+        dismiss_label.c_str());
+    const ImVec2 dismiss_min = ImGui::GetItemRectMin();
+    const ImVec2 dismiss_max = ImGui::GetItemRectMax();
+    annotation_diagnostic_dismiss_rects_.push_back({
+        dismiss_min.x,
+        dismiss_min.y,
+        dismiss_max.x,
+        dismiss_max.y});
+    ImGui::Unindent(style.FramePadding.x);
+    ImGui::Dummy(ImVec2(0.0f, style.FramePadding.y));
+    const ImVec2 card_max(
+        card_min.x + card_width,
+        ImGui::GetCursorScreenPos().y);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImU32 warning_color = ImGui::GetColorU32(
+        palette.warning);
+    draw_list->AddRect(
+        card_min,
+        card_max,
+        warning_color,
+        style.FrameRounding);
+    draw_list->AddLine(
+        ImVec2(card_min.x + 1.0f, card_min.y + 1.0f),
+        ImVec2(card_min.x + 1.0f, card_max.y - 1.0f),
+        warning_color,
+        3.0f);
+    ImGui::PopID();
+
+    if (dismissed) {
+        dismissed_annotation_diagnostic_keys_.insert(
+            dismissal_key);
+    }
+    return true;
+}
+
+void SourceCollectionPanelUi::PrepareAnnotationImportAttempt(
+    const SourceCollectionSessionView& view,
+    const std::filesystem::path& path)
+{
+    SyncAnnotationDiagnosticSource(view);
+    const std::string source_identity =
+        ActiveAnnotationSourceIdentity(view);
+
+    annotation_import_prior_diagnostic_keys_.clear();
+    const std::string selected_path =
+        NormalizedDiagnosticPath(path);
+    if (selected_path.empty()) {
+        return;
+    }
+    for (const SourceCollectionManifestDiagnostic& diagnostic :
+         view.navigation.annotation_diagnostics) {
+        if (diagnostic.kind !=
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationIgnored ||
+            NormalizedDiagnosticPath(diagnostic.path) !=
+                selected_path) {
+            continue;
+        }
+        std::string key = AnnotationDiagnosticDismissalKey(
+            source_identity,
+            diagnostic);
+        dismissed_annotation_diagnostic_keys_.erase(key);
+        annotation_import_prior_diagnostic_keys_.push_back(
+            std::move(key));
+    }
+}
+
+void SourceCollectionPanelUi::CompleteAnnotationImportAttempt(
+    bool loaded)
+{
+    if (loaded) {
+        dismissed_annotation_diagnostic_keys_.insert(
+            annotation_import_prior_diagnostic_keys_.begin(),
+            annotation_import_prior_diagnostic_keys_.end());
+    }
+    annotation_import_prior_diagnostic_keys_.clear();
+}
+
+void SourceCollectionPanelUi::SyncAnnotationDiagnosticSource(
+    const SourceCollectionSessionView& view)
+{
+    const std::string source_identity =
+        ActiveAnnotationSourceIdentity(view);
+    if (annotation_diagnostic_source_identity_ ==
+        source_identity) {
+        return;
+    }
+    annotation_diagnostic_source_identity_ =
+        source_identity;
+    dismissed_annotation_diagnostic_keys_.clear();
+    annotation_import_prior_diagnostic_keys_.clear();
+}
+
 void SourceCollectionPanelUi::RenderAnnotations(
     PanelSessionInteraction& interaction,
     UiLanguage language,
     bool* open,
     const SourceCollectionPathPicker& choose_annotation_file)
 {
+    annotation_add_file_rect_.reset();
+    annotation_diagnostic_dismiss_rects_.clear();
+    const SourceCollectionSessionView& session_view =
+        interaction.View();
+    SyncAnnotationDiagnosticSource(session_view);
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Annotations,
@@ -1333,10 +1557,10 @@ void SourceCollectionPanelUi::RenderAnnotations(
         return;
     }
 
-    const SourceCollectionSessionView& session_view =
-        interaction.View();
     const SpectrumSnapshotHandle& snapshot = session_view.snapshot;
     const SourceCollectionNavigationView& navigation = session_view.navigation;
+    const std::string source_identity =
+        ActiveAnnotationSourceIdentity(session_view);
     if (!snapshot || !navigation.has_active_source || snapshot->source.path.empty()) {
         RenderDisabledText(
             UiText(language, UiTextId::NoActiveSource));
@@ -1350,22 +1574,76 @@ void SourceCollectionPanelUi::RenderAnnotations(
         "SpecForgeAnnotationsAddFile");
     if (ImGui::Button(add_file_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_annotation_file()) {
-            (void)interaction.Submit(
+            PrepareAnnotationImportAttempt(
+                session_view,
+                *path);
+            const PanelSessionInteraction::Update update =
+                interaction.Submit(
                 EditSourceCollection(
                     SourceCollectionIntent::
                         AddReadOnlyAnnotationResult(*path)));
+            CompleteAnnotationImportAttempt(
+                update.result.loaded);
         }
     }
+    const ImVec2 add_file_min = ImGui::GetItemRectMin();
+    const ImVec2 add_file_max = ImGui::GetItemRectMax();
+    annotation_add_file_rect_ = {
+        add_file_min.x,
+        add_file_min.y,
+        add_file_max.x,
+        add_file_max.y};
 
     if (!navigation.annotation_diagnostics.empty()) {
-        for (const SourceCollectionManifestDiagnostic&
-                 diagnostic :
-             navigation.annotation_diagnostics) {
-            RenderSourceCollectionDiagnostic(
-                diagnostic,
-                language);
+        bool rendered_diagnostic = false;
+        std::unordered_map<std::string, std::size_t>
+            latest_import_diagnostic_by_path;
+        for (std::size_t index = 0;
+             index < navigation.annotation_diagnostics.size();
+             ++index) {
+            const SourceCollectionManifestDiagnostic& diagnostic =
+                navigation.annotation_diagnostics[index];
+            if (diagnostic.kind ==
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationIgnored) {
+                latest_import_diagnostic_by_path[
+                    NormalizedDiagnosticPath(diagnostic.path)] =
+                    index;
+            }
         }
-        ImGui::Separator();
+        for (std::size_t index = 0;
+             index < navigation.annotation_diagnostics.size();
+             ++index) {
+            const SourceCollectionManifestDiagnostic& diagnostic =
+                navigation.annotation_diagnostics[index];
+            if (diagnostic.kind ==
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationIgnored) {
+                const auto latest =
+                    latest_import_diagnostic_by_path.find(
+                        NormalizedDiagnosticPath(
+                            diagnostic.path));
+                if (latest !=
+                        latest_import_diagnostic_by_path.end() &&
+                    latest->second != index) {
+                    continue;
+                }
+                rendered_diagnostic =
+                    RenderAnnotationImportDiagnostic(
+                        diagnostic,
+                        source_identity,
+                        language) ||
+                    rendered_diagnostic;
+            } else {
+                RenderSourceCollectionDiagnostic(
+                    diagnostic,
+                    language);
+                rendered_diagnostic = true;
+            }
+        }
+        if (rendered_diagnostic) {
+            ImGui::Separator();
+        }
     }
 
     if (navigation.current_annotations.empty()) {

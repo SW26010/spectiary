@@ -1281,10 +1281,22 @@ SampleWorkflowCoordinator::AddReadOnlyAnnotationToActiveSource(
     const std::filesystem::path& path)
 {
     SampleWorkflowTransitionOutcome outcome;
+    const SourceCollectionManifest* context_before =
+        navigation_.active_context();
+    const std::size_t diagnostic_count_before =
+        context_before == nullptr
+        ? 0U
+        : context_before->diagnostics.size();
     outcome.loaded =
         navigation_.AddReadOnlyAnnotationToActiveSource(
             path,
             &outcome.message);
+    const SourceCollectionManifest* context_after =
+        navigation_.active_context();
+    outcome.invalidate_view =
+        context_after != nullptr &&
+        context_after->diagnostics.size() !=
+            diagnostic_count_before;
     if (outcome.loaded) {
         ApplyNavigationInputEffects(
             outcome,

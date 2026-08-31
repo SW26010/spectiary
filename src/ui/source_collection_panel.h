@@ -11,6 +11,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <vector>
 
 namespace specforge {
 
@@ -61,6 +63,12 @@ public:
         UiLanguage language,
         bool* open,
         const SourceCollectionPathPicker& choose_annotation_file);
+    void PrepareAnnotationImportAttempt(
+        const SourceCollectionSessionView& view,
+        const std::filesystem::path& path);
+    void CompleteAnnotationImportAttempt(bool loaded);
+    void SyncAnnotationDiagnosticSource(
+        const SourceCollectionSessionView& view);
 
 private:
     friend struct ShellUiTestAccess;
@@ -69,6 +77,10 @@ private:
     void LaunchSourceInNewInstance(
         const std::filesystem::path& path,
         const SourceCollectionPathLauncher& launch_source_in_new_instance);
+    [[nodiscard]] bool RenderAnnotationImportDiagnostic(
+        const SourceCollectionManifestDiagnostic& diagnostic,
+        std::string_view source_identity,
+        UiLanguage language);
 
     struct NavigationNumberInputCommit {
         std::string draft;
@@ -154,6 +166,15 @@ private:
         first_source_context_cell_rect_;
     std::optional<std::array<float, 4>>
         source_context_action_rect_;
+    std::string annotation_diagnostic_source_identity_;
+    std::unordered_set<std::string>
+        dismissed_annotation_diagnostic_keys_;
+    std::optional<std::array<float, 4>>
+        annotation_add_file_rect_;
+    std::vector<std::array<float, 4>>
+        annotation_diagnostic_dismiss_rects_;
+    std::vector<std::string>
+        annotation_import_prior_diagnostic_keys_;
 };
 
 }  // namespace specforge

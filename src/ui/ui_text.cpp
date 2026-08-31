@@ -347,6 +347,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Data Sources", "数据来源"},
     UiTextEntry{"Copy Document", "复制文档"},
     UiTextEntry{"Close", "关闭"},
+    UiTextEntry{"Dismiss", "忽略"},
     UiTextEntry{
         "The embedded document is unavailable in this build.",
         "当前构建中无法读取内嵌文档。"},

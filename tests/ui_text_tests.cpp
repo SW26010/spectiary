@@ -692,6 +692,14 @@ void TestSourceInspectionMappingsAreExact()
     }
 
     Require(
+        UiText(UiLanguage::English, UiTextId::Dismiss) ==
+                "Dismiss" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::Dismiss) == "忽略",
+        "annotation diagnostic dismissal text should be localized exactly");
+
+    Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::RawSpectrum,

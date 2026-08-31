@@ -57,6 +57,20 @@ struct SourceCollectionPanelUiTestAccess {
     {
         return panel.source_context_action_rect_;
     }
+
+    [[nodiscard]] static const std::optional<std::array<float, 4>>&
+    AnnotationAddFileRect(
+        const SourceCollectionPanelUi& panel)
+    {
+        return panel.annotation_add_file_rect_;
+    }
+
+    [[nodiscard]] static const std::vector<std::array<float, 4>>&
+    AnnotationDiagnosticDismissRects(
+        const SourceCollectionPanelUi& panel)
+    {
+        return panel.annotation_diagnostic_dismiss_rects_;
+    }
 };
 
 }  // namespace specforge
@@ -195,6 +209,380 @@ ImVec2 RectCenter(const std::array<float, 4>& rect)
     return ImVec2(
         (rect[0] + rect[2]) * 0.5f,
         (rect[1] + rect[3]) * 0.5f);
+}
+
+struct AnnotationPanelFrameObservation {
+    std::string logged_text;
+    bool popup_open = false;
+};
+
+class AnnotationPanelFixture {
+public:
+    AnnotationPanelFixture()
+    {
+        snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+        snapshot->source.path = "source-a.npy";
+        snapshot->collection.spectrum_count = 1;
+        snapshot->collection.current_index = 0;
+        view.snapshot = snapshot;
+        view.current_sample_snapshot = snapshot;
+        view.navigation.has_active_source = true;
+        view.navigation.current_index = 0;
+        view.navigation.sample_count = 1;
+        view.labeling.has_active_source = true;
+        view.labeling.source_identity = "source-a";
+    }
+
+    AnnotationPanelFrameObservation RenderFrame(
+        bool capture_text = true)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DeltaTime = 1.0f / 60.0f;
+        io.DisplaySize = ImVec2(900.0f, 700.0f);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(
+            ImVec2(20.0f, 20.0f),
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(560.0f, 520.0f),
+            ImGuiCond_Always);
+        if (capture_text) {
+            ImGui::LogToBuffer();
+        }
+        bool open = true;
+        specforge::PanelSessionInteraction interaction(
+            [this](
+                specforge::SourceCollectionSessionIntent intent,
+                std::optional<
+                    specforge::NavigationLatencyInputKind>) {
+                if (intent.intent_kind() ==
+                    specforge::SourceCollectionSessionIntentKind::
+                        SourceCollection) {
+                    ++submit_count;
+                    if (after_submit) {
+                        after_submit();
+                    }
+                }
+                specforge::SourceCollectionSessionResult result;
+                result.loaded = submit_loaded;
+                return result;
+            },
+            [this]() -> const specforge::SourceCollectionSessionView& {
+                return view;
+            });
+        panel.RenderAnnotations(
+            interaction,
+            specforge::UiLanguage::English,
+            &open,
+            [this]() {
+                ++choose_file_count;
+                return selected_path;
+            });
+
+        AnnotationPanelFrameObservation observation;
+        if (capture_text) {
+            observation.logged_text =
+                GImGui->LogBuffer.c_str();
+            ImGui::LogFinish();
+        }
+        observation.popup_open = ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId |
+                ImGuiPopupFlags_AnyPopupLevel);
+        ImGui::EndFrame();
+        return observation;
+    }
+
+    std::shared_ptr<specforge::SpectrumSnapshot> snapshot;
+    specforge::SourceCollectionSessionView view;
+    specforge::SourceCollectionPanelUi panel;
+    std::optional<std::filesystem::path> selected_path;
+    std::function<void()> after_submit;
+    bool submit_loaded = false;
+    int choose_file_count = 0;
+    int submit_count = 0;
+};
+
+void ClickAnnotationPanelRect(
+    AnnotationPanelFixture& fixture,
+    const std::array<float, 4>& rect)
+{
+    const ImVec2 center = RectCenter(rect);
+    ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+    (void)fixture.RenderFrame(false);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)fixture.RenderFrame(false);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)fixture.RenderFrame(false);
+}
+
+std::size_t CountOccurrences(
+    std::string_view text,
+    std::string_view needle)
+{
+    std::size_t count = 0;
+    for (std::size_t offset = 0;
+         (offset = text.find(needle, offset)) !=
+             std::string_view::npos;
+         offset += needle.size()) {
+        ++count;
+    }
+    return count;
+}
+
+specforge::SourceCollectionManifestDiagnostic
+MakeAnnotationImportFailure(
+    std::filesystem::path path,
+    std::string detail)
+{
+    return {
+        .kind = specforge::
+            SourceCollectionManifestDiagnosticKind::
+                AnnotationIgnored,
+        .path = std::move(path),
+        .detail = std::move(detail),
+    };
+}
+
+void TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    fixture.view.navigation.annotation_diagnostics.push_back(
+        MakeAnnotationImportFailure(
+            "initial-labels.csv",
+            "CSV roster does not match the active source collection.\nExpected sample B at row 2."));
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+
+    const AnnotationPanelFrameObservation observation =
+        fixture.RenderFrame();
+    Require(
+        observation.logged_text.find("initial-labels.csv") !=
+                std::string::npos &&
+            observation.logged_text.find(
+                "CSV roster does not match the active source collection.") !=
+                std::string::npos &&
+            observation.logged_text.find(
+                "Expected sample B at row 2.") !=
+                std::string::npos &&
+            observation.logged_text.find("Dismiss") !=
+                std::string::npos,
+        "annotation import notice should draw filename, full multiline reason, and Dismiss without hover");
+    Require(
+        !observation.popup_open,
+        "annotation import failure should remain inline rather than opening a modal");
+}
+
+void TestAnnotationImportFailureDismissalTracksExactDetail()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    fixture.view.navigation.annotation_diagnostics.push_back(
+        MakeAnnotationImportFailure(
+            "initial-labels.csv",
+            "First roster mismatch detail."));
+    (void)fixture.RenderFrame();
+    const auto& dismiss_rects =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationDiagnosticDismissRects(fixture.panel);
+    Require(
+        dismiss_rects.size() == 1,
+        "one visible import failure should expose one Dismiss action");
+    const std::array<float, 4> dismiss_rect =
+        dismiss_rects.front();
+    ClickAnnotationPanelRect(fixture, dismiss_rect);
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    const AnnotationPanelFrameObservation dismissed =
+        fixture.RenderFrame();
+    Require(
+        dismissed.logged_text.find("initial-labels.csv") ==
+                std::string::npos &&
+            dismissed.logged_text.find(
+                "First roster mismatch detail.") ==
+                std::string::npos,
+        "dismissed diagnostic should stay hidden for this panel session");
+
+    fixture.view.navigation.annotation_diagnostics.front().detail =
+        "Changed roster mismatch detail.";
+    const AnnotationPanelFrameObservation changed =
+        fixture.RenderFrame();
+    Require(
+        changed.logged_text.find("initial-labels.csv") !=
+                std::string::npos &&
+            changed.logged_text.find(
+                "Changed roster mismatch detail.") !=
+                std::string::npos,
+        "a changed diagnostic detail should produce a new visible dismissal key");
+}
+
+void TestReimportSameAnnotationClearsDismissalForNewFailure()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    const std::filesystem::path diagnostic_path =
+        std::filesystem::path{"imports"} /
+        "nested" / ".." / "initial-labels.csv";
+    const std::filesystem::path selected_path =
+        std::filesystem::path{"imports"} /
+        "initial-labels.csv";
+    const auto diagnostic = MakeAnnotationImportFailure(
+        diagnostic_path,
+        "Roster mismatch on retry.");
+    fixture.view.navigation.annotation_diagnostics.push_back(
+        diagnostic);
+    (void)fixture.RenderFrame();
+    const std::array<float, 4> dismiss_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationDiagnosticDismissRects(fixture.panel)
+                .front();
+    ClickAnnotationPanelRect(fixture, dismiss_rect);
+    Require(
+        fixture.RenderFrame().logged_text.find(
+            "Roster mismatch on retry.") ==
+            std::string::npos,
+        "precondition: retry diagnostic should be dismissed");
+
+    fixture.selected_path = selected_path;
+    fixture.submit_loaded = false;
+    fixture.after_submit = [&fixture, diagnostic]() {
+        fixture.view.navigation.annotation_diagnostics.push_back(
+            diagnostic);
+    };
+    const auto add_file_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationAddFileRect(fixture.panel);
+    Require(
+        add_file_rect.has_value(),
+        "Annotations panel should expose its Add file action");
+    ClickAnnotationPanelRect(fixture, *add_file_rect);
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    const AnnotationPanelFrameObservation retried =
+        fixture.RenderFrame();
+    Require(
+        fixture.choose_file_count == 1 &&
+            fixture.submit_count == 1 &&
+            CountOccurrences(
+                retried.logged_text,
+                "Roster mismatch on retry.") == 1,
+        "same normalized path retry should submit once and reveal one latest failure card");
+
+    const std::array<float, 4> retried_dismiss_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationDiagnosticDismissRects(fixture.panel)
+                .front();
+    ClickAnnotationPanelRect(
+        fixture,
+        retried_dismiss_rect);
+    fixture.submit_loaded = true;
+    fixture.after_submit = {};
+    const auto success_add_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationAddFileRect(fixture.panel);
+    Require(
+        success_add_rect.has_value(),
+        "successful retry should retain the Add file action");
+    ClickAnnotationPanelRect(fixture, *success_add_rect);
+    const AnnotationPanelFrameObservation successful =
+        fixture.RenderFrame();
+    Require(
+        successful.logged_text.find(
+            "Roster mismatch on retry.") ==
+                std::string::npos &&
+            !successful.popup_open,
+        "successful retry should keep historical failure hidden without a modal or success toast");
+}
+
+void TestAnnotationDismissalsResetAcrossSourceSwitch()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    const auto source_a_failure = MakeAnnotationImportFailure(
+        "source-a.csv",
+        "Source A failure.");
+    fixture.view.navigation.annotation_diagnostics = {
+        source_a_failure};
+    (void)fixture.RenderFrame();
+    const std::array<float, 4> dismiss_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationDiagnosticDismissRects(fixture.panel)
+                .front();
+    ClickAnnotationPanelRect(fixture, dismiss_rect);
+
+    fixture.view.labeling.source_identity = "source-b";
+    fixture.snapshot->source.path = "source-b.npy";
+    fixture.view.navigation.annotation_diagnostics = {
+        MakeAnnotationImportFailure(
+            "source-b.csv",
+            "Source B failure.")};
+    const AnnotationPanelFrameObservation source_b =
+        fixture.RenderFrame();
+    Require(
+        source_b.logged_text.find("Source B failure.") !=
+                std::string::npos &&
+            source_b.logged_text.find("Source A failure.") ==
+                std::string::npos,
+        "source switch should show only the active source diagnostic");
+
+    fixture.view.labeling.source_identity = "source-a";
+    fixture.snapshot->source.path = "source-a.npy";
+    fixture.view.navigation.annotation_diagnostics = {
+        source_a_failure};
+    const AnnotationPanelFrameObservation source_a_again =
+        fixture.RenderFrame();
+    Require(
+        source_a_again.logged_text.find("Source A failure.") !=
+            std::string::npos,
+        "switching sources should clear prior-source transient dismissal state");
+}
+
+void TestHiddenAnnotationPanelObservesIntermediateSourceSwitch()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    const auto source_a_failure = MakeAnnotationImportFailure(
+        "source-a.csv",
+        "Source A hidden-panel failure.");
+    fixture.view.navigation.annotation_diagnostics = {
+        source_a_failure};
+    (void)fixture.RenderFrame();
+    const std::array<float, 4> dismiss_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationDiagnosticDismissRects(fixture.panel)
+                .front();
+    ClickAnnotationPanelRect(fixture, dismiss_rect);
+    Require(
+        fixture.RenderFrame().logged_text.find(
+            "Source A hidden-panel failure.") ==
+            std::string::npos,
+        "precondition: source A diagnostic should be dismissed");
+
+    fixture.view.labeling.source_identity = "source-b";
+    fixture.snapshot->source.path = "source-b.npy";
+    fixture.view.navigation.annotation_diagnostics = {
+        MakeAnnotationImportFailure(
+            "source-b.csv",
+            "Source B hidden-panel failure.")};
+    fixture.panel.SyncAnnotationDiagnosticSource(
+        fixture.view);
+
+    fixture.view.labeling.source_identity = "source-a";
+    fixture.snapshot->source.path = "source-a.npy";
+    fixture.view.navigation.annotation_diagnostics = {
+        source_a_failure};
+    fixture.panel.SyncAnnotationDiagnosticSource(
+        fixture.view);
+
+    const AnnotationPanelFrameObservation source_a_again =
+        fixture.RenderFrame();
+    Require(
+        source_a_again.logged_text.find(
+            "Source A hidden-panel failure.") !=
+            std::string::npos,
+        "an unrendered A-to-B-to-A source transition should clear source A dismissal state");
 }
 
 void TestReopenableSourcePathEligibility()
@@ -1944,6 +2332,11 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 int main()
 {
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
+    TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup();
+    TestAnnotationImportFailureDismissalTracksExactDetail();
+    TestReimportSameAnnotationClearsDismissalForNewFailure();
+    TestAnnotationDismissalsResetAcrossSourceSwitch();
+    TestHiddenAnnotationPanelObservesIntermediateSourceSwitch();
     TestReopenableSourcePathEligibility();
     TestFilesPanelContextActionLaunchesWithoutMutatingSession();
     TestFilesPanelContextActionIsDisabledForIneligiblePath();

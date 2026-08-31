@@ -218,6 +218,34 @@ struct ShellUiTestAccess {
             synchronized_navigation_topology_revision_;
     }
 
+    static void SeedAnnotationDiagnosticDismissal(
+        ShellUi& shell,
+        std::string source_identity)
+    {
+        shell.source_collection_panel_ui_.
+            annotation_diagnostic_source_identity_ =
+                std::move(source_identity);
+        shell.source_collection_panel_ui_.
+            dismissed_annotation_diagnostic_keys_.insert(
+                "dismissed-diagnostic");
+    }
+
+    [[nodiscard]] static std::size_t
+    AnnotationDiagnosticDismissalCount(
+        const ShellUi& shell)
+    {
+        return shell.source_collection_panel_ui_.
+            dismissed_annotation_diagnostic_keys_.size();
+    }
+
+    [[nodiscard]] static std::string_view
+    AnnotationDiagnosticSourceIdentity(
+        const ShellUi& shell)
+    {
+        return shell.source_collection_panel_ui_.
+            annotation_diagnostic_source_identity_;
+    }
+
     static void CaptureLabelingOperationResult(
         ShellUi& shell,
         const SourceCollectionSessionResult& result)
@@ -6143,6 +6171,71 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     release_row_two_promise.set_value();
 }
 
+void TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path source_a =
+        UniqueTempPath("_annotation_dismissal_a.npy");
+    const std::filesystem::path source_b =
+        UniqueTempPath("_annotation_dismissal_b.npy");
+    WriteFixture(source_a);
+    WriteFixture(source_b);
+
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+    OpenPreparedFixtureSource(session, source_a);
+    OpenPreparedFixtureSource(session, source_b);
+    (void)session.Submit(
+        specforge::SourceCollectionSessionIntent::
+            EditSourceCollection(
+                specforge::SourceCollectionIntent::
+                    SwitchActive(0)));
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            std::move(session),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting());
+    Require(
+        shell->SetPanelVisibilityForAutomation(
+                 specforge::ApplicationPanel::Annotations,
+                 false)
+            .applied(),
+        "annotation dismissal fixture should hide the Annotations panel");
+
+    const std::string source_a_identity =
+        Access::Session(*shell).View().labeling.source_identity;
+    Require(
+        !source_a_identity.empty(),
+        "annotation dismissal fixture should expose source A identity");
+    Access::SeedAnnotationDiagnosticDismissal(
+        *shell,
+        source_a_identity);
+
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            EditSourceCollection(
+                specforge::SourceCollectionIntent::
+                    SwitchActive(1)));
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            EditSourceCollection(
+                specforge::SourceCollectionIntent::
+                    SwitchActive(0)));
+
+    Require(
+        !shell->PanelVisibilityForAutomation().annotations &&
+            Access::AnnotationDiagnosticSourceIdentity(
+                *shell) == source_a_identity &&
+            Access::AnnotationDiagnosticDismissalCount(
+                *shell) == 0,
+        "a hidden Annotations panel must observe the intermediate source and clear source A dismissal state across A-to-B-to-A");
+
+    shell.reset();
+    std::filesystem::remove(source_a);
+    std::filesystem::remove(source_b);
+}
+
 void TestShellWorkflowResetPreservesSameFrameLabelingIssue()
 {
     using Access = specforge::ShellUiTestAccess;
@@ -6530,6 +6623,7 @@ int main()
         TestAutomationSettingsUseApplicationSettingsOwner();
         TestAutomationPanelProjectionRequiresExactNormalShellPresent();
         TestMaintenanceResynchronizesRetainedNavigationTopology();
+        TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip();
         TestShellWorkflowResetPreservesSameFrameLabelingIssue();
         TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState();
         TestShellFlushResultNamesEveryFailedOwner();
