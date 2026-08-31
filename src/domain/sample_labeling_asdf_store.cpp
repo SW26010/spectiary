@@ -13,6 +13,20 @@ namespace {
 
 using BeforeReplace =
     sample_labeling_asdf_store_test_seam::BeforeReplace;
+using BeforeCodecWrite =
+    sample_labeling_asdf_store_test_seam::BeforeCodecWrite;
+using BeforeMetadataBuild =
+    sample_labeling_asdf_test_seam::BeforeMetadataBuild;
+
+thread_local const BeforeReplace* g_values_before_replace = nullptr;
+
+const BeforeReplace& ValuesBeforeReplaceCheckpoint() noexcept
+{
+    static const BeforeReplace no_checkpoint;
+    return g_values_before_replace != nullptr
+        ? *g_values_before_replace
+        : no_checkpoint;
+}
 
 SampleLabelingAsdfStoreError CodecStoreError(
     const SampleLabelingAsdfError& error)
@@ -191,7 +205,8 @@ bool KnownDocumentGenerationMatches(
 SampleLabelingAsdfStoreWriteResult WriteAtomically(
     const std::filesystem::path& path,
     const SampleLabelingDocument& document,
-    const BeforeReplace& before_replace) noexcept
+    const BeforeReplace& before_replace,
+    const BeforeCodecWrite& before_codec_write) noexcept
 {
     try {
         std::optional<SampleLabelingAsdfDurableBase> existing_base;
@@ -238,9 +253,15 @@ SampleLabelingAsdfStoreWriteResult WriteAtomically(
         const bool written = WriteFileAtomically(
             path,
             options,
-            [&document, &existing_base, &codec_error](
+            [&document,
+                &existing_base,
+                &codec_error,
+                &before_codec_write](
                 std::ostream& stream,
                 std::string& error) {
+                if (before_codec_write) {
+                    before_codec_write(stream);
+                }
                 const SampleLabelingAsdfWriteResult result = existing_base
                     ? RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
                           *existing_base,
@@ -284,7 +305,8 @@ SampleLabelingAsdfStoreWriteResult WriteAtomically(
 SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& document,
-    const BeforeReplace& before_replace) noexcept
+    const BeforeReplace& before_replace,
+    BeforeMetadataBuild before_metadata_build) noexcept
 {
     if (!snapshot.durable_base().valid()) {
         return SampleLabelingAsdfStoreWriteResult{
@@ -310,14 +332,24 @@ SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
         const bool written = WriteFileAtomically(
             snapshot.path(),
             options,
-            [&snapshot, &document, &codec_error](
+            [&snapshot,
+                &document,
+                &codec_error,
+                before_metadata_build](
                 std::ostream& stream,
                 std::string& error) {
                 const SampleLabelingAsdfWriteResult result =
-                    RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
-                        snapshot.durable_base(),
-                        stream,
-                        document);
+                    before_metadata_build != nullptr
+                    ? sample_labeling_asdf_test_seam::
+                          RewriteDocumentWithBeforePreservedMetadataBuild(
+                              snapshot.durable_base(),
+                              stream,
+                              document,
+                              before_metadata_build)
+                    : RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+                          snapshot.durable_base(),
+                          stream,
+                          document);
                 if (!result.succeeded()) {
                     codec_error = result.error;
                     error = result.error.message;
@@ -442,6 +474,172 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
     }
 }
 
+SampleLabelingAsdfStoreGenerationWriteResult
+WriteAndOpenAtomicallyWithCheckpoints(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const sample_labeling_asdf_store_test_seam::
+        AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept
+{
+    try {
+        if (const std::optional<SampleLabelingAsdfStoreError>
+                mismatch = SourceCompatibilityError(
+                    document,
+                    source,
+                    {})) {
+            return SampleLabelingAsdfStoreGenerationWriteResult{
+                .error = std::move(*mismatch)};
+        }
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight allocation failed")};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight failed")};
+    }
+
+    const SampleLabelingAsdfStoreWriteResult write =
+        WriteAtomically(path, document, before_replace, {});
+    if (!write.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = write.error};
+    }
+
+    try {
+        if (after_replace_before_reopen) {
+            after_replace_before_reopen(path);
+        }
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner reopen checkpoint failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner reopen checkpoint failed")};
+    }
+
+    SampleLabelingAsdfStoreOpenResult opened =
+        OpenSampleLabelingAsdfDocumentStore(path, source);
+    if (!opened.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = std::move(opened.error)};
+    }
+    if (!KnownDocumentGenerationMatches(
+            document,
+            opened.snapshot->document())) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = {
+                .kind = SampleLabelingAsdfStoreErrorKind::
+                    PublishedGenerationMismatch,
+                .message =
+                    "opened ASDF labeling owner does not match the published canonical generation"}};
+    }
+    return SampleLabelingAsdfStoreGenerationWriteResult{
+        .snapshot = std::move(opened.snapshot),
+        .document_replaced = true};
+}
+
+SampleLabelingAsdfStoreGenerationWriteResult
+RewriteDocumentAndReopenAtomicallyWithCheckpoints(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const sample_labeling_asdf_store_test_seam::
+        AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept
+{
+    try {
+        if (const std::optional<SampleLabelingAsdfStoreError>
+                mismatch = SourceCompatibilityError(
+                    document,
+                    source,
+                    {})) {
+            return SampleLabelingAsdfStoreGenerationWriteResult{
+                .error = std::move(*mismatch)};
+        }
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling metadata publication preflight allocation failed")};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling metadata publication preflight failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling metadata publication preflight failed")};
+    }
+
+    const SampleLabelingAsdfStoreWriteResult write =
+        RewriteDocumentAtomically(
+            snapshot,
+            document,
+            before_replace,
+            nullptr);
+    if (!write.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = write.error};
+    }
+
+    try {
+        if (after_replace_before_reopen) {
+            after_replace_before_reopen(snapshot.path());
+        }
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = UnexpectedStoreError(
+                "ASDF labeling metadata reopen checkpoint failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = UnexpectedStoreError(
+                "ASDF labeling metadata reopen checkpoint failed")};
+    }
+
+    SampleLabelingAsdfStoreOpenResult reopened =
+        OpenSampleLabelingAsdfDocumentStore(
+            snapshot.path(),
+            source);
+    if (!reopened.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = std::move(reopened.error)};
+    }
+    if (!KnownDocumentGenerationMatches(
+            document,
+            reopened.snapshot->document())) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = {
+                .kind = SampleLabelingAsdfStoreErrorKind::
+                    PublishedGenerationMismatch,
+                .message =
+                    "reopened ASDF labeling document does not match the published canonical generation"}};
+    }
+    return SampleLabelingAsdfStoreGenerationWriteResult{
+        .snapshot = std::move(reopened.snapshot),
+        .document_replaced = true};
+}
+
 }  // namespace
 
 SampleLabelingAsdfOpenSnapshot::SampleLabelingAsdfOpenSnapshot(
@@ -519,7 +717,7 @@ WriteSampleLabelingAsdfDocumentAtomically(
     const std::filesystem::path& path,
     const SampleLabelingDocument& document) noexcept
 {
-    return WriteAtomically(path, document, {});
+    return WriteAtomically(path, document, {}, {});
 }
 
 SampleLabelingAsdfStoreGenerationWriteResult
@@ -528,62 +726,8 @@ WriteSampleLabelingAsdfDocumentAndOpenAtomically(
     const SampleLabelingDocument& document,
     const SampleLabelingSourceCompatibility& source) noexcept
 {
-    try {
-        if (const std::optional<SampleLabelingAsdfStoreError>
-                mismatch = SourceCompatibilityError(
-                    document,
-                    source,
-                    {})) {
-            return SampleLabelingAsdfStoreGenerationWriteResult{
-                .error = std::move(*mismatch)};
-        }
-    } catch (const std::bad_alloc&) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling owner creation preflight allocation failed")};
-    } catch (const std::exception& error) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling owner creation preflight failed: " +
-                std::string(error.what()))};
-    } catch (...) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling owner creation preflight failed")};
-    }
-
-    const SampleLabelingAsdfStoreWriteResult write =
-        WriteSampleLabelingAsdfDocumentAtomically(
-            path,
-            document);
-    if (!write.succeeded()) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = write.error};
-    }
-
-    SampleLabelingAsdfStoreOpenResult opened =
-        OpenSampleLabelingAsdfDocumentStore(
-            path,
-            source);
-    if (!opened.succeeded()) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .document_replaced = true,
-            .error = std::move(opened.error)};
-    }
-    if (!KnownDocumentGenerationMatches(
-            document,
-            opened.snapshot->document())) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .document_replaced = true,
-            .error = {
-                .kind = SampleLabelingAsdfStoreErrorKind::
-                    PublishedGenerationMismatch,
-                .message =
-                    "opened ASDF labeling owner does not match the published canonical generation"}};
-    }
-    return SampleLabelingAsdfStoreGenerationWriteResult{
-        .snapshot = std::move(opened.snapshot),
-        .document_replaced = true};
+    return WriteAndOpenAtomicallyWithCheckpoints(
+        path, document, source, {}, {});
 }
 
 SampleLabelingAsdfStoreWriteResult
@@ -602,7 +746,7 @@ RewriteSampleLabelingAsdfValuesAtomically(
             RewriteAtomically(
                 snapshot,
                 replacement,
-                {},
+                ValuesBeforeReplaceCheckpoint(),
                 &refreshed_durable_base);
         if (result.succeeded()) {
             snapshot.document_->annotation.values =
@@ -633,7 +777,8 @@ RewriteSampleLabelingAsdfDocumentAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& document) noexcept
 {
-    return RewriteDocumentAtomically(snapshot, document, {});
+    return RewriteDocumentAtomically(
+        snapshot, document, {}, nullptr);
 }
 
 SampleLabelingAsdfStoreGenerationWriteResult
@@ -642,61 +787,8 @@ RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
     const SampleLabelingDocument& document,
     const SampleLabelingSourceCompatibility& source) noexcept
 {
-    try {
-        if (const std::optional<SampleLabelingAsdfStoreError>
-                mismatch = SourceCompatibilityError(
-                    document,
-                    source,
-                    {})) {
-            return SampleLabelingAsdfStoreGenerationWriteResult{
-                .error = std::move(*mismatch)};
-        }
-    } catch (const std::bad_alloc&) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling metadata publication preflight allocation failed")};
-    } catch (const std::exception& error) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling metadata publication preflight failed: " +
-                std::string(error.what()))};
-    } catch (...) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = UnexpectedStoreError(
-                "ASDF labeling metadata publication preflight failed")};
-    }
-    const SampleLabelingAsdfStoreWriteResult write =
-        RewriteSampleLabelingAsdfDocumentAtomically(
-            snapshot,
-            document);
-    if (!write.succeeded()) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .error = write.error};
-    }
-
-    SampleLabelingAsdfStoreOpenResult reopened =
-        OpenSampleLabelingAsdfDocumentStore(
-            snapshot.path(),
-            source);
-    if (!reopened.succeeded()) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .document_replaced = true,
-            .error = std::move(reopened.error)};
-    }
-    if (!KnownDocumentGenerationMatches(
-            document,
-            reopened.snapshot->document())) {
-        return SampleLabelingAsdfStoreGenerationWriteResult{
-            .document_replaced = true,
-            .error = {
-                .kind = SampleLabelingAsdfStoreErrorKind::
-                    PublishedGenerationMismatch,
-                .message =
-                    "reopened ASDF labeling document does not match the published canonical generation"}};
-    }
-    return SampleLabelingAsdfStoreGenerationWriteResult{
-        .snapshot = std::move(reopened.snapshot),
-        .document_replaced = true};
+    return RewriteDocumentAndReopenAtomicallyWithCheckpoints(
+        snapshot, document, source, {}, {});
 }
 
 namespace sample_labeling_asdf_store_test_seam {
@@ -706,7 +798,15 @@ SampleLabelingAsdfStoreWriteResult WriteWithBeforeReplace(
     const SampleLabelingDocument& document,
     const BeforeReplace& before_replace) noexcept
 {
-    return WriteAtomically(path, document, before_replace);
+    return WriteAtomically(path, document, before_replace, {});
+}
+
+SampleLabelingAsdfStoreWriteResult WriteWithBeforeCodecWrite(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const BeforeCodecWrite& before_codec_write) noexcept
+{
+    return WriteAtomically(path, document, {}, before_codec_write);
 }
 
 SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
@@ -714,10 +814,14 @@ SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
     const SampleLabelingDocument& replacement,
     const BeforeReplace& before_replace) noexcept
 {
-    return RewriteAtomically(
-        snapshot,
-        replacement,
-        before_replace);
+    const BeforeReplace* const previous_checkpoint =
+        g_values_before_replace;
+    g_values_before_replace = &before_replace;
+    SampleLabelingAsdfStoreWriteResult result =
+        RewriteSampleLabelingAsdfValuesAtomically(
+            snapshot, replacement);
+    g_values_before_replace = previous_checkpoint;
+    return result;
 }
 
 SampleLabelingAsdfStoreWriteResult
@@ -727,7 +831,50 @@ RewriteDocumentWithBeforeReplace(
     const BeforeReplace& before_replace) noexcept
 {
     return RewriteDocumentAtomically(
-        snapshot, document, before_replace);
+        snapshot, document, before_replace, nullptr);
+}
+
+SampleLabelingAsdfStoreWriteResult
+RewriteDocumentWithBeforePreservedMetadataBuild(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    sample_labeling_asdf_test_seam::BeforeMetadataBuild
+        before_metadata_build) noexcept
+{
+    return RewriteDocumentAtomically(
+        snapshot, document, {}, before_metadata_build);
+}
+
+SampleLabelingAsdfStoreGenerationWriteResult
+WriteAndOpenWithCheckpoints(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept
+{
+    return WriteAndOpenAtomicallyWithCheckpoints(
+        path,
+        document,
+        source,
+        before_replace,
+        after_replace_before_reopen);
+}
+
+SampleLabelingAsdfStoreGenerationWriteResult
+RewriteDocumentAndReopenWithCheckpoints(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept
+{
+    return RewriteDocumentAndReopenAtomicallyWithCheckpoints(
+        snapshot,
+        document,
+        source,
+        before_replace,
+        after_replace_before_reopen);
 }
 
 }  // namespace sample_labeling_asdf_store_test_seam

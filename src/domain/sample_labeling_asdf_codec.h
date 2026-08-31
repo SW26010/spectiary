@@ -143,6 +143,15 @@ struct ProfilePreflightProbe {
     std::uint64_t resident_budget_bytes,
     BeforeMetadataBuild before_metadata_build) noexcept;
 
+// Injects a deterministic failure immediately before the preserved YAML tree
+// is rebuilt. The production metadata-rewrite entry point leaves this empty.
+[[nodiscard]] SampleLabelingAsdfWriteResult
+RewriteDocumentWithBeforePreservedMetadataBuild(
+    const SampleLabelingAsdfDurableBase& durable_base,
+    std::ostream& output,
+    const SampleLabelingDocument& document,
+    BeforeMetadataBuild before_metadata_build) noexcept;
+
 // Arithmetic-only seam for exercising the shared reader/writer profile
 // contract without allocating boundary-sized ndarrays.
 [[nodiscard]] SampleLabelingAsdfError ProbeProfilePreflight(

@@ -2871,6 +2871,24 @@ SampleLabelingAsdfWriteResult WriteWithResidentBudget(
     return result;
 }
 
+SampleLabelingAsdfWriteResult
+RewriteDocumentWithBeforePreservedMetadataBuild(
+    const SampleLabelingAsdfDurableBase& durable_base,
+    std::ostream& output,
+    const SampleLabelingDocument& document,
+    BeforeMetadataBuild before_metadata_build) noexcept
+{
+    const BeforeMetadataBuild previous_callback = g_before_metadata_build;
+    g_before_metadata_build = before_metadata_build;
+    SampleLabelingAsdfWriteResult result =
+        RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            durable_base,
+            output,
+            document);
+    g_before_metadata_build = previous_callback;
+    return result;
+}
+
 SampleLabelingAsdfError ProbeProfilePreflight(
     const ProfilePreflightProbe& probe) noexcept
 {
@@ -3056,6 +3074,9 @@ RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
                 state.encoded_roster_block.size(),
             0));
         ValidateDocumentBusinessSemantics(document);
+        if (g_before_metadata_build != nullptr) {
+            g_before_metadata_build();
+        }
         const std::string metadata =
             BuildMetadataPreservingUnknownFields(
                 state.encoded_metadata,

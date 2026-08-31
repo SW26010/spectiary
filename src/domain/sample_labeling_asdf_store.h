@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
@@ -198,12 +199,22 @@ namespace sample_labeling_asdf_store_test_seam {
 using BeforeReplace = std::function<void(
     const std::filesystem::path& temporary_path,
     const std::filesystem::path& target_path)>;
+using BeforeCodecWrite = std::function<void(std::ostream& output)>;
+using AfterReplaceBeforeReopen = std::function<void(
+    const std::filesystem::path& target_path)>;
 
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult WriteWithBeforeReplace(
     const std::filesystem::path& path,
     const SampleLabelingDocument& document,
     const BeforeReplace& before_replace) noexcept;
 
+[[nodiscard]] SampleLabelingAsdfStoreWriteResult WriteWithBeforeCodecWrite(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const BeforeCodecWrite& before_codec_write) noexcept;
+
+// Runs the complete production values wrapper, including the conditional
+// result-to-snapshot handoff, with a deterministic publication checkpoint.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
     SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& replacement,
@@ -214,6 +225,29 @@ RewriteDocumentWithBeforeReplace(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& document,
     const BeforeReplace& before_replace) noexcept;
+
+[[nodiscard]] SampleLabelingAsdfStoreWriteResult
+RewriteDocumentWithBeforePreservedMetadataBuild(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    sample_labeling_asdf_test_seam::BeforeMetadataBuild
+        before_metadata_build) noexcept;
+
+[[nodiscard]] SampleLabelingAsdfStoreGenerationWriteResult
+WriteAndOpenWithCheckpoints(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept;
+
+[[nodiscard]] SampleLabelingAsdfStoreGenerationWriteResult
+RewriteDocumentAndReopenWithCheckpoints(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source,
+    const BeforeReplace& before_replace,
+    const AfterReplaceBeforeReopen& after_replace_before_reopen) noexcept;
 
 }  // namespace sample_labeling_asdf_store_test_seam
 
