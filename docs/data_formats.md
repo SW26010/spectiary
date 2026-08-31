@@ -211,6 +211,48 @@ LAMOST DR13 -> SDSS DR17 -> SDSS DR19
 
 但 V0.2 里新增的 SDSS DR17 自报碳星层，优先使用 DR17 自己那条 `spec-PLATE-MJD-FIBER.fits`，不要随便替换成同位置的非自报 repeat spectrum。
 
+## Sample labeling canonical ASDF
+
+新建的正式 sample labeling task 使用单文件 `.asdf` canonical owner。这里有三套
+彼此独立的版本号：YAML 中 `schema_version: 2.0.0` 是 SpecForge sample-labeling
+语义版本；文件头 `#ASDF 1.0.0` 是 ASDF file-format 版本；
+`#ASDF_STANDARD 1.5.0` 是 ASDF Standard 版本。ASDF 版本号中的 `1.0.0` 不表示
+SpecForge labeling schema 1.0，`!core/asdf-1.1.0` 也只是 ASDF core tag。
+
+下列标识不得混用：
+
+| 项目 | 数据含义 |
+| --- | --- |
+| task ID | `labeling_task.id` 中不可变的 canonical lowercase UUID v4；重命名、Save As、export 或 relink 都不改变它。 |
+| task name | `labeling_task.name` 中可编辑的 UTF-8 文本；必须至少包含一个非 Unicode whitespace 字符，不 trim、不 normalization。 |
+| output filename | 用户选择的文件系统名称；对话框可以由 task name 生成安全建议，但该名称不是 task identity，后续重命名 task 不会重命名文件。 |
+
+schema 2.0 把 source identity/roster、`int32` label values、label definitions、task
+ID/name、`created_at`、`modified_at` 和 origin 放在同一个原子 ASDF generation。
+时间戳 wire form 固定为 `YYYY-MM-DDTHH:MM:SS.sssZ`；只能使用四位真实日期、
+固定三位毫秒和字面量 `Z`。task ID 只接受带连字符的 36 字符小写 UUID v4，
+不接受大写、花括号或 `urn:uuid:`。schema 2.0 没有 `annotation.name`；canonical
+task name 只在 `labeling_task.name`，而 `origin.annotation.name` 表示被 promotion
+输入的 artifact basename。
+
+`origin.kind` 的当前写入值只有 `manual` 和 `annotation_promotion`。Promotion 的
+annotation name 只能是 portable basename，format 只能是 `csv` 或 `npy`；可选
+fingerprint 为 `sha256:` 加 64 位小写十六进制。该摘要覆盖解析所用同一个已打开
+文件 generation 的完整原始字节：CSV 包括编码和换行，NPY 包括 header 与
+payload；它不是 decoded values、sidecar、路径字符串或 source fingerprint 的摘要。
+
+`description` 和 `authors` 是可选 canonical 字段，当前没有编辑 UI；unset 时保持
+absent。Unknown-field preservation 只承诺基于同一 validated durable generation
+重写时保留现有 YAML tree 中受支持的 unknown mapping entries。它不承诺保留额外
+binary blocks、任意 sequence schema、metadata 原始字节、padding 或旧
+index/trailer。完整 YAML tree、semantic mutation/retry 时间戳规则和 preservation
+边界见 [Sample Labeling](sample_labeling.md#canonical-schema-20-identity-and-provenance)。
+
+SpecForge labeling schema `1.0.0` 不读取迁移为 `2.0.0`；本地 labeling cache
+schemas 1–3 也不迁移，当前 cache schema 是 4。Canonical 文档不包含 task copy
+lineage、持久 edit history、document revision、incremental patch 或 workflow
+status；这些概念不能从 output filename 或 ASDF container version 推断。
+
 ## 一句话总结
 
-程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵，FITS 要先识别 HDU、波长列或受限 `COEFF0/COEFF1` fallback，`mask/ivar` 决定有效点，`X.npy` 是处理后的特征而不是原始流量。
+程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵，FITS 要先识别 HDU、波长列或受限 `COEFF0/COEFF1` fallback，`mask/ivar` 决定有效点，`X.npy` 是处理后的特征而不是原始流量；sample labeling canonical `.asdf` 则是带独立 SpecForge schema 版本的 task/source/roster/value 原子文档。
