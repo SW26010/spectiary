@@ -81,6 +81,11 @@ jobs:
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Target specforge_asdf_labeling_production_benchmark `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
+            -TimeoutSec 600
 
       - name: Run required native/headless CTest gate
         shell: pwsh
@@ -90,12 +95,14 @@ jobs:
           New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
           $env:TEMP = $ctestTemp
           $env:TMP = $ctestTemp
+          $env:SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY = `
+            Join-Path $env:AUTOMATION_RUN_ROOT 'asdf-hardening\mutation-failure'
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-debug `
             -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
 
-      - name: Install pinned ASDF interoperability oracle
+      - name: Install pinned ASDF interoperability and hardening oracle
         shell: pwsh
         timeout-minutes: 5
         run: |
@@ -103,7 +110,7 @@ jobs:
             --target build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-python `
             -r tools\asdf_labeling_spike\requirements.txt
 
-      - name: Build ASDF interoperability targets
+      - name: Build ASDF interoperability and hardening targets
         shell: pwsh
         timeout-minutes: 15
         run: |
@@ -120,13 +127,37 @@ jobs:
             -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
             -TimeoutSec 900
 
-      - name: Run pinned ASDF 5.3.1 interoperability CTest
+      - name: Run pinned ASDF 5.3.1 interoperability and checksum CTests
         shell: pwsh
         timeout-minutes: 5
         run: |
           ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
-            -R '^specforge_asdf_labeling_interoperability$' `
+            -L '^asdf-pinned-oracle$' `
             --output-on-failure
+
+      - name: Collect final ASDF interoperability evidence
+        if: ${{ always() }}
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          $destination = Join-Path $env:AUTOMATION_RUN_ROOT 'asdf-hardening\evidence'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          $evidence = @(
+            @{
+              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-results\interoperability.json'
+              Name = 'interoperability.json'
+            },
+            @{
+              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-hardening-results\checksum-interoperability.json'
+              Name = 'checksum-interoperability.json'
+            }
+          )
+          foreach ($entry in $evidence) {
+            if (Test-Path -LiteralPath $entry.Source -PathType Leaf) {
+              Copy-Item -LiteralPath $entry.Source `
+                -Destination (Join-Path $destination $entry.Name) -Force
+            }
+          }
 
       - name: Upload headless logs and failure evidence
         timeout-minutes: 5

@@ -42,6 +42,26 @@ add_test(
 set_tests_properties(
     specforge_asdf_labeling_interoperability
     PROPERTIES
-        LABELS "asdf;asdf-lifecycle;interoperability;required"
+        LABELS "asdf;asdf-lifecycle;asdf-pinned-oracle;interoperability;required"
+        TIMEOUT 120
+)
+
+add_test(
+    NAME specforge_sample_labeling_asdf_checksum_interoperability
+    COMMAND
+        "${CMAKE_COMMAND}" -E env
+        "PYTHONPATH=${CMAKE_BINARY_DIR}/asdf-labeling-spike-python"
+        "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/tools/asdf_labeling_hardening/checksum_oracle.py"
+        --native "$<TARGET_FILE:specforge_sample_labeling_asdf_codec_tests>"
+        --output
+            "${CMAKE_BINARY_DIR}/asdf-labeling-hardening-results/checksum-interoperability.json"
+        --work-dir
+            "${CMAKE_BINARY_DIR}/asdf-labeling-hardening-results/checksum-files"
+)
+set_tests_properties(
+    specforge_sample_labeling_asdf_checksum_interoperability
+    PROPERTIES
+        LABELS "labeling;asdf-lifecycle;asdf-hardening;asdf-pinned-oracle;ci-headless;required"
         TIMEOUT 120
 )

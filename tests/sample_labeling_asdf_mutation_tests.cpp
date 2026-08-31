@@ -11,10 +11,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <span>
@@ -30,6 +32,26 @@ namespace {
 namespace mutation = specforge::asdf_mutation_test;
 
 inline constexpr std::uint64_t kDefaultSeed = 0x78c0de2026ULL;
+inline constexpr std::string_view kArtifactDirectoryEnvironment =
+    "SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY";
+
+[[nodiscard]] std::filesystem::path DefaultArtifactDirectory()
+{
+    char* configured_value = nullptr;
+    std::size_t configured_size = 0;
+    const int environment_error = _dupenv_s(
+        &configured_value,
+        &configured_size,
+        kArtifactDirectoryEnvironment.data());
+    const std::unique_ptr<char, decltype(&std::free)> configured(
+        configured_value, &std::free);
+    if (environment_error == 0 && configured_size > 1U &&
+        configured != nullptr) {
+        return std::filesystem::path(configured.get());
+    }
+    return std::filesystem::current_path() /
+        "asdf-labeling-mutation-reproducer";
+}
 
 struct Options {
     std::uint64_t seed = kDefaultSeed;
@@ -40,10 +62,9 @@ struct Options {
     std::optional<std::filesystem::path> replay_file;
     std::size_t maximum_input_bytes =
         mutation::kDefaultMaximumInputBytes;
-    std::filesystem::path artifact_directory =
-        std::filesystem::current_path() /
-        "asdf-labeling-mutation-reproducer";
+    std::filesystem::path artifact_directory = DefaultArtifactDirectory();
     std::optional<std::size_t> inject_failure_case;
+    std::optional<std::size_t> inject_abrupt_exit_case;
     bool show_help = false;
 };
 
@@ -168,6 +189,8 @@ private:
             options.artifact_directory = Utf8Path(value);
         } else if (argument == "--inject-failure-case") {
             options.inject_failure_case = ParseSize(value, argument);
+        } else if (argument == "--inject-abrupt-exit-case") {
+            options.inject_abrupt_exit_case = ParseSize(value, argument);
         } else {
             throw std::runtime_error(
                 "unknown option: " + std::string(argument));
@@ -205,7 +228,10 @@ void PrintHelp()
         << "  --case-count UINT\n"
         << "  --max-input-bytes UINT\n"
         << "  --artifact-directory PATH\n"
-        << "  --inject-failure-case UINT  (harness self-check only)\n";
+        << "  --inject-failure-case UINT  (harness self-check only)\n"
+        << "  --inject-abrupt-exit-case UINT  (harness self-check only)\n\n"
+        << kArtifactDirectoryEnvironment
+        << " sets the default failure artifact directory.\n";
 }
 
 [[nodiscard]] std::filesystem::path ResolveFixture(
@@ -811,8 +837,10 @@ void WriteReproducer(const Options& options,
     const std::filesystem::path& base_fixture,
     std::size_t case_index,
     const mutation::GeneratedMutationCase& generated,
-    std::string_view actual,
-    std::string_view reason)
+    std::string_view evaluation_state,
+    std::optional<std::string_view> actual,
+    std::optional<std::string_view> reason,
+    bool announce)
 {
     std::error_code error;
     std::filesystem::create_directories(
@@ -877,8 +905,22 @@ void WriteReproducer(const Options& options,
          << JsonQuoted(
                 mutation::ExpectedInvariantName(generated.recipe.expected))
          << ",\n"
-         << "  \"actual_result\": " << JsonQuoted(actual) << ",\n"
-         << "  \"failure\": " << JsonQuoted(reason) << ",\n"
+         << "  \"evaluation_state\": "
+         << JsonQuoted(evaluation_state) << ",\n"
+         << "  \"actual_result\": ";
+    if (actual) {
+        json << JsonQuoted(*actual);
+    } else {
+        json << "null";
+    }
+    json << ",\n"
+         << "  \"failure\": ";
+    if (reason) {
+        json << JsonQuoted(*reason);
+    } else {
+        json << "null";
+    }
+    json << ",\n"
          << "  \"input_size_bytes\": " << generated.bytes.size() << ",\n"
          << "  \"max_input_bytes\": " << options.maximum_input_bytes
          << ",\n"
@@ -895,8 +937,27 @@ void WriteReproducer(const Options& options,
     if (!json) {
         throw std::runtime_error("could not flush reproducer.json");
     }
-    std::cerr << "reproducer_asdf=" << PathText(asdf_path) << '\n'
-              << "reproducer_json=" << PathText(json_path) << '\n';
+    if (announce) {
+        std::cerr << "reproducer_asdf=" << PathText(asdf_path) << '\n'
+                  << "reproducer_json=" << PathText(json_path) << '\n';
+    }
+}
+
+void RemoveCompletedReproducer(const Options& options)
+{
+    const std::array paths{
+        options.artifact_directory / "reproducer.asdf",
+        options.artifact_directory / "reproducer.json",
+    };
+    for (const std::filesystem::path& path : paths) {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+        if (error) {
+            throw std::runtime_error(
+                "could not remove completed mutation case artifact: " +
+                PathText(path));
+        }
+    }
 }
 
 [[nodiscard]] std::size_t CategoryIndex(
@@ -1024,6 +1085,19 @@ int Run(const Options& options)
 
         std::string actual = "not-evaluated";
         try {
+            // Keep the one current input outside the temporary tree before
+            // any production API can abort, hang, or be killed by CTest.
+            WriteReproducer(options,
+                base_fixture,
+                case_index,
+                generated,
+                "pending",
+                std::nullopt,
+                std::nullopt,
+                false);
+            if (options.inject_abrupt_exit_case == case_index) {
+                std::_Exit(86);
+            }
             if (!options.replay_file) {
                 VerifyInvalidWriterEmitsNoBytes(canonical_document);
             }
@@ -1040,13 +1114,16 @@ int Run(const Options& options)
                 throw std::runtime_error(
                     "injected harness assertion failure");
             }
+            RemoveCompletedReproducer(options);
         } catch (const std::exception& exception) {
             WriteReproducer(options,
                 base_fixture,
                 case_index,
                 generated,
-                actual,
-                exception.what());
+                "failed",
+                std::string_view(actual),
+                std::string_view(exception.what()),
+                true);
             std::cerr << "case_index=" << case_index
                       << " recipe=" << generated.recipe.name
                       << " failure=" << exception.what() << '\n';
@@ -1056,8 +1133,10 @@ int Run(const Options& options)
                 base_fixture,
                 case_index,
                 generated,
-                actual,
-                "non-standard exception");
+                "failed",
+                std::string_view(actual),
+                std::string_view("non-standard exception"),
+                true);
             std::cerr << "case_index=" << case_index
                       << " failure=non-standard exception\n";
             return 1;
