@@ -106,7 +106,7 @@ std::string FitsCard(std::string_view key, std::string_view value = {})
     return card;
 }
 
-void WriteFitsHeader(std::ofstream& stream, const std::vector<std::string>& cards)
+std::string FitsHeaderBytes(const std::vector<std::string>& cards)
 {
     std::string header;
     for (const std::string& card : cards) {
@@ -116,6 +116,12 @@ void WriteFitsHeader(std::ofstream& stream, const std::vector<std::string>& card
     header += FitsCard("END");
     const std::size_t padding = (2880 - (header.size() % 2880)) % 2880;
     header.append(padding, ' ');
+    return header;
+}
+
+void WriteFitsHeader(std::ofstream& stream, const std::vector<std::string>& cards)
+{
+    const std::string header = FitsHeaderBytes(cards);
     stream.write(header.data(), static_cast<std::streamsize>(header.size()));
 }
 
@@ -143,27 +149,22 @@ void WriteBytes(const std::filesystem::path& path, const std::vector<unsigned ch
     Require(stream.good(), "could not write fixture bytes");
 }
 
-std::vector<unsigned char> GzipRepeatedBytes(std::size_t byte_count)
+std::vector<unsigned char> GzipBytesWithZeroSuffix(
+    const std::vector<unsigned char>& prefix,
+    std::size_t zero_byte_count)
 {
     z_stream stream = {};
     Require(
         deflateInit2(&stream, Z_BEST_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY) == Z_OK,
         "could not initialize gzip fixture compressor");
 
-    std::array<unsigned char, 64 * 1024> input = {};
+    std::array<unsigned char, 64 * 1024> zeros = {};
     std::array<unsigned char, 64 * 1024> buffer = {};
     std::vector<unsigned char> output;
-    int result = Z_OK;
-    std::size_t remaining = byte_count;
-    do {
-        if (stream.avail_in == 0 && remaining > 0) {
-            const std::size_t chunk = std::min(remaining, input.size());
-            stream.next_in = reinterpret_cast<Bytef*>(input.data());
-            stream.avail_in = static_cast<uInt>(chunk);
-            remaining -= chunk;
-        }
-
-        const int flush = remaining == 0 ? Z_FINISH : Z_NO_FLUSH;
+    const auto compress = [&](const unsigned char* input, std::size_t size, int flush) {
+        stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input));
+        stream.avail_in = static_cast<uInt>(size);
+        int result = Z_OK;
         do {
             stream.next_out = reinterpret_cast<Bytef*>(buffer.data());
             stream.avail_out = static_cast<uInt>(buffer.size());
@@ -171,11 +172,36 @@ std::vector<unsigned char> GzipRepeatedBytes(std::size_t byte_count)
             Require(result == Z_OK || result == Z_STREAM_END, "could not gzip fixture bytes");
             const std::size_t produced = buffer.size() - stream.avail_out;
             output.insert(output.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(produced));
-        } while (stream.avail_out == 0);
-    } while (result != Z_STREAM_END);
+        } while (stream.avail_in > 0 || (flush == Z_FINISH && result != Z_STREAM_END));
+    };
+
+    compress(prefix.data(), prefix.size(), Z_NO_FLUSH);
+    std::size_t remaining = zero_byte_count;
+    while (remaining > 0) {
+        const std::size_t chunk = std::min(remaining, zeros.size());
+        compress(zeros.data(), chunk, Z_NO_FLUSH);
+        remaining -= chunk;
+    }
+    compress(nullptr, 0, Z_FINISH);
 
     deflateEnd(&stream);
     return output;
+}
+
+std::vector<unsigned char> GzipFitsImageWithPayload(std::size_t payload_size)
+{
+    const std::string payload_text = std::to_string(payload_size);
+    Require(payload_text.size() <= 20, "FITS payload size should fit in a numeric value field");
+    const std::string header = FitsHeaderBytes({
+        FitsCard("SIMPLE", "                   T"),
+        FitsCard("BITPIX", "                   8"),
+        FitsCard("NAXIS", "                   1"),
+        FitsCard("NAXIS1", std::string(20 - payload_text.size(), ' ') + payload_text),
+    });
+    const std::size_t padding = (2880 - (payload_size % 2880)) % 2880;
+    return GzipBytesWithZeroSuffix(
+        std::vector<unsigned char>(header.begin(), header.end()),
+        payload_size + padding);
 }
 
 std::vector<unsigned char> GzipBytes(const std::vector<unsigned char>& bytes)
@@ -276,33 +302,45 @@ void WriteFitsVectorTable(const std::filesystem::path& path)
                                 FitsCard("XTENSION", "'BINTABLE'"),
                                 FitsCard("BITPIX", "                   8"),
                                 FitsCard("NAXIS", "                   2"),
-                                FitsCard("NAXIS1", "                  40"),
-                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("NAXIS1", "                  44"),
+                                FitsCard("NAXIS2", "                   2"),
                                 FitsCard("PCOUNT", "                   0"),
                                 FitsCard("GCOUNT", "                   1"),
-                                FitsCard("TFIELDS", "                   4"),
+                                FitsCard("TFIELDS", "                   5"),
                                 FitsCard("TTYPE1", "'WAVELENGTH'"),
                                 FitsCard("TFORM1", "'3E'"),
                                 FitsCard("TTYPE2", "'FLUX'"),
                                 FitsCard("TFORM2", "'3E'"),
-                                FitsCard("TTYPE3", "'ORMASK12'"),
+                                FitsCard("TTYPE3", "'ORMASK'"),
                                 FitsCard("TFORM3", "'3E'"),
                                 FitsCard("TTYPE4", "'RV'"),
                                 FitsCard("TFORM4", "'E'"),
+                                FitsCard("TTYPE5", "'Z'"),
+                                FitsCard("TFORM5", "'E'"),
                                 FitsCard("VACUUM", "                   T"),
                             });
 
     std::vector<unsigned char> data;
-    for (float value : {5000.0F, 5001.0F, 5002.0F}) {
-        AppendBigEndianFloat(data, value);
-    }
-    for (float value : {1.0F, 2.0F, 3.0F}) {
-        AppendBigEndianFloat(data, value);
-    }
-    for (float value : {0.0F, 1.0F, 0.0F}) {
-        AppendBigEndianFloat(data, value);
-    }
-    AppendBigEndianFloat(data, 124.5F);
+    const auto append_row = [&data](
+                                const std::array<float, 3>& wavelength,
+                                const std::array<float, 3>& flux,
+                                const std::array<float, 3>& mask,
+                                float radial_velocity,
+                                float redshift) {
+        for (float value : wavelength) {
+            AppendBigEndianFloat(data, value);
+        }
+        for (float value : flux) {
+            AppendBigEndianFloat(data, value);
+        }
+        for (float value : mask) {
+            AppendBigEndianFloat(data, value);
+        }
+        AppendBigEndianFloat(data, radial_velocity);
+        AppendBigEndianFloat(data, redshift);
+    };
+    append_row({5000.0F, 5001.0F, 5002.0F}, {1.0F, 2.0F, 3.0F}, {0.0F, 1.0F, 0.0F}, 124.5F, 0.02F);
+    append_row({6000.0F, 6001.0F, 6002.0F}, {4.0F, 5.0F, 6.0F}, {1.0F, 0.0F, 0.0F}, -50.0F, 0.03F);
     stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     Require(stream.good(), "could not write vector FITS fixture");
@@ -381,7 +419,7 @@ void WriteFitsImage(const std::filesystem::path& path, bool use_coeff_wavelength
         FitsCard("SIMPLE", "                   T"),
         FitsCard("BITPIX", "                 -32"),
         FitsCard("NAXIS", "                   2"),
-        FitsCard("NAXIS1", "                   3"),
+        FitsCard("NAXIS1", "                   4"),
         FitsCard("NAXIS2", "                   5"),
     };
     if (use_coeff_wavelength) {
@@ -394,24 +432,135 @@ void WriteFitsImage(const std::filesystem::path& path, bool use_coeff_wavelength
     WriteFitsHeader(stream, cards);
 
     std::vector<unsigned char> data;
-    for (float value : {1.0F, 2.0F, 3.0F}) {
+    for (float value : {1.0F, 2.0F, 3.0F, 4.0F}) {
         AppendBigEndianFloat(data, value);
     }
-    for (float value : {1.0F, 0.0F, 1.0F}) {
+    for (float value : {1.0F, 0.0F, 1.0F, 1.0F}) {
         AppendBigEndianFloat(data, value);
     }
-    for (float value : {0.0F, 0.0F, 0.0F}) {
+    for (float value : {0.0F, 0.0F, 0.0F, 0.0F}) {
         AppendBigEndianFloat(data, value);
     }
-    for (float value : {0.0F, 0.0F, 0.0F}) {
+    for (float value : {0.0F, 0.0F, 0.0F, 0.0F}) {
         AppendBigEndianFloat(data, value);
     }
-    for (float value : {0.0F, 0.0F, 1.0F}) {
+    for (float value : {0.0F, 0.0F, 1.0F, 0.0F}) {
         AppendBigEndianFloat(data, value);
     }
     stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     Require(stream.good(), "could not write image FITS fixture");
+}
+
+void WriteFitsImageThenScalarTable(const std::filesystem::path& path)
+{
+    WriteFitsImage(path, true);
+
+    std::ofstream stream(path, std::ios::binary | std::ios::app);
+    Require(stream.good(), "could not append table HDU to FITS image fixture");
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   8"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'E'"),
+                            });
+
+    std::vector<unsigned char> data;
+    for (const std::array<float, 2> row : {
+             std::array<float, 2>{7000.0F, 70.0F},
+             std::array<float, 2>{7001.0F, 71.0F},
+         }) {
+        AppendBigEndianFloat(data, row[0]);
+        AppendBigEndianFloat(data, row[1]);
+    }
+    stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write table HDU after FITS image");
+}
+
+void WriteTruncatedFitsHeader(const std::filesystem::path& path)
+{
+    const std::string bytes =
+        FitsCard("SIMPLE", "                   T") + FitsCard("BITPIX", "                   8");
+    WriteBytes(path, std::vector<unsigned char>(bytes.begin(), bytes.end()));
+}
+
+void WriteFitsHeaderWithMissingImageData(const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open truncated image FITS fixture");
+    WriteFitsHeader(stream, {
+                                FitsCard("SIMPLE", "                   T"),
+                                FitsCard("BITPIX", "                 -32"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   3"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("COEFF0", "                 3.0"),
+                                FitsCard("COEFF1", "               0.001"),
+                            });
+    Require(stream.good(), "could not write complete header for truncated image FITS fixture");
+}
+
+void WriteFitsTableWithDeclaredDataMismatch(const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open mismatched table FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   8"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'E'"),
+                            });
+    std::vector<unsigned char> partial_row;
+    AppendBigEndianFloat(partial_row, 5000.0F);
+    AppendBigEndianFloat(partial_row, 1.0F);
+    stream.write(
+        reinterpret_cast<const char*>(partial_row.data()),
+        static_cast<std::streamsize>(partial_row.size()));
+    Require(stream.good(), "could not write partial table data for mismatched FITS fixture");
+}
+
+void WriteFitsTableWithUnsupportedColumnLayout(const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open unsupported-column FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                  16"),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'8A'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'8A'"),
+                            });
+    const std::string data = "5000.0 1.0      ";
+    Require(data.size() == 16, "unsupported-column fixture row must match NAXIS1");
+    stream.write(data.data(), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write unsupported-column FITS fixture");
 }
 
 void WriteNpy(
@@ -613,6 +762,115 @@ double MetadataDouble(const SpectrumSnapshotHandle& snapshot, std::string_view k
 bool NearlyEqual(double left, double right, double tolerance)
 {
     return std::abs(left - right) <= tolerance;
+}
+
+void RequireEquivalentMetadataEntries(
+    const std::vector<specforge::SpectrumMetadataEntry>& expected,
+    const std::vector<specforge::SpectrumMetadataEntry>& actual,
+    std::string_view excluded_key,
+    std::string_view context)
+{
+    std::vector<const specforge::SpectrumMetadataEntry*> expected_entries;
+    std::vector<const specforge::SpectrumMetadataEntry*> actual_entries;
+    for (const specforge::SpectrumMetadataEntry& entry : expected) {
+        if (entry.key != excluded_key) {
+            expected_entries.push_back(&entry);
+        }
+    }
+    for (const specforge::SpectrumMetadataEntry& entry : actual) {
+        if (entry.key != excluded_key) {
+            actual_entries.push_back(&entry);
+        }
+    }
+
+    Require(
+        expected_entries.size() == actual_entries.size(),
+        std::string(context) + ": metadata entry counts should match");
+    for (std::size_t index = 0; index < expected_entries.size(); ++index) {
+        Require(
+            expected_entries[index]->key == actual_entries[index]->key &&
+                expected_entries[index]->value == actual_entries[index]->value &&
+                expected_entries[index]->source == actual_entries[index]->source,
+            std::string(context) + ": metadata entries should match");
+    }
+}
+
+void RequireEquivalentSpectrumSemantics(
+    const SpectrumSnapshotHandle& expected,
+    const SpectrumSnapshotHandle& actual,
+    std::string_view context)
+{
+    Require(expected != nullptr && actual != nullptr, std::string(context) + ": expected snapshots");
+    Require(expected->capabilities.can_plot_current_spectrum, std::string(context) + ": expected snapshot should be plottable");
+    Require(
+        expected->capabilities.can_plot_current_spectrum == actual->capabilities.can_plot_current_spectrum &&
+            expected->capabilities.can_switch_spectrum == actual->capabilities.can_switch_spectrum &&
+            expected->capabilities.can_show_spectral_lines == actual->capabilities.can_show_spectral_lines &&
+            expected->capabilities.can_show_rest_frame_spectral_lines ==
+                actual->capabilities.can_show_rest_frame_spectral_lines &&
+            expected->capabilities.requires_angstrom_warning == actual->capabilities.requires_angstrom_warning &&
+            expected->capabilities.requires_rest_frame_warning == actual->capabilities.requires_rest_frame_warning &&
+            expected->capabilities.has_domain_error == actual->capabilities.has_domain_error,
+        std::string(context) + ": public capabilities should match");
+    Require(
+        expected->current_spectrum.point_count == actual->current_spectrum.point_count,
+        std::string(context) + ": point counts should match");
+    Require(
+        expected->current_spectrum.x_values != nullptr && actual->current_spectrum.x_values != nullptr &&
+            expected->current_spectrum.y_values != nullptr && actual->current_spectrum.y_values != nullptr,
+        std::string(context) + ": spectrum vectors should be present");
+    Require(
+        *expected->current_spectrum.x_values == *actual->current_spectrum.x_values,
+        std::string(context) + ": wavelength values should match");
+    Require(
+        *expected->current_spectrum.y_values == *actual->current_spectrum.y_values,
+        std::string(context) + ": flux values should match");
+    Require(
+        expected->axis.x_quantity == actual->axis.x_quantity &&
+            expected->axis.x_unit == actual->axis.x_unit &&
+            expected->axis.x_frame == actual->axis.x_frame &&
+            expected->axis.y_quantity == actual->axis.y_quantity &&
+            expected->axis.x_label == actual->axis.x_label &&
+            expected->axis.y_label == actual->axis.y_label,
+        std::string(context) + ": axis semantics should match");
+    Require(
+        expected->collection.spectrum_count == actual->collection.spectrum_count &&
+            expected->collection.current_index == actual->collection.current_index &&
+            expected->collection.can_move_previous == actual->collection.can_move_previous &&
+            expected->collection.can_move_next == actual->collection.can_move_next,
+        std::string(context) + ": collection semantics should match");
+    Require(
+        expected->diagnostics.size() == actual->diagnostics.size(),
+        std::string(context) + ": diagnostics should have the same shape");
+    for (std::size_t index = 0; index < expected->diagnostics.size(); ++index) {
+        Require(
+            expected->diagnostics[index].severity == actual->diagnostics[index].severity &&
+                expected->diagnostics[index].code == actual->diagnostics[index].code,
+            std::string(context) + ": diagnostic semantics should match");
+        RequireEquivalentMetadataEntries(
+            expected->diagnostics[index].metadata,
+            actual->diagnostics[index].metadata,
+            {},
+            std::string(context) + ": diagnostic metadata");
+    }
+    RequireEquivalentMetadataEntries(
+        expected->source.metadata,
+        actual->source.metadata,
+        "format",
+        std::string(context) + ": source metadata");
+    RequireEquivalentMetadataEntries(
+        expected->current_spectrum.metadata,
+        actual->current_spectrum.metadata,
+        {},
+        std::string(context) + ": current-spectrum metadata");
+}
+
+void RequireNonPlottableErrorSnapshot(const SpectrumSnapshotHandle& snapshot, std::string_view context)
+{
+    Require(snapshot != nullptr, std::string(context) + ": loader should return a snapshot");
+    Require(!snapshot->capabilities.can_plot_current_spectrum, std::string(context) + ": snapshot should not be plottable");
+    Require(snapshot->capabilities.has_domain_error, std::string(context) + ": snapshot should report a domain error");
+    Require(!snapshot->diagnostics.empty(), std::string(context) + ": snapshot should include a diagnostic");
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -1380,6 +1638,14 @@ void TestLoadsFitsScalarTableSpectrum()
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "FITS scalar table should be plottable");
     Require(snapshot->current_spectrum.point_count == 2, "IVAR zero row should be filtered");
+    Require(
+        NearlyEqual(snapshot->current_spectrum.x_values->front(), std::pow(10.0, static_cast<double>(3.0F)), 1.0e-12),
+        "FITS scalar table should convert the first LOGLAM value to wavelength");
+    Require(
+        NearlyEqual(snapshot->current_spectrum.x_values->back(), std::pow(10.0, static_cast<double>(3.2F)), 1.0e-12),
+        "FITS scalar table should convert the last retained LOGLAM value to wavelength");
+    Require(snapshot->current_spectrum.y_values->front() == 10.0, "FITS scalar table should retain the first flux value");
+    Require(snapshot->current_spectrum.y_values->back() == 30.0, "FITS scalar table should retain the last flux value");
     Require(snapshot->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "FITS table should expose wavelength axis");
     Require(snapshot->axis.y_quantity == SpectrumValueQuantity::Flux, "FITS table should expose flux axis");
     Require(MetadataValue(snapshot, "source_type") == "fits_spectrum", "FITS source type should come from domain");
@@ -1416,22 +1682,64 @@ void TestLoadsFitsVectorTableSpectrum()
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_lamost_vector.fits";
     WriteFitsVectorTable(path);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
-    Require(snapshot->capabilities.can_plot_current_spectrum, "FITS vector table should be plottable");
-    Require(snapshot->current_spectrum.point_count == 2, "ORMASK nonzero pixel should be filtered");
-    Require(snapshot->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "FITS vector table should expose wavelength axis");
-    Require(MetadataValue(snapshot, "source_type") == "fits_spectrum", "FITS vector source type should come from domain");
-    Require(MetadataValue(snapshot, "format") == "fits", "FITS vector format should come from domain");
+    const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle second = specforge::LoadSpectrumSnapshotFromPathCancelable(path, 1, []() { return false; });
+
+    Require(first->capabilities.can_plot_current_spectrum, "FITS vector table first row should be plottable");
+    Require(first->current_spectrum.point_count == 2, "first-row ORMASK pixel should be filtered");
+    Require(first->current_spectrum.x_values->at(0) == 5000.0, "first vector row should retain its first wavelength");
+    Require(first->current_spectrum.x_values->at(1) == 5002.0, "first vector row should retain its last wavelength");
+    Require(first->current_spectrum.y_values->at(0) == 1.0, "first vector row should retain its first flux");
+    Require(first->current_spectrum.y_values->at(1) == 3.0, "first vector row should retain its last flux");
+    Require(first->collection.spectrum_count == 2, "each vector-table row should be exposed as one spectrum");
+    Require(first->collection.current_index == 0, "first vector-table selection should retain its row index");
+    Require(first->collection.can_move_next, "first vector-table row should allow moving to the next spectrum");
+    Require(first->capabilities.can_switch_spectrum, "multi-row vector table should support spectrum switching");
+    Require(first->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "FITS vector table should expose wavelength axis");
+    Require(MetadataValue(first, "source_type") == "fits_spectrum", "FITS vector source type should come from domain");
+    Require(MetadataValue(first, "format") == "fits", "FITS vector format should come from domain");
     Require(
-        MetadataValue(snapshot, "radial_velocity_km_s") == "124.5",
-        "FITS vector table scalar RV column should be retained");
+        MetadataValue(first, "radial_velocity_km_s") == "124.5",
+        "first vector row scalar RV column should be retained");
     Require(
-        MetadataValue(snapshot, "radial_velocity_source") == "table_column:RV",
+        MetadataValue(first, "radial_velocity_source") == "table_column:RV",
         "FITS vector table scalar RV source should be retained");
     Require(
-        NearlyEqual(MetadataDouble(snapshot, "target_redshift"), 124.5 / kSpeedOfLightKmPerSecond, 1.0e-15),
-        "FITS vector table target redshift should be derived from scalar RV");
-    Require(HasDiagnosticCode(snapshot, SpectrumDiagnosticCode::MaskFilteredPixels), "FITS vector table should report mask filtering");
+        NearlyEqual(MetadataDouble(first, "redshift"), 0.02, 1.0e-8),
+        "first vector row scalar redshift column should be retained");
+    Require(
+        NearlyEqual(MetadataDouble(first, "target_redshift"), 124.5 / kSpeedOfLightKmPerSecond, 1.0e-15),
+        "first vector row target redshift should be derived from scalar RV");
+    Require(MetadataValue(first, "wavelength_medium") == "vacuum", "FITS vector VACUUM metadata should be normalized");
+    Require(
+        MetadataValue(first, "target_rest_frame_status") == "available_not_applied",
+        "first vector row should expose available-but-unapplied rest-frame metadata");
+    Require(
+        MetadataValue(first, "rest_frame_correction_status") == "not_applied",
+        "FITS vector row should record that rest-frame correction was not applied");
+    Require(first->capabilities.requires_rest_frame_warning, "FITS vector row should retain the rest-frame warning");
+    Require(HasDiagnosticCode(first, SpectrumDiagnosticCode::MaskFilteredPixels), "FITS vector table should report mask filtering");
+
+    Require(second->capabilities.can_plot_current_spectrum, "FITS vector table second row should be plottable");
+    Require(second->current_spectrum.point_count == 2, "second-row ORMASK pixel should be filtered");
+    Require(second->current_spectrum.x_values->at(0) == 6001.0, "second vector row should retain its first unmasked wavelength");
+    Require(second->current_spectrum.x_values->at(1) == 6002.0, "second vector row should retain its last wavelength");
+    Require(second->current_spectrum.y_values->at(0) == 5.0, "second vector row should retain its first unmasked flux");
+    Require(second->current_spectrum.y_values->at(1) == 6.0, "second vector row should retain its last flux");
+    Require(second->collection.spectrum_count == 2, "second vector row should retain the table spectrum count");
+    Require(second->collection.current_index == 1, "second vector-table selection should retain its row index");
+    Require(second->collection.can_move_previous, "second vector-table row should allow moving to the previous spectrum");
+    Require(!second->collection.can_move_next, "last vector-table row should not allow moving past the table");
+    Require(MetadataValue(second, "radial_velocity_km_s") == "-50", "second vector row should use its own RV value");
+    Require(
+        NearlyEqual(MetadataDouble(second, "redshift"), 0.03, 1.0e-8),
+        "second vector row should use its own redshift value");
+    Require(
+        NearlyEqual(MetadataDouble(second, "target_redshift"), -50.0 / kSpeedOfLightKmPerSecond, 1.0e-15),
+        "second vector row target redshift should be derived from its own RV");
+    Require(
+        MetadataValue(second, "target_rest_frame_status") == "available_not_applied",
+        "second vector row should retain rest-frame metadata");
 }
 
 void TestBlocksInvalidFitsRedshiftForRestFrameInput()
@@ -1462,9 +1770,13 @@ void TestLoadsLimitedFitsImageSpectrum()
 
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "limited FITS image should be plottable");
-    Require(snapshot->current_spectrum.point_count == 1, "image IVAR and ORMASK rows should filter invalid pixels");
+    Require(snapshot->current_spectrum.point_count == 2, "image IVAR and ORMASK rows should filter invalid pixels");
     Require(snapshot->current_spectrum.x_values->at(0) == 1000.0, "image wavelength should use COEFF0/COEFF1");
+    Require(
+        NearlyEqual(snapshot->current_spectrum.x_values->at(1), std::pow(10.0, 3.003), 1.0e-12),
+        "image wavelength endpoint should apply both COEFF0 and COEFF1");
     Require(snapshot->current_spectrum.y_values->at(0) == 1.0, "image row 0 should provide flux");
+    Require(snapshot->current_spectrum.y_values->at(1) == 4.0, "image row 0 should provide the retained endpoint flux");
     Require(MetadataValue(snapshot, "hdu_type") == "image", "image HDU metadata should be retained");
     Require(
         MetadataValue(snapshot, "valid_pixel_rule") == "ivar_positive_and_ormask_zero",
@@ -1485,6 +1797,22 @@ void TestRejectsFitsImageWcsFallback()
         "CRVAL1/CD1_1-only image should not be treated as a single spectrum");
 }
 
+void TestPrefersRecognizedFitsTableOverImageHdu()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_table_before_image_fallback.fits";
+    WriteFitsImageThenScalarTable(path);
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    Require(snapshot->capabilities.can_plot_current_spectrum, "mixed-HDU FITS should be plottable");
+    Require(MetadataValue(snapshot, "hdu_type") == "bintable", "recognized table HDU should take priority over image HDU");
+    Require(snapshot->current_spectrum.point_count == 2, "selected table HDU should expose both scalar rows");
+    Require(snapshot->current_spectrum.x_values->at(0) == 7000.0, "mixed-HDU selection should use table wavelength values");
+    Require(snapshot->current_spectrum.x_values->at(1) == 7001.0, "mixed-HDU selection should retain the table endpoint");
+    Require(snapshot->current_spectrum.y_values->at(0) == 70.0, "mixed-HDU selection should use table flux values");
+    Require(snapshot->current_spectrum.y_values->at(1) == 71.0, "mixed-HDU selection should retain the table flux endpoint");
+}
+
 void TestRejectsMalformedFitsTableWidth()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_bad_table_width.fits";
@@ -1497,6 +1825,37 @@ void TestRejectsMalformedFitsTableWidth()
         "malformed FITS table width should be a domain invalid-shape snapshot");
 }
 
+void TestMalformedFitsInputsReturnErrorSnapshots()
+{
+    const std::filesystem::path truncated_header =
+        std::filesystem::temp_directory_path() / "specforge_loader_truncated_header.fits";
+    WriteTruncatedFitsHeader(truncated_header);
+    RequireNonPlottableErrorSnapshot(
+        specforge::LoadSpectrumSnapshotFromPath(truncated_header, 0),
+        "truncated FITS header");
+
+    const std::filesystem::path missing_image_data =
+        std::filesystem::temp_directory_path() / "specforge_loader_missing_image_data.fits";
+    WriteFitsHeaderWithMissingImageData(missing_image_data);
+    RequireNonPlottableErrorSnapshot(
+        specforge::LoadSpectrumSnapshotFromPathCancelable(missing_image_data, 0, []() { return false; }),
+        "complete FITS header with truncated data");
+
+    const std::filesystem::path declared_data_mismatch =
+        std::filesystem::temp_directory_path() / "specforge_loader_declared_data_mismatch.fits";
+    WriteFitsTableWithDeclaredDataMismatch(declared_data_mismatch);
+    RequireNonPlottableErrorSnapshot(
+        specforge::LoadSpectrumSnapshotFromPath(declared_data_mismatch, 0),
+        "FITS declared dimensions larger than actual data");
+
+    const std::filesystem::path unsupported_columns =
+        std::filesystem::temp_directory_path() / "specforge_loader_unsupported_columns.fits";
+    WriteFitsTableWithUnsupportedColumnLayout(unsupported_columns);
+    RequireNonPlottableErrorSnapshot(
+        specforge::LoadSpectrumSnapshotFromPathCancelable(unsupported_columns, 0, []() { return false; }),
+        "unsupported FITS table column layout");
+}
+
 void TestLoadsGzippedFitsSpectrum()
 {
     const std::filesystem::path fits_path = std::filesystem::temp_directory_path() / "specforge_loader_gzip_source.fits";
@@ -1504,10 +1863,35 @@ void TestLoadsGzippedFitsSpectrum()
     WriteFitsScalarTable(fits_path);
     WriteBytes(gzip_path, GzipBytes(ReadBytes(fits_path)));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(gzip_path, 0);
-    Require(snapshot->capabilities.can_plot_current_spectrum, "gzipped FITS table should be plottable");
-    Require(snapshot->current_spectrum.point_count == 2, "gzipped FITS should preserve table filtering behavior");
-    Require(MetadataValue(snapshot, "format") == "fits.gz", "gzipped FITS format should come from domain");
+    const SpectrumSnapshotHandle uncompressed = specforge::LoadSpectrumSnapshotFromPath(fits_path, 0);
+    const SpectrumSnapshotHandle compressed = specforge::LoadSpectrumSnapshotFromPath(gzip_path, 0);
+    RequireEquivalentSpectrumSemantics(uncompressed, compressed, "compressed and uncompressed FITS");
+    Require(MetadataValue(uncompressed, "format") == "fits", "uncompressed FITS should retain its format label");
+    Require(MetadataValue(compressed, "format") == "fits.gz", "gzipped FITS should retain its format label");
+}
+
+void TestLoadsFitsFromNonAsciiPath()
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / std::filesystem::path(L"specforge_loader_\u5149\u8c31\u8def\u5f84");
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    Require(!error, "could not create non-ASCII FITS fixture directory");
+    const std::filesystem::path path = directory / std::filesystem::path(L"\u517c\u5bb9\u6d4b\u8bd5.fits");
+    WriteFitsScalarTable(path);
+
+    const SpectrumSnapshotHandle snapshot =
+        specforge::LoadSpectrumSnapshotFromPathCancelable(path, 0, []() { return false; });
+    Require(snapshot->capabilities.can_plot_current_spectrum, "FITS file at a non-ASCII path should be plottable");
+    Require(snapshot->source.path == path, "FITS snapshot should preserve the native non-ASCII source path");
+    Require(
+        snapshot->current_spectrum.name == PathToUtf8(path.filename()),
+        "FITS snapshot should expose the non-ASCII filename as UTF-8");
+    Require(snapshot->current_spectrum.point_count == 2, "non-ASCII FITS path should preserve spectrum contents");
+
+    std::filesystem::remove(path, error);
+    error.clear();
+    std::filesystem::remove(directory, error);
 }
 
 void WriteFitsScalarTableWithTrailingEmptyHdus(
@@ -1983,7 +2367,8 @@ void TestRejectsCorruptGzippedFits()
 void TestRejectsOversizedInflatedGzippedFits()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_inflated_too_large.fits.gz";
-    WriteBytes(path, GzipRepeatedBytes(64ULL * 1024ULL * 1024ULL + 1ULL));
+    constexpr std::size_t kPayloadSize = 64ULL * 1024ULL * 1024ULL + 1ULL;
+    WriteBytes(path, GzipFitsImageWithPayload(kPayloadSize));
 
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "over-inflated gzip FITS should not be plottable");
@@ -2254,8 +2639,11 @@ int main()
     TestBlocksInvalidFitsRedshiftForRestFrameInput();
     TestLoadsLimitedFitsImageSpectrum();
     TestRejectsFitsImageWcsFallback();
+    TestPrefersRecognizedFitsTableOverImageHdu();
     TestRejectsMalformedFitsTableWidth();
+    TestMalformedFitsInputsReturnErrorSnapshots();
     TestLoadsGzippedFitsSpectrum();
+    TestLoadsFitsFromNonAsciiPath();
     TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline();
     TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms();
     TestFitsColumnAndImageReadersPollDuringValueConversion();
