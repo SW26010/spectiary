@@ -14,12 +14,15 @@ production persistence lifecycle.
    value: -1}`. Do not use scalar `ndarray.mask: -1` in v1.
 3. The wire baseline is ASDF Standard 1.5.0, root `core/asdf-1.1.0`, and
    `core/ndarray-1.0.0`. ASDF file format remains 1.0.0.
-4. The second-round writer recommendation is internal zlib level 6 blocks,
-   zero checksum, no block index, and little-endian `int32`/UCS-4 payloads.
-   Atomic label autosave copies an unchanged encoded roster block verbatim and
-   re-encodes only the values block. The promoted production codec component
-   implements and interoperably validates this path. The domain document store
-   now owns source-aware open, durable-base reuse, and atomic replacement. The
+4. The production writer profile uses internal zlib level 6 blocks, zero
+   checksum, and little-endian `int32`/UCS-4 payloads. Fresh and full-document
+   writes may omit the optional block index; timestamped value autosaves emit a
+   newly calculated index for their new block offsets. Such an autosave rebuilds
+   the YAML metadata from the durable tree, copies only the unchanged encoded
+   roster block verbatim, and re-encodes the values block. The promoted
+   production codec component implements and interoperably validates this path.
+   The domain document store now owns source-aware open, durable-base reuse,
+   and atomic replacement. The
    controller hydrates persisted canonical owners under their one-file output
    lease, retains the opened generation, and publishes value-only or full
    metadata generations through the store with write-ahead recovery and retry.
@@ -48,9 +51,10 @@ The #74 owner lifecycle integration is complete:
 - activation acquires the task and one-file output leases before reopening the
   ASDF through the document store; the durable snapshot/generation remains a
   runtime-only controller fact;
-- value-only autosaves reuse the encoded roster block, while task and label
-  metadata edits publish one complete metadata-and-values generation and
-  preserve forward-compatible unknown fields;
+- value-only autosaves re-emit timestamped, unknown-preserving metadata, reuse
+  only the encoded roster block, re-encode values, and generate a block index
+  for the new offsets; task and label metadata edits publish one complete
+  metadata-and-values generation;
 - failed publication retains the last trusted ASDF generation and the newest
   write-ahead overlay, then retries against a reopened current durable base;
 - standalone ASDF documents can be explicitly adopted without rewriting their
@@ -146,12 +150,15 @@ declaration, and the changed value. The raw wall time, process CPU time, file
 size, and child-process peak RSS are in
 `build/asdf-labeling-spike-results/second-round-benchmark.json`.
 
-For ASDF, the experiment also implements the requested realistic label-only
-rewrite. It retains the existing YAML metadata, streams the encoded roster
-block from the old document into the temporary document without decoding it,
-and encodes a new values block. The result is genuine ASDF accepted by the
-official Python implementation. Every one-label and 1000-label case verifies
-that the roster block is byte-for-byte identical.
+For ASDF, the second-round benchmark prototype also implements the requested
+realistic label-only rewrite. It retains the existing YAML metadata, streams the
+encoded roster block from the old document into the temporary document without
+decoding it, and encodes a new values block. Those measurements isolate the
+roster-reuse benefit; the promoted production fast path additionally rebuilds
+timestamped metadata and emits a block index for the resulting offsets. Both
+forms are genuine ASDF accepted by the official Python implementation. Every
+one-label and 1000-label case verifies that the roster block is byte-for-byte
+identical.
 
 At 1M variable-Unicode samples, ranges below cover both value distributions:
 
@@ -279,11 +286,13 @@ The second-round recommended v1 writer profile is intentionally narrow:
 - internal blocks only; external/streamed blocks are rejected;
 - zlib level 6 for roster and values blocks;
 - checksum bytes all zero;
-- no block index emitted; readers validate a present standard block index
-  against the scanned block offsets, then ignore it for block discovery;
+- fresh and full-document writes omit the optional block index; a timestamped
+  value rewrite emits a newly calculated standard index for its new block
+  offsets, and readers validate any present index against the scanned blocks;
 - little-endian int32 values and little-endian UCS-4 roster strings;
-- label-only atomic rewrites preserve the unchanged encoded roster block and
-  re-encode only the values block;
+- label-only atomic rewrites rebuild canonical metadata with supported unknown
+  mappings, preserve only the unchanged encoded roster block, and re-encode the
+  values block;
 - a roster is eligible for durable verbatim reuse only when its zlib stream
   declares `FLEVEL=2`, the level-6 production class; other valid zlib levels
   remain compatibility-readable but cannot seed a durable rewrite;
@@ -296,13 +305,16 @@ copied verbatim, 1M-sample level-6 label persistence takes 13-19 ms rather than
 0.55-0.77 s. Level 6 retains the substantial storage reduction without making
 the roster pay that cost on every edit.
 
-The native subset now reads both uncompressed and zlib blocks, requires the
-declared decoded size to equal the ndarray shape/dtype before allocation,
+The second-round experimental native subset reads both uncompressed and zlib
+blocks, requires the declared decoded size to equal the ndarray shape/dtype
+before allocation,
 rejects truncated/corrupt streams, and writes level-6 zlib blocks. Its
 label-value rewrite parses and re-encodes only the values block, copies the
 encoded roster block verbatim, preserves the original metadata bytes, and emits
-no block index. Nonzero checksums and unsupported compression identifiers remain
-controlled rejections.
+no block index. The promoted production codec instead rebuilds timestamped
+metadata and emits a recalculated index while retaining the same roster-only
+reuse property. Nonzero checksums and unsupported compression identifiers
+remain controlled rejections.
 
 Production compression is file-backed and bounded: values and UCS-4 roster
 words are generated in fixed-size chunks, streamed through level-6 deflate to
@@ -348,11 +360,13 @@ process.
 
 Unknown fields are accepted without projecting them into the canonical domain
 model. They remain owned by the validated durable generation instead. The
-label-only block-reuse rewrite preserves the metadata prefix byte-for-byte. A
-metadata-changing rewrite reparses that validated tree, replaces every known v1
-field from the edited canonical document, and emits the unrecognized mapping
-entries again. Unknown entries are retained at the root and inside the standard
-software, source, roster, ndarray descriptor, annotation/missing, task, and
+timestamped block-reuse rewrite reparses that validated tree, replaces the known
+canonical fields from the complete replacement document, preserves supported
+unknown mappings, and copies only the exact encoded roster block. A
+metadata-changing rewrite uses the same unknown-preserving tree builder but
+re-encodes the roster as well. Unknown entries are retained at the root and
+inside the standard software, source, roster, ndarray descriptor,
+annotation/missing, task, and
 label maps; label-entry metadata follows the stable label code across name or
 shortcut edits. Removed labels and roster constructs do not retain metadata
 that belonged only to the removed known entity.
@@ -437,10 +451,11 @@ emission. The reader may hydrate zero-checksum uncompressed or big-endian
 ASDF 1.5 inputs so approved research fixtures can be migrated, but such an
 explicit roster never becomes a reusable durable base. Every full write and
 label-only rewrite emits the fixed little-endian, zlib-level-6, zero-checksum
-profile. Reader hydration, full writes, and durable rewrites all run the same
-shape/resource preflight for sample and roster counts, ndarray sizes, metadata,
-reusable-prefix and file sizes. Its 512 MiB contract covers codec-controlled
-bulk allocations, decoded payloads, canonical text, and explicitly sized
+block profile; the label-only path also emits a recalculated block index. Reader
+hydration, full writes, and durable rewrites all run the same shape/resource
+preflight for sample and roster counts, ndarray sizes, metadata, durable
+metadata/roster bytes, and file sizes. Its 512 MiB contract covers
+codec-controlled bulk allocations, decoded payloads, canonical text, and explicitly sized
 scratch buffers; it is not a strict bound on process RSS, yaml-cpp's internal
 DOM, allocator overhead, or platform library internals. Before copying an
 alias-expanded scalar into the canonical document, the reader accounts that

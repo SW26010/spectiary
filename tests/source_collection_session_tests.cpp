@@ -359,7 +359,10 @@ public:
         std::filesystem::path workflow_cache,
         specforge::SampleLabelingController::
             CanonicalDocumentPublisher
-                canonical_document_publisher = {})
+                canonical_document_publisher = {},
+        specforge::SampleLabelingController::
+            CanonicalValuesPublisher
+                canonical_values_publisher = {})
         : specforge::SourceCollectionSession(
               source_session_cache,
               navigation_cache,
@@ -367,7 +370,8 @@ public:
               workflow_cache,
               specforge::SampleLabelingStateCacheLoadPolicy::
                   AllowPersistentOutputs,
-              std::move(canonical_document_publisher)),
+              std::move(canonical_document_publisher),
+              std::move(canonical_values_publisher)),
           preparation_(PreparationAdapters(
               std::move(loader),
               navigation_cache,
@@ -2610,7 +2614,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         },
         16);
 
-    bool fail_canonical_document_publication = false;
+    bool fail_canonical_values_publication = false;
     std::vector<std::size_t> loaded_indices;
     PreparedSession session(
         [&loaded_indices, source_path](
@@ -2630,15 +2634,14 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         directory / "navigation.json",
         labeling_cache,
         directory / "workflow.json",
-        [&fail_canonical_document_publication](
-            const specforge::SampleLabelingAsdfOpenSnapshot&
+        {},
+        [&fail_canonical_values_publication](
+            specforge::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
-            const specforge::SampleLabelingDocument& document,
-            const specforge::SampleLabelingCanonicalSourceDescriptor&
-                source) {
-            if (fail_canonical_document_publication) {
+            const specforge::SampleLabelingDocument& document) {
+            if (fail_canonical_values_publication) {
                 return specforge::
-                    SampleLabelingAsdfStoreGenerationWriteResult{
+                    SampleLabelingAsdfStoreWriteResult{
                         .error = {
                             .kind = specforge::
                                 SampleLabelingAsdfStoreErrorKind::
@@ -2647,11 +2650,9 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
                                 "injected label export matrix publication failure"}};
             }
             return specforge::
-                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                RewriteSampleLabelingAsdfValuesAtomically(
                     owner_snapshot,
-                    document,
-                    specforge::SampleLabelingCompatibilityView(
-                        source));
+                    document);
         });
     Require(
         session.Open(source_path).loaded,
@@ -2724,7 +2725,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
                         CanonicalAsdf,
         "label export matrix should establish a canonical ASDF owner");
 
-    fail_canonical_document_publication = true;
+    fail_canonical_values_publication = true;
     (void)Submit(
         session,
         MoveSampleNavigation(
@@ -5314,6 +5315,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
 
     std::vector<std::size_t> loaded_indices;
     std::size_t canonical_document_publication_attempts = 0;
+    std::size_t canonical_values_publication_attempts = 0;
     PreparedSession session(
         [&loaded_indices, source_path](
             const std::filesystem::path& path,
@@ -5343,23 +5345,6 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             if (canonical_document_publication_attempts == 1) {
                 const specforge::SampleLabelingAsdfStoreWriteResult
                     write = specforge::
-                        sample_labeling_asdf_store_test_seam::
-                            RewriteDocumentWithBeforeReplace(
-                                owner_snapshot,
-                                document,
-                                [](const std::filesystem::path&,
-                                   const std::filesystem::path&) {
-                                    throw std::runtime_error(
-                                        "injected canonical session publication failure");
-                                });
-                return specforge::
-                    SampleLabelingAsdfStoreGenerationWriteResult{
-                        .document_replaced = write.written,
-                        .error = write.error};
-            }
-            if (canonical_document_publication_attempts == 3) {
-                const specforge::SampleLabelingAsdfStoreWriteResult
-                    write = specforge::
                         RewriteSampleLabelingAsdfDocumentAtomically(
                             owner_snapshot,
                             document);
@@ -5384,6 +5369,28 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                     document,
                     specforge::SampleLabelingCompatibilityView(
                         source));
+        },
+        [&canonical_values_publication_attempts](
+            specforge::SampleLabelingAsdfOpenSnapshot&
+                owner_snapshot,
+            const specforge::SampleLabelingDocument& document) {
+            ++canonical_values_publication_attempts;
+            if (canonical_values_publication_attempts == 1) {
+                return specforge::
+                    sample_labeling_asdf_store_test_seam::
+                        RewriteWithBeforeReplace(
+                            owner_snapshot,
+                            document,
+                            [](const std::filesystem::path&,
+                               const std::filesystem::path&) {
+                                throw std::runtime_error(
+                                    "injected canonical session publication failure");
+                            });
+            }
+            return specforge::
+                RewriteSampleLabelingAsdfValuesAtomically(
+                    owner_snapshot,
+                    document);
         });
     const specforge::SourceCollectionSessionResult opened =
         session.Open(
@@ -5533,7 +5540,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             edited.label_write->operation.output_save_attempted &&
             !edited.label_write->operation.output_saved &&
             edited.label_write->operation.output_retry_scheduled &&
-            canonical_document_publication_attempts == 1,
+            canonical_values_publication_attempts == 1 &&
+            canonical_document_publication_attempts == 0,
         "canonical session edit should retain its durable overlay after the injected publication failure");
     Require(
         ReadBinaryFile(annotation_path) ==
@@ -5557,7 +5565,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             deadline.has_value(),
             "failed canonical publication should expose a retry deadline");
         maintenance = session.RunMaintenance(*deadline);
-        if (canonical_document_publication_attempts >= 2) {
+        if (canonical_values_publication_attempts >= 2) {
             retry_published = true;
             break;
         }
@@ -5600,6 +5608,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         refreshed_good = find_refreshed_option("9");
     Require(
         retry_published &&
+            canonical_values_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 0 &&
             maintenance.action.navigation_inputs_changed &&
             persisted_generation.succeeded() &&
             persisted_generation.document->annotation.values ==
@@ -5634,7 +5644,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         after_failed_metadata_edit = session.View();
     Require(
         metadata_edited.changed &&
-            canonical_document_publication_attempts == 3 &&
+            canonical_values_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 1 &&
             after_failed_metadata_edit.labeling.save_state.kind ==
                 specforge::SampleLabelSaveStateKind::Failed,
         "a session metadata rewrite whose replacement cannot reopen should remain visibly failed and retryable");
@@ -5651,7 +5662,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             "failed session metadata reopen should expose a retry deadline");
         metadata_maintenance =
             session.RunMaintenance(*deadline);
-        if (canonical_document_publication_attempts >= 4) {
+        if (canonical_document_publication_attempts >= 2) {
             metadata_retry_published = true;
             break;
         }
@@ -5690,7 +5701,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         metadata_retry_published &&
             metadata_maintenance.action
                 .navigation_inputs_changed &&
-            canonical_document_publication_attempts == 4 &&
+            canonical_values_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 2 &&
             after_metadata_edit.labeling.save_state.kind ==
                 specforge::SampleLabelSaveStateKind::
                     AutosavedToOutput &&

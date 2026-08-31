@@ -105,6 +105,16 @@ public:
         WorkflowStateCacheLoader workflow_state_cache_loader,
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher);
+    SampleWorkflowCoordinator(
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path,
+        SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
+        WorkflowStateCacheLoader workflow_state_cache_loader,
+        SampleLabelingController::CanonicalDocumentPublisher
+            canonical_document_publisher,
+        SampleLabelingController::CanonicalValuesPublisher
+            canonical_values_publisher);
 
     [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
         SourceCollectionIntent intent,

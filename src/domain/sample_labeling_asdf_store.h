@@ -9,7 +9,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 
@@ -98,8 +97,7 @@ private:
     friend SampleLabelingAsdfStoreWriteResult
     RewriteSampleLabelingAsdfValuesAtomically(
         SampleLabelingAsdfOpenSnapshot& snapshot,
-        std::span<const std::int32_t> values,
-        CanonicalTimestamp modified_at) noexcept;
+        const SampleLabelingDocument& replacement) noexcept;
 };
 
 struct SampleLabelingAsdfStoreOpenResult {
@@ -187,12 +185,13 @@ RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
     const SampleLabelingSourceCompatibility& source) noexcept;
 
 // Safe to repeat with one snapshot only while this store is the sole writer
-// and every intervening publication is a value-only rewrite through it.
+// and every intervening publication is a timestamped values rewrite through
+// it. replacement must differ only in values and monotonically advanced
+// modified_at; the snapshot advances in place only after atomic replacement.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
     SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at) noexcept;
+    const SampleLabelingDocument& replacement) noexcept;
 
 namespace sample_labeling_asdf_store_test_seam {
 
@@ -206,14 +205,8 @@ using BeforeReplace = std::function<void(
     const BeforeReplace& before_replace) noexcept;
 
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    const BeforeReplace& before_replace) noexcept;
-
-[[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at,
+    SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& replacement,
     const BeforeReplace& before_replace) noexcept;
 
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult

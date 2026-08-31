@@ -39,9 +39,11 @@ struct SampleLabelingAsdfReadResult;
 struct SampleLabelingAsdfWriteResult;
 using SampleLabelingAsdfReadCheckpoint = std::function<void()>;
 
-// Immutable snapshot of the already-validated metadata and encoded roster
-// prefix belonging to one opened canonical document. Keeping this handle lets
-// repeated label-only saves reuse the roster without reopening or decoding it.
+// Immutable snapshot of the already-validated metadata tree and exact encoded
+// roster block belonging to one opened canonical document. Inter-block padding
+// and the old values/index generation are not retained. Keeping this handle
+// lets repeated label-only saves reuse the roster without reopening or decoding
+// it.
 class SampleLabelingAsdfDurableBase {
 public:
     SampleLabelingAsdfDurableBase() noexcept = default;
@@ -63,8 +65,7 @@ private:
     RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
         const SampleLabelingAsdfDurableBase& durable_base,
         std::ostream& output,
-        std::span<const std::int32_t> values,
-        CanonicalTimestamp modified_at) noexcept;
+        const SampleLabelingDocument& replacement) noexcept;
     friend SampleLabelingAsdfWriteResult
     RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
         const SampleLabelingAsdfDurableBase& durable_base,
@@ -164,16 +165,18 @@ struct ProfilePreflightProbe {
     std::ostream& output,
     const SampleLabelingDocument& document) noexcept;
 
-// Values-only persistence seam. Canonical metadata is rebuilt so modified_at
-// advances while the already-validated FLEVEL=2 roster block is copied without
-// reopening or decoding it. All other canonical fields must match the durable
-// base. A refreshed durable base is returned for repeated saves.
+// Timestamped values persistence seam. The complete replacement document must
+// differ from the durable generation only in values and monotonically advanced
+// modified_at. Canonical metadata is rebuilt with supported unknown mappings
+// retained, while only the already-validated FLEVEL=2 roster block is copied
+// without reopening or decoding it. Inter-block padding is discarded and a
+// block index is emitted from the new block offsets. A refreshed durable base
+// is returned for repeated saves.
 [[nodiscard]] SampleLabelingAsdfWriteResult
 RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     const SampleLabelingAsdfDurableBase& durable_base,
     std::ostream& output,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at) noexcept;
+    const SampleLabelingDocument& replacement) noexcept;
 
 // Metadata-changing rewrite seam for an opened v2 document. Known canonical
 // fields are replaced from document while unrecognized YAML mapping entries at

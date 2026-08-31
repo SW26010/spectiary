@@ -1173,6 +1173,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
     {
         std::size_t legacy_publication_calls = 0;
         std::size_t canonical_document_publication_calls = 0;
+        std::size_t canonical_values_publication_calls = 0;
         const std::array<specforge::CanonicalTimestamp, 2>
             mutation_times{
                 *specforge::ParseCanonicalTimestamp(
@@ -1197,18 +1198,26 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
                     task,
                     source);
             },
-            [&canonical_document_publication_calls,
-             &published_modified_times](
+            [&canonical_document_publication_calls](
                 const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
                 const specforge::SampleLabelingDocument& replacement,
                 const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
                 ++canonical_document_publication_calls;
-                published_modified_times.push_back(
-                    replacement.labeling.canonical_metadata.modified_at);
                 return specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                     snapshot,
                     replacement,
                     specforge::SampleLabelingCompatibilityView(source));
+            },
+            [&canonical_values_publication_calls,
+             &published_modified_times](
+                specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+                const specforge::SampleLabelingDocument& replacement) {
+                ++canonical_values_publication_calls;
+                published_modified_times.push_back(
+                    replacement.labeling.canonical_metadata.modified_at);
+                return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                    snapshot,
+                    replacement);
             },
             [](const std::filesystem::path& path,
                const specforge::SampleLabelingDocument& replacement,
@@ -1275,7 +1284,8 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
                 cleared.operation.output_saved &&
                 !cleared.operation.output_retry_scheduled &&
                 legacy_publication_calls == 0 &&
-                canonical_document_publication_calls == 2 &&
+                canonical_document_publication_calls == 0 &&
+                canonical_values_publication_calls == 2 &&
                 published_modified_times ==
                     std::vector<specforge::CanonicalTimestamp>(
                         mutation_times.begin(),
@@ -1291,7 +1301,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
                 current_projection->labeling_document
                         ->annotation.values ==
                     std::vector<std::int32_t>({2, -1, 7}),
-            "canonical assign and clear dispatch should checkpoint, publish and reopen full document generations, and clear each sparse overlay");
+            "canonical assign and clear dispatch should checkpoint, publish timestamped value generations, advance the open snapshot, and clear each sparse overlay");
     }
 
     const specforge::SampleLabelingAsdfStoreOpenResult
@@ -1417,7 +1427,9 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
         asdf_path);
 
     bool fail_publication = true;
-    std::size_t canonical_publication_calls = 0;
+    std::size_t canonical_document_publication_calls = 0;
+    std::size_t canonical_values_publication_calls = 0;
+    std::size_t semantic_clock_calls = 0;
     const specforge::CanonicalTimestamp mutation_time =
         *specforge::ParseCanonicalTimestamp(
             "2026-08-30T12:34:56.789Z");
@@ -1435,34 +1447,35 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
                 task,
                 source);
         },
-        [&fail_publication,
-         &canonical_publication_calls,
-         &attempted_modified_times](
+        [&canonical_document_publication_calls](
             const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
             const specforge::SampleLabelingDocument& document,
             const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
-            ++canonical_publication_calls;
-            attempted_modified_times.push_back(
-                document.labeling.canonical_metadata.modified_at);
-            if (fail_publication) {
-                const specforge::SampleLabelingAsdfStoreWriteResult write =
-                    specforge::sample_labeling_asdf_store_test_seam::
-                        RewriteDocumentWithBeforeReplace(
-                            snapshot,
-                            document,
-                            [](const auto&, const auto&) {
-                                throw std::runtime_error(
-                                    "injected canonical document publication failure");
-                            });
-                return specforge::
-                    SampleLabelingAsdfStoreGenerationWriteResult{
-                        .document_replaced = write.written,
-                        .error = write.error};
-            }
+            ++canonical_document_publication_calls;
             return specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                 snapshot,
                 document,
                 specforge::SampleLabelingCompatibilityView(source));
+        },
+        [&fail_publication,
+         &canonical_values_publication_calls,
+         &attempted_modified_times](
+            specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+            const specforge::SampleLabelingDocument& document) {
+            ++canonical_values_publication_calls;
+            attempted_modified_times.push_back(
+                document.labeling.canonical_metadata.modified_at);
+            if (fail_publication) {
+                return specforge::SampleLabelingAsdfStoreWriteResult{
+                    .error = {
+                        .kind = specforge::SampleLabelingAsdfStoreErrorKind::
+                            AtomicWriteFailure,
+                        .message =
+                            "injected canonical values publication failure"}};
+            }
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                document);
         },
         [](const std::filesystem::path& path,
            const specforge::SampleLabelingDocument& document,
@@ -1475,7 +1488,10 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
         []() -> std::optional<std::string> {
             return "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         },
-        [mutation_time]() { return mutation_time; });
+        [&semantic_clock_calls, mutation_time]() {
+            ++semantic_clock_calls;
+            return mutation_time;
+        });
     controller.ActivateSource(
         CanonicalOwnerSourceIdentity(),
         CanonicalOwnerSourceDescriptor());
@@ -1490,7 +1506,9 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
             failed.operation.output_save_attempted &&
             !failed.operation.output_saved &&
             failed.operation.output_retry_scheduled &&
-            canonical_publication_calls == 1 &&
+            canonical_document_publication_calls == 0 &&
+            canonical_values_publication_calls == 1 &&
+            semantic_clock_calls == 1 &&
             attempted_modified_times ==
                 std::vector<specforge::CanonicalTimestamp>{
                     mutation_time} &&
@@ -1523,6 +1541,9 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
             old_generation.snapshot->document()
                     .annotation.values ==
                 original.annotation.values &&
+            old_generation.snapshot->document()
+                    .labeling.canonical_metadata.modified_at ==
+                original.labeling.canonical_metadata.modified_at &&
             pending_task != nullptr &&
             pending_task->values ==
                 std::vector<int>({2, -1, -1}) &&
@@ -1563,7 +1584,8 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
             "canonical-source",
             "00000000-0000-4000-8000-000000000006");
     Require(
-        canonical_publication_calls == 1 &&
+        canonical_document_publication_calls == 0 &&
+            canonical_values_publication_calls == 1 &&
             !inactive_maintenance
                  .canonical_output_published &&
             !controller.NextMaintenanceDeadline() &&
@@ -1596,7 +1618,9 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
             "canonical-source",
             "00000000-0000-4000-8000-000000000006");
     Require(
-        canonical_publication_calls == 2 &&
+        canonical_document_publication_calls == 0 &&
+            canonical_values_publication_calls == 2 &&
+            semantic_clock_calls == 1 &&
             attempted_modified_times ==
                 std::vector<specforge::CanonicalTimestamp>({
                     mutation_time,
@@ -1653,6 +1677,7 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
         asdf_path);
 
     std::size_t document_publication_calls = 0;
+    std::size_t values_publication_calls = 0;
     std::size_t semantic_clock_calls = 0;
     const specforge::CanonicalTimestamp semantic_mutation_time =
         *specforge::ParseCanonicalTimestamp(
@@ -1679,6 +1704,14 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
                     snapshot,
                     document,
                     specforge::SampleLabelingCompatibilityView(source));
+        },
+        [&values_publication_calls](
+            specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+            const specforge::SampleLabelingDocument& document) {
+            ++values_publication_calls;
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                document);
         },
         [](const std::filesystem::path& path,
            const specforge::SampleLabelingDocument& document,
@@ -1754,6 +1787,7 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
             code_changed.output_saved &&
             !code_changed.output_retry_scheduled &&
             document_publication_calls == 5 &&
+            values_publication_calls == 0 &&
             semantic_clock_calls == 5 &&
             !controller.NextMaintenanceDeadline(),
         "canonical metadata mutations should publish and reopen one full document generation each");

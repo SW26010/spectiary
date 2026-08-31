@@ -555,6 +555,28 @@ SourceCollectionSession::SourceCollectionSession(
         labeling_state_cache_load_policy,
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher)
+    : SourceCollectionSession(
+          std::move(source_session_state_cache_path),
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path),
+          std::move(workflow_state_cache_path),
+          labeling_state_cache_load_policy,
+          std::move(canonical_document_publisher),
+          SampleLabelingController::CanonicalValuesPublisher{})
+{
+}
+
+SourceCollectionSession::SourceCollectionSession(
+    std::filesystem::path source_session_state_cache_path,
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path,
+    SampleLabelingStateCacheLoadPolicy
+        labeling_state_cache_load_policy,
+    SampleLabelingController::CanonicalDocumentPublisher
+        canonical_document_publisher,
+    SampleLabelingController::CanonicalValuesPublisher
+        canonical_values_publisher)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
@@ -571,7 +593,8 @@ SourceCollectionSession::SourceCollectionSession(
               return LoadSampleWorkflowStateCache(
                   path);
           },
-          std::move(canonical_document_publisher))),
+          std::move(canonical_document_publisher),
+          std::move(canonical_values_publisher))),
       source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
           std::move(source_session_state_cache_path)))
 {

@@ -83,7 +83,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "42883d9aff31e985af950d53ee8259fc8cf48273b2953da61469d1a0cb139cad"
+      "sha256": "44f887fc532289c9485d379444ce1b830110e892ddf7390e2b747b2a7d0011e1"
     },
     {
       "name": "invalid_count",

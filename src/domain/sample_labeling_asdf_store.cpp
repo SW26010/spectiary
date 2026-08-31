@@ -88,6 +88,61 @@ std::optional<SampleLabelingAsdfStoreError> PreservationIdentityError(
             "metadata rewrite document identity does not match the opened ASDF generation"};
 }
 
+std::optional<SampleLabelingAsdfStoreError> ValuesRewriteIdentityError(
+    const SampleLabelingDocument& original,
+    const SampleLabelingDocument& replacement)
+{
+    bool labels_match =
+        original.labeling.labels.size() == replacement.labeling.labels.size();
+    for (std::size_t index = 0;
+         labels_match && index < original.labeling.labels.size();
+         ++index) {
+        const SampleLabelingDocumentLabel& expected =
+            original.labeling.labels[index];
+        const SampleLabelingDocumentLabel& actual =
+            replacement.labeling.labels[index];
+        labels_match = expected.code == actual.code &&
+            expected.name == actual.name &&
+            expected.shortcut == actual.shortcut;
+    }
+
+    const SampleLabelingTaskCanonicalMetadata& original_metadata =
+        original.labeling.canonical_metadata;
+    const SampleLabelingTaskCanonicalMetadata& replacement_metadata =
+        replacement.labeling.canonical_metadata;
+    if (original.format_kind == replacement.format_kind &&
+        original.schema_version == replacement.schema_version &&
+        original.source.base_identity == replacement.source.base_identity &&
+        original.source.kind == replacement.source.kind &&
+        original.source.name == replacement.source.name &&
+        original.source.fingerprint == replacement.source.fingerprint &&
+        original.source.sample_count == replacement.source.sample_count &&
+        original.source.roster.identity_kind ==
+            replacement.source.roster.identity_kind &&
+        original.source.roster.sample_names ==
+            replacement.source.roster.sample_names &&
+        original.annotation.kind == replacement.annotation.kind &&
+        original.annotation.missing.semantic ==
+            replacement.annotation.missing.semantic &&
+        original.annotation.missing.value ==
+            replacement.annotation.missing.value &&
+        original.labeling.id == replacement.labeling.id &&
+        original.labeling.name == replacement.labeling.name &&
+        original_metadata.created_at == replacement_metadata.created_at &&
+        original_metadata.origin == replacement_metadata.origin &&
+        original_metadata.description == replacement_metadata.description &&
+        original_metadata.authors == replacement_metadata.authors &&
+        replacement_metadata.modified_at >= original_metadata.modified_at &&
+        labels_match) {
+        return std::nullopt;
+    }
+    return SampleLabelingAsdfStoreError{
+        .kind = SampleLabelingAsdfStoreErrorKind::
+            PreservationIdentityMismatch,
+        .message =
+            "values rewrite may change only values and modified_at in the opened ASDF generation"};
+}
+
 bool KnownDocumentGenerationMatches(
     const SampleLabelingDocument& expected,
     const SampleLabelingDocument& actual)
@@ -299,8 +354,7 @@ SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
 
 SampleLabelingAsdfStoreWriteResult RewriteAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at,
+    const SampleLabelingDocument& replacement,
     const BeforeReplace& before_replace,
     SampleLabelingAsdfDurableBase* refreshed_durable_base = nullptr) noexcept
 {
@@ -313,6 +367,12 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
                     "ASDF labeling document durable base is unavailable"}};
     }
     try {
+        if (const std::optional<SampleLabelingAsdfStoreError> mismatch =
+                ValuesRewriteIdentityError(
+                    snapshot.document(), replacement)) {
+            return SampleLabelingAsdfStoreWriteResult{
+                .error = std::move(*mismatch)};
+        }
         std::optional<SampleLabelingAsdfError> codec_error;
         std::optional<SampleLabelingAsdfDurableBase> codec_durable_base;
         bool roster_block_reused = false;
@@ -325,8 +385,7 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
             snapshot.path(),
             options,
             [&snapshot,
-                values,
-                modified_at,
+                &replacement,
                 &codec_error,
                 &codec_durable_base,
                 &roster_block_reused](
@@ -336,8 +395,7 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
                     RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                         snapshot.durable_base(),
                         stream,
-                        values,
-                        modified_at);
+                        replacement);
                 if (!result.succeeded()) {
                     codec_error = result.error;
                     error = result.error.message;
@@ -531,26 +589,26 @@ WriteSampleLabelingAsdfDocumentAndOpenAtomically(
 SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
     SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at) noexcept
+    const SampleLabelingDocument& replacement) noexcept
 {
     try {
         std::vector<std::int32_t> published_values(
-            values.begin(),
-            values.end());
+            replacement.annotation.values.begin(),
+            replacement.annotation.values.end());
+        const CanonicalTimestamp published_modified_at =
+            replacement.labeling.canonical_metadata.modified_at;
         SampleLabelingAsdfDurableBase refreshed_durable_base;
         SampleLabelingAsdfStoreWriteResult result =
             RewriteAtomically(
                 snapshot,
-                values,
-                modified_at,
+                replacement,
                 {},
                 &refreshed_durable_base);
         if (result.succeeded()) {
             snapshot.document_->annotation.values =
                 std::move(published_values);
             snapshot.document_->labeling.canonical_metadata.modified_at =
-                modified_at;
+                published_modified_at;
             snapshot.durable_base_ = std::move(refreshed_durable_base);
         }
         return result;
@@ -652,27 +710,13 @@ SampleLabelingAsdfStoreWriteResult WriteWithBeforeReplace(
 }
 
 SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    const BeforeReplace& before_replace) noexcept
-{
-    return RewriteWithBeforeReplace(
-        snapshot,
-        values,
-        snapshot.document().labeling.canonical_metadata.modified_at,
-        before_replace);
-}
-
-SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at,
+    SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& replacement,
     const BeforeReplace& before_replace) noexcept
 {
     return RewriteAtomically(
         snapshot,
-        values,
-        modified_at,
+        replacement,
         before_replace);
 }
 

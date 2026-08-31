@@ -613,6 +613,49 @@ SampleLabelingController::SampleLabelingController(
     StateCacheLoader state_cache_loader,
     LegacyOutputPublisher legacy_output_publisher,
     CanonicalDocumentPublisher canonical_document_publisher,
+    CanonicalValuesPublisher canonical_values_publisher)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          std::move(legacy_output_publisher),
+          canonical_document_publisher
+              ? std::move(canonical_document_publisher)
+              : CanonicalDocumentPublisher{
+                    [](const SampleLabelingAsdfOpenSnapshot& snapshot,
+                       const SampleLabelingDocument& document,
+                       const SampleLabelingCanonicalSourceDescriptor& source) {
+                        return RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                            snapshot,
+                            document,
+                            SampleLabelingCompatibilityView(source));
+                    }},
+          canonical_values_publisher
+              ? std::move(canonical_values_publisher)
+              : CanonicalValuesPublisher{
+                    [](SampleLabelingAsdfOpenSnapshot& snapshot,
+                       const SampleLabelingDocument& replacement) {
+                        return RewriteSampleLabelingAsdfValuesAtomically(
+                            snapshot,
+                            replacement);
+                    }},
+          [](const std::filesystem::path& path,
+             const SampleLabelingDocument& document,
+             const SampleLabelingCanonicalSourceDescriptor& source) {
+              return WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                  path,
+                  document,
+                  SampleLabelingCompatibilityView(source));
+          },
+          []() { return GenerateUuidV4(); },
+          []() { return CurrentCanonicalTimestamp(); })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    LegacyOutputPublisher legacy_output_publisher,
+    CanonicalDocumentPublisher canonical_document_publisher,
     CanonicalCreationPublisher canonical_creation_publisher)
     : SampleLabelingController(
           std::move(state_cache_path),
@@ -633,12 +676,40 @@ SampleLabelingController::SampleLabelingController(
     CanonicalCreationPublisher canonical_creation_publisher,
     TaskIdGenerator task_id_generator,
     TaskClock task_clock)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          std::move(legacy_output_publisher),
+          std::move(canonical_document_publisher),
+          [](SampleLabelingAsdfOpenSnapshot& snapshot,
+             const SampleLabelingDocument& replacement) {
+              return RewriteSampleLabelingAsdfValuesAtomically(
+                  snapshot,
+                  replacement);
+          },
+          std::move(canonical_creation_publisher),
+          std::move(task_id_generator),
+          std::move(task_clock))
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    LegacyOutputPublisher legacy_output_publisher,
+    CanonicalDocumentPublisher canonical_document_publisher,
+    CanonicalValuesPublisher canonical_values_publisher,
+    CanonicalCreationPublisher canonical_creation_publisher,
+    TaskIdGenerator task_id_generator,
+    TaskClock task_clock)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
       legacy_output_publisher_(
           std::move(legacy_output_publisher)),
       canonical_document_publisher_(
           std::move(canonical_document_publisher)),
+      canonical_values_publisher_(
+          std::move(canonical_values_publisher)),
       canonical_creation_publisher_(
           std::move(canonical_creation_publisher)),
       task_id_generator_(std::move(task_id_generator)),
@@ -3476,24 +3547,39 @@ SampleLabelingController::PersistCanonicalTaskOutput(
         return result;
     }
 
-    SampleLabelingAsdfStoreGenerationWriteResult generation =
-        canonical_document_publisher_(
-            snapshot,
-            *replacement,
-            *active_source_descriptor_);
-    const bool published =
-        generation.document_replaced &&
-        generation.succeeded();
-    result.artifacts_replaced = generation.document_replaced;
-    if (generation.document_replaced) {
-        *asdf_snapshot = std::move(generation.snapshot);
-    }
-    if (!published) {
-        fail(
-            generation.error.message.empty()
-                ? "could not publish and reopen canonical ASDF document"
-                : std::move(generation.error.message));
-        return result;
+    if (task.metadata_save_pending) {
+        SampleLabelingAsdfStoreGenerationWriteResult generation =
+            canonical_document_publisher_(
+                snapshot,
+                *replacement,
+                *active_source_descriptor_);
+        const bool published =
+            generation.document_replaced &&
+            generation.succeeded();
+        result.artifacts_replaced = generation.document_replaced;
+        if (generation.document_replaced) {
+            *asdf_snapshot = std::move(generation.snapshot);
+        }
+        if (!published) {
+            fail(
+                generation.error.message.empty()
+                    ? "could not publish and reopen canonical ASDF document"
+                    : std::move(generation.error.message));
+            return result;
+        }
+    } else {
+        SampleLabelingAsdfStoreWriteResult write =
+            canonical_values_publisher_(
+                snapshot,
+                *replacement);
+        result.artifacts_replaced = write.written;
+        if (!write.succeeded()) {
+            fail(
+                write.error.message.empty()
+                    ? "could not publish canonical ASDF values"
+                    : std::move(write.error.message));
+            return result;
+        }
     }
 
     result.published = true;

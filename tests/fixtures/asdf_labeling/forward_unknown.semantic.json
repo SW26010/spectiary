@@ -6,8 +6,11 @@
   "source_identity": "source:future",
   "source_fingerprint": "sha256:future",
   "sample_count": 2,
-  "roster_identity_kind": "source_index",
-  "sample_names": [],
+  "roster_identity_kind": "explicit_names",
+  "sample_names": [
+    "future-a",
+    "future-b"
+  ],
   "annotation_kind": "categorical_integer",
   "missing_semantic": "unlabeled",
   "missing_value": -1,

@@ -356,6 +356,26 @@ def _fixture_cases() -> list[dict[str, Any]]:
         {"code": 0, "name": "星系", "shortcut": "g"},
         {"code": 1, "name": "类星体", "shortcut": "q"},
     ]
+    forward_unknown = _tree(
+        source_kind="npy",
+        source_name="future.npy",
+        source_fingerprint="sha256:future",
+        values=[0, 1],
+        names=["future-a", "future-b"],
+        task_id="future-task",
+        task_name="Future fields",
+        labels=[dict(label) for label in labels],
+        extra={"future_vendor": {"new_flag": True, "new_text": "preserve or ignore"}},
+    )
+    forward_unknown["labeling_task"]["future_task"] = {
+        "token": "task-survives"
+    }
+    forward_unknown["labeling_task"]["origin"]["future_origin"] = {
+        "token": "origin-survives"
+    }
+    forward_unknown["labeling_task"]["labels"][0]["future_label"] = {
+        "token": "label-survives"
+    }
     return [
         {
             "name": "minimal",
@@ -466,17 +486,11 @@ def _fixture_cases() -> list[dict[str, Any]]:
         {
             "name": "forward_unknown",
             "valid": True,
-            "tree": _tree(
-                source_kind="npy",
-                source_name="future.npy",
-                source_fingerprint="sha256:future",
-                values=[0, 1],
-                names=None,
-                task_id="future-task",
-                task_name="Future fields",
-                labels=labels,
-                extra={"future_vendor": {"new_flag": True, "new_text": "preserve or ignore"}},
-            ),
+            "tree": forward_unknown,
+            "write_options": {
+                "compression": "zlib",
+                "compression_level": 6,
+            },
         },
         {
             "name": "invalid_count",
@@ -610,7 +624,7 @@ def generate_fixtures(output: Path) -> dict[str, Any]:
         if "mutate" in case:
             case["mutate"](tree)
         path = output / f"{case['name']}.asdf"
-        _write_reference(path, tree)
+        _write_reference(path, tree, **case.get("write_options", {}))
         summary_path = output / f"{case['name']}.semantic.json"
         summary_path.write_text(
             json.dumps(_semantic_summary(tree), ensure_ascii=False, indent=2) + "\n",
@@ -867,6 +881,7 @@ def _fsync(path: Path) -> None:
 
 ASDF_BLOCK_MAGIC = b"\xd3BLK"
 ASDF_BLOCK_HEADER_SIZE = 48
+ASDF_BLOCK_INDEX_HEADER = b"#ASDF BLOCK INDEX\n%YAML 1.1\n---\n"
 COPY_CHUNK_SIZE = 1024 * 1024
 
 
@@ -905,6 +920,27 @@ def _scan_asdf_blocks(path: Path) -> tuple[bytes, list[tuple[int, int]]]:
             start = stream.tell()
             magic = stream.read(4)
             if not magic:
+                break
+            if magic == ASDF_BLOCK_INDEX_HEADER[:4]:
+                stream.seek(start)
+                index = stream.read()
+                if not index.startswith(
+                    ASDF_BLOCK_INDEX_HEADER
+                ) or not index.endswith(b"...\n"):
+                    raise RuntimeError(f"invalid ASDF block index: {path}")
+                entries = index[len(ASDF_BLOCK_INDEX_HEADER) : -4].splitlines()
+                try:
+                    offsets = [
+                        int(entry.removeprefix(b"- "))
+                        for entry in entries
+                        if entry
+                    ]
+                except ValueError as error:
+                    raise RuntimeError(f"invalid ASDF block index offset: {path}") from error
+                if any(not entry.startswith(b"- ") for entry in entries) or offsets != [
+                    offset for offset, _ in blocks
+                ]:
+                    raise RuntimeError(f"stale ASDF block index: {path}")
                 break
             if magic != ASDF_BLOCK_MAGIC:
                 raise RuntimeError(f"unexpected data after ASDF YAML tree: {path}")
@@ -1923,9 +1959,14 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
                 "known semantics, or lost forward-compatible metadata"
             )
         forward_compressions = _asdf_block_compressions(forward_rewrite)
-        if forward_compressions != ["zlib"]:
+        expected_forward_compressions = (
+            ["zlib", "zlib"]
+            if expected_forward["roster_identity_kind"] == "explicit_names"
+            else ["zlib"]
+        )
+        if forward_compressions != expected_forward_compressions:
             raise RuntimeError(
-                "production forward-metadata rewrite did not retain one zlib block"
+                "production forward-metadata rewrite did not retain the canonical zlib blocks"
             )
         records.append(
             {

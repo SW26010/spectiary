@@ -432,6 +432,27 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     WorkflowStateCacheLoader workflow_state_cache_loader,
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher)
+    : SampleWorkflowCoordinator(
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path),
+          std::move(workflow_state_cache_path),
+          std::move(labeling_state_cache_loader),
+          std::move(workflow_state_cache_loader),
+          std::move(canonical_document_publisher),
+          SampleLabelingController::CanonicalValuesPublisher{})
+{
+}
+
+SampleWorkflowCoordinator::SampleWorkflowCoordinator(
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path,
+    SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
+    WorkflowStateCacheLoader workflow_state_cache_loader,
+    SampleLabelingController::CanonicalDocumentPublisher
+        canonical_document_publisher,
+    SampleLabelingController::CanonicalValuesPublisher
+        canonical_values_publisher)
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(
           std::move(labeling_state_cache_path),
@@ -439,7 +460,8 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           DefaultLegacyOutputPublisher(),
           canonical_document_publisher
               ? std::move(canonical_document_publisher)
-              : DefaultCanonicalDocumentPublisher()),
+              : DefaultCanonicalDocumentPublisher(),
+          std::move(canonical_values_publisher)),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
       workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)

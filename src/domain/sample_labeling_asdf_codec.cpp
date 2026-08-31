@@ -31,9 +31,11 @@
 namespace specforge {
 
 struct SampleLabelingAsdfDurableBase::State {
-    std::vector<unsigned char> encoded_prefix;
+    std::vector<unsigned char> encoded_metadata;
+    std::vector<unsigned char> encoded_roster_block;
     std::vector<std::int32_t> label_codes;
     std::string preservation_identity_digest;
+    std::string values_rewrite_identity_digest;
     CanonicalTimestamp created_at;
     CanonicalTimestamp modified_at;
     SampleLabelingOrigin origin;
@@ -128,6 +130,49 @@ void AppendIdentityDigestField(StableSha256& digest,
         AppendIdentityDigestField(digest, annotation.format);
         AppendIdentityDigestField(
             digest, annotation.fingerprint.value_or(std::string{}));
+    }
+    return digest.FinishHex();
+}
+
+[[nodiscard]] std::string ValuesRewriteIdentityDigest(
+    const SampleLabelingDocument& document)
+{
+    StableSha256 digest;
+    AppendIdentityDigestField(
+        digest, "specforge.sample_labeling.asdf-values-rewrite-identity-v1");
+    AppendIdentityDigestField(
+        digest, PreservationIdentityDigest(document));
+    AppendIdentityDigestField(
+        digest, document.annotation.missing.semantic);
+    AppendIdentityDigestField(
+        digest, std::to_string(document.annotation.missing.value));
+    AppendIdentityDigestField(digest, document.labeling.name);
+
+    const SampleLabelingTaskCanonicalMetadata& metadata =
+        document.labeling.canonical_metadata;
+    AppendIdentityDigestField(
+        digest, metadata.description ? "description" : "no-description");
+    if (metadata.description) {
+        AppendIdentityDigestField(digest, *metadata.description);
+    }
+    AppendIdentityDigestField(
+        digest, std::to_string(metadata.authors.size()));
+    for (const SampleLabelingAuthor& author : metadata.authors) {
+        AppendIdentityDigestField(digest, author.name);
+        AppendIdentityDigestField(
+            digest, author.identifier ? "identifier" : "no-identifier");
+        if (author.identifier) {
+            AppendIdentityDigestField(digest, *author.identifier);
+        }
+    }
+
+    AppendIdentityDigestField(
+        digest, std::to_string(document.labeling.labels.size()));
+    for (const SampleLabelingDocumentLabel& label :
+        document.labeling.labels) {
+        AppendIdentityDigestField(digest, std::to_string(label.code));
+        AppendIdentityDigestField(digest, label.name);
+        AppendIdentityDigestField(digest, label.shortcut);
     }
     return digest.FinishHex();
 }
@@ -292,6 +337,21 @@ void WriteText(std::ostream& output, std::string_view text)
     WriteBytes(output,
         std::span<const unsigned char>(
             reinterpret_cast<const unsigned char*>(text.data()), text.size()));
+}
+
+[[nodiscard]] std::string BuildBlockIndex(
+    std::span<const std::uint64_t> block_offsets)
+{
+    std::string index = "#ASDF BLOCK INDEX\n%YAML 1.1\n---\n";
+    for (const std::uint64_t offset : block_offsets) {
+        index.append("- ").append(std::to_string(offset)).push_back('\n');
+    }
+    index.append("...\n");
+    if (index.size() > kMaximumBlockIndexBytes) {
+        Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            "ASDF block index exceeds the production limit");
+    }
+    return index;
 }
 
 [[nodiscard]] std::uint64_t InputFileSize(const std::filesystem::path& path)
@@ -2313,17 +2373,17 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
 }
 
 [[nodiscard]] std::string BuildMetadataPreservingUnknownFields(
-    std::span<const unsigned char> encoded_prefix,
+    std::span<const unsigned char> encoded_metadata,
     std::size_t metadata_bytes,
     const SampleLabelingDocument& document,
     std::size_t roster_width)
 {
-    if (metadata_bytes > encoded_prefix.size()) {
+    if (metadata_bytes > encoded_metadata.size()) {
         Fail(SampleLabelingAsdfErrorKind::IoFailure,
             "durable ASDF metadata prefix is inconsistent");
     }
     const std::string original_metadata(
-        reinterpret_cast<const char*>(encoded_prefix.data()),
+        reinterpret_cast<const char*>(encoded_metadata.data()),
         metadata_bytes);
     YAML::Node root = YAML::Load(original_metadata);
     if (!root || !root.IsMap()) {
@@ -2461,55 +2521,6 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
         metadata.size() > kMaximumMetadataBytes - 5U) {
         Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
             "preserved ASDF YAML metadata exceeds the production limit");
-    }
-    metadata.append("\n...\n");
-    return metadata;
-}
-
-[[nodiscard]] std::string BuildMetadataWithModifiedAt(
-    std::span<const unsigned char> encoded_prefix,
-    std::size_t metadata_bytes,
-    CanonicalTimestamp modified_at)
-{
-    if (metadata_bytes > encoded_prefix.size()) {
-        Fail(SampleLabelingAsdfErrorKind::IoFailure,
-            "durable ASDF metadata prefix is inconsistent");
-    }
-    const std::string original_metadata(
-        reinterpret_cast<const char*>(encoded_prefix.data()),
-        metadata_bytes);
-    YAML::Node root = YAML::Load(original_metadata);
-    if (!root || !root.IsMap()) {
-        Fail(SampleLabelingAsdfErrorKind::IoFailure,
-            "durable ASDF metadata tree is unavailable");
-    }
-    PreserveParsedStringScalarTypes(root);
-    YAML::Node task = root["labeling_task"];
-    if (!task || !task.IsMap()) {
-        Fail(SampleLabelingAsdfErrorKind::IoFailure,
-            "durable ASDF labeling task metadata is unavailable");
-    }
-    SetYamlString(task,
-        "modified_at",
-        FormatCanonicalTimestamp(modified_at));
-
-    std::string metadata;
-    metadata.reserve(std::min<std::size_t>(
-        metadata_bytes + 64U, kMaximumMetadataBytes));
-    metadata.append("#ASDF ")
-        .append(kSampleLabelingAsdfFileFormatVersion)
-        .append("\n#ASDF_STANDARD ")
-        .append(kSampleLabelingAsdfStandardVersion)
-        .append("\n%YAML 1.1\n%TAG ! tag:stsci.edu:asdf/\n--- ");
-    StringAppendStreamBuffer buffer(metadata, kMaximumMetadataBytes);
-    std::ostream metadata_stream(&buffer);
-    YAML::Emitter body(metadata_stream);
-    body.SetIndent(2);
-    body << root;
-    if (!body.good() || !metadata_stream ||
-        metadata.size() > kMaximumMetadataBytes - 5U) {
-        Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
-            "ASDF YAML metadata exceeds the production limit");
     }
     metadata.append("\n...\n");
     return metadata;
@@ -2740,9 +2751,39 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
         if (initially_reusable) {
             auto state =
                 std::make_shared<SampleLabelingAsdfDurableBase::State>();
-            state->encoded_prefix = std::move(reusable_prefix);
+            if (validated_metadata_bytes > reusable_prefix.size()) {
+                Fail(SampleLabelingAsdfErrorKind::IoFailure,
+                    "durable ASDF metadata bytes are inconsistent");
+            }
+            state->encoded_metadata.assign(
+                reusable_prefix.begin(),
+                reusable_prefix.begin() +
+                    static_cast<std::ptrdiff_t>(validated_metadata_bytes));
+            if (parsed.roster_array) {
+                const BlockDescriptor& roster_block = ReferencedBlock(
+                    blocks,
+                    parsed.roster_array->source_index,
+                    "sample roster");
+                if (roster_block.raw_offset > reusable_prefix.size() ||
+                    roster_block.raw_size >
+                        reusable_prefix.size() - roster_block.raw_offset) {
+                    Fail(SampleLabelingAsdfErrorKind::IoFailure,
+                        "durable ASDF roster block bytes are inconsistent");
+                }
+                const std::size_t roster_begin =
+                    static_cast<std::size_t>(roster_block.raw_offset);
+                const std::size_t roster_end = roster_begin +
+                    static_cast<std::size_t>(roster_block.raw_size);
+                state->encoded_roster_block.assign(
+                    reusable_prefix.begin() +
+                        static_cast<std::ptrdiff_t>(roster_begin),
+                    reusable_prefix.begin() +
+                        static_cast<std::ptrdiff_t>(roster_end));
+            }
             state->preservation_identity_digest =
                 PreservationIdentityDigest(parsed.document);
+            state->values_rewrite_identity_digest =
+                ValuesRewriteIdentityDigest(parsed.document);
             state->created_at =
                 parsed.document.labeling.canonical_metadata.created_at;
             state->modified_at =
@@ -3011,12 +3052,13 @@ RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
         ValidateProfilePreflight(BuildWriterProfilePreflight(document,
             roster_width,
             state.metadata_bytes,
-            state.encoded_prefix.size(),
+            state.encoded_metadata.size() +
+                state.encoded_roster_block.size(),
             0));
         ValidateDocumentBusinessSemantics(document);
         const std::string metadata =
             BuildMetadataPreservingUnknownFields(
-                state.encoded_prefix,
+                state.encoded_metadata,
                 state.metadata_bytes,
                 document,
                 roster_width);
@@ -3068,8 +3110,7 @@ SampleLabelingAsdfWriteResult
 RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     const SampleLabelingAsdfDurableBase& durable_base,
     std::ostream& output,
-    std::span<const std::int32_t> values,
-    CanonicalTimestamp modified_at) noexcept
+    const SampleLabelingDocument& replacement) noexcept
 {
     try {
         if (!durable_base.state_) {
@@ -3078,65 +3119,78 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
         }
         const SampleLabelingAsdfDurableBase::State& state =
             *durable_base.state_;
-        if (modified_at < state.created_at ||
-            modified_at < state.modified_at) {
+        ValidateDocumentText(replacement);
+        const CanonicalTimestamp modified_at =
+            replacement.labeling.canonical_metadata.modified_at;
+        if (modified_at < state.modified_at) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
                 "values rewrite modified_at must be monotonic");
         }
-        if (state.sample_count != values.size()) {
+        if (state.values_rewrite_identity_digest !=
+            ValuesRewriteIdentityDigest(replacement)) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-                "replacement values do not match the canonical sample count");
+                "values rewrite may change only values and modified_at");
         }
-        for (const std::int32_t value : values) {
-            if (value != kSampleLabelingDocumentUnlabeledValue &&
-                !std::ranges::binary_search(state.label_codes, value)) {
-                Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-                    "replacement values reference an undefined label code");
-            }
-        }
+        ValidateDocumentBusinessSemantics(replacement);
+
+        const std::span<const std::int32_t> values =
+            replacement.annotation.values;
+        const std::size_t roster_width = state.roster_string_width;
+        ValidateProfilePreflight(BuildWriterProfilePreflight(replacement,
+            roster_width,
+            state.metadata_bytes,
+            state.encoded_metadata.size() +
+                state.encoded_roster_block.size(),
+            0));
 
         const std::string metadata =
-            BuildMetadataWithModifiedAt(
-                state.encoded_prefix,
+            BuildMetadataPreservingUnknownFields(
+                state.encoded_metadata,
                 state.metadata_bytes,
-                modified_at);
-        if (state.metadata_bytes > state.encoded_prefix.size()) {
-            Fail(SampleLabelingAsdfErrorKind::IoFailure,
-                "durable ASDF metadata prefix is inconsistent");
-        }
-        const std::span<const unsigned char> roster_block{
-            state.encoded_prefix.data() + state.metadata_bytes,
-            state.encoded_prefix.size() - state.metadata_bytes};
+                replacement,
+                roster_width);
+        const std::span<const unsigned char> roster_block =
+            state.encoded_roster_block;
 
-        ProfilePreflight profile{
-            .source_sample_count = state.sample_count,
-            .values_array = ArrayDescriptor{.source_index = 0,
-                .count = values.size(),
-                .item_width = 1,
-                .little_endian = true},
-            .label_count = state.label_codes.size(),
-            .metadata_bytes = metadata.size(),
-            .label_storage_bytes =
-                state.label_codes.size() * sizeof(std::int32_t),
-            .reusable_prefix_bytes = metadata.size() + roster_block.size(),
-            .codec_scratch_bytes = kDeflateResidentScratchBytes};
-        if (state.roster_block_reused) {
-            profile.roster_array = ArrayDescriptor{.source_index = 0,
-                .count = state.sample_count,
-                .item_width = state.roster_string_width,
-                .little_endian = true};
-        }
-        ValidateProfilePreflight(profile);
+        const std::uint64_t reusable_prefix_bytes =
+            metadata.size() + roster_block.size();
+        ValidateProfilePreflight(BuildWriterProfilePreflight(replacement,
+            roster_width,
+            metadata.size(),
+            reusable_prefix_bytes,
+            0));
 
         std::unique_ptr<DeflateSpool> values_spool =
             EncodeValuesToSpool(values);
-        profile.file_bytes = profile.reusable_prefix_bytes +
-            values_spool->block_size();
-        ValidateProfilePreflight(profile);
+        std::array<std::uint64_t, 2> block_offsets{};
+        std::size_t block_count = 0;
+        if (!roster_block.empty()) {
+            block_offsets[block_count++] = metadata.size();
+        }
+        block_offsets[block_count++] = reusable_prefix_bytes;
+        const std::string block_index = BuildBlockIndex(
+            std::span<const std::uint64_t>(
+                block_offsets.data(), block_count));
+        if (values_spool->block_size() >
+                kMaximumAsdfFileBytes - reusable_prefix_bytes ||
+            block_index.size() >
+                kMaximumAsdfFileBytes - reusable_prefix_bytes -
+                    values_spool->block_size()) {
+            Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+                "ASDF block-reuse output exceeds the production file-size limit");
+        }
+        const std::uint64_t file_bytes = reusable_prefix_bytes +
+            values_spool->block_size() + block_index.size();
+        ValidateProfilePreflight(BuildWriterProfilePreflight(replacement,
+            roster_width,
+            metadata.size(),
+            reusable_prefix_bytes,
+            file_bytes));
 
         WriteText(output, metadata);
         WriteBytes(output, roster_block);
         values_spool->WriteBlock(output);
+        WriteText(output, block_index);
         if (!output) {
             Fail(SampleLabelingAsdfErrorKind::IoFailure,
                 "could not complete ASDF block-reuse write");
@@ -3144,19 +3198,15 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
 
         auto refreshed_state =
             std::make_shared<SampleLabelingAsdfDurableBase::State>();
-        refreshed_state->encoded_prefix.reserve(
-            metadata.size() + roster_block.size());
-        refreshed_state->encoded_prefix.insert(
-            refreshed_state->encoded_prefix.end(),
-            metadata.begin(),
-            metadata.end());
-        refreshed_state->encoded_prefix.insert(
-            refreshed_state->encoded_prefix.end(),
-            roster_block.begin(),
-            roster_block.end());
+        refreshed_state->encoded_metadata.assign(
+            metadata.begin(), metadata.end());
+        refreshed_state->encoded_roster_block =
+            state.encoded_roster_block;
         refreshed_state->label_codes = state.label_codes;
         refreshed_state->preservation_identity_digest =
             state.preservation_identity_digest;
+        refreshed_state->values_rewrite_identity_digest =
+            state.values_rewrite_identity_digest;
         refreshed_state->created_at = state.created_at;
         refreshed_state->modified_at = modified_at;
         refreshed_state->origin = state.origin;

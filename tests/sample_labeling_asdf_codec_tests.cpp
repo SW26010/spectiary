@@ -63,6 +63,15 @@ std::vector<unsigned char> ReadAllBytes(const std::filesystem::path& path)
     return bytes;
 }
 
+bool ContainsText(
+    std::span<const unsigned char> bytes,
+    std::string_view text)
+{
+    return std::search(
+               bytes.begin(), bytes.end(), text.begin(), text.end()) !=
+           bytes.end();
+}
+
 specforge::JsonValue ReadJsonFile(const std::filesystem::path& path)
 {
     const std::vector<unsigned char> bytes = ReadAllBytes(path);
@@ -268,6 +277,7 @@ struct RawBlock {
 struct RawAsdf {
     std::size_t tree_end = 0;
     std::vector<RawBlock> blocks;
+    std::vector<std::size_t> block_index_offsets;
 };
 
 RawAsdf ParseRawAsdf(const std::vector<unsigned char>& bytes)
@@ -290,6 +300,38 @@ RawAsdf ParseRawAsdf(const std::vector<unsigned char>& bytes)
             ++offset;
         }
         if (offset == bytes.size()) {
+            break;
+        }
+        constexpr std::string_view block_index_header =
+            "#ASDF BLOCK INDEX\n%YAML 1.1\n---\n";
+        const std::string_view suffix(
+            reinterpret_cast<const char*>(bytes.data() + offset),
+            bytes.size() - offset);
+        if (suffix.starts_with(block_index_header)) {
+            Require(
+                suffix.ends_with("...\n"),
+                "raw ASDF block index should be terminated");
+            std::size_t line = block_index_header.size();
+            while (line < suffix.size() && suffix.substr(line, 2) == "- ") {
+                const std::size_t line_end = suffix.find('\n', line);
+                Require(
+                    line_end != std::string_view::npos && line_end > line + 2,
+                    "raw ASDF block index entry should be complete");
+                std::size_t value = 0;
+                for (std::size_t index = line + 2; index < line_end; ++index) {
+                    const unsigned char digit =
+                        static_cast<unsigned char>(suffix[index]);
+                    Require(
+                        std::isdigit(digit) != 0,
+                        "raw ASDF block index entry should be numeric");
+                    value = value * 10U + static_cast<std::size_t>(digit - '0');
+                }
+                parsed.block_index_offsets.push_back(value);
+                line = line_end + 1U;
+            }
+            Require(
+                suffix.substr(line) == "...\n",
+                "raw ASDF block index should contain only offsets");
             break;
         }
         Require(
@@ -1612,13 +1654,16 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
     Require(advanced_modified_at.has_value(),
         "advanced modified timestamp fixture should parse");
     std::ostringstream rejected_output(std::ios::binary);
-    const std::array<std::int32_t, 3> invalid_replacement{42, 0, 1};
+    specforge::SampleLabelingDocument invalid_replacement =
+        *validated.document;
+    invalid_replacement.annotation.values = {42, 0, 1};
+    invalid_replacement.labeling.canonical_metadata.modified_at =
+        *advanced_modified_at;
     const specforge::SampleLabelingAsdfWriteResult rejected =
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             rejected_output,
-            invalid_replacement,
-            *advanced_modified_at);
+            invalid_replacement);
     Require(
         !rejected.succeeded() &&
             rejected.error.kind ==
@@ -1632,13 +1677,17 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "block-reuse output should open");
-    const std::array<std::int32_t, 3> replacement{0, 0, 1};
+    const std::array<std::int32_t, 3> replacement_values{0, 0, 1};
+    specforge::SampleLabelingDocument replacement = *validated.document;
+    replacement.annotation.values.assign(
+        replacement_values.begin(), replacement_values.end());
+    replacement.labeling.canonical_metadata.modified_at =
+        *advanced_modified_at;
     const specforge::SampleLabelingAsdfWriteResult rewrite =
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
-            replacement,
-            *advanced_modified_at);
+            replacement);
     output.close();
     Require(rewrite.succeeded(), "label-only block-reuse write should succeed");
     Require(
@@ -1660,7 +1709,7 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
     Require(read.succeeded(), "rewritten production document should read");
     specforge::SampleLabelingDocument expected = ProductionDocument();
     expected.annotation.values.assign(
-        replacement.begin(), replacement.end());
+        replacement_values.begin(), replacement_values.end());
     expected.labeling.canonical_metadata.modified_at =
         *advanced_modified_at;
     Require(
@@ -1668,6 +1717,141 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
             SemanticSummary(*read.document), SemanticSummary(expected)),
         "rewritten document should preserve all semantics except replaced values");
 
+    std::filesystem::remove(input_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+}
+
+void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
+{
+    const std::filesystem::path input_path =
+        TempPath("_forward_unknown_indexed.asdf");
+    const std::filesystem::path output_path =
+        TempPath("_forward_unknown_values.asdf");
+    std::vector<unsigned char> before =
+        ReadAllBytes(FixturePath("forward_unknown.asdf"));
+    RawAsdf before_raw = ParseRawAsdf(before);
+    Require(
+        before_raw.blocks.size() == 2,
+        "forward-unknown values fixture should contain roster and values blocks");
+    const std::array<unsigned char, 4> metadata_roster_padding{
+        0,
+        ' ',
+        '\n',
+        0,
+    };
+    before.insert(
+        before.begin() + static_cast<std::ptrdiff_t>(
+            before_raw.blocks[0].offset),
+        metadata_roster_padding.begin(),
+        metadata_roster_padding.end());
+    before_raw = ParseRawAsdf(before);
+    const std::array<unsigned char, 5> roster_values_padding{
+        '\n',
+        0,
+        ' ',
+        0,
+        '\n',
+    };
+    before.insert(
+        before.begin() + static_cast<std::ptrdiff_t>(
+            before_raw.blocks[1].offset),
+        roster_values_padding.begin(),
+        roster_values_padding.end());
+    before_raw = ParseRawAsdf(before);
+    AppendText(before, StandardBlockIndex(before_raw));
+    WriteAllBytes(input_path, before);
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(
+        opened.succeeded() && opened.durable_base,
+        "forward-unknown fixture should expose a durable block-reuse base");
+    specforge::SampleLabelingDocument replacement = *opened.document;
+    replacement.annotation.values = {1, 0};
+    replacement.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:01.000Z");
+
+    specforge::SampleLabelingDocument metadata_mismatch = replacement;
+    metadata_mismatch.labeling.name = "metadata changes need a full rewrite";
+    std::ostringstream rejected_output(std::ios::binary);
+    const specforge::SampleLabelingAsdfWriteResult rejected =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *opened.durable_base,
+            rejected_output,
+            metadata_mismatch);
+    Require(
+        !rejected.succeeded() &&
+            rejected.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed &&
+            rejected_output.str().empty(),
+        "values codec must reject non-value canonical changes before emitting output");
+
+    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+    Require(output.good(), "forward-unknown values output should open");
+    const specforge::SampleLabelingAsdfWriteResult rewrite =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *opened.durable_base,
+            output,
+            replacement);
+    output.close();
+    Require(
+        rewrite.succeeded() && rewrite.roster_block_reused,
+        rewrite.error.message.empty()
+            ? "timestamped values rewrite should reuse the encoded roster block"
+            : rewrite.error.message);
+
+    const std::vector<unsigned char> after = ReadAllBytes(output_path);
+    const RawAsdf after_raw = ParseRawAsdf(after);
+    Require(
+        after_raw.blocks.size() == 2 &&
+            after_raw.blocks[0].offset == after_raw.tree_end &&
+            after_raw.blocks[1].offset ==
+                after_raw.blocks[0].offset + after_raw.blocks[0].size &&
+            before_raw.blocks[0].size == after_raw.blocks[0].size &&
+            std::equal(
+                before.begin() + static_cast<std::ptrdiff_t>(
+                    before_raw.blocks[0].offset),
+                before.begin() + static_cast<std::ptrdiff_t>(
+                    before_raw.blocks[0].offset + before_raw.blocks[0].size),
+                after.begin() + static_cast<std::ptrdiff_t>(
+                    after_raw.blocks[0].offset)) &&
+            !std::equal(
+                before.begin() + static_cast<std::ptrdiff_t>(
+                    before_raw.blocks[1].offset),
+                before.begin() + static_cast<std::ptrdiff_t>(
+                    before_raw.blocks[1].offset + before_raw.blocks[1].size),
+                after.begin() + static_cast<std::ptrdiff_t>(
+                    after_raw.blocks[1].offset),
+                after.begin() + static_cast<std::ptrdiff_t>(
+                    after_raw.blocks[1].offset + after_raw.blocks[1].size)),
+        "timestamped values rewrite should reuse only roster bytes and replace values bytes");
+    Require(
+        before_raw.tree_end != after_raw.tree_end &&
+            ContainsText(after, "future_vendor") &&
+            ContainsText(after, "future_task") &&
+            ContainsText(after, "future_origin") &&
+            ContainsText(after, "future_label") &&
+            ContainsText(before, "#ASDF BLOCK INDEX") &&
+            ContainsText(after, "#ASDF BLOCK INDEX") &&
+            after_raw.block_index_offsets ==
+                std::vector<std::size_t>{
+                    after_raw.blocks[0].offset,
+                    after_raw.blocks[1].offset,
+                },
+        "timestamped values rewrite must rebuild metadata, retain supported unknown mappings, drop input padding, and emit a recomputed block index");
+
+    const specforge::SampleLabelingAsdfReadResult reopened =
+        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    Require(
+        reopened.succeeded() &&
+            JsonEquals(
+                SemanticSummary(*reopened.document),
+                SemanticSummary(replacement)),
+        "timestamped values rewrite should reopen as the complete replacement document");
+
+    std::error_code cleanup_error;
     std::filesystem::remove(input_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
 }
@@ -1690,13 +1874,17 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
         "source-index modified timestamp fixture should parse");
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
-    const std::array<std::int32_t, 3> replacement{-1, 1, 1};
+    const std::array<std::int32_t, 3> replacement_values{-1, 1, 1};
+    specforge::SampleLabelingDocument replacement = *validated.document;
+    replacement.annotation.values.assign(
+        replacement_values.begin(), replacement_values.end());
+    replacement.labeling.canonical_metadata.modified_at =
+        *advanced_modified_at;
     const specforge::SampleLabelingAsdfWriteResult rewrite =
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
-            replacement,
-            *advanced_modified_at);
+            replacement);
     output.close();
     Require(rewrite.succeeded(), "source-index label rewrite should succeed");
     Require(
@@ -1709,7 +1897,7 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
         specforge::ReadSampleLabelingAsdfDocument(output_path);
     specforge::SampleLabelingDocument expected = ProductionDocument(false);
     expected.annotation.values.assign(
-        replacement.begin(), replacement.end());
+        replacement_values.begin(), replacement_values.end());
     expected.labeling.canonical_metadata.modified_at =
         *advanced_modified_at;
     Require(
@@ -1759,12 +1947,16 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
         values_path, std::ios::binary | std::ios::trunc);
     Require(values_output.good(),
         "promotion values output should open");
+    specforge::SampleLabelingDocument values_replacement = *opened.document;
+    values_replacement.annotation.values.assign(
+        replacement_values.begin(), replacement_values.end());
+    values_replacement.labeling.canonical_metadata.modified_at =
+        *values_modified_at;
     const specforge::SampleLabelingAsdfWriteResult values_rewrite =
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *opened.durable_base,
             values_output,
-            replacement_values,
-            *values_modified_at);
+            values_replacement);
     values_output.close();
     Require(
         values_rewrite.succeeded() && values_rewrite.durable_base,
@@ -2492,13 +2684,13 @@ int main(int argc, char* argv[])
                              "to open\n";
                 return 1;
             }
-            const std::array<std::int32_t, 3> replacement{0, 0, 1};
+            specforge::SampleLabelingDocument replacement = *read.document;
+            replacement.annotation.values = {0, 0, 1};
             const specforge::SampleLabelingAsdfWriteResult rewrite =
                 specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
-                    replacement,
-                    read.document->labeling.canonical_metadata.modified_at);
+                    replacement);
             output.close();
             if (!rewrite.succeeded() || !rewrite.roster_block_reused) {
                 std::cerr << "production explicit-roster oracle rewrite failed: "
@@ -2556,6 +2748,9 @@ int main(int argc, char* argv[])
             std::vector<std::int32_t> values =
                 read.document->annotation.values;
             values[index] = replacement;
+            specforge::SampleLabelingDocument replacement_document =
+                *read.document;
+            replacement_document.annotation.values = std::move(values);
             std::ofstream output(
                 argv[3], std::ios::binary | std::ios::trunc);
             if (!output) {
@@ -2566,8 +2761,7 @@ int main(int argc, char* argv[])
                 specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
-                    values,
-                    read.document->labeling.canonical_metadata.modified_at);
+                    replacement_document);
             output.close();
             if (!rewrite.succeeded()) {
                 std::cerr << "production oracle rewrite failed: "
@@ -2599,6 +2793,7 @@ int main(int argc, char* argv[])
         TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent();
         TestWriterEmitsSourceIndexProductionProfileAndRoundTrips();
         TestLabelRewriteReusesRosterBlockVerbatim();
+        TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster();
         TestSourceIndexRewriteUsesSingleValuesBlock();
         TestPromotionValuesRewriteRefreshesMetadataRewriteBase();
         TestMetadataRewritePreservesForwardUnknownFields();

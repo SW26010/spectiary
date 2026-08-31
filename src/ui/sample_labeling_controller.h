@@ -131,6 +131,10 @@ public:
             const SampleLabelingAsdfOpenSnapshot&,
             const SampleLabelingDocument&,
             const SampleLabelingCanonicalSourceDescriptor&)>;
+    using CanonicalValuesPublisher =
+        std::function<SampleLabelingAsdfStoreWriteResult(
+            SampleLabelingAsdfOpenSnapshot&,
+            const SampleLabelingDocument&)>;
     using CanonicalCreationPublisher =
         std::function<SampleLabelingAsdfStoreGenerationWriteResult(
             const std::filesystem::path&,
@@ -159,12 +163,27 @@ public:
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalValuesPublisher canonical_values_publisher);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalCreationPublisher canonical_creation_publisher);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalCreationPublisher canonical_creation_publisher,
+        TaskIdGenerator task_id_generator,
+        TaskClock task_clock);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalValuesPublisher canonical_values_publisher,
         CanonicalCreationPublisher canonical_creation_publisher,
         TaskIdGenerator task_id_generator,
         TaskClock task_clock);
@@ -585,6 +604,7 @@ private:
     StateCacheLoader state_cache_loader_;
     LegacyOutputPublisher legacy_output_publisher_;
     CanonicalDocumentPublisher canonical_document_publisher_;
+    CanonicalValuesPublisher canonical_values_publisher_;
     CanonicalCreationPublisher canonical_creation_publisher_;
     TaskIdGenerator task_id_generator_;
     TaskClock task_clock_;

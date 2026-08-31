@@ -1258,6 +1258,11 @@ target_compile_definitions(
         SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
         SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
 )
+target_compile_definitions(
+    specforge_sample_labeling_asdf_store_tests
+    PRIVATE
+        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+)
 if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
     add_dependencies(
         specforge_asdf_labeling_interoperability_targets

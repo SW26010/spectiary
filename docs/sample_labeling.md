@@ -892,24 +892,34 @@ canonical ASDF output path.
 
 The ASDF codec remains a caller-owned stream component. A separate domain
 document store owns source-aware open, the immutable durable roster/base
-snapshot, and atomic full-document replacement. The store retains a low-level
-atomic value-only primitive for focused domain use, but the task-lifecycle
-controller does not use it: every canonical semantic mutation builds and
-publishes one complete replacement document. Full rewrites update
-`modified_at`, merge edited known SpecForge schema `2.0.0` fields into the
-validated generation, retain the validated roster identity and contents, and
-preserve forward-compatible unknown mapping entries; label-local
-unknown entries are associated by stable label code. A full rewrite of an
-existing path must obtain such a durable base and fail safely when it cannot,
-rather than reconstructing only the old reader's object model and silently
-dropping future fields. It must also retain the opened source/roster identity,
-annotation kind, and stable task id so opaque metadata is not transplanted into
-another logical document. A successful full rewrite invalidates the old
-snapshot and requires reopening the new generation. Both the codec durable-base
-check and the document-store seam treat `created_at` and `origin` as immutable,
-and require the replacement `modified_at` to be no earlier than the durable
-generation. A forward-compatible unknown origin may therefore survive a rewrite
-unchanged, but a rewrite cannot introduce or alter it.
+snapshot, and atomic replacement. Every canonical publication supplies a
+complete replacement document, including its intended `modified_at`; the store
+does not synthesize metadata from a values span alone. For a pure label-value
+mutation, the controller uses the timestamped values fast path. It rebuilds the
+YAML metadata from the durable metadata tree with the unknown-field-preserving
+builder, re-emitting the new `modified_at` and values descriptor. It reuses only
+the already encoded roster block, re-encodes the values block, and recomputes
+the resulting block layout and offsets. It emits a new block index for those
+offsets instead of copying the input index or its stale layout padding. In
+particular, the fast path does not byte-copy a combined metadata-and-roster
+prefix. A successful values
+publication refreshes the open snapshot's durable base, so later value saves
+can repeat that path without reopening.
+
+Metadata mutations use the full-document rewrite. That path merges edited known
+SpecForge schema `2.0.0` fields into the validated generation and preserves
+forward-compatible unknown mapping entries; label-local unknown entries are
+associated by stable label code. A full rewrite of an existing path must obtain
+such a durable base and fail safely when it cannot, rather than reconstructing
+only the old reader's object model and silently dropping future fields. It must
+also retain the opened source/roster identity, annotation kind, and stable task
+id so opaque metadata is not transplanted into another logical document. A
+successful full rewrite invalidates the old snapshot and requires reopening the
+new generation. Both the codec durable-base check and the document-store seam
+treat `created_at` and `origin` as immutable, and require the replacement
+`modified_at` to be no earlier than the durable generation. A
+forward-compatible unknown origin may therefore survive a rewrite unchanged,
+but a rewrite cannot introduce or alter it.
 Controller leases, recovery state, retry policy, and UI activation remain above
 that store and are not codec responsibilities.
 
@@ -935,32 +945,33 @@ Malformed documents, source/roster mismatches, and task-id mismatches fail the
 activation without falling back to legacy NPY hydration. Assigning or clearing
 values first commits the newest sparse overlay to the local cache, then builds a
 complete replacement from the opened snapshot plus the authoritative task
-values and canonical metadata. It publishes through the same full-document
-rewrite used for metadata edits, updates `modified_at`, preserves unknown
-mappings and the canonical roster semantics, and clears the corresponding
-sparse overlay only after the replacement is reopened and its generation is
-verified.
-A failed replacement leaves the old
-ASDF generation trusted, retains the newest sparse overlay, and schedules an
-owner-aware retry. A successful foreground publication or maintenance retry
-synchronizes the attached annotation generation before the active snapshot can
-be released and invalidates filter/sort projections that may have consumed the
-older generation. Canonical retries run only while their source is active with
-its matching descriptor; switching sources parks the durable overlay and that
-source's next activation re-arms publication. Task renames and label
-add/edit/remove operations, including shortcuts and used-code rewrites, use the
-same full-document path, so known metadata, values, and forward-compatible
-unknown metadata remain one canonical generation. The old snapshot is invalid
-as soon as replacement
-reaches disk; the mutation is successful only after the replacement reopens and
-its known generation matches the intended document. The requested reopen source
-descriptor is checked against that intended document before replacement, so an
-incompatible public-store call cannot alter the durable owner. If reopen fails,
-the local overlay remains pending, the stale snapshot is discarded, and retry
-first opens the current durable file before rewriting it. Creating a new ASDF
-owner uses a full canonical document write followed by source-aware reopen and
-generation validation. The controller adopts the formal owner only after both
-steps and output-lease refresh succeed.
+values and canonical metadata. The resulting values-plus-`modified_at`
+publication uses the values fast path; it preserves the supported unknown
+mappings and the encoded roster block while replacing the values generation.
+Only successful atomic replacement advances the in-memory snapshot and clears
+the corresponding sparse overlay. Failure leaves the prior ASDF value,
+`modified_at`, and whole generation trusted on disk, retains the overlay, and
+schedules an owner-aware retry using the mutation's original timestamp rather
+than a retry-time clock value.
+
+A successful foreground publication or maintenance retry synchronizes the
+attached annotation generation before the active snapshot can be released and
+invalidates filter/sort projections that may have consumed the older generation.
+Canonical retries run only while their source is active with its matching
+descriptor; switching sources parks the durable overlay and that source's next
+activation re-arms publication. Task renames and label add/edit/remove
+operations, including shortcuts and used-code rewrites, take the full-document
+path, so known metadata, values, and forward-compatible unknown metadata remain
+one canonical generation. The old snapshot is invalid as soon as a full
+replacement reaches disk; the mutation is successful only after the replacement
+reopens and its known generation matches the intended document. The requested
+reopen source descriptor is checked against that intended document before
+replacement, so an incompatible public-store call cannot alter the durable
+owner. If reopen fails, the local overlay remains pending, the stale snapshot is
+discarded, and retry first opens the current durable file before rewriting it.
+Creating a new ASDF owner uses a full canonical document write followed by
+source-aware reopen and generation validation. The controller adopts the formal
+owner only after both steps and output-lease refresh succeed.
 
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save
