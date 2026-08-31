@@ -59,7 +59,12 @@ EnsureSampleLabelExportPathExtension(
 
 using SampleLabelExportPathChooser =
     std::function<std::optional<std::filesystem::path>(
-        SampleLabelExportFormat)>;
+        SampleLabelExportFormat,
+        std::string_view)>;
+
+using SampleLabelingOutputPathChooser =
+    std::function<std::optional<std::filesystem::path>(
+        std::string_view)>;
 
 class SampleWorkflowPanelUi {
 public:
@@ -72,14 +77,14 @@ public:
     void RenderLabeling(
         PanelSessionInteraction& interaction,
         bool* open,
-        const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        const SampleLabelingOutputPathChooser& choose_output_path,
         const SampleLabelExportPathChooser& choose_export_path,
         SampleWorkflowShortcut& shortcut);
     void RenderLabeling(
         PanelSessionInteraction& interaction,
         UiLanguage language,
         bool* open,
-        const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        const SampleLabelingOutputPathChooser& choose_output_path,
         const SampleLabelExportPathChooser& choose_export_path,
         SampleWorkflowShortcut& shortcut);
     void FinalizeTaskNameEdit(
@@ -192,6 +197,8 @@ private:
     std::optional<std::array<float, 4>> labeling_pause_rect_;
     std::optional<std::array<float, 4>> labeling_delete_rect_;
     std::optional<std::array<float, 4>> labeling_recovery_rect_;
+    std::optional<std::array<float, 4>>
+        labeling_output_action_rect_;
     std::optional<std::array<float, 4>> labeling_export_rect_;
     std::optional<std::array<float, 4>>
         labeling_export_format_rect_;

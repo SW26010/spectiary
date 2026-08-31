@@ -4,6 +4,7 @@
 #include "domain/utf8.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_label_presentation.h"
+#include "ui/sample_labeling_filename.h"
 #include "ui/sample_labeling_issue_text.h"
 
 #include <imgui.h>
@@ -1486,7 +1487,7 @@ std::string SampleWorkflowPanelUi::LabelShortcutNotice(
 void SampleWorkflowPanelUi::RenderLabeling(
     PanelSessionInteraction& interaction,
     bool* open,
-    const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    const SampleLabelingOutputPathChooser& choose_output_path,
     const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
@@ -1527,7 +1528,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     PanelSessionInteraction& interaction,
     UiLanguage language,
     bool* open,
-    const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    const SampleLabelingOutputPathChooser& choose_output_path,
     const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
@@ -1537,6 +1538,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     labeling_pause_rect_.reset();
     labeling_delete_rect_.reset();
     labeling_recovery_rect_.reset();
+    labeling_output_action_rect_.reset();
     labeling_export_rect_.reset();
     labeling_export_format_rect_.reset();
     temporary_labeling_action_rect_.reset();
@@ -2818,13 +2820,25 @@ void SampleWorkflowPanelUi::RenderLabeling(
                     : "SpecForgeSaveLabelingTaskTo");
         if (ImGui::Button(
                 save_to_label.c_str())) {
-            if (std::optional<std::filesystem::path> path = choose_output_path()) {
+            const std::string suggested_filename =
+                SuggestedSampleLabelingFilename(
+                    interaction.View().labeling.task_name,
+                    SampleLabelingFilePurpose::CanonicalOutput);
+            if (std::optional<std::filesystem::path> path =
+                    choose_output_path(suggested_filename)) {
                 (void)submit(
                     ChangeActiveSampleWorkflow(
                         ActiveSampleWorkflowIntent::
                             SetActiveLabelingOutputPath(*path)));
             }
         }
+        const ImVec2 output_action_min = ImGui::GetItemRectMin();
+        const ImVec2 output_action_max = ImGui::GetItemRectMax();
+        labeling_output_action_rect_ = {
+            output_action_min.x,
+            output_action_min.y,
+            output_action_max.x,
+            output_action_max.y};
     }
     if (labeling_view.has_active_task &&
         labeling_view.can_export_label_values) {
@@ -2836,7 +2850,13 @@ void SampleWorkflowPanelUi::RenderLabeling(
         if (ImGui::Button(export_label.c_str())) {
             if (std::optional<std::filesystem::path> path =
                     choose_export_path(
-                        labeling_export_format_)) {
+                        labeling_export_format_,
+                        SuggestedSampleLabelingFilename(
+                            interaction.View().labeling.task_name,
+                            labeling_export_format_ ==
+                                    SampleLabelExportFormat::Csv
+                                ? SampleLabelingFilePurpose::CsvExport
+                                : SampleLabelingFilePurpose::NpyExport))) {
                 (void)submit(
                     ChangeActiveSampleWorkflow(
                         ActiveSampleWorkflowIntent::

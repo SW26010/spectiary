@@ -52,6 +52,13 @@ struct SourceCollectionPanelUiTestAccess {
     {
         return intent.active_sample_workflow.export_format;
     }
+
+    [[nodiscard]] static const std::filesystem::path&
+    ActiveWorkflowPath(
+        const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.path;
+    }
 };
 
 struct SampleWorkflowPanelUiTestAccess {
@@ -279,6 +286,13 @@ struct SampleWorkflowPanelUiTestAccess {
         const SampleWorkflowPanelUi& panel)
     {
         return panel.labeling_export_format_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingOutputActionRect(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_output_action_rect_;
     }
 
     static void SetPendingAnnotationActivation(
@@ -583,10 +597,11 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
     panel.RenderLabeling(
         interaction,
         &open,
-        []() -> std::optional<std::filesystem::path> {
+        [](std::string_view)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat)
+        [](specforge::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -657,10 +672,11 @@ LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
     panel.RenderLabeling(
         interaction,
         &open,
-        []() -> std::optional<std::filesystem::path> {
+        [](std::string_view)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat)
+        [](specforge::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -762,11 +778,15 @@ void ReplaceFocusedText(
 }
 
 struct LabelingExportFrameObservation {
+    int output_path_request_count = 0;
     int export_path_request_count = 0;
     std::optional<specforge::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
     std::optional<specforge::SampleLabelExportFormat>
         requested_export_format;
+    std::string requested_suggested_filename;
+    std::string requested_output_suggested_filename;
+    std::filesystem::path submitted_path;
     std::optional<specforge::SampleLabelExportFormat>
         submitted_export_format;
 };
@@ -795,6 +815,9 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
             observation.submitted_export_format =
                 specforge::SourceCollectionPanelUiTestAccess::
                     ActiveWorkflowExportFormat(intent);
+            observation.submitted_path =
+                specforge::SourceCollectionPanelUiTestAccess::
+                    ActiveWorkflowPath(intent);
             return specforge::SourceCollectionSessionResult{};
         },
         [&view]() -> const specforge::SourceCollectionSessionView& {
@@ -804,14 +827,21 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
     panel.RenderLabeling(
         interaction,
         &open,
-        []() -> std::optional<std::filesystem::path> {
-            return std::nullopt;
+        [&observation](std::string_view suggested_filename)
+            -> std::optional<std::filesystem::path> {
+            ++observation.output_path_request_count;
+            observation.requested_output_suggested_filename =
+                suggested_filename;
+            return std::filesystem::path{"user-entered.final"};
         },
         [&observation](
-            specforge::SampleLabelExportFormat format)
+            specforge::SampleLabelExportFormat format,
+            std::string_view suggested_filename)
             -> std::optional<std::filesystem::path> {
             ++observation.export_path_request_count;
             observation.requested_export_format = format;
+            observation.requested_suggested_filename =
+                suggested_filename;
             return format == specforge::SampleLabelExportFormat::Csv
                 ? std::filesystem::path{"export.csv"}
                 : std::filesystem::path{"export.npy"};
@@ -1127,10 +1157,11 @@ RecoveryFrameObservation RenderRecoveryFrame(
         interaction,
         language,
         &open,
-        []() -> std::optional<std::filesystem::path> {
+        [](std::string_view)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat)
+        [](specforge::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -1222,10 +1253,11 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     panel.RenderLabeling(
         interaction,
         &open,
-        []() -> std::optional<std::filesystem::path> {
+        [](std::string_view)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat)
+        [](specforge::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -1418,6 +1450,50 @@ void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
         "canonical owner should not expose another ownership migration action");
 }
 
+void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(7, 'q');
+    view.labeling.active_task_is_temporary = true;
+    view.labeling.task_name = "a/b:c*";
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderLabelingExportFrame(panel, view);
+    const auto action_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingOutputActionRect(panel);
+    Require(
+        action_rect.has_value(),
+        "temporary task should expose the canonical output chooser action");
+    const ImVec2 action_position(
+        ((*action_rect)[0] + (*action_rect)[2]) * 0.5f,
+        ((*action_rect)[1] + (*action_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        action_position.x,
+        action_position.y);
+    (void)RenderLabelingExportFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingExportFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation submitted =
+        RenderLabelingExportFrame(panel, view);
+    Require(
+        submitted.output_path_request_count == 1 &&
+            submitted.requested_output_suggested_filename ==
+                "a_b_c_.asdf" &&
+            submitted.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    SetActiveLabelingOutputPath &&
+            submitted.submitted_path == "user-entered.final",
+        "Save to should suggest a safe ASDF name while forwarding the user's chosen path unchanged");
+}
+
 void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
 {
     ScopedImGuiContext context;
@@ -1461,6 +1537,8 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
                     ExportActiveLabels &&
             submitted.requested_export_format ==
                 specforge::SampleLabelExportFormat::Npy &&
+            submitted.requested_suggested_filename ==
+                "Quality.npy" &&
             submitted.submitted_export_format ==
                 specforge::SampleLabelExportFormat::Npy,
         "Export Labels should request and submit the selected stateless NPY export format");
@@ -1571,6 +1649,8 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
         submitted.export_path_request_count == 1 &&
             submitted.requested_export_format ==
                 specforge::SampleLabelExportFormat::Csv &&
+            submitted.requested_suggested_filename ==
+                "Quality.csv" &&
             submitted.submitted_export_format ==
                 specforge::SampleLabelExportFormat::Csv,
         "folder default should drive both the chooser and export intent as CSV");
@@ -1603,6 +1683,8 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
         overridden.export_path_request_count == 1 &&
             overridden.requested_export_format ==
                 specforge::SampleLabelExportFormat::Npy &&
+            overridden.requested_suggested_filename ==
+                "Quality.npy" &&
             overridden.submitted_export_format ==
                 specforge::SampleLabelExportFormat::Npy,
         "folder NPY override should drive both the chooser and export intent");
@@ -1705,10 +1787,17 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
             false);
         const LabelingExportFrameObservation exported =
             RenderLabelingExportFrame(panel, view);
+        const std::string expected_suggested_filename =
+            matrix_case.expected_export ==
+                    specforge::SampleLabelExportFormat::Csv
+                ? "Quality.csv"
+                : "Quality.npy";
         Require(
             exported.export_path_request_count == 1 &&
                 exported.requested_export_format ==
                     matrix_case.expected_export &&
+                exported.requested_suggested_filename ==
+                    expected_suggested_filename &&
                 exported.submitted_workflow_kind ==
                     specforge::
                         ActiveSampleWorkflowIntentKind::
@@ -4845,6 +4934,7 @@ int main()
 {
     TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
     TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
+    TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath();
     TestLabelingPanelRoutesExportLabelsAsASeparateIntent();
     TestLabelingPanelKeepsFormatOverrideUntilSourceChanges();
     TestLabelExportFormatMatrixRoutesToChooserAndIntent();

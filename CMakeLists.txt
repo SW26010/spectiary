@@ -356,6 +356,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/immersive_context_overlay.cpp
     src/ui/panel_session_interaction.cpp
     src/ui/sample_label_presentation.cpp
+    src/ui/sample_labeling_filename.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
     src/ui/settings_panel.cpp
@@ -1171,6 +1172,16 @@ specforge_add_test(
     specforge_sample_workflow_shortcut_tests
     tests/sample_workflow_shortcut_tests.cpp
     specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_sample_labeling_filename_tests
+    tests/sample_labeling_filename_tests.cpp
+    specforge_desktop_ui
+)
+set_tests_properties(
+    specforge_sample_labeling_filename_tests
+    PROPERTIES
+        LABELS "labeling;ci-headless;required"
 )
 specforge_add_test(
     specforge_source_collection_panel_tests

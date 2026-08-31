@@ -753,7 +753,8 @@ std::optional<std::filesystem::path> ShowAnnotationFilePicker(
 }
 
 std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
-    UiLanguage language)
+    UiLanguage language,
+    std::string_view suggested_filename)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -793,6 +794,9 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
         label_output_filters.data());
     dialog->SetFileTypeIndex(1);
     dialog->SetDefaultExtension(L"asdf");
+    const std::wstring wide_suggested_filename =
+        Utf8ToWide(suggested_filename);
+    dialog->SetFileName(wide_suggested_filename.c_str());
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
@@ -804,7 +808,8 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
 
 std::optional<std::filesystem::path> ShowLabelValuesExportFilePicker(
     UiLanguage language,
-    SampleLabelExportFormat format)
+    SampleLabelExportFormat format,
+    std::string_view suggested_filename)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -841,6 +846,9 @@ std::optional<std::filesystem::path> ShowLabelValuesExportFilePicker(
     dialog->SetFileTypeIndex(1);
     dialog->SetDefaultExtension(
         csv_export ? L"csv" : L"npy");
+    const std::wstring wide_suggested_filename =
+        Utf8ToWide(suggested_filename);
+    dialog->SetFileName(wide_suggested_filename.c_str());
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) ||
@@ -2691,15 +2699,20 @@ void ShellUi::RenderLabelingPanel(bool panel_open)
         &panel_open,
         [language = application_settings_
              .View()
-             .language]() {
-            return ShowLabelOutputFilePicker(language);
+             .language](std::string_view suggested_filename) {
+            return ShowLabelOutputFilePicker(
+                language,
+                suggested_filename);
         },
         [language = application_settings_
              .View()
-             .language](SampleLabelExportFormat format) {
+             .language](
+                 SampleLabelExportFormat format,
+                 std::string_view suggested_filename) {
             return ShowLabelValuesExportFilePicker(
                 language,
-                format);
+                format,
+                suggested_filename);
         },
         shortcut);
     if (!panel_open) {
