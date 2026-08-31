@@ -1271,6 +1271,17 @@ specforge_add_test(
     tests/sample_labeling_asdf_store_tests.cpp
     specforge_core
 )
+specforge_add_test(
+    specforge_sample_labeling_asdf_mutation_tests
+    tests/sample_labeling_asdf_mutation_tests.cpp
+    specforge_core
+)
+target_link_libraries(
+    specforge_sample_labeling_asdf_mutation_tests
+    PRIVATE
+        yaml-cpp::yaml-cpp
+        ZLIB::ZLIB
+)
 target_compile_definitions(
     specforge_sample_labeling_asdf_codec_tests
     PRIVATE
@@ -1279,6 +1290,11 @@ target_compile_definitions(
 )
 target_compile_definitions(
     specforge_sample_labeling_asdf_store_tests
+    PRIVATE
+        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+)
+target_compile_definitions(
+    specforge_sample_labeling_asdf_mutation_tests
     PRIVATE
         SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
 )
@@ -1298,6 +1314,7 @@ set_tests_properties(
     specforge_sample_labeling_document_tests
     specforge_sample_labeling_asdf_codec_tests
     specforge_sample_labeling_asdf_store_tests
+    specforge_sample_labeling_asdf_mutation_tests
     specforge_sample_labeling_filter_tests
     specforge_source_collection_session_tests
     PROPERTIES
