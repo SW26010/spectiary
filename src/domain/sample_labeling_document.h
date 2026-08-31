@@ -18,7 +18,7 @@ struct SourceCollectionContext;
 
 inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
     "specforge.sample_labeling";
-inline constexpr std::string_view kSampleLabelingDocumentSchemaVersion = "1.0.0";
+inline constexpr std::string_view kSampleLabelingDocumentSchemaVersion = "2.0.0";
 inline constexpr std::string_view kSampleLabelingDocumentCategoricalIntegerKind =
     "categorical_integer";
 inline constexpr std::string_view kSampleLabelingDocumentUnlabeledSemantic = "unlabeled";
@@ -55,7 +55,6 @@ struct SampleLabelingDocumentMissingValue {
 struct SampleLabelingDocumentAnnotation {
     std::string kind =
         std::string{kSampleLabelingDocumentCategoricalIntegerKind};
-    std::string name;
     SampleLabelingDocumentMissingValue missing;
     // The element type and vector shape are the canonical int32/[sample_count]
     // value contract.  A codec may represent this as a typed ndarray without
@@ -72,6 +71,7 @@ struct SampleLabelingDocumentLabel {
 struct SampleLabelingDocumentTask {
     std::string id;
     std::string name;
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
     std::vector<SampleLabelingDocumentLabel> labels;
 };
 
@@ -101,12 +101,17 @@ enum class SampleLabelingDocumentValidationIssueKind {
     EmptySampleName,
     DuplicateSampleName,
     UnsupportedAnnotationKind,
-    MissingAnnotationName,
     UnsupportedMissingSemantic,
     InvalidUnlabeledValue,
     AnnotationSampleCountMismatch,
     MissingTaskId,
+    InvalidTaskId,
     MissingTaskName,
+    InvalidCanonicalTimestampOrder,
+    InvalidOriginKind,
+    InvalidOriginAnnotation,
+    InvalidDescription,
+    InvalidAuthor,
     ReservedLabelCode,
     DuplicateLabelCode,
     MissingLabelName,

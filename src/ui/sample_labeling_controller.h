@@ -13,7 +13,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -127,10 +126,6 @@ public:
         std::function<SampleLabelOutputPublicationResult(
         SampleLabelingTask&,
         const SampleLabelResultMetadataSource*)>;
-    using CanonicalValuesPublisher =
-        std::function<SampleLabelingAsdfStoreWriteResult(
-            SampleLabelingAsdfOpenSnapshot&,
-            std::span<const std::int32_t>)>;
     using CanonicalDocumentPublisher =
         std::function<SampleLabelingAsdfStoreGenerationWriteResult(
             const SampleLabelingAsdfOpenSnapshot&,
@@ -141,6 +136,9 @@ public:
             const std::filesystem::path&,
             const SampleLabelingDocument&,
             const SampleLabelingCanonicalSourceDescriptor&)>;
+    using TaskIdGenerator =
+        std::function<std::optional<std::string>()>;
+    using TaskClock = std::function<CanonicalTimestamp()>;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
@@ -155,20 +153,21 @@ public:
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher,
-        CanonicalValuesPublisher canonical_values_publisher);
-    SampleLabelingController(
-        std::filesystem::path state_cache_path,
-        StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
-        CanonicalValuesPublisher canonical_values_publisher,
         CanonicalDocumentPublisher canonical_document_publisher);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher,
-        CanonicalValuesPublisher canonical_values_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalCreationPublisher canonical_creation_publisher);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalCreationPublisher canonical_creation_publisher,
+        TaskIdGenerator task_id_generator,
+        TaskClock task_clock);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -196,17 +195,22 @@ public:
     [[nodiscard]] std::optional<SampleAnnotationResult>
         ActiveCanonicalAsdfAnnotationProjection() const;
     [[nodiscard]] SampleLabelingOperationResult CreateTask(
-        std::string task_id,
         std::string task_name);
     [[nodiscard]] SampleLabelingOperationResult
         StartOrResumeTemporaryTask();
     [[nodiscard]] SampleLabelingOperationResult CreateTaskFromAnnotation(
-        std::string task_id,
         std::string task_name,
         SampleLabelSet label_set,
         std::vector<int> values,
         std::filesystem::path output_path,
         bool metadata_clean);
+    [[nodiscard]] SampleLabelingOperationResult CreateTaskFromAnnotation(
+        std::string task_name,
+        SampleLabelSet label_set,
+        std::vector<int> values,
+        std::filesystem::path output_path,
+        bool metadata_clean,
+        SampleLabelingOrigin origin);
     // Adopts an attached canonical document without rewriting it. The
     // attached generation supplies only the expected task identity; the
     // controller acquires the task/output leases and reopens the current
@@ -240,8 +244,7 @@ public:
     [[nodiscard]] SampleLabelingOperationResult SetActiveAutoAdvance(bool enabled);
     [[nodiscard]] SampleLabelingOperationResult SetActiveSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SampleLabelingOperationResult SaveActiveTemporaryTaskToOutput(
-        std::filesystem::path output_path,
-        std::string task_name);
+        std::filesystem::path output_path);
     // Explicitly migrates an active legacy NPY+sidecar owner to a new
     // canonical ASDF document. The legacy artifacts remain unchanged and stay
     // authoritative unless the new document is published, reopened, and the
@@ -493,7 +496,8 @@ private:
             std::string_view requested_task_id,
             std::size_t sample_count,
             const std::vector<SampleLabelingTask>&
-                known_tasks) const;
+                known_tasks,
+            bool requires_temporary_slot) const;
     [[nodiscard]] ExclusiveFileLeaseAcquireResult
         TryAttachTemporarySlotLease(
             TaskEditLeaseSet& leases,
@@ -580,9 +584,10 @@ private:
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
     LegacyOutputPublisher legacy_output_publisher_;
-    CanonicalValuesPublisher canonical_values_publisher_;
     CanonicalDocumentPublisher canonical_document_publisher_;
     CanonicalCreationPublisher canonical_creation_publisher_;
+    TaskIdGenerator task_id_generator_;
+    TaskClock task_clock_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;

@@ -276,7 +276,7 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
 
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(
-            "quality",
+            "22222222-2222-4222-8222-222222222222",
             "Quality",
             3);
     Require(
@@ -340,6 +340,81 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
         restored_task.values.size() == 3 &&
             restored_task.values[1] == 5,
         "package-relative output should load values from NPY");
+}
+
+void TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
+    const PortableTestRoots& roots)
+{
+    const std::filesystem::path save_path =
+        roots.temporary_root / "invalid-task-id-save.json";
+    specforge::SampleLabelingTask invalid_task =
+        specforge::CreateSampleLabelingTask(
+            "quality",
+            "Quality",
+            2U);
+    specforge::SampleLabelingSourceState invalid_state;
+    invalid_state.sample_count = 2U;
+    invalid_state.active_task_id = invalid_task.task_id;
+    invalid_state.tasks.push_back(std::move(invalid_task));
+    specforge::SampleLabelingStateCache invalid_cache;
+    invalid_cache.sources.emplace(
+        "invalid-id-source",
+        std::move(invalid_state));
+    std::string save_error;
+    Require(
+        !specforge::SaveSampleLabelingStateCache(
+            save_path,
+            invalid_cache,
+            &save_error) &&
+            save_error.find("UUID v4") != std::string::npos &&
+            !std::filesystem::exists(save_path),
+        "schema-4 cache Save should reject a task id the reader cannot restore");
+
+    const std::filesystem::path patch_path =
+        roots.temporary_root / "invalid-task-id-patch.json";
+    specforge::SampleLabelingTask valid_task =
+        specforge::CreateSampleLabelingTask(
+            "11111111-1111-4111-8111-111111111111",
+            "Quality",
+            2U);
+    specforge::SampleLabelingSourceState valid_state;
+    valid_state.sample_count = 2U;
+    valid_state.active_task_id = valid_task.task_id;
+    valid_state.tasks.push_back(valid_task);
+    specforge::SampleLabelingStateCache valid_cache;
+    valid_cache.sources.emplace(
+        "invalid-patch-source",
+        std::move(valid_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            patch_path,
+            valid_cache),
+        "valid schema-4 cache seed should save");
+
+    valid_task.task_id = "quality";
+    specforge::SampleLabelingStateCachePatch patch;
+    specforge::SampleLabelingSourceStatePatch& source_patch =
+        patch.sources["invalid-patch-source"];
+    source_patch.task_tombstones.push_back(
+        "11111111-1111-4111-8111-111111111111");
+    source_patch.task_upserts.push_back(std::move(valid_task));
+    std::string patch_error;
+    Require(
+        !specforge::CommitSampleLabelingStateCachePatch(
+            patch_path,
+            patch,
+            &patch_error) &&
+            patch_error.find("UUID v4") != std::string::npos,
+        "schema-4 cache Patch should reject a task id the reader cannot restore");
+    const specforge::SampleLabelingStateCacheLoadResult restored =
+        specforge::LoadSampleLabelingStateCache(patch_path);
+    Require(
+        restored.warning.empty() &&
+            restored.cache.sources.at("invalid-patch-source")
+                    .tasks.front()
+                    .task_id ==
+                "11111111-1111-4111-8111-111111111111",
+        "a rejected non-UUID patch should leave the durable cache unchanged");
 }
 
 void TestSourceSessionStateCacheStoresPackageRelativePaths(
@@ -561,6 +636,8 @@ int main()
         TestPortableDefaultStateWriteCreatesDataFile(roots);
         TestUserPathDisplayTextUsesPackageRelativePortablePath(roots);
         TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
+            roots);
+        TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
             roots);
         TestSourceSessionStateCacheStoresPackageRelativePaths(roots);
         TestSourceSessionStateCacheRebasesLegacyMovedPortablePath(

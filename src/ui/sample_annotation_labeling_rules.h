@@ -33,14 +33,13 @@ struct SampleAnnotationLabelingActivationPlan {
     std::string task_name;
     SampleLabelSet label_set;
     std::vector<int> values;
+    SampleLabelingOrigin origin;
     bool metadata_clean = false;
 };
 
 [[nodiscard]] std::string DefaultedSampleLabelingTaskName(std::string task_name);
-[[nodiscard]] std::string TaskIdForNewSampleLabelingTask(
-    std::string_view task_name,
-    const std::vector<SampleLabelingTask>* active_source_tasks);
-[[nodiscard]] std::string SampleLabelingTaskNameForOutputPath(const std::filesystem::path& output_path);
+[[nodiscard]] bool CanPromoteSampleAnnotationToLabeling(
+    const SampleAnnotationResult& annotation);
 [[nodiscard]] const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
     const std::vector<SampleLabelingTask>* active_source_tasks,
     const SampleAnnotationResult& annotation);

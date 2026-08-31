@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
+$labelingTaskId = '77777777-7777-4777-8777-777777777777'
 
 function Assert-True {
     param(
@@ -1376,12 +1377,14 @@ try {
         -Destination $fixtureExecutable
     $buildRoot =
         Split-Path -Parent $resolvedExecutable
-    $runtimeDll = Join-Path $buildRoot 'zd.dll'
-    if (Test-Path -LiteralPath $runtimeDll -PathType Leaf) {
-        Copy-Item `
-            -LiteralPath $runtimeDll `
-            -Destination (
-                Join-Path $portableAppRoot 'zd.dll')
+    foreach ($runtimeFile in @('zd.dll', 'yaml-cppd.dll')) {
+        $runtimeDll = Join-Path $buildRoot $runtimeFile
+        if (Test-Path -LiteralPath $runtimeDll -PathType Leaf) {
+            Copy-Item `
+                -LiteralPath $runtimeDll `
+                -Destination (
+                    Join-Path $portableAppRoot $runtimeFile)
+        }
     }
     $runtimeConfig = Join-Path $buildRoot 'config'
     if (Test-Path -LiteralPath $runtimeConfig -PathType Container) {
@@ -3677,7 +3680,7 @@ try {
         $canceledPersisted.sources |
             ForEach-Object { $_.tasks } |
             Where-Object {
-                [string]$_.task_id -eq 'quality'
+                [string]$_.task_id -eq $labelingTaskId
             }
     )[0]
     Assert-True `
@@ -3754,7 +3757,7 @@ try {
         $sameActivationPersisted.sources |
             ForEach-Object { $_.tasks } |
             Where-Object {
-                [string]$_.task_id -eq 'quality'
+                [string]$_.task_id -eq $labelingTaskId
             }
     )[0]
     $sameGotoTerminalIndex =
@@ -3953,7 +3956,7 @@ try {
         $labelThenReplacePersisted.sources |
             ForEach-Object { $_.tasks } |
             Where-Object {
-                [string]$_.task_id -eq 'quality'
+                [string]$_.task_id -eq $labelingTaskId
             }
     )[0]
     Assert-True `

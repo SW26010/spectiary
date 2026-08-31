@@ -27,6 +27,11 @@
 
 namespace {
 
+constexpr char kLabelingTaskId[] =
+    "77777777-7777-4777-8777-777777777777";
+constexpr char kPersistentLabelingTaskId[] =
+    "88888888-8888-4888-8888-888888888888";
+
 void Require(bool condition, std::string_view message)
 {
     if (!condition) {
@@ -263,7 +268,7 @@ int WriteLabelingSeedFixture(
             *snapshot);
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(
-            "quality",
+            kLabelingTaskId,
             "Quality",
             context.identity.spectrum_count);
     if (!specforge::UpsertSampleLabel(
@@ -320,7 +325,7 @@ int WriteLabelingSeedFixture(
     source.context_fingerprint =
         context.identity.context_fingerprint;
     source.tasks.push_back(std::move(task));
-    source.active_task_id = "quality";
+    source.active_task_id = kLabelingTaskId;
 
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(
@@ -376,7 +381,7 @@ int ExerciseLabelingDeleteFixture(
     const std::string selected_task_id =
         task_id
         ? task_id->string()
-        : std::string("quality");
+        : std::string(kLabelingTaskId);
     const auto first_view = controller.View();
     if (first_view.active_task == nullptr ||
         first_view.active_task->task_id != selected_task_id) {
@@ -463,7 +468,7 @@ int VerifyLabelOutputFixture(
     const std::string expected_task_id =
         task_id_text
         ? std::filesystem::path(*task_id_text).string()
-        : std::string("quality");
+        : std::string(kLabelingTaskId);
     const specforge::SampleLabelResultMetadata& metadata =
         *loaded->metadata;
     if (metadata.task_id != expected_task_id ||
@@ -639,7 +644,7 @@ int wmain(int argc, wchar_t** argv)
         persistent_task =
             specforge::
                 CreateSampleLabelingTask(
-                    "persistent",
+                    kPersistentLabelingTaskId,
                     "Persistent",
                     2U);
     persistent_task.output_path =
@@ -652,7 +657,7 @@ int wmain(int argc, wchar_t** argv)
     persistent_source.tasks.push_back(
         std::move(persistent_task));
     persistent_source.active_task_id =
-        "persistent";
+        kPersistentLabelingTaskId;
     specforge::SampleLabelingStateCache
         persistent_cache;
     persistent_cache.sources.emplace(

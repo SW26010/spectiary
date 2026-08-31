@@ -867,6 +867,18 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     std::filesystem::remove(floating_path, cleanup_error);
 }
 
+specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+{
+    const auto timestamp =
+        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+    Require(timestamp.has_value(), "test canonical timestamp should parse");
+    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    metadata.created_at = *timestamp;
+    metadata.modified_at = *timestamp;
+    metadata.origin.kind = "manual";
+    return metadata;
+}
+
 void TestPreservesNonCanonicalNpySampleNamesForNavigation()
 {
     const auto verify_preserved = [](
@@ -955,10 +967,10 @@ specforge::SampleLabelingDocument MakeAnnotationAsdfDocument()
         "sample-b",
         "sample-c",
     };
-    document.annotation.name = "quality-code";
     document.annotation.values = {-1, 2, 7};
-    document.labeling.id = "quality-task-id";
+    document.labeling.id = "11111111-1111-4111-8111-111111111111";
     document.labeling.name = "Quality review";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {
         {2, "accepted", "a"},
         {7, "rejected", "r"},
@@ -1037,7 +1049,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
     Require(
         loaded->labeling_document != nullptr &&
             loaded->labeling_document->labeling.id ==
-                "quality-task-id" &&
+                "11111111-1111-4111-8111-111111111111" &&
             loaded->labeling_document->labeling.name ==
                 "Quality review" &&
             loaded->labeling_document->labeling.labels.size() == 2 &&
@@ -1045,12 +1057,12 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
                 "rejected" &&
             loaded->labeling_document->labeling.labels[1].shortcut ==
                 "r" &&
-            loaded->labeling_document->annotation.name == "quality-code" &&
+            loaded->name == "Quality review" &&
             loaded->labeling_document->source.base_identity ==
                 "source-base-v1" &&
             loaded->labeling_document->source.roster.sample_names ==
                 sample_names,
-        "ASDF canonical task, labels, source, roster, and annotation identity should remain available");
+        "ASDF canonical task, labels, source, roster, and labeling display name should remain available");
     Require(
         specforge::FormatSampleAnnotationValue(
             *loaded,

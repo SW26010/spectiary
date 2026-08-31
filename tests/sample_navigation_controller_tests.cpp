@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -451,6 +452,18 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
     Require(context != nullptr && context->annotations.empty(), "removed annotation should leave active context");
 }
 
+specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+{
+    const auto timestamp =
+        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+    Require(timestamp.has_value(), "test canonical timestamp should parse");
+    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    metadata.created_at = *timestamp;
+    metadata.modified_at = *timestamp;
+    metadata.origin.kind = "manual";
+    return metadata;
+}
+
 void TestControllerAttachesAsdfLabelingDocumentForActiveSource()
 {
     const std::filesystem::path source_path =
@@ -486,10 +499,10 @@ void TestControllerAttachesAsdfLabelingDocumentForActiveSource()
     document.source.sample_count = identity->spectrum_count;
     document.source.roster.identity_kind =
         std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
-    document.annotation.name = "review-code";
     document.annotation.values = {-1, 4, 4};
-    document.labeling.id = "review-task";
+    document.labeling.id = "22222222-2222-4222-8222-222222222222";
     document.labeling.name = "Review task";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {{4, "reviewed", "r"}};
     {
         std::ofstream stream(
@@ -522,8 +535,9 @@ void TestControllerAttachesAsdfLabelingDocumentForActiveSource()
         context->annotations.front();
     Require(
         annotation.labeling_document != nullptr &&
-            annotation.labeling_document->labeling.id == "review-task" &&
-            annotation.labeling_document->annotation.name == "review-code" &&
+            annotation.labeling_document->labeling.id ==
+                "22222222-2222-4222-8222-222222222222" &&
+            annotation.name == "Review task" &&
             annotation.labeling_document->labeling.labels.front().name ==
                 "reviewed" &&
             !annotation.label_metadata.has_value(),
@@ -892,7 +906,7 @@ void TestInvalidDisplayNamesExportAndAttachByCanonicalIndex()
             specforge::FormatSampleAnnotationValue(
                 context->annotations.front(),
                 context->annotations.front().values[0]) ==
-                "unlabeled" &&
+                "Unlabeled" &&
             specforge::FormatSampleAnnotationValue(
                 context->annotations.front(),
                 context->annotations.front().values[1]) ==
@@ -2185,6 +2199,7 @@ void TestExactNameResolutionIsDeterministic()
 
 int main()
 {
+    try {
     TestNavigationStateCacheRoundTrip();
     TestNavigationStateCacheIgnoresCorruptJson();
     TestNavigationStateCacheIgnoresUnsupportedSchema();
@@ -2216,5 +2231,10 @@ int main()
     TestSequenceTopologyRevisionExcludesCursorMovement();
     TestAdjacentRowsFollowFilteredSortedRawSequence();
     TestExactNameResolutionIsDeterministic();
+    } catch (const std::exception& error) {
+        std::cerr << "sample navigation controller test failure: "
+                  << error.what() << '\n';
+        return 1;
+    }
     return 0;
 }

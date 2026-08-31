@@ -143,6 +143,29 @@ specforge::JsonValue SemanticSummary(
         values.array.push_back(specforge::JsonIntegerValue(value));
     }
 
+    specforge::JsonValue origin_annotation = specforge::JsonNullValue();
+    if (document.labeling.canonical_metadata.origin.annotation) {
+        const specforge::SampleLabelingAnnotationOrigin& annotation =
+            *document.labeling.canonical_metadata.origin.annotation;
+        origin_annotation = specforge::JsonObjectValue({
+            {"name", specforge::JsonStringValue(annotation.name)},
+            {"format", specforge::JsonStringValue(annotation.format)},
+            {"fingerprint", annotation.fingerprint
+                 ? specforge::JsonStringValue(*annotation.fingerprint)
+                 : specforge::JsonNullValue()},
+        });
+    }
+    specforge::JsonValue authors = specforge::JsonArrayValue();
+    for (const specforge::SampleLabelingAuthor& author :
+        document.labeling.canonical_metadata.authors) {
+        authors.array.push_back(specforge::JsonObjectValue({
+            {"name", specforge::JsonStringValue(author.name)},
+            {"identifier", author.identifier
+                 ? specforge::JsonStringValue(*author.identifier)
+                 : specforge::JsonNullValue()},
+        }));
+    }
+
     return specforge::JsonObjectValue({
         {"format_kind", specforge::JsonStringValue(document.format_kind)},
         {"schema_version", specforge::JsonStringValue(document.schema_version)},
@@ -156,13 +179,26 @@ specforge::JsonValue SemanticSummary(
              document.source.roster.identity_kind)},
         {"sample_names", std::move(sample_names)},
         {"annotation_kind", specforge::JsonStringValue(document.annotation.kind)},
-        {"annotation_name", specforge::JsonStringValue(document.annotation.name)},
         {"missing_semantic", specforge::JsonStringValue(
              document.annotation.missing.semantic)},
         {"missing_value", specforge::JsonIntegerValue(
              document.annotation.missing.value)},
         {"task_id", specforge::JsonStringValue(document.labeling.id)},
         {"task_name", specforge::JsonStringValue(document.labeling.name)},
+        {"created_at", specforge::JsonStringValue(
+             specforge::FormatCanonicalTimestamp(
+                 document.labeling.canonical_metadata.created_at))},
+        {"modified_at", specforge::JsonStringValue(
+             specforge::FormatCanonicalTimestamp(
+                 document.labeling.canonical_metadata.modified_at))},
+        {"origin_kind", specforge::JsonStringValue(
+             document.labeling.canonical_metadata.origin.kind)},
+        {"origin_annotation", std::move(origin_annotation)},
+        {"description", document.labeling.canonical_metadata.description
+             ? specforge::JsonStringValue(
+                   *document.labeling.canonical_metadata.description)
+             : specforge::JsonNullValue()},
+        {"authors", std::move(authors)},
         {"labels", std::move(labels)},
         {"values", std::move(values)},
         {"values_dtype", specforge::JsonStringValue("int32")},
@@ -398,10 +434,16 @@ specforge::SampleLabelingDocument ProductionDocument(bool explicit_roster = true
         document.source.roster.sample_names =
             {"alpha.fits", "星系-β.fits", "échelle-γ.fits"};
     }
-    document.annotation.name = "天体分类";
     document.annotation.values = {-1, 0, 1};
-    document.labeling.id = "task-alpha";
+    document.labeling.id =
+        "00000000-0000-4000-8000-000000000001";
     document.labeling.name = "天体分类";
+    const auto timestamp = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:00.000Z");
+    Require(timestamp.has_value(), "production timestamp fixture should parse");
+    document.labeling.canonical_metadata.created_at = *timestamp;
+    document.labeling.canonical_metadata.modified_at = *timestamp;
+    document.labeling.canonical_metadata.origin.kind = "manual";
     document.labeling.labels = {
         {0, "Galaxy", "g"},
         {1, "Quasar", "q"}};
@@ -476,7 +518,7 @@ void WriteYamlAliasAmplificationFixture(
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
              << "format_kind: \"specforge.sample_labeling\"\n"
-             << "schema_version: \"1.0.0\"\n"
+             << "schema_version: \"2.0.0\"\n"
              << "source_collection:\n"
              << "  identity: \"source:yaml-alias-budget\"\n"
              << "  source_kind: \"npy\"\n"
@@ -487,7 +529,6 @@ void WriteYamlAliasAmplificationFixture(
              << "  identity_kind: \"source_index\"\n"
              << "annotation:\n"
              << "  kind: \"categorical_integer\"\n"
-             << "  name: \"Alias budget\"\n"
              << "  values: !core/ndarray-1.0.0\n"
              << "    source: 0\n"
              << "    datatype: int32\n"
@@ -497,8 +538,12 @@ void WriteYamlAliasAmplificationFixture(
              << "    semantic: \"unlabeled\"\n"
              << "    value: -1\n"
              << "labeling_task:\n"
-             << "  id: \"yaml-alias-budget\"\n"
+             << "  id: \"00000000-0000-4000-8000-000000000004\"\n"
              << "  name: \"Alias budget\"\n"
+             << "  created_at: \"2026-08-30T08:00:00.000Z\"\n"
+             << "  modified_at: \"2026-08-30T08:00:00.000Z\"\n"
+             << "  origin: {kind: \"manual\"}\n"
+             << "  authors: []\n"
              << "  labels:\n";
     for (std::size_t index = 0; index < label_count; ++index) {
         metadata << "  - code: " << index << "\n"
@@ -722,23 +767,121 @@ void TestReadsApprovedPythonFixtures()
     Require(approved_count > 0, "manifest should select approved native fixtures");
 }
 
-void TestRejectsSemanticViolationsWithControlledErrors()
+void TestRejectsManifestSemanticViolationsWithControlledErrors()
 {
-    constexpr std::array fixtures{
-        "invalid_count.asdf",
-        "invalid_duplicate_label.asdf",
-        "invalid_sentinel_collision.asdf",
-        "invalid_undefined_value.asdf"};
-    for (const std::string_view fixture : fixtures) {
+    const specforge::JsonValue manifest =
+        ReadJsonFile(FixturePath("manifest.json"));
+    const specforge::JsonValue* fixtures =
+        specforge::JsonObjectMember(manifest, "fixtures");
+    Require(
+        fixtures != nullptr &&
+            fixtures->kind == specforge::JsonValue::Kind::Array,
+        "fixture manifest should contain fixture records");
+
+    std::size_t semantic_invalid_count = 0;
+    for (const specforge::JsonValue& fixture : fixtures->array) {
+        const specforge::JsonValue* structurally_valid_member =
+            specforge::JsonObjectMember(fixture, "structurally_valid");
+        const specforge::JsonValue* semantically_valid_member =
+            specforge::JsonObjectMember(fixture, "semantically_valid");
+        Require(
+            structurally_valid_member != nullptr &&
+                structurally_valid_member->kind ==
+                    specforge::JsonValue::Kind::Bool &&
+                semantically_valid_member != nullptr &&
+                semantically_valid_member->kind ==
+                    specforge::JsonValue::Kind::Bool,
+            "every fixture must explicitly classify structural and semantic validity");
+        const bool structurally_valid =
+            structurally_valid_member->bool_value;
+        const bool semantically_valid =
+            semantically_valid_member->bool_value;
+        if (!structurally_valid) {
+            Require(
+                !semantically_valid,
+                "structural-invalid fixture must not claim semantic validity");
+            continue;
+        }
+        if (semantically_valid) {
+            continue;
+        }
+
+        const std::optional<std::string> path =
+            specforge::ReadJsonStringMember(fixture, "path");
+        const std::optional<std::string> expected_error =
+            specforge::ReadJsonStringMember(fixture, "expected_error");
+        Require(
+            path.has_value() && !path->empty() &&
+                expected_error.has_value() && !expected_error->empty(),
+            "semantic-invalid fixture should name its ASDF and expected error");
+
         const specforge::SampleLabelingAsdfReadResult result =
-            specforge::ReadSampleLabelingAsdfDocument(FixturePath(fixture));
-        Require(!result.succeeded(), "semantic-invalid fixture should be rejected");
+            specforge::ReadSampleLabelingAsdfDocument(FixturePath(*path));
+        Require(
+            !result.succeeded(),
+            std::string("semantic-invalid fixture should be rejected: ") +
+                *path);
         Require(
             result.error.kind ==
                 specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-            "semantic-invalid fixture should return a typed semantic error");
-        Require(!result.error.message.empty(), "semantic error should carry a diagnostic");
+            std::string(
+                "semantic-invalid fixture should return a typed semantic error: ") +
+                *path);
+        Require(
+            !result.error.message.empty(),
+            std::string("semantic error should carry a diagnostic: ") +
+                *path);
+        ++semantic_invalid_count;
     }
+    Require(
+        semantic_invalid_count > 0,
+        "manifest should contain semantic-invalid production reader fixtures");
+}
+
+void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
+{
+    const std::filesystem::path legacy_schema_path =
+        TempPath("_legacy_schema.asdf");
+    Require(
+        WriteDocument(legacy_schema_path, ProductionDocument()).succeeded(),
+        "legacy-schema fixture should start from a valid schema 2 document");
+    std::vector<unsigned char> bytes = ReadAllBytes(legacy_schema_path);
+    ReplaceTextOnce(
+        bytes,
+        "schema_version: \"2.0.0\"",
+        "schema_version: \"1.0.0\"");
+    WriteAllBytes(legacy_schema_path, bytes);
+    const specforge::SampleLabelingAsdfReadResult legacy_schema =
+        specforge::ReadSampleLabelingAsdfDocument(legacy_schema_path);
+    Require(
+        !legacy_schema.succeeded() &&
+            legacy_schema.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+        "schema 1.0 documents must be rejected after the schema 2 cutover");
+
+    const std::filesystem::path reserved_name_path =
+        TempPath("_reserved_annotation_name.asdf");
+    Require(
+        WriteDocument(reserved_name_path, ProductionDocument()).succeeded(),
+        "reserved-name fixture should start from a valid schema 2 document");
+    bytes = ReadAllBytes(reserved_name_path);
+    ReplaceTextOnce(
+        bytes,
+        "\nannotation:\n  kind: ",
+        "\nannotation:\n  name: \"legacy annotation\"\n  kind: ");
+    WriteAllBytes(reserved_name_path, bytes);
+    const specforge::SampleLabelingAsdfReadResult reserved_name =
+        specforge::ReadSampleLabelingAsdfDocument(reserved_name_path);
+    Require(
+        !reserved_name.succeeded() &&
+            reserved_name.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed,
+        "annotation.name must be rejected as a reserved schema 2 path");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(legacy_schema_path, cleanup_error);
+    std::filesystem::remove(reserved_name_path, cleanup_error);
 }
 
 void TestRejectsMalformedCorruptAndUnsupportedInputs()
@@ -1340,6 +1483,72 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
     std::filesystem::remove(path, cleanup_error);
 }
 
+void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
+{
+    const std::filesystem::path absent_path =
+        TempPath("_authors_absent.asdf");
+    Require(
+        WriteDocument(absent_path, ProductionDocument()).succeeded(),
+        "absent-authors input should be written");
+
+    std::vector<unsigned char> absent_bytes = ReadAllBytes(absent_path);
+    const std::string_view absent_text(
+        reinterpret_cast<const char*>(absent_bytes.data()),
+        absent_bytes.size());
+    const std::string_view empty_authors = "\n  authors: []";
+    const std::size_t authors_position = absent_text.find(empty_authors);
+    if (authors_position != std::string_view::npos) {
+        absent_bytes.erase(
+            absent_bytes.begin() +
+                static_cast<std::ptrdiff_t>(authors_position),
+            absent_bytes.begin() + static_cast<std::ptrdiff_t>(
+                authors_position + empty_authors.size()));
+        WriteAllBytes(absent_path, absent_bytes);
+    }
+    const specforge::SampleLabelingAsdfReadResult absent_read =
+        specforge::ReadSampleLabelingAsdfDocument(absent_path);
+    Require(
+        absent_read.succeeded() &&
+            absent_read.document->labeling.canonical_metadata.authors.empty(),
+        "schema 2 reader should accept an absent optional authors field");
+
+    const std::filesystem::path fresh_path =
+        TempPath("_authors_fresh.asdf");
+    Require(
+        WriteDocument(fresh_path, ProductionDocument()).succeeded(),
+        "fresh document without authors should be written");
+    const std::vector<unsigned char> fresh_bytes = ReadAllBytes(fresh_path);
+    const RawAsdf fresh_raw = ParseRawAsdf(fresh_bytes);
+    const std::string_view fresh_metadata(
+        reinterpret_cast<const char*>(fresh_bytes.data()), fresh_raw.tree_end);
+    Require(
+        fresh_metadata.find("\n  authors:") == std::string_view::npos,
+        "fresh writer should omit an unset authors field completely");
+
+    specforge::SampleLabelingDocument authored = ProductionDocument();
+    authored.labeling.canonical_metadata.authors = {
+        {.name = "SpecForge maintainer",
+            .identifier = "https://example.invalid/maintainer"},
+        {.name = "验证者", .identifier = std::nullopt}};
+    const std::filesystem::path authored_path =
+        TempPath("_authors_present.asdf");
+    Require(
+        WriteDocument(authored_path, authored).succeeded(),
+        "document with authors should be written");
+    const specforge::SampleLabelingAsdfReadResult authored_read =
+        specforge::ReadSampleLabelingAsdfDocument(authored_path);
+    Require(
+        authored_read.succeeded() &&
+            authored_read.document->labeling.canonical_metadata.authors ==
+                authored.labeling.canonical_metadata.authors,
+        "non-empty authors should round-trip without loss");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(absent_path, cleanup_error);
+    std::filesystem::remove(fresh_path, cleanup_error);
+    std::filesystem::remove(authored_path, cleanup_error);
+}
+
 void TestWriterEmitsSourceIndexProductionProfileAndRoundTrips()
 {
     const std::filesystem::path path = TempPath("_source_index_profile.asdf");
@@ -1398,13 +1607,18 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
     Require(
         validated.durable_base && validated.durable_base->valid(),
         "validated production input should expose a durable rewrite base");
+    const auto advanced_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:01.000Z");
+    Require(advanced_modified_at.has_value(),
+        "advanced modified timestamp fixture should parse");
     std::ostringstream rejected_output(std::ios::binary);
     const std::array<std::int32_t, 3> invalid_replacement{42, 0, 1};
     const specforge::SampleLabelingAsdfWriteResult rejected =
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             rejected_output,
-            invalid_replacement);
+            invalid_replacement,
+            *advanced_modified_at);
     Require(
         !rejected.succeeded() &&
             rejected.error.kind ==
@@ -1423,7 +1637,8 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
-            replacement);
+            replacement,
+            *advanced_modified_at);
     output.close();
     Require(rewrite.succeeded(), "label-only block-reuse write should succeed");
     Require(
@@ -1440,20 +1655,14 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
                 before.begin() + static_cast<std::ptrdiff_t>(before_raw.blocks[0].offset + before_raw.blocks[0].size),
                 after.begin() + static_cast<std::ptrdiff_t>(after_raw.blocks[0].offset)),
         "encoded roster block must be copied byte-for-byte");
-    Require(
-        before_raw.blocks[1].offset == after_raw.blocks[1].offset &&
-            std::equal(
-                before.begin(),
-                before.begin() + static_cast<std::ptrdiff_t>(before_raw.blocks[1].offset),
-                after.begin()),
-        "metadata and roster prefix must remain byte-for-byte unchanged");
-
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(output_path);
     Require(read.succeeded(), "rewritten production document should read");
     specforge::SampleLabelingDocument expected = ProductionDocument();
     expected.annotation.values.assign(
         replacement.begin(), replacement.end());
+    expected.labeling.canonical_metadata.modified_at =
+        *advanced_modified_at;
     Require(
         JsonEquals(
             SemanticSummary(*read.document), SemanticSummary(expected)),
@@ -1475,6 +1684,10 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     Require(
         validated.succeeded() && validated.durable_base,
         "source-index input should expose a durable rewrite base");
+    const auto advanced_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:01.000Z");
+    Require(advanced_modified_at.has_value(),
+        "source-index modified timestamp fixture should parse");
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     const std::array<std::int32_t, 3> replacement{-1, 1, 1};
@@ -1482,7 +1695,8 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
         specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
-            replacement);
+            replacement,
+            *advanced_modified_at);
     output.close();
     Require(rewrite.succeeded(), "source-index label rewrite should succeed");
     Require(
@@ -1496,6 +1710,8 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     specforge::SampleLabelingDocument expected = ProductionDocument(false);
     expected.annotation.values.assign(
         replacement.begin(), replacement.end());
+    expected.labeling.canonical_metadata.modified_at =
+        *advanced_modified_at;
     Require(
         read.succeeded() &&
             JsonEquals(
@@ -1507,13 +1723,121 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     std::filesystem::remove(output_path, cleanup_error);
 }
 
+void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
+{
+    const std::filesystem::path input_path =
+        TempPath("_promotion_values_metadata_input.asdf");
+    const std::filesystem::path values_path =
+        TempPath("_promotion_values_metadata_values.asdf");
+    const std::filesystem::path metadata_path =
+        TempPath("_promotion_values_metadata_output.asdf");
+
+    specforge::SampleLabelingDocument promoted = ProductionDocument();
+    promoted.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    promoted.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "labels.csv",
+            .format = "csv",
+            .fingerprint = "sha256:" + std::string(64, 'a')};
+    Require(
+        WriteDocument(input_path, promoted).succeeded(),
+        "promotion chain input should be written");
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(
+        opened.succeeded() && opened.durable_base,
+        "promotion chain input should expose a durable base");
+
+    const auto values_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:01.000Z");
+    Require(values_modified_at.has_value(),
+        "promotion values timestamp should parse");
+    const std::array<std::int32_t, 3> replacement_values{1, 0, 1};
+    std::ofstream values_output(
+        values_path, std::ios::binary | std::ios::trunc);
+    Require(values_output.good(),
+        "promotion values output should open");
+    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *opened.durable_base,
+            values_output,
+            replacement_values,
+            *values_modified_at);
+    values_output.close();
+    Require(
+        values_rewrite.succeeded() && values_rewrite.durable_base,
+        values_rewrite.error.message.empty()
+            ? "promotion values rewrite should return a refreshed durable base"
+            : values_rewrite.error.message);
+
+    const specforge::SampleLabelingAsdfReadResult values_generation =
+        specforge::ReadSampleLabelingAsdfDocument(values_path);
+    Require(
+        values_generation.succeeded() &&
+            values_generation.document->labeling.canonical_metadata.origin ==
+                promoted.labeling.canonical_metadata.origin &&
+            values_generation.document->annotation.values ==
+                std::vector<std::int32_t>(
+                    replacement_values.begin(), replacement_values.end()),
+        "values rewrite should preserve promotion provenance in the written generation");
+
+    specforge::SampleLabelingDocument metadata_edited =
+        *values_generation.document;
+    metadata_edited.labeling.name = "Renamed promoted task";
+    metadata_edited.labeling.labels[0].name = "Renamed Galaxy";
+    metadata_edited.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:02.000Z");
+    std::ofstream metadata_output(
+        metadata_path, std::ios::binary | std::ios::trunc);
+    Require(metadata_output.good(),
+        "promotion metadata output should open");
+    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *values_rewrite.durable_base,
+            metadata_output,
+            metadata_edited);
+    metadata_output.close();
+    Require(
+        metadata_rewrite.succeeded(),
+        metadata_rewrite.error.message.empty()
+            ? "metadata rewrite after promotion values rewrite should succeed"
+            : metadata_rewrite.error.message);
+
+    const specforge::SampleLabelingAsdfReadResult reopened =
+        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    Require(
+        reopened.succeeded() &&
+            JsonEquals(
+                SemanticSummary(*reopened.document),
+                SemanticSummary(metadata_edited)),
+        "promotion provenance and edited metadata should survive the chained rewrite");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(input_path, cleanup_error);
+    std::filesystem::remove(values_path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+}
+
 void TestMetadataRewritePreservesForwardUnknownFields()
 {
     const std::filesystem::path input_path =
         TempPath("_forward_metadata_input.asdf");
     const std::filesystem::path output_path =
         TempPath("_forward_metadata_output.asdf");
-    const specforge::SampleLabelingDocument original = ProductionDocument();
+    specforge::SampleLabelingDocument original = ProductionDocument();
+    original.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    original.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "labels.csv",
+            .format = "csv",
+             .fingerprint =
+                 "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"};
+    original.labeling.canonical_metadata.authors = {
+        {.name = "Original author", .identifier = std::nullopt}};
     Require(
         WriteDocument(input_path, original).succeeded(),
         "forward-metadata input should be written");
@@ -1533,6 +1857,9 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         "\n  names: !core/ndarray-1.0.0",
         "\n  future_roster: \"roster-survives\"\n  names: !core/ndarray-1.0.0");
     ReplaceTextOnce(bytes,
+        "\nannotation:\n  kind: ",
+        "\nannotation:\n  future_annotation: \"annotation-survives\"\n  kind: ");
+    ReplaceTextOnce(bytes,
         "    shape: [3]\n  missing:",
         "    shape: [3]\n    future_values: \"values-survive\"\n  missing:");
     ReplaceTextOnce(bytes,
@@ -1541,6 +1868,12 @@ void TestMetadataRewritePreservesForwardUnknownFields()
     ReplaceTextOnce(bytes,
         "\n  labels:\n",
         "\n  future_task: \"task-survives\"\n  labels:\n");
+    ReplaceTextOnce(bytes,
+        "\n  origin:\n    kind: ",
+        "\n  origin:\n    future_origin: \"origin-survives\"\n    kind: ");
+    ReplaceTextOnce(bytes,
+        "\n      format: \"csv\"\n",
+        "\n      format: \"csv\"\n      future_origin_annotation: \"origin-annotation-survives\"\n");
     ReplaceTextOnce(bytes,
         "    shortcut: \"g\"\n",
         "    shortcut: \"g\"\n    future_label: \"label-survives\"\n");
@@ -1552,11 +1885,14 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         opened.succeeded() && opened.durable_base,
         "forward-metadata input should expose a durable base");
     specforge::SampleLabelingDocument edited = *opened.document;
-    edited.annotation.name = "Edited annotation";
     edited.annotation.values = {1, 1, 0};
     edited.labeling.name = "Edited task";
+    edited.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:01.000Z");
     edited.labeling.labels[0].name = "Edited Galaxy";
     edited.labeling.labels[0].shortcut = "1";
+    edited.labeling.canonical_metadata.authors.clear();
 
     specforge::SampleLabelingDocument unrelated = edited;
     unrelated.labeling.id = "another-task";
@@ -1596,9 +1932,12 @@ void TestMetadataRewritePreservesForwardUnknownFields()
     for (const std::string_view token : {
              "source-survives",
              "roster-survives",
+             "annotation-survives",
              "values-survive",
              "missing-survives",
              "task-survives",
+             "origin-survives",
+             "origin-annotation-survives",
              "label-survives",
          }) {
         Require(
@@ -1613,6 +1952,9 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         rewritten.find("real_boolean: true") != std::string::npos &&
             rewritten.find("real_integer: 1") != std::string::npos,
         "metadata rewrite must not stringify genuine unknown booleans or integers");
+    Require(
+        rewritten.find("authors:") == std::string::npos,
+        "metadata rewrite should remove authors when the canonical list is empty");
 
     const specforge::SampleLabelingAsdfReadResult reopened =
         specforge::ReadSampleLabelingAsdfDocument(output_path);
@@ -1626,6 +1968,208 @@ void TestMetadataRewritePreservesForwardUnknownFields()
     std::error_code cleanup_error;
     std::filesystem::remove(input_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
+}
+
+void TestMetadataRewriteEnforcesImmutableCanonicalProvenance()
+{
+    const std::filesystem::path input_path =
+        TempPath("_immutable_metadata_input.asdf");
+    specforge::SampleLabelingDocument original = ProductionDocument();
+    original.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:10.000Z");
+    Require(
+        WriteDocument(input_path, original).succeeded(),
+        "immutable-metadata input should be written");
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(
+        opened.succeeded() && opened.durable_base,
+        "immutable-metadata input should expose a durable base");
+
+    const auto RequireRejectedBeforeOutput =
+        [&](const specforge::SampleLabelingDocument& edited,
+            std::string_view expectation) {
+            std::ostringstream output(std::ios::binary);
+            const specforge::SampleLabelingAsdfWriteResult rewrite =
+                specforge::
+                    RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+                        *opened.durable_base,
+                        output,
+                        edited);
+            Require(
+                !rewrite.succeeded() &&
+                    rewrite.error.kind ==
+                        specforge::SampleLabelingAsdfErrorKind::
+                            SemanticValidationFailed &&
+                    output.str().empty(),
+                expectation);
+        };
+
+    specforge::SampleLabelingDocument changed_created_at = original;
+    changed_created_at.labeling.canonical_metadata.created_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:01.000Z");
+    RequireRejectedBeforeOutput(
+        changed_created_at,
+        "metadata rewrite must not replace the durable created_at");
+
+    specforge::SampleLabelingDocument changed_origin = original;
+    changed_origin.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    changed_origin.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "labels.csv",
+            .format = "csv",
+            .fingerprint = "sha256:" + std::string(64, 'a')};
+    RequireRejectedBeforeOutput(
+        changed_origin,
+        "metadata rewrite must not replace the durable origin provenance");
+
+    specforge::SampleLabelingDocument regressed_modified_at = original;
+    regressed_modified_at.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:09.000Z");
+    RequireRejectedBeforeOutput(
+        regressed_modified_at,
+        "metadata rewrite modified_at must be monotonic across generations");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(input_path, cleanup_error);
+}
+
+void TestWriterOriginPolicyPreservesReaderForwardCompatibility()
+{
+    specforge::SampleLabelingDocument future = ProductionDocument();
+    future.labeling.canonical_metadata.origin.kind = "future";
+    std::ostringstream fresh_output(std::ios::binary);
+    const specforge::SampleLabelingAsdfWriteResult fresh_write =
+        specforge::WriteSampleLabelingAsdfDocument(fresh_output, future);
+    Require(
+        !fresh_write.succeeded() &&
+            fresh_write.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed &&
+            fresh_output.str().empty(),
+        "the current fresh writer must reject a reader-only future origin kind before output");
+
+    const std::filesystem::path input_path =
+        TempPath("_future_origin_input.asdf");
+    const std::filesystem::path output_path =
+        TempPath("_future_origin_output.asdf");
+    Require(
+        WriteDocument(input_path, ProductionDocument()).succeeded(),
+        "future-origin compatibility input should be written");
+    std::vector<unsigned char> bytes = ReadAllBytes(input_path);
+    ReplaceTextOnce(bytes, "kind: \"manual\"", "kind: \"future\"");
+    WriteAllBytes(input_path, bytes);
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(
+        opened.succeeded() && opened.durable_base &&
+            opened.document->labeling.canonical_metadata.origin.kind ==
+                "future",
+        "the reader should continue accepting valid lowercase future origin tokens");
+
+    specforge::SampleLabelingDocument edited = *opened.document;
+    edited.labeling.name = "Forward-preserved future origin";
+    edited.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:01.000Z");
+    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+    Require(output.good(), "future-origin rewrite output should open");
+    const specforge::SampleLabelingAsdfWriteResult rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *opened.durable_base,
+            output,
+            edited);
+    output.close();
+    Require(
+        rewrite.succeeded(),
+        rewrite.error.message.empty()
+            ? "an unchanged future origin should survive a forward-compatible rewrite"
+            : rewrite.error.message);
+
+    const specforge::SampleLabelingAsdfReadResult reopened =
+        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    Require(
+        reopened.succeeded() &&
+            reopened.document->labeling.canonical_metadata.origin.kind ==
+                "future" &&
+            reopened.document->labeling.name == edited.labeling.name,
+        "forward-compatible rewrite should preserve the unknown origin generation");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(input_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+}
+
+void TestCodecRequiresPortableAnnotationOriginName()
+{
+    specforge::SampleLabelingDocument promoted = ProductionDocument();
+    promoted.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    promoted.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "初始标签.csv",
+            .format = "csv",
+            .fingerprint = "sha256:" + std::string(64, 'b')};
+    std::ostringstream portable_output(std::ios::binary);
+    Require(
+        specforge::WriteSampleLabelingAsdfDocument(
+            portable_output, promoted).succeeded(),
+        "a Unicode basename should remain valid portable annotation provenance");
+
+    for (const std::string_view nonportable_name : {
+             "folder/labels.csv",
+             "folder\\labels.csv",
+             "/tmp/labels.csv",
+             "C:\\secret\\labels.csv",
+             "\\\\server\\share\\labels.csv",
+             "C:labels.csv",
+         }) {
+        specforge::SampleLabelingDocument nonportable = promoted;
+        nonportable.labeling.canonical_metadata.origin.annotation->name =
+            nonportable_name;
+        std::ostringstream rejected_output(std::ios::binary);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                rejected_output, nonportable);
+        Require(
+            !write.succeeded() &&
+                write.error.kind ==
+                    specforge::SampleLabelingAsdfErrorKind::
+                        SemanticValidationFailed &&
+                rejected_output.str().empty(),
+            "fresh writer must reject rooted or directory-bearing annotation provenance names before output");
+    }
+
+    const std::filesystem::path absolute_origin_path =
+        TempPath("_absolute_annotation_origin.asdf");
+    promoted.labeling.canonical_metadata.origin.annotation->name =
+        "safe-labels.csv";
+    Require(
+        WriteDocument(absolute_origin_path, promoted).succeeded(),
+        "portable annotation-origin reader fixture should be written");
+    std::vector<unsigned char> bytes = ReadAllBytes(absolute_origin_path);
+    ReplaceTextOnce(bytes,
+        "name: \"safe-labels.csv\"",
+        "name: \"/tmp/labels.csv\"");
+    WriteAllBytes(absolute_origin_path, bytes);
+
+    const specforge::SampleLabelingAsdfReadResult absolute_origin =
+        specforge::ReadSampleLabelingAsdfDocument(absolute_origin_path);
+    Require(
+        !absolute_origin.succeeded() && !absolute_origin.durable_base &&
+            absolute_origin.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed,
+        "production reader must reject an absolute local annotation provenance path");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(absolute_origin_path, cleanup_error);
 }
 
 void TestRewriteRejectsUnverifiedRosterBlocks()
@@ -1798,7 +2342,9 @@ void TestCanonicalReaderRequiresExplicitSourceIdentity()
 
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(path);
-    Require(!read.succeeded(), "canonical v1 must require source identity");
+    Require(
+        !read.succeeded(),
+        "SpecForge sample-labeling schema 2.0.0 must require source identity");
     Require(
         read.error.kind ==
             specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
@@ -1825,6 +2371,24 @@ void TestWriterRejectsUnreadableLabelCount()
         write.error.kind ==
             specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer and reader should share the label-count resource limit");
+}
+
+void TestWriterRejectsUnreadableAuthorCountBeforeOutput()
+{
+    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    document.labeling.canonical_metadata.authors.assign(
+        10'001, {.name = "Author", .identifier = std::nullopt});
+    std::ostringstream output(std::ios::binary);
+    const specforge::SampleLabelingAsdfWriteResult write =
+        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    Require(!write.succeeded(), "writer must reject an unreadable author count");
+    Require(
+        write.error.kind ==
+            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+        "writer and reader should share the author-count resource limit");
+    Require(
+        output.str().empty(),
+        "author-count preflight must fail before writer output begins");
 }
 
 void TestMetadataReadIsBounded()
@@ -1933,7 +2497,8 @@ int main(int argc, char* argv[])
                 specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
-                    replacement);
+                    replacement,
+                    read.document->labeling.canonical_metadata.modified_at);
             output.close();
             if (!rewrite.succeeded() || !rewrite.roster_block_reused) {
                 std::cerr << "production explicit-roster oracle rewrite failed: "
@@ -1952,7 +2517,6 @@ int main(int argc, char* argv[])
                 return 1;
             }
             specforge::SampleLabelingDocument edited = *read.document;
-            edited.annotation.name = "Forward metadata edited";
             edited.labeling.name = "Forward metadata edited";
             edited.labeling.labels[0].name = "Edited Galaxy";
             edited.labeling.labels[0].shortcut = "1";
@@ -2002,7 +2566,8 @@ int main(int argc, char* argv[])
                 specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
-                    values);
+                    values,
+                    read.document->labeling.canonical_metadata.modified_at);
             output.close();
             if (!rewrite.succeeded()) {
                 std::cerr << "production oracle rewrite failed: "
@@ -2013,7 +2578,8 @@ int main(int argc, char* argv[])
         }
         Require(argc == 1, "unexpected sample labeling codec test arguments");
         TestReadsApprovedPythonFixtures();
-        TestRejectsSemanticViolationsWithControlledErrors();
+        TestRejectsManifestSemanticViolationsWithControlledErrors();
+        TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName();
         TestRejectsMalformedCorruptAndUnsupportedInputs();
         TestRejectsNdarrayMaskProfile();
         TestWriterRejectsRosterNulBeforeOutput();
@@ -2030,15 +2596,21 @@ int main(int argc, char* argv[])
         TestReaderEnforcesCombinedResidentMemoryBudget();
         TestSharedProfilePreflightBoundaryMatrix();
         TestWriterEmitsFixedProductionProfileAndRoundTrips();
+        TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent();
         TestWriterEmitsSourceIndexProductionProfileAndRoundTrips();
         TestLabelRewriteReusesRosterBlockVerbatim();
         TestSourceIndexRewriteUsesSingleValuesBlock();
+        TestPromotionValuesRewriteRefreshesMetadataRewriteBase();
         TestMetadataRewritePreservesForwardUnknownFields();
+        TestMetadataRewriteEnforcesImmutableCanonicalProvenance();
+        TestWriterOriginPolicyPreservesReaderForwardCompatibility();
+        TestCodecRequiresPortableAnnotationOriginName();
         TestRewriteRejectsUnverifiedRosterBlocks();
         TestReaderCompatibilityProfileCannotBecomeDurableVerbatim();
         TestDurableRosterRequiresDefaultZlibFlevel();
         TestWriterRejectsUnreadableRosterWidth();
         TestWriterRejectsUnreadableLabelCount();
+        TestWriterRejectsUnreadableAuthorCountBeforeOutput();
         TestCanonicalReaderRequiresExplicitSourceIdentity();
         TestMetadataReadIsBounded();
         return 0;

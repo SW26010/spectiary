@@ -7,6 +7,8 @@
 #include "domain/source_path_identity.h"
 #include "domain/source_collection_identity_digest.h"
 #include "domain/stable_sha256.h"
+#include "domain/utf8.h"
+#include "domain/uuid_v4.h"
 #include "platform/exclusive_file_lease.h"
 #include "ui/sample_annotation_labeling_rules.h"
 
@@ -30,7 +32,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kStateFormatKind = "specforge.sample_labeling_tasks.cache";
-constexpr int kStateSchemaVersion = 3;
+constexpr int kStateSchemaVersion = 4;
 
 const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
 {
@@ -166,27 +168,8 @@ std::string_view OutputFormatText(
 
 bool ParseTaskOutput(
     const JsonValue& task_object,
-    int schema_version,
     SampleLabelingTask& task)
 {
-    if (schema_version < kStateSchemaVersion) {
-        const JsonValue* output_path =
-            ObjectMember(task_object, "output_path");
-        if (output_path == nullptr ||
-            output_path->kind == JsonValue::Kind::Null) {
-            return true;
-        }
-        std::optional<std::filesystem::path> path =
-            ReadPersistedPathReference(*output_path);
-        if (!path || path->empty()) {
-            return false;
-        }
-        task.output_path = std::move(*path);
-        task.output_format =
-            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-        return true;
-    }
-
     const JsonValue* output = ObjectMember(task_object, "output");
     if (output == nullptr || output->kind != JsonValue::Kind::Object) {
         return false;
@@ -325,12 +308,167 @@ struct ParsedTask {
     bool malformed = false;
 };
 
+bool IsCanonicalOriginKind(std::string_view value)
+{
+    if (value.empty() || value.front() < 'a' || value.front() > 'z') {
+        return false;
+    }
+    return std::all_of(
+        value.begin(),
+        value.end(),
+        [](char character) {
+            return (character >= 'a' && character <= 'z') ||
+                (character >= '0' && character <= '9') ||
+                character == '_';
+        });
+}
+
+bool IsCanonicalAnnotationFingerprint(std::string_view value)
+{
+    constexpr std::string_view prefix = "sha256:";
+    return value.size() == prefix.size() + 64U &&
+        value.starts_with(prefix) &&
+        std::all_of(
+            value.begin() + static_cast<std::ptrdiff_t>(prefix.size()),
+            value.end(),
+            [](char character) {
+                return (character >= '0' && character <= '9') ||
+                    (character >= 'a' && character <= 'f');
+            });
+}
+
+std::optional<SampleLabelingTaskCanonicalMetadata>
+ParseCanonicalMetadata(const JsonValue& task_object)
+{
+    const JsonValue* value =
+        ObjectMember(task_object, "canonical_metadata");
+    if (value == nullptr || value->kind != JsonValue::Kind::Object) {
+        return std::nullopt;
+    }
+    const std::optional<std::string> created_text =
+        ReadStringMember(*value, "created_at");
+    const std::optional<std::string> modified_text =
+        ReadStringMember(*value, "modified_at");
+    if (!created_text || !modified_text) {
+        return std::nullopt;
+    }
+    const std::optional<CanonicalTimestamp> created_at =
+        ParseCanonicalTimestamp(*created_text);
+    const std::optional<CanonicalTimestamp> modified_at =
+        ParseCanonicalTimestamp(*modified_text);
+    if (!created_at || !modified_at || *modified_at < *created_at) {
+        return std::nullopt;
+    }
+
+    const JsonValue* origin_value = ObjectMember(*value, "origin");
+    if (origin_value == nullptr ||
+        origin_value->kind != JsonValue::Kind::Object) {
+        return std::nullopt;
+    }
+    const std::optional<std::string> origin_kind =
+        ReadStringMember(*origin_value, "kind");
+    if (!origin_kind || !IsCanonicalOriginKind(*origin_kind)) {
+        return std::nullopt;
+    }
+
+    SampleLabelingTaskCanonicalMetadata metadata;
+    metadata.created_at = *created_at;
+    metadata.modified_at = *modified_at;
+    metadata.origin.kind = *origin_kind;
+    if (const JsonValue* annotation =
+            ObjectMember(*origin_value, "annotation");
+        annotation != nullptr && annotation->kind != JsonValue::Kind::Null) {
+        if (annotation->kind != JsonValue::Kind::Object) {
+            return std::nullopt;
+        }
+        const std::optional<std::string> name =
+            ReadStringMember(*annotation, "name");
+        const std::optional<std::string> format =
+            ReadStringMember(*annotation, "format");
+        if (!name || !format) {
+            return std::nullopt;
+        }
+        SampleLabelingAnnotationOrigin parsed_annotation{
+            .name = *name,
+            .format = *format};
+        if (const JsonValue* fingerprint =
+                ObjectMember(*annotation, "fingerprint");
+            fingerprint != nullptr &&
+            fingerprint->kind != JsonValue::Kind::Null) {
+            parsed_annotation.fingerprint =
+                ReadStringMember(*annotation, "fingerprint");
+            if (!parsed_annotation.fingerprint) {
+                return std::nullopt;
+            }
+        }
+        if (!IsValidSampleLabelingAnnotationOriginName(
+                parsed_annotation.name) ||
+            (parsed_annotation.format != "csv" &&
+             parsed_annotation.format != "npy") ||
+            (parsed_annotation.fingerprint &&
+             !IsCanonicalAnnotationFingerprint(
+                 *parsed_annotation.fingerprint))) {
+            return std::nullopt;
+        }
+        metadata.origin.annotation = std::move(parsed_annotation);
+    }
+    if ((metadata.origin.kind == "manual" &&
+         metadata.origin.annotation) ||
+        (metadata.origin.kind == "annotation_promotion" &&
+         !metadata.origin.annotation)) {
+        return std::nullopt;
+    }
+
+    if (const JsonValue* description =
+            ObjectMember(*value, "description");
+        description != nullptr && description->kind != JsonValue::Kind::Null) {
+        metadata.description = ReadStringMember(*value, "description");
+        if (!metadata.description ||
+            !IsValidUtf8(*metadata.description)) {
+            return std::nullopt;
+        }
+    }
+    if (const JsonValue* authors = ObjectMember(*value, "authors");
+        authors != nullptr && authors->kind != JsonValue::Kind::Null) {
+        if (authors->kind != JsonValue::Kind::Array) {
+            return std::nullopt;
+        }
+        metadata.authors.reserve(authors->array.size());
+        for (const JsonValue& author_value : authors->array) {
+            if (author_value.kind != JsonValue::Kind::Object) {
+                return std::nullopt;
+            }
+            const std::optional<std::string> name =
+                ReadStringMember(author_value, "name");
+            if (!name || !IsValidUtf8WithNonWhitespace(*name)) {
+                return std::nullopt;
+            }
+            SampleLabelingAuthor author{.name = *name};
+            if (const JsonValue* identifier =
+                    ObjectMember(author_value, "identifier");
+                identifier != nullptr &&
+                identifier->kind != JsonValue::Kind::Null) {
+                author.identifier =
+                    ReadStringMember(author_value, "identifier");
+                if (!author.identifier) {
+                    return std::nullopt;
+                }
+                if (!IsValidUtf8WithNonWhitespace(
+                        *author.identifier)) {
+                    return std::nullopt;
+                }
+            }
+            metadata.authors.push_back(std::move(author));
+        }
+    }
+    return metadata;
+}
+
 ParsedTask ParseTask(
     const JsonValue& task_object,
     std::size_t sample_count,
     const std::function<void()>& cancellation_checkpoint,
-    bool hydrate_persistent_output,
-    int schema_version)
+    bool hydrate_persistent_output)
 {
     if (task_object.kind != JsonValue::Kind::Object) {
         return {};
@@ -338,15 +476,25 @@ ParsedTask ParseTask(
 
     const std::optional<std::string> task_id = ReadStringMember(task_object, "task_id");
     const std::optional<std::string> task_name = ReadStringMember(task_object, "task_name");
-    if (!task_id || task_id->empty()) {
+    if (!task_id ||
+        !IsCanonicalUuidV4(*task_id) ||
+        !task_name ||
+        !IsValidUtf8WithNonWhitespace(*task_name)) {
         return {};
     }
 
-    bool malformed =
-        ObjectMember(task_object, "task_name") != nullptr &&
-        !task_name;
+    bool malformed = false;
 
-    SampleLabelingTask task = CreateSampleLabelingTask(*task_id, task_name.value_or(*task_id), 0);
+    std::optional<SampleLabelingTaskCanonicalMetadata> canonical_metadata =
+        ParseCanonicalMetadata(task_object);
+    if (!canonical_metadata) {
+        return {};
+    }
+    SampleLabelingTask task = CreateSampleLabelingTask(
+        *task_id,
+        task_name.value_or(*task_id),
+        0,
+        std::move(*canonical_metadata));
     task.values.reserve(sample_count);
     constexpr std::size_t kInitializationChunk = 4096U;
     while (task.values.size() < sample_count) {
@@ -393,8 +541,7 @@ ParsedTask ParseTask(
             malformed = true;
         }
     }
-    malformed =
-        !ParseTaskOutput(task_object, schema_version, task) || malformed;
+    malformed = !ParseTaskOutput(task_object, task) || malformed;
     if (const JsonValue* initial_publication_pending =
             ObjectMember(
                 task_object,
@@ -611,8 +758,6 @@ ParsedTask ParseTask(
         task.output_format =
             SampleLabelingOutputArtifactFormat::None;
         task.initial_publication_pending = false;
-        task.task_name =
-            std::string{kTemporarySampleLabelingTaskName};
         task.values_are_authoritative = true;
         task.pending_sample_indices.clear();
         task.metadata_save_pending = false;
@@ -632,6 +777,24 @@ void SetError(
     if (error_message != nullptr) {
         *error_message = std::move(message);
     }
+}
+
+bool ValidateCacheTaskIds(
+    const SampleLabelingStateCache& cache,
+    std::string* error_message)
+{
+    for (const auto& [source_identity, state] : cache.sources) {
+        (void)source_identity;
+        for (const SampleLabelingTask& task : state.tasks) {
+            if (!IsCanonicalUuidV4(task.task_id)) {
+                SetError(
+                    error_message,
+                    "sample-labeling cache task ids must be canonical UUID v4 values");
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool ValidateOutputOwnership(
@@ -685,6 +848,9 @@ bool ValidateCacheStructure(
     const SampleLabelingStateCache& cache,
     std::string* error_message)
 {
+    if (!ValidateCacheTaskIds(cache, error_message)) {
+        return false;
+    }
     for (const auto& [source_identity, state] : cache.sources) {
         if (source_identity.empty() || state.sample_count == 0) {
             SetError(
@@ -1121,7 +1287,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
         LoadVersionedJsonCacheFile(
             path,
             kStateFormatKind,
-            {1, 2, kStateSchemaVersion},
+            {kStateSchemaVersion},
             "sample-labeling task record",
             cancellation_checkpoint);
     switch (cache.issue_kind) {
@@ -1258,10 +1424,9 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
                         policy !=
                             SampleLabelingStateCacheLoadPolicy::
                                 AllowPersistentOutputsWithoutResultHydration &&
-                            policy !=
-                                SampleLabelingStateCacheLoadPolicy::
-                                    InternalDraftsOnly,
-                        cache.document->schema_version);
+                        policy !=
+                            SampleLabelingStateCacheLoadPolicy::
+                                    InternalDraftsOnly);
                     if (policy ==
                             SampleLabelingStateCacheLoadPolicy::
                                 InternalDraftsOnly &&
@@ -1341,7 +1506,8 @@ bool SaveSampleLabelingStateCache(
     if (path.empty()) {
         return false;
     }
-    if (!ValidateOutputOwnership(cache, error_message)) {
+    if (!ValidateCacheTaskIds(cache, error_message) ||
+        !ValidateOutputOwnership(cache, error_message)) {
         return false;
     }
 
@@ -1392,6 +1558,71 @@ bool SaveSampleLabelingStateCache(
                     stream << "          \"task_name\": ";
                     WriteJsonString(stream, task.task_name);
                     stream << ",\n";
+                    stream << "          \"canonical_metadata\": {\n";
+                    stream << "            \"created_at\": ";
+                    WriteJsonString(
+                        stream,
+                        FormatCanonicalTimestamp(
+                            task.canonical_metadata.created_at));
+                    stream << ",\n";
+                    stream << "            \"modified_at\": ";
+                    WriteJsonString(
+                        stream,
+                        FormatCanonicalTimestamp(
+                            task.canonical_metadata.modified_at));
+                    stream << ",\n";
+                    stream << "            \"origin\": {\n";
+                    stream << "              \"kind\": ";
+                    WriteJsonString(
+                        stream,
+                        task.canonical_metadata.origin.kind);
+                    if (task.canonical_metadata.origin.annotation) {
+                        const SampleLabelingAnnotationOrigin& annotation =
+                            *task.canonical_metadata.origin.annotation;
+                        stream << ",\n";
+                        stream << "              \"annotation\": { \"name\": ";
+                        WriteJsonString(stream, annotation.name);
+                        stream << ", \"format\": ";
+                        WriteJsonString(stream, annotation.format);
+                        if (annotation.fingerprint) {
+                            stream << ", \"fingerprint\": ";
+                            WriteJsonString(stream, *annotation.fingerprint);
+                        }
+                        stream << " }\n";
+                    } else {
+                        stream << "\n";
+                    }
+                    stream << "            }";
+                    if (task.canonical_metadata.description) {
+                        stream << ",\n";
+                        stream << "            \"description\": ";
+                        WriteJsonString(
+                            stream,
+                            *task.canonical_metadata.description);
+                    }
+                    if (!task.canonical_metadata.authors.empty()) {
+                        stream << ",\n";
+                        stream << "            \"authors\": [";
+                        for (std::size_t author_index = 0;
+                             author_index < task.canonical_metadata.authors.size();
+                             ++author_index) {
+                            const SampleLabelingAuthor& author =
+                                task.canonical_metadata.authors[author_index];
+                            if (author_index != 0) {
+                                stream << ", ";
+                            }
+                            stream << "{ \"name\": ";
+                            WriteJsonString(stream, author.name);
+                            if (author.identifier) {
+                                stream << ", \"identifier\": ";
+                                WriteJsonString(stream, *author.identifier);
+                            }
+                            stream << " }";
+                        }
+                        stream << "]";
+                    }
+                    stream << "\n";
+                    stream << "          },\n";
                     stream << "          \"auto_advance\": " << (task.auto_advance ? "true" : "false") << ",\n";
                     stream << "          \"skip_labeled_on_advance\": "
                            << (task.skip_labeled_on_advance ? "true" : "false") << ",\n";

@@ -2,32 +2,36 @@
   "format_kind": "specforge.sample_labeling",
   "schema_version": "2.0.0",
   "source_kind": "npy",
-  "source_name": "bad-sentinel.npy",
-  "source_identity": "source:bad-sentinel",
-  "source_fingerprint": "sha256:bad-sentinel",
+  "source_name": "promoted.npy",
+  "source_identity": "source:promoted-origin",
+  "source_fingerprint": "sha256:promoted-origin",
   "sample_count": 1,
   "roster_identity_kind": "source_index",
   "sample_names": [],
   "annotation_kind": "categorical_integer",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
-  "task_id": "02674314-6a94-4ca8-a9f3-987bb90ec6d3",
-  "task_name": "Bad sentinel",
+  "task_id": "0ee2ffde-dab5-47c7-ac62-1cd34d5d8c2b",
+  "task_name": "Promoted labels",
   "created_at": "2026-08-30T08:00:00.000Z",
   "modified_at": "2026-08-30T08:00:00.000Z",
-  "origin_kind": "manual",
-  "origin_annotation": null,
+  "origin_kind": "annotation_promotion",
+  "origin_annotation": {
+    "name": "folder/labels.csv",
+    "format": "csv",
+    "fingerprint": null
+  },
   "description": null,
   "authors": [],
   "labels": [
     {
-      "code": -1,
-      "name": "Collision",
+      "code": 0,
+      "name": "A",
       "shortcut": ""
     }
   ],
   "values": [
-    -1
+    0
   ],
   "values_dtype": "int32",
   "values_shape": [

@@ -111,9 +111,11 @@ view
 
 **Temporary sample labeling task**:
 The single output-free sample labeling task retained for one source collection.
-It uses the default name `Temporary labeling task`, may be paused and resumed,
-and becomes a local labeling annotation only after the user selects an output
-location. A source collection may not own two temporary sample labeling tasks.
+An ordinary manual draft uses the default name `Temporary labeling task`; an
+annotation-promotion draft retains its promoted task name. It may be paused and
+resumed, and becomes a local labeling annotation only after the user selects an
+output location. A source collection may not own two temporary sample labeling
+tasks.
 _Avoid_: Unsaved copy of every formal task, unnamed annotation, global task
 
 **Sample navigation**:

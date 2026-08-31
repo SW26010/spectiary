@@ -5,6 +5,7 @@
 #include "domain/sample_labeling_document.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "domain/uuid_v4.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/sample_workflow_state_cache_io.h"
@@ -43,6 +44,18 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+{
+    const auto timestamp =
+        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+    Require(timestamp.has_value(), "test canonical timestamp should parse");
+    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    metadata.created_at = *timestamp;
+    metadata.modified_at = *timestamp;
+    metadata.origin.kind = "manual";
+    return metadata;
 }
 
 void RequireResolvedSequencePosition(
@@ -345,9 +358,6 @@ public:
         std::filesystem::path labeling_cache,
         std::filesystem::path workflow_cache,
         specforge::SampleLabelingController::
-            CanonicalValuesPublisher
-                canonical_values_publisher = {},
-        specforge::SampleLabelingController::
             CanonicalDocumentPublisher
                 canonical_document_publisher = {})
         : specforge::SourceCollectionSession(
@@ -357,7 +367,6 @@ public:
               workflow_cache,
               specforge::SampleLabelingStateCacheLoadPolicy::
                   AllowPersistentOutputs,
-              std::move(canonical_values_publisher),
               std::move(canonical_document_publisher)),
           preparation_(PreparationAdapters(
               std::move(loader),
@@ -1599,7 +1608,8 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
         Submit(session, SetActiveLabelingOutputPath(output_path));
     const std::string canonical_bytes_after_formalization =
         ReadBinaryFile(output_path);
-    const std::string source_id = "labeling:temporary-labeling-task";
+    const std::string source_id =
+        "labeling:" + session.View().labeling.task_id;
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
             session.View().navigation.current_annotations[0].relationship ==
@@ -1674,7 +1684,8 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
     (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:temporary-labeling-task";
+    const std::string source_id =
+        "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
     (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
@@ -1721,7 +1732,8 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
     (void)Submit(session, AssignActiveLabelToCurrentSample(4));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:temporary-labeling-task";
+    const std::string source_id =
+        "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
     (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
@@ -1762,7 +1774,8 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
     (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:temporary-labeling-task";
+    const std::string source_id =
+        "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
 
@@ -2597,7 +2610,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         },
         16);
 
-    bool fail_canonical_value_publication = false;
+    bool fail_canonical_document_publication = false;
     std::vector<std::size_t> loaded_indices;
     PreparedSession session(
         [&loaded_indices, source_path](
@@ -2617,13 +2630,15 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         directory / "navigation.json",
         labeling_cache,
         directory / "workflow.json",
-        [&fail_canonical_value_publication](
-            specforge::SampleLabelingAsdfOpenSnapshot&
+        [&fail_canonical_document_publication](
+            const specforge::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
-            std::span<const std::int32_t> values) {
-            if (fail_canonical_value_publication) {
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor&
+                source) {
+            if (fail_canonical_document_publication) {
                 return specforge::
-                    SampleLabelingAsdfStoreWriteResult{
+                    SampleLabelingAsdfStoreGenerationWriteResult{
                         .error = {
                             .kind = specforge::
                                 SampleLabelingAsdfStoreErrorKind::
@@ -2632,9 +2647,11 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
                                 "injected label export matrix publication failure"}};
             }
             return specforge::
-                RewriteSampleLabelingAsdfValuesAtomically(
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                     owner_snapshot,
-                    values);
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
         });
     Require(
         session.Open(source_path).loaded,
@@ -2707,7 +2724,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
                         CanonicalAsdf,
         "label export matrix should establish a canonical ASDF owner");
 
-    fail_canonical_value_publication = true;
+    fail_canonical_document_publication = true;
     (void)Submit(
         session,
         MoveSampleNavigation(
@@ -3183,6 +3200,10 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
             {"1", "\\unlabeled"},
             {"2", "\\\\unlabeled"},
         });
+    const std::string original_csv_bytes =
+        ReadBinaryFile(csv_path);
+    const std::filesystem::path asdf_path =
+        UniqueTempPath("_csv_promotion.asdf");
 
     std::vector<std::size_t> loaded_indices;
     PreparedSession session =
@@ -3215,8 +3236,9 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
     };
 
     Require(
-        current_annotation().missing,
-        "CSV unlabeled sentinel should project as a missing value");
+        current_annotation().missing &&
+            current_annotation().can_activate_labeling,
+        "CSV unlabeled sentinel should project as missing while exposing promotion");
     (void)Submit(
         session,
         MoveSampleNavigation(
@@ -3267,6 +3289,72 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
             unlabeled_option->key !=
                 labeled_unlabeled_option->key,
         "CSV sentinel and labeled text unlabeled must retain different sample filter keys");
+
+    const specforge::SourceCollectionSessionResult activated =
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(csv_path));
+    const specforge::SourceCollectionSessionView& active_view =
+        session.View();
+    Require(
+        activated.action.workflow_changed &&
+            active_view.labeling.has_active_task &&
+            specforge::IsCanonicalUuidV4(
+                active_view.labeling.task_id) &&
+            active_view.labeling.active_task_is_temporary &&
+            !active_view.labeling.output_path &&
+            active_view.labeling.output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::None,
+        "CSV activation should create a fresh outputless canonical draft");
+    Require(
+        active_view.labeling.label_set.labels.size() == 2 &&
+            active_view.labeling.label_set.labels[0].code == 0 &&
+            active_view.labeling.label_set.labels[0].name ==
+                "\\unlabeled" &&
+            active_view.labeling.label_set.labels[1].code == 1 &&
+            active_view.labeling.label_set.labels[1].name ==
+                "unlabeled" &&
+            active_view.labeling.current_code == 0,
+        "CSV promotion should distinguish missing from escaped text with stable lexical codes");
+    Require(
+        ReadBinaryFile(csv_path) == original_csv_bytes,
+        "CSV activation must not overwrite or adopt the source artifact");
+
+    const specforge::SourceCollectionSessionResult formalized =
+        Submit(
+            session,
+            SetActiveLabelingOutputPath(asdf_path));
+    Require(
+        formalized.action.navigation_inputs_changed &&
+            formalized.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::None &&
+            session.View().labeling.output_path == asdf_path &&
+            session.View().labeling.output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
+        "the promoted CSV draft should formalize only at an explicit ASDF path");
+    const specforge::SampleLabelingAsdfReadResult saved =
+        specforge::ReadSampleLabelingAsdfDocument(asdf_path);
+    Require(
+        saved.succeeded() &&
+            saved.document->annotation.values ==
+                std::vector<std::int32_t>({-1, 1, 0}) &&
+            saved.document->labeling.labels.size() == 2 &&
+            saved.document->labeling.canonical_metadata.origin.kind ==
+                "annotation_promotion" &&
+            saved.document->labeling.canonical_metadata.origin.annotation &&
+            saved.document->labeling.canonical_metadata.origin.annotation->name ==
+                csv_path.filename().string() &&
+            saved.document->labeling.canonical_metadata.origin.annotation->format ==
+                "csv" &&
+            saved.document->labeling.canonical_metadata.origin.annotation->fingerprint &&
+            saved.document->labeling.canonical_metadata.origin.annotation->fingerprint->size() ==
+                71 &&
+            saved.document->labeling.canonical_metadata.origin.annotation->fingerprint->starts_with(
+                "sha256:"),
+        "formalized CSV promotion should persist values, definitions, and portable SHA-256 provenance");
+    Require(
+        ReadBinaryFile(csv_path) == original_csv_bytes,
+        "formalizing a CSV promotion must leave the source CSV byte-for-byte unchanged");
 }
 
 void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
@@ -3485,21 +3573,28 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
             "the recovery delete intent should refresh only the paused draft projection");
 
         (void)Submit(restarted, StartOrResumeTemporaryLabelingTask());
+        const std::string replacement_task_id =
+            restarted.View().labeling.task_id;
         Require(
             restarted.View().labeling.has_active_task &&
-                restarted.View().labeling.task_id == task_id &&
+                specforge::IsCanonicalUuidV4(
+                    replacement_task_id) &&
+                replacement_task_id != task_id &&
                 Submit(restarted, DeactivateActiveLabelingTask()).action.workflow_changed,
-            "restart recovery fixture should create and pause a replacement draft with the stable ID");
+            "restart recovery fixture should create and pause a replacement draft with a fresh UUID");
         const specforge::SourceCollectionSessionResult recovered = Submit(
             restarted,
-            RecoverTemporaryLabelingTask(source_identity, task_id));
+            RecoverTemporaryLabelingTask(
+                source_identity,
+                replacement_task_id));
         Require(
             recovered.action.workflow_changed &&
                 restarted.View().labeling.has_active_task &&
-                restarted.View().labeling.task_id == task_id &&
+                restarted.View().labeling.task_id ==
+                    replacement_task_id &&
                 restarted.View().labeling.current_code ==
                     specforge::kUnlabeledSampleLabelCode,
-            "the replacement recovery fixture should activate an empty same-ID draft");
+            "the replacement recovery fixture should activate its empty fresh-ID draft");
     }
 }
 
@@ -3581,11 +3676,11 @@ void TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts()
     source_state.sample_count = 3;
     source_state.tasks = {
         specforge::CreateSampleLabelingTask(
-            "stale-draft",
+            "44444444-4444-4444-8444-444444444444",
             "Recovered draft A",
             3),
         specforge::CreateSampleLabelingTask(
-            "stale-draft",
+            "44444444-4444-4444-8444-444444444444",
             "Recovered draft B",
             3)};
     specforge::SampleLabelingStateCache cache;
@@ -3642,7 +3737,7 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
 
     specforge::SampleLabelingTask formal_task =
         specforge::CreateSampleLabelingTask(
-            "shared-task-id",
+            "55555555-5555-4555-8555-555555555555",
             "Formal task",
             3);
     formal_task.output_path =
@@ -3654,7 +3749,7 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
     source_state.tasks = {
         std::move(formal_task),
         specforge::CreateSampleLabelingTask(
-            "shared-task-id",
+            "55555555-5555-4555-8555-555555555555",
             "Temporary draft",
             3)};
     specforge::SampleLabelingStateCache cache;
@@ -3686,10 +3781,12 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
     const std::size_t shared_id_count = static_cast<std::size_t>(std::count(
         view.task_ids.begin(),
         view.task_ids.end(),
-        std::string{"shared-task-id"}));
+        std::string{
+            "55555555-5555-4555-8555-555555555555"}));
     Require(
         view.recovery_drafts.size() == 1 &&
-            view.recovery_drafts.front().task_id == "shared-task-id" &&
+            view.recovery_drafts.front().task_id ==
+                "55555555-5555-4555-8555-555555555555" &&
             shared_id_count == 2,
         "formal/temp identity conflict should project one recovery row and both task IDs");
 }
@@ -3753,7 +3850,10 @@ void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
 
     result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "starting after discard should create a fresh task");
-    Require(session.View().labeling.task_id == discarded_task_id, "fresh temporary task may reuse the available id");
+    Require(
+        specforge::IsCanonicalUuidV4(session.View().labeling.task_id) &&
+            session.View().labeling.task_id != discarded_task_id,
+        "starting after discard should generate a fresh canonical task id");
     Require(
         session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
         "deleted draft values should not come back");
@@ -3763,7 +3863,6 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
-    const std::string saved_name = Utf8(output_path.stem().u8string());
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -3774,18 +3873,24 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
         Submit(session, SetActiveLabelingOutputPath(output_path));
     Require(!session.View().labeling.has_temporary_task, "choosing output should formalize the temporary task");
     Require(!session.View().labeling.active_task_is_temporary, "saved task should become a formal annotation");
-    Require(session.View().labeling.task_name == saved_name, "saved annotation name should derive from its filename");
+    Require(
+        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        "choosing an output path should not rename canonical task metadata");
     Require(session.View().navigation.current_annotations.size() == 1, "local task output should appear in annotations");
     Require(
-        session.View().navigation.current_annotations[0].name == saved_name,
-        "local labeling annotation should default to the saved filename");
+        session.View().navigation.current_annotations[0].name ==
+            specforge::kTemporarySampleLabelingTaskName,
+        "local labeling annotation should default to the canonical task name");
     Require(
         session.View().filter.available_sources.size() == 1 &&
-            session.View().filter.available_sources[0].name == saved_name,
-        "local labeling filter source should default to the saved filename");
+            session.View().filter.available_sources[0].name ==
+                specforge::kTemporarySampleLabelingTaskName,
+        "local labeling filter source should default to the canonical task name");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
-    Require(session.View().labeling.task_name == saved_name, "display-name customization should not rename metadata");
+    Require(
+        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        "display-name customization should not rename metadata");
     Require(
         session.View().navigation.current_annotations[0].name == "Hard cases",
         "annotation row should use the custom local-task display name");
@@ -3796,8 +3901,9 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
     Require(result.action.workflow_changed, "clearing local-task annotation display name should report workflow change");
     Require(
-        session.View().navigation.current_annotations[0].name == saved_name,
-        "cleared local-task annotation display name should restore the saved filename");
+        session.View().navigation.current_annotations[0].name ==
+            specforge::kTemporarySampleLabelingTaskName,
+        "cleared local-task annotation display name should restore the canonical task name");
 
     result = Submit(session, DeactivateActiveLabelingTask());
     Require(!session.View().labeling.has_temporary_task, "closing a formal annotation should not create a draft");
@@ -3805,7 +3911,8 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     Require(session.View().labeling.active_task_is_temporary, "a fresh temporary task should start after formal save");
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
-            session.View().navigation.current_annotations[0].name == saved_name,
+            session.View().navigation.current_annotations[0].name ==
+                specforge::kTemporarySampleLabelingTaskName,
         "starting a new temporary task should keep the formal annotation available");
 
     const std::string fresh_temporary_task_id = session.View().labeling.task_id;
@@ -3850,8 +3957,9 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         session.View().labeling.active_task_is_temporary &&
-            session.View().labeling.task_id == fresh_temporary_task_id,
-        "the persistent draft option should safely switch back from a formal annotation");
+            specforge::IsCanonicalUuidV4(session.View().labeling.task_id) &&
+            session.View().labeling.task_id != fresh_temporary_task_id,
+        "starting after deleting the paused draft should create a fresh canonical task");
 }
 
 void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
@@ -4577,13 +4685,20 @@ void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
     (void)Submit(
         session,
         ActivateLabelingTaskFromAnnotation(legacy_path));
+    const std::string promoted_task_id =
+        session.View().labeling.task_id;
     Require(
         session.View().labeling.output_path == legacy_path &&
-            session.View().labeling.task_id ==
-                "session-legacy-task" &&
+            specforge::IsCanonicalUuidV4(promoted_task_id) &&
+            promoted_task_id != "session-legacy-task" &&
             session.View().labeling.task_name ==
                 "Session legacy task",
-        "legacy migration session should begin with sidecar-owned task identity");
+        "legacy promotion should assign a fresh canonical UUID without inheriting the sidecar id");
+    const std::string promoted_metadata_bytes =
+        ReadBinaryFile(metadata_path);
+    Require(
+        promoted_metadata_bytes != metadata_bytes,
+        "legacy promotion should replace stale sidecar identity metadata");
 
     const specforge::SourceCollectionSessionResult migrated =
         Submit(
@@ -4597,15 +4712,16 @@ void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
         "explicit output selection on an active legacy owner should migrate it to ASDF");
     Require(
         ReadBinaryFile(legacy_path) == legacy_bytes &&
-            ReadBinaryFile(metadata_path) == metadata_bytes,
-        "session migration must leave the original NPY and sidecar bytes unchanged");
+            ReadBinaryFile(metadata_path) ==
+                promoted_metadata_bytes,
+        "session migration must leave the legacy NPY and promoted sidecar bytes unchanged");
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(
             canonical_path);
     Require(
         read.succeeded() &&
             read.document->labeling.id ==
-                "session-legacy-task" &&
+                promoted_task_id &&
             read.document->labeling.name ==
                 "Session legacy task" &&
             read.document->annotation.values ==
@@ -4693,7 +4809,10 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     const specforge::SourceCollectionIdentity identity =
         specforge::BuildSourceCollectionIdentity(*MakeSnapshot(source_path, 2, 0));
     specforge::SampleLabelingTask local_task =
-        specforge::CreateSampleLabelingTask("local-task", "Local task", 2);
+        specforge::CreateSampleLabelingTask(
+            "66666666-6666-4666-8666-666666666666",
+            "Local task",
+            2);
     local_task.output_path = annotation_path;
     local_task.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
@@ -4848,10 +4967,10 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
     document.source.roster.identity_kind =
         std::string{
             specforge::kSampleLabelingDocumentSourceIndexRoster};
-    document.annotation.name = "quality-code";
     document.annotation.values = {5, -1, 9};
-    document.labeling.id = "canonical-quality";
+    document.labeling.id = "33333333-3333-4333-8333-333333333333";
     document.labeling.name = "Canonical quality";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -4892,7 +5011,8 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(
         session.View().labeling.has_active_task &&
-            session.View().labeling.task_id == "canonical-quality" &&
+            session.View().labeling.task_id ==
+                "33333333-3333-4333-8333-333333333333" &&
             session.View().labeling.task_name == "Canonical quality" &&
             session.View().labeling.current_code == 5 &&
             session.View().labeling.output_path == annotation_path &&
@@ -4916,7 +5036,8 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
             source != cache.cache.sources.end() &&
             source->second.tasks.size() == 1 &&
-            source->second.tasks[0].task_id == "canonical-quality" &&
+            source->second.tasks[0].task_id ==
+                "33333333-3333-4333-8333-333333333333" &&
             source->second.tasks[0].output_path == annotation_path &&
             source->second.tasks[0].output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::
@@ -4981,7 +5102,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingOperationResult::Issue::
                     EditTargetChanged &&
             session.View().labeling.task_id ==
-                "canonical-quality" &&
+                "33333333-3333-4333-8333-333333333333" &&
             session.View().labeling.output_path ==
                 annotation_path &&
             session.View().labeling.task_ids.size() == 1,
@@ -5000,7 +5121,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             .sample_count = identity.spectrum_count,
         });
     const specforge::SampleLabelingOperationResult blocked =
-        competing.ActivateTask("canonical-quality");
+        competing.ActivateTask("33333333-3333-4333-8333-333333333333");
     Require(
         !blocked.accepted &&
             blocked.issue ==
@@ -5043,10 +5164,10 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
         std::string{
             specforge::
                 kSampleLabelingDocumentSourceIndexRoster};
-    document.annotation.name = "quality-code";
     document.annotation.values = {5, -1, 9};
-    document.labeling.id = "attached-generation";
+    document.labeling.id = "44444444-4444-4444-8444-444444444444";
     document.labeling.name = "Attached generation";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -5069,7 +5190,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
             .loaded,
         "attached ASDF generation should load read-only");
 
-    document.labeling.id = "replacement-generation";
+    document.labeling.id = "55555555-5555-4555-8555-555555555555";
     document.labeling.name = "Replacement generation";
     {
         std::ofstream stream(
@@ -5129,10 +5250,10 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         std::string{
             specforge::
                 kSampleLabelingDocumentSourceIndexRoster};
-    document.annotation.name = "quality-code";
     document.annotation.values = {5, -1, 9};
-    document.labeling.id = "canonical-quality";
+    document.labeling.id = "33333333-3333-4333-8333-333333333333";
     document.labeling.name = "Canonical quality";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -5156,9 +5277,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
 
     specforge::SampleLabelingTask cached =
         specforge::CreateSampleLabelingTask(
-            "canonical-quality",
+            "33333333-3333-4333-8333-333333333333",
             "stale cache name",
             3);
+    cached.canonical_metadata =
+        document.labeling.canonical_metadata;
     cached.label_set.labels = {
         {99, "stale cache label", 's'},
     };
@@ -5190,7 +5313,6 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         "canonical owner cache fixture should save");
 
     std::vector<std::size_t> loaded_indices;
-    std::size_t canonical_publication_attempts = 0;
     std::size_t canonical_document_publication_attempts = 0;
     PreparedSession session(
         [&loaded_indices, source_path](
@@ -5211,28 +5333,6 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         labeling_cache,
         UniqueTempPath(
             "_canonical_owner_workflow.json"),
-        [&canonical_publication_attempts](
-            specforge::SampleLabelingAsdfOpenSnapshot&
-                owner_snapshot,
-            std::span<const std::int32_t> values) {
-            ++canonical_publication_attempts;
-            if (canonical_publication_attempts == 1) {
-                return specforge::
-                    sample_labeling_asdf_store_test_seam::
-                        RewriteWithBeforeReplace(
-                            owner_snapshot,
-                            values,
-                            [](const std::filesystem::path&,
-                               const std::filesystem::path&) {
-                                throw std::runtime_error(
-                                    "injected canonical session publication failure");
-                            });
-            }
-            return specforge::
-                RewriteSampleLabelingAsdfValuesAtomically(
-                    owner_snapshot,
-                    values);
-        },
         [&canonical_document_publication_attempts](
             const specforge::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
@@ -5241,6 +5341,23 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 SampleLabelingCanonicalSourceDescriptor& source) {
             ++canonical_document_publication_attempts;
             if (canonical_document_publication_attempts == 1) {
+                const specforge::SampleLabelingAsdfStoreWriteResult
+                    write = specforge::
+                        sample_labeling_asdf_store_test_seam::
+                            RewriteDocumentWithBeforeReplace(
+                                owner_snapshot,
+                                document,
+                                [](const std::filesystem::path&,
+                                   const std::filesystem::path&) {
+                                    throw std::runtime_error(
+                                        "injected canonical session publication failure");
+                                });
+                return specforge::
+                    SampleLabelingAsdfStoreGenerationWriteResult{
+                        .document_replaced = write.written,
+                        .error = write.error};
+            }
+            if (canonical_document_publication_attempts == 3) {
                 const specforge::SampleLabelingAsdfStoreWriteResult
                     write = specforge::
                         RewriteSampleLabelingAsdfDocumentAtomically(
@@ -5347,7 +5464,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     Require(
         activated.action.workflow_changed &&
             labeling.has_active_task &&
-            labeling.task_id == "canonical-quality" &&
+            labeling.task_id ==
+                "33333333-3333-4333-8333-333333333333" &&
             labeling.task_name ==
                 "Canonical quality generation B" &&
             labeling.current_code == 9 &&
@@ -5415,7 +5533,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             edited.label_write->operation.output_save_attempted &&
             !edited.label_write->operation.output_saved &&
             edited.label_write->operation.output_retry_scheduled &&
-            canonical_publication_attempts == 1,
+            canonical_document_publication_attempts == 1,
         "canonical session edit should retain its durable overlay after the injected publication failure");
     Require(
         ReadBinaryFile(annotation_path) ==
@@ -5439,7 +5557,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             deadline.has_value(),
             "failed canonical publication should expose a retry deadline");
         maintenance = session.RunMaintenance(*deadline);
-        if (canonical_publication_attempts >= 2) {
+        if (canonical_document_publication_attempts >= 2) {
             retry_published = true;
             break;
         }
@@ -5516,8 +5634,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         after_failed_metadata_edit = session.View();
     Require(
         metadata_edited.changed &&
-            canonical_publication_attempts == 2 &&
-            canonical_document_publication_attempts == 1 &&
+            canonical_document_publication_attempts == 3 &&
             after_failed_metadata_edit.labeling.save_state.kind ==
                 specforge::SampleLabelSaveStateKind::Failed,
         "a session metadata rewrite whose replacement cannot reopen should remain visibly failed and retryable");
@@ -5534,7 +5651,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             "failed session metadata reopen should expose a retry deadline");
         metadata_maintenance =
             session.RunMaintenance(*deadline);
-        if (canonical_document_publication_attempts >= 2) {
+        if (canonical_document_publication_attempts >= 4) {
             metadata_retry_published = true;
             break;
         }
@@ -5573,8 +5690,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         metadata_retry_published &&
             metadata_maintenance.action
                 .navigation_inputs_changed &&
-            canonical_publication_attempts == 2 &&
-            canonical_document_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 4 &&
             after_metadata_edit.labeling.save_state.kind ==
                 specforge::SampleLabelSaveStateKind::
                     AutosavedToOutput &&
@@ -5591,7 +5707,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             generation_c_option->display_text ==
                 "excellent generation C (11)" &&
             generation_c_option->sample_count == 2,
-        "session retry should reopen a replaced metadata generation, publish recoded values and definitions together, bypass the values-only writer, and refresh the attached generation");
+        "session retry should reopen a replaced metadata generation, publish recoded values and definitions together, and refresh the attached generation");
 
     const specforge::SourceCollectionSessionResult deactivated =
         Submit(
@@ -5636,11 +5752,12 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         std::string{
             specforge::
                 kSampleLabelingDocumentSourceIndexRoster};
-    generation_a.annotation.name = "quality-code";
     generation_a.annotation.values = {5, -1, 9};
-    generation_a.labeling.id = "canonical-quality";
+    generation_a.labeling.id =
+        "33333333-3333-4333-8333-333333333333";
     generation_a.labeling.name =
         "Canonical quality generation A";
+    generation_a.labeling.canonical_metadata = TestCanonicalMetadata();
     generation_a.labeling.labels = {
         {5, "bad generation A", "b"},
         {9, "good generation A", "g"},
@@ -5662,7 +5779,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
 
     specforge::SampleLabelingTask cached =
         specforge::CreateSampleLabelingTask(
-            "canonical-quality",
+            "33333333-3333-4333-8333-333333333333",
             "structural cache owner",
             3);
     cached.output_path = annotation_path;
@@ -5809,10 +5926,10 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
         std::string{
             specforge::
                 kSampleLabelingDocumentSourceIndexRoster};
-    document.annotation.name = "quality-code";
     document.annotation.values = {5, -1, 9};
-    document.labeling.id = "inactive-canonical-quality";
+    document.labeling.id = "66666666-6666-4666-8666-666666666666";
     document.labeling.name = "Inactive canonical quality";
+    document.labeling.canonical_metadata = TestCanonicalMetadata();
     document.labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -5834,9 +5951,11 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
 
     specforge::SampleLabelingTask cached =
         specforge::CreateSampleLabelingTask(
-            "inactive-canonical-quality",
+            "66666666-6666-4666-8666-666666666666",
             "structural cache placeholder",
             3);
+    cached.canonical_metadata =
+        document.labeling.canonical_metadata;
     cached.values[1] = 9;
     cached.pending_sample_indices.insert(1);
     cached.output_path = annotation_path;
@@ -6533,6 +6652,8 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
             UniqueTempPath("_lease_switch_workflow.json"));
     };
 
+    std::string first_task_id;
+    std::string second_task_id;
     {
         PreparedSession seed = make_session();
         Require(
@@ -6548,9 +6669,10 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 first_annotation));
         Require(
             seed.View().labeling.has_active_task &&
-                seed.View().labeling.task_id ==
-                    "first-task",
+                specforge::IsCanonicalUuidV4(
+                    seed.View().labeling.task_id),
             "lease-switch seed should register the first task");
+        first_task_id = seed.View().labeling.task_id;
         (void)Submit(
             seed,
             DeactivateActiveLabelingTask());
@@ -6563,9 +6685,11 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 second_annotation));
         Require(
             seed.View().labeling.has_active_task &&
-                seed.View().labeling.task_id ==
-                    "second-task",
+                specforge::IsCanonicalUuidV4(
+                    seed.View().labeling.task_id) &&
+                seed.View().labeling.task_id != first_task_id,
             "lease-switch seed should register the second task");
+        second_task_id = seed.View().labeling.task_id;
         (void)Submit(
             seed,
             DeactivateActiveLabelingTask());
@@ -6598,7 +6722,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
     Require(
         first.View().labeling.has_active_task &&
             first.View().labeling.task_id ==
-                "first-task",
+                first_task_id,
         "first instance should activate the first task");
     (void)Submit(
         second,
@@ -6607,7 +6731,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
     Require(
         second.View().labeling.has_active_task &&
             second.View().labeling.task_id ==
-                "second-task",
+                second_task_id,
         "second instance should activate the second task");
 
     const specforge::SourceCollectionSessionResult rejected =
@@ -6625,7 +6749,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
     Require(
         first.View().labeling.has_active_task &&
             first.View().labeling.task_id ==
-                "first-task",
+                first_task_id,
         "rejected target activation must keep the current editing selection");
 }
 
@@ -8115,7 +8239,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
     const std::string filter_source_id =
-        "labeling:temporary-labeling-task";
+        "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     const specforge::SourceCollectionSessionResult filtered =
         Submit(
@@ -8238,7 +8362,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
     const std::string filter_source_id =
-        "labeling:temporary-labeling-task";
+        "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     const specforge::SourceCollectionSessionResult filtered =
         Submit(
@@ -10206,6 +10330,7 @@ struct LabelingProjectionHandoffFixture {
     std::filesystem::path labeling_cache;
     std::filesystem::path workflow_cache;
     specforge::SourceCollectionContext context;
+    std::string task_id;
 };
 
 LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
@@ -10262,6 +10387,10 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                 .loaded,
             "labeling projection handoff fixture should open its source");
         (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
+        fixture.task_id = seed.View().labeling.task_id;
+        Require(
+            specforge::IsCanonicalUuidV4(fixture.task_id),
+            "labeling projection handoff fixture should create a canonical task id");
         Require(
             Submit(
                 seed,
@@ -10309,7 +10438,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
             "labeling projection handoff fixture should formalize its task");
 
         const std::string source_id =
-            "labeling:temporary-labeling-task";
+            "labeling:" + fixture.task_id;
         (void)Submit(seed, AddSampleFilterSource(source_id));
         (void)Submit(
             seed,
@@ -10383,8 +10512,7 @@ void WriteLatestLabelingProjection(
         fixture.context);
     if (editor.View().active_task == nullptr) {
         Require(
-            editor.ActivateTask(
-                      "temporary-labeling-task")
+            editor.ActivateTask(fixture.task_id)
                 .accepted,
             "projection handoff editor should acquire the task");
     }
@@ -10406,6 +10534,7 @@ struct TemporaryDraftNavigationRefreshFixture {
     std::filesystem::path labeling_cache;
     std::filesystem::path workflow_cache;
     specforge::SourceCollectionContext context;
+    std::string formal_task_id;
     std::string draft_task_id;
 };
 
@@ -10440,16 +10569,19 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             fixture.source_path,
             fixture.context);
         Require(
-            seed.CreateTask("formal-task", "Formal task").accepted &&
+            seed.CreateTask("Formal task").accepted &&
                 seed.UpsertActiveLabel(
                        specforge::SampleLabelDefinition{1, "one", 'o'})
                     .changed,
             "navigation refresh fixture should create the unrelated formal task");
         Require(
+            seed.View().active_task != nullptr,
+            "navigation refresh fixture should expose the formal task");
+        fixture.formal_task_id = seed.View().active_task->task_id;
+        Require(
             seed.AssignLabel(0, 1).write.changed &&
                 seed.SaveActiveTemporaryTaskToOutput(
-                       fixture.formal_output_path,
-                       "Formal task")
+                       fixture.formal_output_path)
                     .output_saved &&
                 seed.DeactivateActiveTask().state_saved,
             "navigation refresh fixture should persist the active formal task");
@@ -10472,11 +10604,10 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
                 seed.AssignLabel(1, 2).write.changed &&
                 seed.AssignLabel(2, 1).write.changed &&
                 seed.SaveActiveTemporaryTaskToOutput(
-                       fixture.draft_output_path,
-                       "Formalized draft")
+                       fixture.draft_output_path)
                     .output_saved &&
                 seed.DeactivateActiveTask().state_saved &&
-                seed.ActivateTask("formal-task").accepted,
+                seed.ActivateTask(fixture.formal_task_id).accepted,
             "navigation refresh fixture should persist and select the formal task");
     }
 
@@ -10583,8 +10714,7 @@ void FormalizeTemporaryDraftFromAnotherInstance(
         formalizer.ActivateTask(fixture.draft_task_id).accepted &&
             formalizer
                 .SaveActiveTemporaryTaskToOutput(
-                    fixture.draft_output_path,
-                    "Formalized draft")
+                    fixture.draft_output_path)
                 .output_saved &&
             formalizer.DeactivateActiveTask().state_saved,
         "the external instance should formalize the recovery draft");
@@ -10626,7 +10756,8 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         coordinator.BuildSortingView(snapshot);
     Require(
         coordinator.LabelingView(snapshot).has_active_task &&
-            coordinator.LabelingView(snapshot).task_id == "formal-task" &&
+            coordinator.LabelingView(snapshot).task_id ==
+                fixture.formal_task_id &&
             !coordinator.LabelingView(snapshot).active_task_is_temporary,
         "the unrelated formal task should remain active");
     (void)initial_filter;
@@ -10848,8 +10979,7 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         fixture.source_path,
         fixture.context);
     Require(
-        deleting.ActivateTask(
-                    "temporary-labeling-task")
+        deleting.ActivateTask(fixture.task_id)
             .accepted,
         "deleting editor should acquire the inactive task");
     Require(

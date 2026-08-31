@@ -3,9 +3,10 @@
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_collection_manifest.h"
+#include "domain/utf8.h"
+#include "domain/uuid_v4.h"
 
 #include <algorithm>
-#include <cctype>
 #include <numeric>
 #include <string>
 #include <utility>
@@ -20,9 +21,29 @@ struct ValidationComplete final {
 
 bool HasNonWhitespaceText(std::string_view value)
 {
-    return std::any_of(value.begin(), value.end(), [](unsigned char character) {
-        return std::isspace(character) == 0;
+    return IsValidUtf8WithNonWhitespace(value);
+}
+
+bool IsLowercaseToken(std::string_view value)
+{
+    if (value.empty() || value.front() < 'a' || value.front() > 'z') {
+        return false;
+    }
+    return std::ranges::all_of(value, [](char character) {
+        return (character >= 'a' && character <= 'z') ||
+            (character >= '0' && character <= '9') || character == '_';
     });
+}
+
+bool IsAnnotationFingerprint(std::string_view value)
+{
+    constexpr std::string_view prefix = "sha256:";
+    return value.size() == prefix.size() + 64U &&
+        value.starts_with(prefix) &&
+        std::ranges::all_of(value.substr(prefix.size()), [](char character) {
+            return (character >= '0' && character <= '9') ||
+                (character >= 'a' && character <= 'f');
+        });
 }
 
 void AddIssue(
@@ -43,7 +64,6 @@ SampleLabelingDocument BuildDocumentWithSource(
 {
     SampleLabelingDocument document;
     document.source = std::move(source);
-    document.annotation.name = task.task_name;
     document.annotation.values.reserve(task.values.size());
     for (const int value : task.values) {
         document.annotation.values.push_back(
@@ -52,6 +72,7 @@ SampleLabelingDocument BuildDocumentWithSource(
 
     document.labeling.id = task.task_id;
     document.labeling.name = task.task_name;
+    document.labeling.canonical_metadata = task.canonical_metadata;
     document.labeling.labels.reserve(
         task.label_set.labels.size());
     for (const SampleLabelDefinition& label :
@@ -131,11 +152,25 @@ ProjectSampleLabelingDocumentTask(
         return std::nullopt;
     }
 
+    const bool has_pending_local_edits =
+        !local_state.pending_sample_indices.empty() ||
+        local_state.metadata_save_pending;
+    if (has_pending_local_edits &&
+        (local_state.canonical_metadata.created_at !=
+             document.labeling.canonical_metadata.created_at ||
+         local_state.canonical_metadata.origin !=
+             document.labeling.canonical_metadata.origin ||
+         local_state.canonical_metadata.modified_at <
+             document.labeling.canonical_metadata.modified_at)) {
+        return std::nullopt;
+    }
+
     SampleLabelingTask projected =
         CreateSampleLabelingTask(
             document.labeling.id,
             document.labeling.name,
-            0);
+            0,
+            document.labeling.canonical_metadata);
     projected.values.reserve(
         document.annotation.values.size());
     for (std::size_t index = 0;
@@ -180,6 +215,12 @@ ProjectSampleLabelingDocumentTask(
     projected.values_are_authoritative = true;
     projected.pending_sample_indices =
         local_state.pending_sample_indices;
+    if (!projected.pending_sample_indices.empty() &&
+        local_state.canonical_metadata.modified_at >
+            projected.canonical_metadata.modified_at) {
+        projected.canonical_metadata.modified_at =
+            local_state.canonical_metadata.modified_at;
+    }
     for (const std::size_t sample_index :
          projected.pending_sample_indices) {
         if (sample_index >= projected.values.size()) {
@@ -194,6 +235,15 @@ ProjectSampleLabelingDocumentTask(
     if (projected.metadata_save_pending) {
         projected.task_name = local_state.task_name;
         projected.label_set = local_state.label_set;
+        projected.canonical_metadata.description =
+            local_state.canonical_metadata.description;
+        projected.canonical_metadata.authors =
+            local_state.canonical_metadata.authors;
+        if (local_state.canonical_metadata.modified_at >
+            projected.canonical_metadata.modified_at) {
+            projected.canonical_metadata.modified_at =
+                local_state.canonical_metadata.modified_at;
+        }
     }
 
     std::vector<int> defined_label_codes;
@@ -363,12 +413,6 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
             fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedAnnotationKind);
     }
-    if (!HasNonWhitespaceText(document.annotation.name)) {
-        AddIssue(
-            result,
-            fail_fast,
-            SampleLabelingDocumentValidationIssueKind::MissingAnnotationName);
-    }
     if (document.annotation.missing.semantic !=
         kSampleLabelingDocumentUnlabeledSemantic) {
         AddIssue(
@@ -395,12 +439,79 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
             result,
             fail_fast,
             SampleLabelingDocumentValidationIssueKind::MissingTaskId);
+    } else if (!IsCanonicalUuidV4(document.labeling.id)) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::InvalidTaskId);
     }
     if (!HasNonWhitespaceText(document.labeling.name)) {
         AddIssue(
             result,
             fail_fast,
             SampleLabelingDocumentValidationIssueKind::MissingTaskName);
+    }
+
+    const SampleLabelingTaskCanonicalMetadata& metadata =
+        document.labeling.canonical_metadata;
+    if (metadata.modified_at < metadata.created_at) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::
+                InvalidCanonicalTimestampOrder);
+    }
+    const bool known_manual = metadata.origin.kind == "manual";
+    const bool known_promotion =
+        metadata.origin.kind == "annotation_promotion";
+    if (!IsLowercaseToken(metadata.origin.kind)) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::InvalidOriginKind);
+    }
+    if ((known_manual && metadata.origin.annotation.has_value()) ||
+        (known_promotion && !metadata.origin.annotation.has_value())) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::
+                InvalidOriginAnnotation);
+    }
+    if (metadata.origin.annotation) {
+        const SampleLabelingAnnotationOrigin& annotation =
+            *metadata.origin.annotation;
+        const bool fingerprint_valid = !annotation.fingerprint ||
+            IsAnnotationFingerprint(*annotation.fingerprint);
+        if (!IsValidSampleLabelingAnnotationOriginName(
+                annotation.name) ||
+            (annotation.format != "csv" && annotation.format != "npy") ||
+            !fingerprint_valid) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::
+                    InvalidOriginAnnotation);
+        }
+    }
+    if (metadata.description &&
+        !IsValidUtf8(*metadata.description)) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::InvalidDescription);
+    }
+    for (std::size_t index = 0; index < metadata.authors.size(); ++index) {
+        const SampleLabelingAuthor& author = metadata.authors[index];
+        if (!HasNonWhitespaceText(author.name) ||
+            (author.identifier &&
+             !HasNonWhitespaceText(*author.identifier))) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::InvalidAuthor,
+                index);
+        }
     }
 
     for (std::size_t index = 0; index < document.labeling.labels.size(); ++index) {

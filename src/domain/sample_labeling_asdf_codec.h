@@ -63,7 +63,8 @@ private:
     RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
         const SampleLabelingAsdfDurableBase& durable_base,
         std::ostream& output,
-        std::span<const std::int32_t> values) noexcept;
+        std::span<const std::int32_t> values,
+        CanonicalTimestamp modified_at) noexcept;
     friend SampleLabelingAsdfWriteResult
     RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
         const SampleLabelingAsdfDurableBase& durable_base,
@@ -85,6 +86,7 @@ struct SampleLabelingAsdfReadResult {
 struct SampleLabelingAsdfWriteResult {
     bool written = false;
     bool roster_block_reused = false;
+    std::optional<SampleLabelingAsdfDurableBase> durable_base;
     SampleLabelingAsdfError error;
 
     [[nodiscard]] bool succeeded() const noexcept
@@ -93,7 +95,7 @@ struct SampleLabelingAsdfWriteResult {
     }
 };
 
-// Reads only a bounded YAML prefix and the encoded blocks referenced by the v1
+// Reads only a bounded YAML prefix and the encoded blocks referenced by the v2
 // document. The complete file is never materialized as one buffer. Compatible
 // zero-checksum uncompressed/big-endian inputs may be hydrated, but only the
 // fixed little-endian/zlib roster profile with FLEVEL=2 receives a durable
@@ -153,7 +155,7 @@ struct ProfilePreflightProbe {
 
 }  // namespace sample_labeling_asdf_test_seam
 
-// Writes the fixed production v1 profile to a caller-owned stream. Documents
+// Writes the fixed production v2 profile to a caller-owned stream. Documents
 // outside the production reader's codec-controlled bulk-allocation contract are
 // rejected before any bytes are emitted. This is not a process-RSS or
 // third-party allocator bound. The caller remains responsible for atomic
@@ -162,19 +164,18 @@ struct ProfilePreflightProbe {
     std::ostream& output,
     const SampleLabelingDocument& document) noexcept;
 
-// Label-only persistence seam. The durable base must come from a successful
-// read of the same canonical document. Its already-validated metadata prefix
-// and FLEVEL=2 encoded roster block are copied verbatim without reopening or
-// decoding the source; only the int32 values block is encoded again through a
-// bounded file-backed spool. Encoding and the shared profile preflight complete
-// before output begins.
+// Values-only persistence seam. Canonical metadata is rebuilt so modified_at
+// advances while the already-validated FLEVEL=2 roster block is copied without
+// reopening or decoding it. All other canonical fields must match the durable
+// base. A refreshed durable base is returned for repeated saves.
 [[nodiscard]] SampleLabelingAsdfWriteResult
 RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     const SampleLabelingAsdfDurableBase& durable_base,
     std::ostream& output,
-    std::span<const std::int32_t> values) noexcept;
+    std::span<const std::int32_t> values,
+    CanonicalTimestamp modified_at) noexcept;
 
-// Metadata-changing rewrite seam for an opened v1 document. Known canonical
+// Metadata-changing rewrite seam for an opened v2 document. Known canonical
 // fields are replaced from document while unrecognized YAML mapping entries at
 // the root and inside canonical maps are carried forward. Label-entry metadata
 // is matched by stable label code. Roster and values blocks are encoded again,

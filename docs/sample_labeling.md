@@ -62,9 +62,10 @@ For automatically loaded read-only annotations, SpecForge should infer the
 annotation kind from dtype. Integer dtypes are categorical annotations and may be
 treated as sample-labeling results for display. String dtypes should default to
 plain read-only annotation display so companion name arrays or other text fields
-are not accidentally treated as classification labels. The first implementation
-does not convert string annotations into editable sample labeling tasks, but a
-future implementation may support that through an explicit user action.
+are not accidentally treated as classification labels. Source-aware CSV
+attachments using the defined `sample,label` or `filename,label` interchange
+schema are the explicit exception: their text label column may be promoted to an
+outputless editable task. Arbitrary string NPY annotations remain read-only.
 Floating-point dtypes are continuous annotations; they should display raw values
 and should not use sample label sets, mappings, classification shortcuts, or
 clear-label behavior.
@@ -458,7 +459,7 @@ stable source identity, or rewrite portable sample label result metadata. The
 default display name is the loaded result name: automatically loaded plain
 annotations default to the annotation file name, metadata-backed label results
 default to the metadata task name when available, and local sample labeling task
-rows default to the output filename stem recorded as the formal task name. The
+rows default to the formal task name stored in the local task record. The
 user may edit the display name in place from the `Annotations` table. Clearing
 the edited display name removes the custom local override and restores the
 default display name. A custom display
@@ -468,23 +469,26 @@ reveal the original annotation path or file name so the source remains
 inspectable.
 
 Formal sample labeling task names and annotation display names are separate. A
-temporary draft's first formal task name is derived from the filename chosen
-through `Save to...` and is written to portable metadata. Adopting an existing
-canonical ASDF preserves the document task name; migrating a legacy owner
-preserves the sidecar task name. Editing the annotation display name must not
-rename the task, output file, or portable metadata.
+manual draft starts with its stable default formal name, while an annotation
+promotion derives its formal name from the promoted annotation metadata or
+display name. Selecting `Save to...` does not derive or replace that name from
+the output filename. Adopting an existing canonical ASDF preserves the document
+task name; migrating a legacy owner preserves the sidecar task name. Editing the
+annotation display name must not rename the task, output file, or portable
+metadata.
 
-After editable sample labeling exists, categorical annotation rows should expose
-a small drag affordance so the user can drag that annotation to the Labeling
-window and make it the active sample labeling task.
+After editable sample labeling exists, eligible annotation rows should expose a
+small drag affordance so the user can drag that annotation to the Labeling window
+and make it the active sample labeling task.
 
-Dragging a categorical annotation from the sample annotation view should convert
-that annotation into a local sample labeling task before it becomes editable.
-The converted task uses the annotation file as its output target, so SpecForge
-must warn that edits will modify the original data in place. The warning should
-say this is appropriate only when the user intentionally wants to edit that data
-or when the file represents an unfinished labeling task being restored, and it
-should recommend backing up the original data first.
+Dragging a writable integer categorical legacy annotation from the sample
+annotation view converts it into a local task that keeps the annotation file as
+its output target. SpecForge must warn that edits will modify the original data
+in place. The warning should say this is appropriate only when the user
+intentionally wants to edit that data or when the file represents an unfinished
+labeling task being restored, and it should recommend backing up the original
+data first. Promoting an eligible source-aware CSV text annotation instead
+creates an outputless draft and never adopts or overwrites the CSV input.
 
 Portable labeling evidence is format-specific. A canonical ASDF document owns
 its task id, task metadata, source identity, roster, and values in one file. A
@@ -509,9 +513,10 @@ relationship:
 Plain annotations should display their current raw annotation value. Writable
 integer categorical plain annotations may be dragged into `Labeling`, but doing
 so follows the normal conversion flow and requires the in-place edit warning.
-String and floating-point plain annotations are read-only in the first editable
-labeling implementation and should not expose a first-version labeling drag
-action.
+Floating-point plain annotations and arbitrary string NPY annotations are
+read-only in the first editable labeling implementation. A source-aware CSV text
+annotation with the defined label-column schema may expose the explicit
+outputless-promotion action described below.
 
 External label results should display the mapped label value from their
 canonical document or adjacent legacy metadata and be visibly marked as
@@ -561,17 +566,20 @@ that task record. Automatic relink is limited to the imported path and its
 format-declared artifacts; SpecForge should not scan the broader filesystem for
 moved label results.
 
-Only writable first-implementation integer categorical annotation formats may be
-converted this way. Floating-point and string annotations must not be converted
-into first-version sample labeling tasks. String annotation conversion remains a
-future extension point and must still require an explicit user action.
+In-place conversion is limited to writable integer categorical annotation
+formats. Floating-point annotations and arbitrary string annotations must not be
+converted into first-version sample labeling tasks. Source-aware CSV text
+annotations are a narrow exception: an explicit promotion deterministically
+maps the label text to categorical codes and creates an outputless task rather
+than an in-place owner.
 
-After conversion, the task follows normal local sample labeling task rules. The
-existing annotation file is simply the selected output location for that task.
-The converted task may expand its category set like any local task, but writing
-back to the original output target is limited by that file's writable format and
-integer dtype. If a new numeric code cannot be represented safely, SpecForge
-should require the user to choose a different output target before saving.
+After an in-place legacy conversion, the task follows normal local sample
+labeling task rules and the existing annotation file is the selected output
+location. The converted task may expand its category set like any local task,
+but writing back to the original output target is limited by that file's
+writable format and integer dtype. If a new numeric code cannot be represented
+safely, SpecForge should require the user to choose a different output target
+before saving.
 Activating an annotation as an existing local task must use the same identity
 validation as annotation relationship display. A canonical annotation must
 match the local task's owner format and output path plus its embedded task id,
@@ -587,12 +595,14 @@ local recovery draft until the user selects `Save to...`. Selecting the output
 location requires an `.asdf` path and promotes it to a formal local labeling
 annotation only after one canonical document containing source identity, task
 metadata, roster, and values is atomically written and reopened successfully.
-The task derives its name from the chosen filename stem and then permits a fresh
-temporary task for the same source collection. The selected owner and pending
-overlay are checkpointed before publication; a failed first publication restores
-the output-free draft immediately or through maintenance/restart recovery if the
-compensating checkpoint is temporarily unavailable. Locally created tasks may
-define and expand their own category sets.
+The task retains the formal name established when the draft was created or
+promoted; the chosen filename does not rename it. Successful publication then
+permits a fresh temporary task for the same source collection. The selected
+owner and pending overlay are checkpointed before publication; a failed first
+publication restores the output-free draft immediately or through
+maintenance/restart recovery if the compensating checkpoint is temporarily
+unavailable. Locally created tasks may define and expand their own category
+sets.
 
 An active `legacy_npy_with_sidecar` owner exposes a separate explicit
 `Migrate to ASDF...` action. This is not standalone-ASDF adoption and does not
@@ -801,14 +811,17 @@ state persistence. Writes should be debounced, flushed on normal shutdown, and
 retried after non-blocking save failures.
 
 Each `SampleLabelingTask` persists its formal output ownership as an explicit
-path-and-format pair. State-cache schema 3 writes this as `output.path` plus
+path-and-format pair. State-cache schema 4 writes this as `output.path` plus
 `output.format`; temporary drafts use `none`, `Save to...` tasks and existing
 canonical document owners use `canonical_asdf`, and existing or explicitly
 adopted legacy-format owners use `legacy_npy_with_sidecar`. Explicit promotion
-of an existing NPY annotation is one such adoption. Schema 1 and 2 records with
-a non-null `output_path` migrate explicitly to legacy NPY ownership. Formal
-records do not duplicate the full values array in this cache; they retain only
-sparse pending values plus local session/recovery state. The write-ahead
+of an existing NPY annotation is one such adoption. Schema 4 also stores the
+canonical task metadata (`created_at`, `modified_at`, `origin`, optional
+`description`, and `authors`). Cache schemas 1 through 3 are unsupported and
+ignored rather than migrated because they cannot supply both a strict UUID v4
+identity and trustworthy canonical creation metadata. Formal records do not
+duplicate the full values array in this cache; they retain only sparse pending
+values plus local session/recovery state. The write-ahead
 `initial_publication_pending` phase is
 durable only until canonical creation is adopted or reconciled back to a true
 temporary draft. Legacy-to-ASDF migration does not use that temporary-only
@@ -818,6 +831,12 @@ reopen succeed. Output leases, conflict detection, and recovery projection
 checks use the task's stored format rather than guessing from its filename
 extension.
 
+The schema reader accepts syntactically valid future `origin.kind` tokens so an
+existing document can be opened and preserved forward-compatibly. A current
+SpecForge writer may create only `manual` or `annotation_promotion` origins.
+Promotion provenance stores a portable annotation basename, never an absolute
+path or a name containing directory components.
+
 ## Annotation I/O
 
 The sample-labeling model should treat annotation storage formats as adapters.
@@ -826,10 +845,12 @@ loaded sample annotation result: one value per spectrum sample, with a known
 value kind such as categorical integer, categorical string, or continuous
 floating point.
 
-Format-specific details belong behind annotation I/O. Canonical ASDF v1 is the
-writer for newly formalized tasks and the source-aware annotation/task-hydration
-adapter. New canonical owners require an `.asdf` path before their write-ahead
-checkpoint is committed. NPY remains a read adapter and the persistence writer
+Format-specific details belong behind annotation I/O. Canonical sample-labeling
+documents use SpecForge schema `2.0.0`, serialized with ASDF file format `1.0.0`
+and ASDF Standard `1.5.0`; this ASDF adapter is the writer for newly formalized
+tasks and the source-aware annotation/task-hydration adapter. New canonical
+owners require an `.asdf` path before their write-ahead checkpoint is committed.
+NPY remains a read adapter and the persistence writer
 for existing or explicitly adopted legacy-format owners, including tasks created
 by promoting an existing NPY annotation. That legacy owner's lease identity
 always protects both the selected result path and the adjacent
@@ -858,24 +879,37 @@ not adopt an output owner, create a sidecar, or change task/save/navigation
 state. Source-aware CSV ingestion accepts the same `filename,label` and
 `sample,label` schemas, maps identities back to the canonical source roster,
 and loads the decoded label column as a plain text annotation. Duplicate,
-unknown, or missing identities are rejected. This attachment does not invent a
-labeling task id, label definitions, durable owner, or canonical provenance;
-CSV therefore remains an interchange annotation rather than a lossless
-labeling-task round-trip.
+unknown, or missing identities are rejected. A user may promote such a CSV
+attachment into an outputless editable task. Missing cells map to the canonical
+unlabeled code `-1`; distinct non-missing text values are sorted by their exact
+UTF-8 bytes and assigned stable codes `0..N-1`, so a labeled literal
+`unlabeled` remains distinct from the missing sentinel. The promotion records a
+fresh UUID v4 plus portable `annotation_promotion` provenance containing the CSV
+display name, `format: csv`, and, when available, a SHA-256 fingerprint of the
+complete imported bytes. It never overwrites or adopts the source CSV as an
+output owner. The task remains a draft until the user explicitly selects a
+canonical ASDF output path.
 
 The ASDF codec remains a caller-owned stream component. A separate domain
 document store owns source-aware open, the immutable durable roster/base
-snapshot, atomic full-document replacement, and atomic value-only rewrites.
-Value-only rewrites retain the validated metadata/roster prefix verbatim.
-Metadata-changing rewrites merge edited known v1 fields into that validated
-generation so forward-compatible unknown mapping entries survive; label-local
+snapshot, and atomic full-document replacement. The store retains a low-level
+atomic value-only primitive for focused domain use, but the task-lifecycle
+controller does not use it: every canonical semantic mutation builds and
+publishes one complete replacement document. Full rewrites update
+`modified_at`, merge edited known SpecForge schema `2.0.0` fields into the
+validated generation, retain the validated roster identity and contents, and
+preserve forward-compatible unknown mapping entries; label-local
 unknown entries are associated by stable label code. A full rewrite of an
 existing path must obtain such a durable base and fail safely when it cannot,
 rather than reconstructing only the old reader's object model and silently
 dropping future fields. It must also retain the opened source/roster identity,
 annotation kind, and stable task id so opaque metadata is not transplanted into
-another logical document. A successful metadata rewrite invalidates the old
-snapshot and requires reopening the new generation.
+another logical document. A successful full rewrite invalidates the old
+snapshot and requires reopening the new generation. Both the codec durable-base
+check and the document-store seam treat `created_at` and `origin` as immutable,
+and require the replacement `modified_at` to be no earlier than the durable
+generation. A forward-compatible unknown origin may therefore survive a rewrite
+unchanged, but a rewrite cannot introduce or alter it.
 Controller leases, recovery state, retry policy, and UI activation remain above
 that store and are not codec responsibilities.
 
@@ -899,11 +933,14 @@ controller keeps the resulting `SampleLabelingAsdfOpenSnapshot` as the active
 durable generation only in memory; it is never serialized into the state cache.
 Malformed documents, source/roster mismatches, and task-id mismatches fail the
 activation without falling back to legacy NPY hydration. Assigning or clearing
-values first commits the newest sparse overlay to the local cache and then
-atomically publishes the complete authoritative values through the opened ASDF
-snapshot. Value-only publication reuses the durable metadata/roster prefix,
-advances the in-memory document generation, and clears the corresponding sparse
-overlay only after replacement succeeds. A failed replacement leaves the old
+values first commits the newest sparse overlay to the local cache, then builds a
+complete replacement from the opened snapshot plus the authoritative task
+values and canonical metadata. It publishes through the same full-document
+rewrite used for metadata edits, updates `modified_at`, preserves unknown
+mappings and the canonical roster semantics, and clears the corresponding
+sparse overlay only after the replacement is reopened and its generation is
+verified.
+A failed replacement leaves the old
 ASDF generation trusted, retains the newest sparse overlay, and schedules an
 owner-aware retry. A successful foreground publication or maintenance retry
 synchronizes the attached annotation generation before the active snapshot can
@@ -911,11 +948,10 @@ be released and invalidates filter/sort projections that may have consumed the
 older generation. Canonical retries run only while their source is active with
 its matching descriptor; switching sources parks the durable overlay and that
 source's next activation re-arms publication. Task renames and label
-add/edit/remove operations, including shortcuts and used-code rewrites, build a
-complete replacement generation from the opened snapshot plus the latest task
-metadata and values. They publish through the full-document atomic rewrite so
-known metadata, values, and forward-compatible unknown metadata remain one
-canonical generation. The old snapshot is invalid as soon as replacement
+add/edit/remove operations, including shortcuts and used-code rewrites, use the
+same full-document path, so known metadata, values, and forward-compatible
+unknown metadata remain one canonical generation. The old snapshot is invalid
+as soon as replacement
 reaches disk; the mutation is successful only after the replacement reopens and
 its known generation matches the intended document. The requested reopen source
 descriptor is checked against that intended document before replacement, so an
@@ -941,7 +977,7 @@ New formal labeling tasks use canonical ASDF so source identity, task metadata,
 roster, and the one-dimensional label values share one atomic generation.
 Numeric tasks write stable label codes, and the sample label set owns the
 interpretation from numeric code to user-facing label. Unlabeled samples use
-`-1`; the canonical v1 value array is signed `int32`.
+`-1`; the SpecForge sample-labeling schema `2.0.0` value array is signed `int32`.
 Save and autosave continue to publish through the task's declared owner format.
 `Export Labels` writes the current task values in canonical source-roster order
 using the adjacent NPY/CSV UI selection without changing that owner. NPY sources

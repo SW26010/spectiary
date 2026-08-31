@@ -5891,6 +5891,8 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
 void TestMaintenanceResynchronizesRetainedNavigationTopology()
 {
     using Access = specforge::ShellUiTestAccess;
+    const std::string task_id =
+        "99999999-9999-4999-8999-999999999999";
     const std::filesystem::path source_path =
         UniqueTempPath("_maintenance_navigation_source.npy");
     const std::filesystem::path navigation_cache =
@@ -5929,7 +5931,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
 
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(
-            "temporary-labeling-task",
+            task_id,
             "Maintenance task",
             3);
     task.label_set.labels.push_back(
@@ -5988,7 +5990,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
                 .loaded,
             "maintenance topology fixture should open its seed source");
         const std::string filter_source_id =
-            "labeling:temporary-labeling-task";
+            "labeling:" + task_id;
         (void)seed.Submit(
             specforge::SourceCollectionSessionIntent::
                 ApplySampleFiltering(
@@ -6108,7 +6110,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     editor.ActivateSource(context.identity);
     Require(
         editor.ActivateTask(
-                  "temporary-labeling-task")
+                  task_id)
             .accepted &&
             editor.ClearLabel(2).operation.output_saved &&
             editor.DeactivateActiveTask().state_saved,

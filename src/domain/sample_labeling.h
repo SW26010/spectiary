@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain/canonical_timestamp.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -74,9 +76,51 @@ struct SampleLabelSaveState {
     std::string message;
 };
 
+struct SampleLabelingAnnotationOrigin {
+    std::string name;
+    std::string format;
+    std::optional<std::string> fingerprint;
+
+    [[nodiscard]] bool operator==(
+        const SampleLabelingAnnotationOrigin&) const = default;
+};
+
+struct SampleLabelingOrigin {
+    std::string kind = "manual";
+    std::optional<SampleLabelingAnnotationOrigin> annotation;
+
+    [[nodiscard]] bool operator==(
+        const SampleLabelingOrigin&) const = default;
+};
+
+// Canonical provenance stores only a portable artifact basename: valid
+// non-blank UTF-8 with no root, directory component, or ASCII drive prefix.
+[[nodiscard]] bool IsValidSampleLabelingAnnotationOriginName(
+    std::string_view name) noexcept;
+
+struct SampleLabelingAuthor {
+    std::string name;
+    std::optional<std::string> identifier;
+
+    [[nodiscard]] bool operator==(
+        const SampleLabelingAuthor&) const = default;
+};
+
+struct SampleLabelingTaskCanonicalMetadata {
+    CanonicalTimestamp created_at;
+    CanonicalTimestamp modified_at;
+    SampleLabelingOrigin origin;
+    std::optional<std::string> description;
+    std::vector<SampleLabelingAuthor> authors;
+
+    [[nodiscard]] bool operator==(
+        const SampleLabelingTaskCanonicalMetadata&) const = default;
+};
+
 struct SampleLabelingTask {
     std::string task_id;
     std::string task_name;
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
     SampleLabelSet label_set;
     std::vector<int> values;
     bool auto_advance = false;
@@ -126,6 +170,11 @@ struct SampleLabelOutputPublicationResult {
     std::string task_id,
     std::string task_name,
     std::size_t sample_count);
+[[nodiscard]] SampleLabelingTask CreateSampleLabelingTask(
+    std::string task_id,
+    std::string task_name,
+    std::size_t sample_count,
+    SampleLabelingTaskCanonicalMetadata canonical_metadata);
 [[nodiscard]] bool IsValidSampleLabelShortcut(char shortcut);
 [[nodiscard]] char NormalizeSampleLabelShortcut(char shortcut);
 [[nodiscard]] bool ContainsSampleLabelCode(const SampleLabelSet& label_set, int code);
@@ -161,6 +210,14 @@ void RebuildSampleLabelingTaskStatistics(
 [[nodiscard]] SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sample_index);
 void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path);
 void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task);
+// Records a canonical semantic value mutation. modified_at is persisted with
+// the complete replacement document generation.
+void MarkCanonicalValueMutation(
+    SampleLabelingTask& task,
+    CanonicalTimestamp mutation_time);
+void MarkCanonicalSemanticMutation(
+    SampleLabelingTask& task,
+    CanonicalTimestamp mutation_time);
 void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveStateKind clean_state);
 void MarkSampleLabelTaskSaveFailed(
     SampleLabelingTask& task,

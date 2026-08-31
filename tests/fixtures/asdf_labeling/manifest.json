@@ -2,7 +2,7 @@
   "reference": {
     "asdf": "5.3.1",
     "asdf_standard_version": "1.5.0",
-    "schema_version": "1.0.0"
+    "schema_version": "2.0.0"
   },
   "fixtures": [
     {
@@ -13,7 +13,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "de961bfb79b7977b172ca4bb826c78f501a4a4cce8506efe9d0e0df3b99fa2f6"
+      "sha256": "0576824a6d50bb29c26a4b4287e9db67493081c01efd4e217590ac87ac936b29"
     },
     {
       "name": "unicode",
@@ -23,7 +23,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "6a1ef92ec8fc0d9b3e775844bf548d28ae08ad4cca598deaca82fae330d9e04b"
+      "sha256": "434e6c98dd61d44c956e072ed7916467060f82e6d65b6eb94af95beff53d31e9"
     },
     {
       "name": "folder_roster",
@@ -33,7 +33,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "24f5af349d283bdceec5e1d5e4d78226fa68e68b134136d0dfc220a80b18d162"
+      "sha256": "f894b205bdb54a22a757928580e4c6699c8ea49e1dc261180fde0012a8162b73"
     },
     {
       "name": "npy_with_names",
@@ -43,7 +43,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b6b937e42eaa3dd315208f9e87189792bfc2a5e9d3f182ed3cf861633d849c3e"
+      "sha256": "3e3424bb906c5df93b39e65ee0af8c4f7c3f613b0cf249280d152c3c7f4751ba"
     },
     {
       "name": "npy_source_index",
@@ -53,7 +53,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "3d019790650872e292fb8d9acc9e0527e39b53744f1968273309f746ed33f0ce"
+      "sha256": "b0520a1fd9f17869707ae905ce9ffd264468632a2a61b7d48bdfc002faecc6f1"
     },
     {
       "name": "mixed_unlabeled",
@@ -63,7 +63,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b3f99716f393b30a8bb80e60b6b831d484a794b45ea5eb6f25cfc67640016a57"
+      "sha256": "af64b200d03456f2d72e0d2f694151216314475d9a12c7f2abc5f2fe518b83c3"
     },
     {
       "name": "large_values",
@@ -73,7 +73,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b2f9130a22ad1a34cbe0c4fd0a9c55de7204a0c19d7612d65fd210fb8670d9d2"
+      "sha256": "3b8ac3898e4715fa94128c2b2749bc2f6f728bb41219dc26692cf7093cf4af1a"
     },
     {
       "name": "forward_unknown",
@@ -83,7 +83,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "8597f751206f7e5b6de23c1fe8d9d326bcfe507a5946fc12f097856053809d4c"
+      "sha256": "42883d9aff31e985af950d53ee8259fc8cf48273b2953da61469d1a0cb139cad"
     },
     {
       "name": "invalid_count",
@@ -93,7 +93,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "sample_count/value count",
-      "sha256": "0307847df6b30b0fc2e459449f3bfb475b6b258ccbf02e19c389bf7f590d6d03"
+      "sha256": "2e1adf46f962a6beb382c8ea8219f0818526890a91142b91e32cb99f026930c0"
     },
     {
       "name": "invalid_duplicate_label",
@@ -103,7 +103,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label codes unique",
-      "sha256": "61143b67c707255a6bfc7e85fc3d1561a5515e8c2aabbab46897d7bbe92e15dc"
+      "sha256": "1ec5aa17ede07b82e85f2d6b8ae6c017d3a0b21884d36d7f69bac21918d25d13"
     },
     {
       "name": "invalid_sentinel_collision",
@@ -113,7 +113,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label code collides with unlabeled",
-      "sha256": "e8d8263f7d530f012c7259ca290b6217dea20924f18c4383010e5e723c60eb65"
+      "sha256": "8078fb6ba3b785a2aa957130cf95806cb02668c91ac53aa855073c7631887d72"
     },
     {
       "name": "invalid_undefined_value",
@@ -123,7 +123,77 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "values reference defined labels",
-      "sha256": "5864f0698ac229a007e84b4fff7fc4cd28abacdce7277b5ac3121b42b13b723e"
+      "sha256": "29d2a79562bfc4d24ffd515d194f3584529076ed47c6c5ff606c836dd0a32acf"
+    },
+    {
+      "name": "promoted_unicode_origin",
+      "path": "promoted_unicode_origin.asdf",
+      "semantic_path": "promoted_unicode_origin.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "e98200b415cee705c440d592f2742fb6b70e8b3229462e84d114fb46fc074413"
+    },
+    {
+      "name": "invalid_origin_dot",
+      "path": "invalid_origin_dot.asdf",
+      "semantic_path": "invalid_origin_dot.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "20bcd88b2491f7adce34fce6fa19636e76e97b913400ffcbfe9152056a23312e"
+    },
+    {
+      "name": "invalid_origin_dotdot",
+      "path": "invalid_origin_dotdot.asdf",
+      "semantic_path": "invalid_origin_dotdot.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "16e572163a0771f635e33b143aa601f5904457121a9a2f961d0825ce0ef6cd95"
+    },
+    {
+      "name": "invalid_origin_absolute",
+      "path": "invalid_origin_absolute.asdf",
+      "semantic_path": "invalid_origin_absolute.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "4e958a275e8e22f45e4cc75f5afbf5f66807aaf343fee682bf83d986b95e5702"
+    },
+    {
+      "name": "invalid_origin_forward_directory",
+      "path": "invalid_origin_forward_directory.asdf",
+      "semantic_path": "invalid_origin_forward_directory.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "14f6c8da619bb8370ccedcec2e3653481c29f2be12b60a7a8abc247bd832197f"
+    },
+    {
+      "name": "invalid_origin_backslash_directory",
+      "path": "invalid_origin_backslash_directory.asdf",
+      "semantic_path": "invalid_origin_backslash_directory.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "f999489bee5ce80340b50f1ca33cd8a5cf68745e2784884ace655f400b4111dd"
+    },
+    {
+      "name": "invalid_origin_drive_prefix",
+      "path": "invalid_origin_drive_prefix.asdf",
+      "semantic_path": "invalid_origin_drive_prefix.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "origin annotation name",
+      "sha256": "99cf7984b69e224b8e124178d958e5e9cbd7bf8b9d29a954fe1e2edd643b0c06"
     },
     {
       "name": "profile_zlib",
@@ -133,7 +203,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "fb787e59c8470a4f465fe90bb58033fea77fe50e8ad0302c3009e613dc796b14"
+      "sha256": "72e9a2272ce2e1714a6d280b52e37ea625c1acf1688cb364f0abb32e61dd06a1"
     },
     {
       "name": "profile_checksum",
@@ -143,7 +213,7 @@
       "semantically_valid": true,
       "native_profile_supported": false,
       "expected_error": "unsupported wire profile",
-      "sha256": "b3baf2f573274d4a72faf5e272af55eda3f28d76b5325169d6ffc9214b634ac0"
+      "sha256": "ef264a92d909af653a3230133cb5e857953be951a25ffcbb2bc01e3fd548d2ad"
     },
     {
       "name": "malformed_bad_magic",
@@ -173,7 +243,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "9f6d2712fbca9883358ad2362bed6de36154c292e9bbd194ce53b985439dc58c"
+      "sha256": "6f699fadf69ee4f66f1a710b785bfced145a7e561c1ce4a8fdf3e3143cc3d8af"
     },
     {
       "name": "malformed_zlib_payload",
@@ -183,7 +253,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "e42abe0b45a6e887e0ce6141ddda16c36d779ccd7d2feac07f3e84bd4c39d12f"
+      "sha256": "08b3ac41ee7dcde6f9a76952d110589821523a0c833fcd1e16e642b615c46c3a"
     }
   ]
 }

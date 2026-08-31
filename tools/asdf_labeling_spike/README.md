@@ -1,10 +1,12 @@
-# SpecForge ASDF labeling spike
+# SpecForge sample-labeling schema 2.0.0 ASDF spike
 
 This directory contains the reproducible experiments for GitHub issue #77. It
 is deliberately separate from the production labeling persistence path. The
 approved semantic model remains owned by issue #74.
 
-The reference oracle is Python `asdf` 5.3.1 with `asdf-standard` 1.5.0. For
+The reference oracle is Python `asdf` 5.3.1 with `asdf-standard` 1.5.0. The
+documents use SpecForge sample-labeling schema `2.0.0`, ASDF file format
+`1.0.0`, and ASDF Standard `1.5.0`; these are three separate version axes. For
 ad-hoc experiments, install the pinned environment into an ignored build
 directory:
 
@@ -12,6 +14,17 @@ directory:
 python -m pip install --target build/asdf-labeling-spike-python -r tools/asdf_labeling_spike/requirements.txt
 $env:PYTHONPATH = (Resolve-Path build/asdf-labeling-spike-python).Path
 ```
+
+The checked profile is the canonical SpecForge sample-labeling schema `2.0.0`
+document: task IDs are
+lowercase UUID v4 values; task timestamps use fixed millisecond UTC text; task
+origin, optional description, and optional authors round-trip through the Python
+and native readers/writers; empty authors remain absent, and `annotation.name`
+is rejected. Promoted annotation provenance names must be portable basenames:
+`.`/`..`, path separators, and ASCII drive prefixes are rejected by both
+oracles. The native reader
+also enforces real calendar dates, origin shape/format, and exact optional
+`sha256:` annotation fingerprints.
 
 Generate and validate the checked-in golden corpus:
 
@@ -91,13 +104,21 @@ additionally verifies that the
 encoded Unicode roster block is byte-for-byte unchanged while the values block
 is replaced. A differential duplicate-key case confirms that official ASDF
 selects the last value while the production reader/rewrite rejects the
-ambiguous document before creating output. The native CLI
-also exposes that seam directly for an already validated input document:
+ambiguous document before creating output. The native CLI also exposes the
+historical raw-block experiment directly for an already validated SpecForge
+sample-labeling schema `2.0.0` input document:
 
 ```powershell
 build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/specforge_asdf_labeling_spike_native.exe `
   rewrite-value input.asdf output.asdf 0 1
 ```
+
+That experimental command first validates the complete known schema and then
+copies the YAML tree prefix byte-for-byte while replacing the values block, so
+unknown root, origin, and origin-annotation fields retain their representation.
+It is not the production lifecycle save path and intentionally does not model
+the controller clock; production semantic saves use the full metadata-aware
+document rewrite.
 
 Both benchmark commands use a subprocess per case so reported peak RSS is not
 contaminated by allocations retained by earlier cases. Generated benchmark

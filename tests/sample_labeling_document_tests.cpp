@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -86,6 +87,11 @@ concept HasLabeledCount = requires(T value) {
     value.labeled_count;
 };
 
+template <typename T>
+concept HasAnnotationName = requires(T value) {
+    value.name;
+};
+
 static_assert(!HasAutoAdvance<specforge::SampleLabelingDocument>);
 static_assert(!HasSkipLabeledOnAdvance<specforge::SampleLabelingDocument>);
 static_assert(!HasRememberedPosition<specforge::SampleLabelingDocument>);
@@ -99,6 +105,7 @@ static_assert(!HasValueCount<specforge::SampleLabelingDocument>);
 static_assert(!HasLabelUsageCounts<specforge::SampleLabelingDocument>);
 static_assert(!HasLabeledCount<specforge::SampleLabelingDocument>);
 static_assert(!HasContextFingerprint<specforge::SampleLabelingDocumentSource>);
+static_assert(!HasAnnotationName<specforge::SampleLabelingDocumentAnnotation>);
 
 bool HasIssue(
     const specforge::SampleLabelingDocumentValidationResult& result,
@@ -126,8 +133,20 @@ specforge::SampleLabelingDocument ValidDocument()
         .spectrum_count = 3};
     source_context.manifest.sample_names =
         {"星系一", "类星体β", "échelle-γ"};
+    specforge::SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    canonical_metadata.created_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T16:23:45.123Z");
+    canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T17:01:12.456Z");
+    canonical_metadata.origin.kind = "manual";
     specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask("task-alpha", "天体分类", 3);
+        specforge::CreateSampleLabelingTask(
+            "00000000-0000-4000-8000-000000000001",
+            "天体分类",
+            3,
+            std::move(canonical_metadata));
     Require(
         specforge::UpsertSampleLabel(task.label_set, {0, "Galaxy", 'g'}),
         "first label fixture should be valid");
@@ -172,7 +191,8 @@ void TestBuildSeparatesCanonicalDocumentFromTaskSessionState()
         document.annotation.values == std::vector<std::int32_t>({0, -1, 1}),
         "builder should copy only canonical annotation values");
     Require(
-        document.labeling.id == "task-alpha" &&
+        document.labeling.id ==
+                "00000000-0000-4000-8000-000000000001" &&
             document.labeling.name == "天体分类" &&
             document.labeling.labels.size() == 2,
         "builder should copy task identity, name, and label definitions");
@@ -256,7 +276,10 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
         .context_fingerprint = "sha256-v1:index-context",
         .spectrum_count = 2};
     specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask("index-task", "Index labels", 2);
+        specforge::CreateSampleLabelingTask(
+            "00000000-0000-4000-8000-000000000002",
+            "Index labels",
+            2);
     Require(
         specforge::UpsertSampleLabel(task.label_set, {0, "Target", 't'}),
         "source-index label fixture should be valid");
@@ -289,7 +312,7 @@ void TestInvalidSourceNamesFallBackToSourceIndexRoster()
     };
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(
-            "invalid-roster-task",
+            "00000000-0000-4000-8000-000000000003",
             "Index fallback",
             3);
 
@@ -413,7 +436,7 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
     document.format_kind = "specforge.session";
-    document.schema_version = "2.0.0";
+    document.schema_version = "1.0.0";
     document.annotation.kind = "continuous_float";
     document.annotation.missing.semantic = "nan";
     document.source.base_identity.clear();
@@ -434,6 +457,160 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
     }
 }
 
+void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
+{
+    specforge::SampleLabelingDocument document = ValidDocument();
+    document.labeling.id = "00000000-0000-4000-8000-00000000000A";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidTaskId),
+        "schema 2 task ids must use the lowercase canonical UUID v4 form");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T16:00:00.000Z");
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidCanonicalTimestampOrder),
+        "created_at must not be later than modified_at");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "labels.csv",
+            .format = "csv"};
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidOriginAnnotation),
+        "manual origin must not carry annotation promotion metadata");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidOriginAnnotation),
+        "annotation promotion must carry portable annotation provenance");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.origin.kind = "Bad-Origin";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidOriginKind),
+        "origin kinds must remain lowercase extensible tokens");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    document.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "\xE3\x80\x80",
+            .format = "json",
+            .fingerprint =
+                "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"};
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidOriginAnnotation),
+        "promotion provenance must use a non-whitespace UTF-8 name, csv/npy format, and lowercase SHA-256");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.description =
+        std::string{"\xC3\x28", 2};
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidDescription),
+        "description must contain valid UTF-8");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.authors = {
+        {.name = "Alice", .identifier = "   "},
+        {.name = "\xE3\x80\x80"},
+    };
+    const auto invalid_authors =
+        specforge::ValidateSampleLabelingDocument(document);
+    Require(
+        HasIssue(
+            invalid_authors,
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidAuthor,
+            0) &&
+            HasIssue(
+                invalid_authors,
+                specforge::SampleLabelingDocumentValidationIssueKind::
+                    InvalidAuthor,
+                1),
+        "author name and optional identifier must contain non-whitespace UTF-8 text");
+
+    document = ValidDocument();
+    document.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    document.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "初始标签.csv",
+            .format = "csv",
+            .fingerprint = "sha256:" + std::string(64, 'a')};
+    document.labeling.canonical_metadata.description =
+        "中日韩描述 🧪";
+    document.labeling.canonical_metadata.authors = {
+        {.name = "Alice", .identifier = "https://example.test/alice"},
+        {.name = "山田太郎"},
+    };
+    Require(
+        specforge::ValidateSampleLabelingDocument(document).valid(),
+        "schema 2 canonical metadata should accept valid Unicode declarations without normalization");
+}
+
+void TestValidatorRequiresPortableAnnotationOriginBasename()
+{
+    specforge::SampleLabelingDocument promoted = ValidDocument();
+    promoted.labeling.canonical_metadata.origin.kind =
+        "annotation_promotion";
+    promoted.labeling.canonical_metadata.origin.annotation =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "初始标签.csv",
+            .format = "csv",
+            .fingerprint = "sha256:" + std::string(64, 'a')};
+    Require(
+        specforge::ValidateSampleLabelingDocument(promoted).valid(),
+        "shared document validation should accept a Unicode annotation provenance basename");
+
+    for (const std::string_view nonportable_name : {
+             "/home/user/labels.csv",
+             "C:\\labels.npy",
+             "C:/labels.csv",
+             "\\\\server\\share\\labels.csv",
+             "folder/labels.csv",
+             "folder\\labels.npy",
+             "C:labels.csv",
+             ".",
+             "..",
+         }) {
+        promoted.labeling.canonical_metadata.origin.annotation->name =
+            nonportable_name;
+        Require(
+            HasIssue(
+                specforge::ValidateSampleLabelingDocument(promoted),
+                specforge::SampleLabelingDocumentValidationIssueKind::
+                    InvalidOriginAnnotation),
+            "shared document validation must reject rooted, directory-bearing, and drive-relative annotation provenance names");
+    }
+}
+
 void TestCanonicalProjectionRejectsUndefinedPendingCodes()
 {
     const specforge::SampleLabelingDocument document =
@@ -447,6 +624,8 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
     local_state.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
+    local_state.canonical_metadata =
+        document.labeling.canonical_metadata;
     local_state.values[1] = 42;
     local_state.pending_sample_indices.insert(1);
 
@@ -473,6 +652,66 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
             metadata_projection->values ==
                 std::vector<int>({0, 42, 1}),
         "pending values should be validated after a compatible local metadata overlay is applied");
+}
+
+void TestCanonicalProjectionUsesOneMetadataAuthority()
+{
+    const specforge::SampleLabelingDocument document =
+        ValidDocument();
+    specforge::SampleLabelingTask local_state =
+        specforge::CreateSampleLabelingTask(
+            document.labeling.id,
+            "stale cache name",
+            document.annotation.values.size(),
+            document.labeling.canonical_metadata);
+    local_state.output_path = "canonical-owner.asdf";
+    local_state.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+
+    local_state.canonical_metadata.description =
+        "stale cache description";
+    const auto clean_projection =
+        specforge::ProjectSampleLabelingDocumentTask(
+            document,
+            local_state);
+    Require(
+        clean_projection &&
+            clean_projection->task_name ==
+                document.labeling.name &&
+            clean_projection->canonical_metadata ==
+                document.labeling.canonical_metadata,
+        "without a pending overlay, the durable canonical document must be the sole metadata authority");
+
+    local_state.pending_sample_indices.insert(1);
+    local_state.values[1] = 0;
+    local_state.canonical_metadata.created_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T16:23:45.124Z");
+    Require(
+        !specforge::ProjectSampleLabelingDocumentTask(
+            document,
+            local_state),
+        "pending cache edits must not merge with a different immutable creation timestamp");
+
+    local_state.canonical_metadata =
+        document.labeling.canonical_metadata;
+    local_state.canonical_metadata.origin.kind = "future_origin";
+    Require(
+        !specforge::ProjectSampleLabelingDocumentTask(
+            document,
+            local_state),
+        "pending cache edits must not merge with a different immutable origin");
+
+    local_state.canonical_metadata =
+        document.labeling.canonical_metadata;
+    local_state.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T16:30:00.000Z");
+    Require(
+        !specforge::ProjectSampleLabelingDocumentTask(
+            document,
+            local_state),
+        "an older pending cache generation must be treated as stale rather than overlaid on newer disk metadata");
 }
 
 void TestFailFastValidatorBoundsDiagnostics()
@@ -506,7 +745,10 @@ int main()
         TestValidatorEnforcesSampleAlignmentAndRosterShape();
         TestValidatorEnforcesLabelAndUnlabeledInvariants();
         TestValidatorRejectsUnsupportedDocumentSemantics();
+        TestValidatorEnforcesSchemaTwoIdentityAndMetadata();
+        TestValidatorRequiresPortableAnnotationOriginBasename();
         TestCanonicalProjectionRejectsUndefinedPendingCodes();
+        TestCanonicalProjectionUsesOneMetadataAuthority();
         TestFailFastValidatorBoundsDiagnostics();
         return 0;
     } catch (const std::exception& error) {

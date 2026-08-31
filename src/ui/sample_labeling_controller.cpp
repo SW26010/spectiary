@@ -5,9 +5,12 @@
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
 #include "domain/stable_sha256.h"
+#include "domain/utf8.h"
+#include "domain/uuid_v4.h"
 #include "ui/sample_annotation_labeling_rules.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -51,6 +54,113 @@ bool IsCanonicalAsdfOutputPath(
         lower_ascii(extension[2]) == 's' &&
         lower_ascii(extension[3]) == 'd' &&
         lower_ascii(extension[4]) == 'f';
+}
+
+bool IsValidAnnotationPromotionOrigin(
+    const SampleLabelingOrigin& origin)
+{
+    if (origin.kind != "annotation_promotion" ||
+        !origin.annotation ||
+        !IsValidSampleLabelingAnnotationOriginName(
+            origin.annotation->name) ||
+        (origin.annotation->format != "csv" &&
+         origin.annotation->format != "npy")) {
+        return false;
+    }
+    if (!origin.annotation->fingerprint) {
+        return true;
+    }
+    constexpr std::string_view kPrefix = "sha256:";
+    const std::string_view fingerprint =
+        *origin.annotation->fingerprint;
+    if (!fingerprint.starts_with(kPrefix) ||
+        fingerprint.size() != kPrefix.size() + 64U) {
+        return false;
+    }
+    const std::string_view digest =
+        fingerprint.substr(kPrefix.size());
+    return std::all_of(
+        digest.begin(),
+        digest.end(),
+        [](char character) {
+            return (character >= '0' && character <= '9') ||
+                (character >= 'a' && character <= 'f');
+        });
+}
+
+bool SameLabelSet(
+    const SampleLabelSet& left,
+    const SampleLabelSet& right)
+{
+    return left.labels.size() == right.labels.size() &&
+        std::equal(
+            left.labels.begin(),
+            left.labels.end(),
+            right.labels.begin(),
+            [](const SampleLabelDefinition& left_label,
+               const SampleLabelDefinition& right_label) {
+                return left_label.code == right_label.code &&
+                    left_label.name == right_label.name &&
+                    left_label.shortcut == right_label.shortcut;
+            });
+}
+
+bool PromotionArtifactMatchesPlannedGeneration(
+    const std::filesystem::path& path,
+    std::size_t sample_count,
+    const SampleLabelingOrigin& origin,
+    std::string_view task_name,
+    const SampleLabelSet& label_set,
+    std::span<const int> values,
+    const SampleLabelingCanonicalSourceDescriptor*
+        source_descriptor)
+{
+    if (!origin.annotation ||
+        !origin.annotation->fingerprint) {
+        return true;
+    }
+
+    SampleAnnotationIoAdapter adapter;
+    std::string reload_error;
+    std::optional<SampleAnnotationResult> reloaded =
+        source_descriptor == nullptr
+        ? adapter.Load(
+              path,
+              sample_count,
+              &reload_error)
+        : adapter.LoadForSource(
+              path,
+              SampleLabelingCompatibilityView(
+                  *source_descriptor),
+              &reload_error);
+    if (!reloaded ||
+        !reloaded->artifact_provenance ||
+        *reloaded->artifact_provenance !=
+            *origin.annotation) {
+        return false;
+    }
+
+    const SampleLabelResultMetadata* metadata =
+        reloaded->label_metadata
+        ? &*reloaded->label_metadata
+        : nullptr;
+    const SampleAnnotationLabelingActivationPlan reloaded_plan =
+        PlanSampleAnnotationLabelingActivation(
+            SampleAnnotationLabelingActivationRequest{
+                .annotation = &*reloaded,
+                .metadata = metadata,
+            });
+    return reloaded_plan.kind ==
+            SampleAnnotationLabelingActivationKind::
+                CreateTaskFromAnnotation &&
+        reloaded_plan.origin == origin &&
+        reloaded_plan.task_name == task_name &&
+        SameLabelSet(
+            reloaded_plan.label_set,
+            label_set) &&
+        std::ranges::equal(
+            reloaded_plan.values,
+            values);
 }
 
 bool ShouldRetryOutputSave(const SampleLabelingTask& task)
@@ -229,6 +339,7 @@ bool SameTaskProjection(
             });
     return left.task_id == right.task_id &&
         left.task_name == right.task_name &&
+        left.canonical_metadata == right.canonical_metadata &&
         labels_match && left.values == right.values &&
         left.auto_advance == right.auto_advance &&
         left.skip_labeled_on_advance ==
@@ -265,37 +376,6 @@ bool SameSourceTaskProjection(
             SameTaskProjection);
 }
 
-std::string UniqueTaskIdForCreation(
-    std::string_view requested_task_id,
-    const std::vector<SampleLabelingTask>& latest_tasks,
-    const std::vector<SampleLabelingTask>& known_tasks,
-    const std::unordered_set<std::string>& reserved_ids)
-{
-    std::unordered_set<std::string> existing_ids =
-        reserved_ids;
-    existing_ids.reserve(
-        existing_ids.size() + latest_tasks.size() +
-        known_tasks.size());
-    for (const SampleLabelingTask& task : latest_tasks) {
-        existing_ids.insert(task.task_id);
-    }
-    for (const SampleLabelingTask& task : known_tasks) {
-        existing_ids.insert(task.task_id);
-    }
-
-    const std::string base{requested_task_id};
-    if (!existing_ids.contains(base)) {
-        return base;
-    }
-    for (std::size_t suffix = 2;; ++suffix) {
-        std::string candidate =
-            base + "-" + std::to_string(suffix);
-        if (!existing_ids.contains(candidate)) {
-            return candidate;
-        }
-    }
-}
-
 std::vector<std::filesystem::path> TaskEditLeasePaths(
     const std::filesystem::path& state_cache_path,
     std::string_view lease_key)
@@ -330,38 +410,6 @@ SampleLabelResultMetadataSource SourceMetadataFromState(const SampleLabelingCont
     return source;
 }
 
-bool CanonicalTaskMetadataMatchesSnapshot(
-    const SampleLabelingTask& task,
-    const SampleLabelingDocument& document)
-{
-    if (task.task_id != document.labeling.id ||
-        task.task_name != document.labeling.name ||
-        task.label_set.labels.size() !=
-            document.labeling.labels.size()) {
-        return false;
-    }
-    for (std::size_t index = 0;
-         index < task.label_set.labels.size();
-         ++index) {
-        const SampleLabelDefinition& task_label =
-            task.label_set.labels[index];
-        const SampleLabelingDocumentLabel& document_label =
-            document.labeling.labels[index];
-        const std::string task_shortcut =
-            task_label.shortcut == '\0'
-            ? std::string{}
-            : std::string(1, task_label.shortcut);
-        if (static_cast<std::int64_t>(task_label.code) !=
-                static_cast<std::int64_t>(
-                    document_label.code) ||
-            task_label.name != document_label.name ||
-            task_shortcut != document_label.shortcut) {
-            return false;
-        }
-    }
-    return true;
-}
-
 std::optional<SampleLabelingDocument>
 BuildCanonicalDocumentReplacement(
     const SampleLabelingTask& task,
@@ -373,7 +421,7 @@ BuildCanonicalDocumentReplacement(
         task.values.size() != current.annotation.values.size()) {
         if (error_message != nullptr) {
             *error_message =
-                "canonical ASDF metadata publication does not match the opened owner generation";
+                "canonical ASDF document publication does not match the opened owner generation";
         }
         return std::nullopt;
     }
@@ -399,6 +447,7 @@ BuildCanonicalDocumentReplacement(
     }
 
     replacement.labeling.name = task.task_name;
+    replacement.labeling.canonical_metadata = task.canonical_metadata;
     replacement.labeling.labels.clear();
     replacement.labeling.labels.reserve(
         task.label_set.labels.size());
@@ -527,25 +576,6 @@ SampleLabelingController::SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
           std::move(legacy_output_publisher),
-          [](SampleLabelingAsdfOpenSnapshot& snapshot,
-             std::span<const std::int32_t> values) {
-              return RewriteSampleLabelingAsdfValuesAtomically(
-                  snapshot,
-                  values);
-          })
-{
-}
-
-SampleLabelingController::SampleLabelingController(
-    std::filesystem::path state_cache_path,
-    StateCacheLoader state_cache_loader,
-    LegacyOutputPublisher legacy_output_publisher,
-    CanonicalValuesPublisher canonical_values_publisher)
-    : SampleLabelingController(
-          std::move(state_cache_path),
-          std::move(state_cache_loader),
-          std::move(legacy_output_publisher),
-          std::move(canonical_values_publisher),
           [](const SampleLabelingAsdfOpenSnapshot& snapshot,
              const SampleLabelingDocument& document,
              const SampleLabelingCanonicalSourceDescriptor& source) {
@@ -561,13 +591,11 @@ SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
     LegacyOutputPublisher legacy_output_publisher,
-    CanonicalValuesPublisher canonical_values_publisher,
     CanonicalDocumentPublisher canonical_document_publisher)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
           std::move(legacy_output_publisher),
-          std::move(canonical_values_publisher),
           std::move(canonical_document_publisher),
           [](const std::filesystem::path& path,
              const SampleLabelingDocument& document,
@@ -584,19 +612,37 @@ SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
     LegacyOutputPublisher legacy_output_publisher,
-    CanonicalValuesPublisher canonical_values_publisher,
     CanonicalDocumentPublisher canonical_document_publisher,
     CanonicalCreationPublisher canonical_creation_publisher)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          std::move(legacy_output_publisher),
+          std::move(canonical_document_publisher),
+          std::move(canonical_creation_publisher),
+          []() { return GenerateUuidV4(); },
+          []() { return CurrentCanonicalTimestamp(); })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    LegacyOutputPublisher legacy_output_publisher,
+    CanonicalDocumentPublisher canonical_document_publisher,
+    CanonicalCreationPublisher canonical_creation_publisher,
+    TaskIdGenerator task_id_generator,
+    TaskClock task_clock)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
       legacy_output_publisher_(
           std::move(legacy_output_publisher)),
-      canonical_values_publisher_(
-          std::move(canonical_values_publisher)),
       canonical_document_publisher_(
           std::move(canonical_document_publisher)),
       canonical_creation_publisher_(
           std::move(canonical_creation_publisher)),
+      task_id_generator_(std::move(task_id_generator)),
+      task_clock_(std::move(task_clock)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -1355,11 +1401,19 @@ SampleLabelingController::
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTask(
-    std::string task_id,
     std::string task_name)
 {
     SourceState* state = ActiveSource();
-    if (state == nullptr || task_id.empty()) {
+    if (state == nullptr ||
+        !IsValidUtf8WithNonWhitespace(task_name) ||
+        !task_id_generator_ ||
+        !task_clock_) {
+        return RejectOperation();
+    }
+    const std::optional<std::string> requested_task_id =
+        task_id_generator_();
+    if (!requested_task_id ||
+        !IsCanonicalUuidV4(*requested_task_id)) {
         return RejectOperation();
     }
 
@@ -1410,9 +1464,10 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
     TaskCreationPreparation preparation =
         PrepareTaskCreation(
             *active_source_identity_,
-            task_id,
+            *requested_task_id,
             state->sample_count,
-            state->tasks);
+            state->tasks,
+            true);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         return preserve_refreshed_projection(
@@ -1422,12 +1477,30 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
     if (!preparation.ready &&
         !state_cache_load_warning_.empty() &&
         state->tasks.empty()) {
-        preparation.task_id =
-            UniqueTaskIdForCreation(
-                task_id,
-                {},
-                state->tasks,
-                {});
+        constexpr std::size_t kMaximumIdAttempts = 64;
+        for (std::size_t attempt = 0;
+             attempt < kMaximumIdAttempts;
+             ++attempt) {
+            const std::optional<std::string> generated =
+                attempt == 0
+                ? requested_task_id
+                : task_id_generator_();
+            if (generated &&
+                IsCanonicalUuidV4(*generated) &&
+                std::none_of(
+                    state->tasks.begin(),
+                    state->tasks.end(),
+                    [&generated](const SampleLabelingTask& task) {
+                        return task.task_id == *generated;
+                    })) {
+                preparation.task_id = *generated;
+                break;
+            }
+        }
+        if (preparation.task_id.empty()) {
+            return preserve_refreshed_projection(
+                RejectEditTargetChanged());
+        }
         preparation.leases.task_identity_key =
             TaskIdentityEditLeaseKey(
                 *active_source_identity_,
@@ -1454,11 +1527,16 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
             RejectEditTargetChanged());
     }
 
-    state->tasks.push_back(
-        CreateSampleLabelingTask(
-            std::move(preparation.task_id),
-            std::move(task_name),
-            state->sample_count));
+    const CanonicalTimestamp created_at = task_clock_();
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    canonical_metadata.created_at = created_at;
+    canonical_metadata.modified_at = created_at;
+    canonical_metadata.origin.kind = "manual";
+    state->tasks.push_back(CreateSampleLabelingTask(
+        std::move(preparation.task_id),
+        std::move(task_name),
+        state->sample_count,
+        std::move(canonical_metadata)));
     SampleLabelingTask& created = state->tasks.back();
     state->active_task_id = created.task_id;
     MarkTaskUpsert(
@@ -1521,33 +1599,68 @@ SampleLabelingController::StartOrResumeTemporaryTask()
             return result;
         }
         SampleLabelingOperationResult created = CreateTask(
-            TaskIdForNewSampleLabelingTask(
-                kTemporarySampleLabelingTaskName,
-                &state->tasks),
-            std::string{
-                kTemporarySampleLabelingTaskName});
+            std::string{kTemporarySampleLabelingTaskName});
         created.task_projection_changed =
             created.task_projection_changed ||
             result.task_projection_changed;
         return created;
     }
     return CreateTask(
-        TaskIdForNewSampleLabelingTask(
-            kTemporarySampleLabelingTaskName,
-            &state->tasks),
         std::string{kTemporarySampleLabelingTaskName});
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(
-    std::string task_id,
     std::string task_name,
     SampleLabelSet label_set,
     std::vector<int> values,
     std::filesystem::path output_path,
     bool metadata_clean)
 {
+    SampleLabelingOrigin origin{.kind = "annotation_promotion"};
+    const std::filesystem::path filename = output_path.filename();
+    const std::u8string name = filename.u8string();
+    std::string extension = output_path.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const std::string format = extension == ".csv"
+        ? "csv"
+        : extension == ".npy" ? "npy" : std::string{};
+    origin.annotation = SampleLabelingAnnotationOrigin{
+        .name = std::string{
+            reinterpret_cast<const char*>(name.data()), name.size()},
+        .format = format};
+    return CreateTaskFromAnnotation(
+        std::move(task_name),
+        std::move(label_set),
+        std::move(values),
+        std::move(output_path),
+        metadata_clean,
+        std::move(origin));
+}
+
+SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(
+    std::string task_name,
+    SampleLabelSet label_set,
+    std::vector<int> values,
+    std::filesystem::path output_path,
+    bool metadata_clean,
+    SampleLabelingOrigin origin)
+{
     SourceState* state = ActiveSource();
-    if (state == nullptr || task_id.empty() || output_path.empty() || values.size() != state->sample_count) {
+    if (state == nullptr ||
+        !IsValidUtf8WithNonWhitespace(task_name) ||
+        !task_id_generator_ ||
+        !task_clock_ ||
+        !IsValidAnnotationPromotionOrigin(origin) ||
+        output_path.empty() ||
+        values.size() != state->sample_count) {
+        return RejectOperation();
+    }
+
+    const bool csv_promotion =
+        origin.annotation->format == "csv";
+    if (csv_promotion && TemporaryTask() != nullptr) {
         return RejectOperation();
     }
 
@@ -1557,10 +1670,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
                    SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar &&
                OutputPathMatches(*task.output_path, output_path);
     });
-    if (output_match != state->tasks.end()) {
-        if (output_match->task_id != task_id) {
-            return RejectOperation();
-        }
+    if (!csv_promotion && output_match != state->tasks.end()) {
         if (state->active_task_id && *state->active_task_id == output_match->task_id) {
             SampleLabelingOperationResult result = RejectOperation();
             result.accepted = true;
@@ -1569,10 +1679,10 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         return ActivateTask(output_match->task_id);
     }
 
-    const auto id_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
-        return task.task_id == task_id;
-    });
-    if (id_match != state->tasks.end()) {
+    const std::optional<std::string> requested_task_id =
+        task_id_generator_();
+    if (!requested_task_id ||
+        !IsCanonicalUuidV4(*requested_task_id)) {
         return RejectOperation();
     }
 
@@ -1583,55 +1693,47 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         return RejectOperation();
     }
 
-    SampleLabelingTask task = CreateSampleLabelingTask(std::move(task_id), std::move(task_name), state->sample_count);
-    task.label_set = std::move(label_set);
-    task.values = std::move(values);
-    RebuildSampleLabelingTaskStatistics(task);
-    if (metadata_clean) {
-        task.output_path = std::move(output_path);
-        task.output_format =
-            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-        MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
-    } else {
-        SelectSampleLabelTaskOutputPath(
-            task,
-            std::move(output_path));
-    }
-
-    TaskActivationPreparation preparation =
-        PrepareTaskActivation(
+    TaskCreationPreparation preparation =
+        PrepareTaskCreation(
             *active_source_identity_,
-            task,
+            *requested_task_id,
             state->sample_count,
-            false,
-            false);
+            state->tasks,
+            csv_promotion);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         return RejectLeaseAcquireStatus(
             preparation.lease_status);
     }
-    if (preparation.refresh_status ==
-            TaskRefreshStatus::Failed) {
+    if (!preparation.ready ||
+        preparation.task_id.empty()) {
         return RejectEditTargetChanged();
     }
-    const bool expected_absent =
-        preparation.refresh_status ==
-        TaskRefreshStatus::Missing;
-    if (preparation.refresh_status ==
-            TaskRefreshStatus::Ready &&
-        preparation.task) {
-        if (!preparation.task->output_path ||
-            !OutputPathMatches(
-                *preparation.task->output_path,
-                *task.output_path)) {
-            return RejectEditTargetChanged();
-        }
-        task = std::move(*preparation.task);
-        metadata_clean =
-            !HasPendingOutputSave(task) &&
-            task.save_state.kind !=
-                SampleLabelSaveStateKind::Failed;
-    } else {
+    const CanonicalTimestamp created_at = task_clock_();
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    canonical_metadata.created_at = created_at;
+    canonical_metadata.modified_at = created_at;
+    canonical_metadata.origin = std::move(origin);
+    SampleLabelingTask task = CreateSampleLabelingTask(
+        std::move(preparation.task_id),
+        std::move(task_name),
+        state->sample_count,
+        std::move(canonical_metadata));
+    task.label_set = std::move(label_set);
+    task.values = std::move(values);
+    RebuildSampleLabelingTaskStatistics(task);
+    // A promotion always owns a fresh UUID. Existing sidecar metadata can
+    // seed labels/name at the planning boundary, but it cannot already be a
+    // clean representation of this new task identity.
+    metadata_clean = csv_promotion;
+    if (!csv_promotion) {
+        metadata_clean = false;
+        SelectSampleLabelTaskOutputPath(
+            task,
+            output_path);
+    }
+
+    if (!csv_promotion) {
         ExclusiveFileLeaseAcquireResult output_lease =
             TryAttachOutputLease(
                 preparation.leases,
@@ -1649,7 +1751,32 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         if (*latest_output_conflict) {
             return RejectOperation();
         }
+    }
 
+    if (!PromotionArtifactMatchesPlannedGeneration(
+            output_path,
+            state->sample_count,
+            task.canonical_metadata.origin,
+            task.task_name,
+            task.label_set,
+            task.values,
+            active_source_descriptor_
+                ? &*active_source_descriptor_
+                : nullptr)) {
+        return RejectEditTargetChanged();
+    }
+
+    if (csv_promotion) {
+        MarkSampleLabelTaskPersisted(
+            task,
+            SampleLabelSaveStateKind::InternalDraftOnly);
+    } else if (task.canonical_metadata.origin.annotation
+                   ->fingerprint) {
+        // The planned and leased raw artifact generations match. Keep the
+        // plan's values/labels together with that fingerprint; a second
+        // read here could observe a later external replacement.
+        MarkSampleLabelTaskMetadataPending(task);
+    } else {
         std::string reload_error;
         std::optional<LoadedSampleLabelResult>
             reloaded_output =
@@ -1672,29 +1799,8 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         } else {
             task.values =
                 std::move(reloaded_output->values);
-            if (reloaded_output->metadata) {
-                if (reloaded_output->metadata->task_id !=
-                    task.task_id) {
-                    return RejectEditTargetChanged();
-                }
-                task.task_name =
-                    reloaded_output->metadata->task_name;
-                task.label_set =
-                    std::move(
-                        reloaded_output->metadata->label_set);
-                metadata_clean = true;
-            } else {
-                metadata_clean = false;
-            }
             RebuildSampleLabelingTaskStatistics(task);
-            if (metadata_clean) {
-                MarkSampleLabelTaskPersisted(
-                    task,
-                    SampleLabelSaveStateKind::
-                        AutosavedToOutput);
-            } else {
-                MarkSampleLabelTaskMetadataPending(task);
-            }
+            MarkSampleLabelTaskMetadataPending(task);
         }
     }
 
@@ -1711,7 +1817,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
                 *active_source_identity_,
                 *state,
                 task,
-                expected_absent,
+                true,
                 &checkpoint_error);
         if (!recovery_checkpoint_saved) {
             SampleLabelingOperationResult rejected =
@@ -1772,8 +1878,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         *active_source_identity_,
         *state,
         state->tasks.back(),
-        expected_absent &&
-            !recovery_checkpoint_saved);
+        !recovery_checkpoint_saved);
     MarkActiveTaskSelection(
         *active_source_identity_,
         *state);
@@ -1806,7 +1911,7 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
     SourceState* state = ActiveSource();
     if (state == nullptr ||
         !active_source_identity_ ||
-        expected_task_id.empty() ||
+        !IsCanonicalUuidV4(expected_task_id) ||
         output_path.empty() ||
         !IsCanonicalAsdfOutputPath(output_path) ||
         !active_source_descriptor_ ||
@@ -2270,7 +2375,7 @@ SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(Sample
         result.accepted = task != nullptr;
         return result;
     }
-    MarkSampleLabelTaskMetadataPending(*task);
+    MarkCanonicalSemanticMutation(*task, task_clock_());
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
@@ -2291,7 +2396,7 @@ SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
         result.accepted = task != nullptr;
         return result;
     }
-    MarkSampleLabelTaskMetadataPending(*task);
+    MarkCanonicalSemanticMutation(*task, task_clock_());
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
@@ -2308,7 +2413,7 @@ SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int co
         result.accepted = task != nullptr;
         return result;
     }
-    MarkSampleLabelTaskMetadataPending(*task);
+    MarkCanonicalSemanticMutation(*task, task_clock_());
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
@@ -2320,14 +2425,17 @@ SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int co
 SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(std::string task_name)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || task_name.empty() || task->task_name == task_name) {
+    if (task == nullptr ||
+        !IsValidUtf8WithNonWhitespace(task_name) ||
+        task->task_name == task_name) {
         SampleLabelingOperationResult result = RejectOperation();
-        result.accepted = task != nullptr && !task_name.empty();
+        result.accepted = task != nullptr &&
+            IsValidUtf8WithNonWhitespace(task_name);
         return result;
     }
 
     task->task_name = std::move(task_name);
-    MarkSampleLabelTaskMetadataPending(*task);
+    MarkCanonicalSemanticMutation(*task, task_clock_());
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
@@ -2367,15 +2475,13 @@ SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAd
 }
 
 SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskToOutput(
-    std::filesystem::path output_path,
-    std::string task_name)
+    std::filesystem::path output_path)
 {
     SampleLabelingTask* task = ActiveTask();
     SourceState* state = ActiveSource();
     if (task == nullptr || state == nullptr || task->output_path ||
         output_path.empty() ||
-        !IsCanonicalAsdfOutputPath(output_path) ||
-        task_name.empty()) {
+        !IsCanonicalAsdfOutputPath(output_path)) {
         return RejectOperation();
     }
 
@@ -2397,7 +2503,6 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     }
 
     SampleLabelingTask candidate = *task;
-    candidate.task_name = std::move(task_name);
     candidate.output_path = std::move(output_path);
     candidate.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
@@ -3343,103 +3448,55 @@ SampleLabelingController::PersistCanonicalTaskOutput(
 
     SampleLabelingAsdfOpenSnapshot& snapshot =
         **asdf_snapshot;
-    if (task.metadata_save_pending) {
-        if (!active_source_descriptor_ ||
-            !active_source_identity_ ||
-            active_source_descriptor_->base_identity !=
-                *active_source_identity_ ||
-            active_source_descriptor_->base_identity !=
-                snapshot.document().source.base_identity ||
-            active_source_descriptor_->sample_count !=
-                task.values.size()) {
-            fail(
-                "canonical ASDF metadata publication does not have a matching source generation");
-            return result;
-        }
-
-        std::string replacement_error;
-        std::optional<SampleLabelingDocument> replacement =
-            BuildCanonicalDocumentReplacement(
-                task,
-                snapshot,
-                &replacement_error);
-        if (!replacement) {
-            fail(
-                replacement_error.empty()
-                    ? "could not build the canonical ASDF metadata generation"
-                    : std::move(replacement_error),
-                false);
-            return result;
-        }
-
-        SampleLabelingAsdfStoreGenerationWriteResult generation =
-            canonical_document_publisher_(
-                snapshot,
-                *replacement,
-                *active_source_descriptor_);
-        const bool published =
-            generation.document_replaced &&
-            generation.succeeded();
-        result.artifacts_replaced =
-            generation.document_replaced;
-        if (generation.document_replaced) {
-            *asdf_snapshot = std::move(generation.snapshot);
-        }
-        if (!published) {
-            fail(
-                generation.error.message.empty()
-                    ? "could not publish and reopen canonical ASDF metadata"
-                    : std::move(generation.error.message));
-            return result;
-        }
-
-        result.published = true;
-        MarkSampleLabelTaskPersisted(
-            task,
-            SampleLabelSaveStateKind::AutosavedToOutput);
-        return result;
-    }
-
-    if (!CanonicalTaskMetadataMatchesSnapshot(
-            task,
-            snapshot.document())) {
-        task.metadata_save_pending = true;
+    if (!active_source_descriptor_ ||
+        !active_source_identity_ ||
+        active_source_descriptor_->base_identity !=
+            *active_source_identity_ ||
+        active_source_descriptor_->base_identity !=
+            snapshot.document().source.base_identity ||
+        active_source_descriptor_->sample_count !=
+            task.values.size()) {
         fail(
-            "canonical ASDF metadata changed and requires a full-document publication");
+            "canonical ASDF publication does not have a matching source generation");
         return result;
     }
 
-    std::vector<std::int32_t> values;
-    values.reserve(task.values.size());
-    for (const int value : task.values) {
-        const std::int64_t widened =
-            static_cast<std::int64_t>(value);
-        if (widened <
-                std::numeric_limits<std::int32_t>::min() ||
-            widened >
-                std::numeric_limits<std::int32_t>::max()) {
-            fail(
-                "canonical ASDF label value is outside the int32 range",
-                false);
-            return result;
-        }
-        values.push_back(
-            static_cast<std::int32_t>(value));
-    }
-    const SampleLabelingAsdfStoreWriteResult write =
-        canonical_values_publisher_(
+    std::string replacement_error;
+    std::optional<SampleLabelingDocument> replacement =
+        BuildCanonicalDocumentReplacement(
+            task,
             snapshot,
-            values);
-    if (!write.succeeded()) {
+            &replacement_error);
+    if (!replacement) {
         fail(
-            write.error.message.empty()
-                ? "could not publish canonical ASDF label values"
-                : write.error.message);
+            replacement_error.empty()
+                ? "could not build the canonical ASDF replacement generation"
+                : std::move(replacement_error),
+            false);
+        return result;
+    }
+
+    SampleLabelingAsdfStoreGenerationWriteResult generation =
+        canonical_document_publisher_(
+            snapshot,
+            *replacement,
+            *active_source_descriptor_);
+    const bool published =
+        generation.document_replaced &&
+        generation.succeeded();
+    result.artifacts_replaced = generation.document_replaced;
+    if (generation.document_replaced) {
+        *asdf_snapshot = std::move(generation.snapshot);
+    }
+    if (!published) {
+        fail(
+            generation.error.message.empty()
+                ? "could not publish and reopen canonical ASDF document"
+                : std::move(generation.error.message));
         return result;
     }
 
     result.published = true;
-    result.artifacts_replaced = true;
     MarkSampleLabelTaskPersisted(
         task,
         SampleLabelSaveStateKind::AutosavedToOutput);
@@ -3704,6 +3761,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
     SampleLabelingWriteOperationResult result;
     result.write = AssignSampleLabel(*task, sample_index, code);
     if (result.write.changed) {
+        MarkCanonicalValueMutation(*task, task_clock_());
         result.operation =
             CompleteMutation(
                 task,
@@ -3730,6 +3788,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::siz
     SampleLabelingWriteOperationResult result;
     result.write = ClearSampleLabel(*task, sample_index);
     if (result.write.changed) {
+        MarkCanonicalValueMutation(*task, task_clock_());
         result.operation =
             CompleteMutation(
                 task,
@@ -4461,41 +4520,68 @@ SampleLabelingController::PrepareTaskCreation(
     std::string_view source_identity,
     std::string_view requested_task_id,
     std::size_t sample_count,
-    const std::vector<SampleLabelingTask>& known_tasks) const
+    const std::vector<SampleLabelingTask>& known_tasks,
+    bool requires_temporary_slot) const
 {
     TaskCreationPreparation preparation;
     if (source_identity.empty() ||
-        requested_task_id.empty() ||
+        !IsCanonicalUuidV4(requested_task_id) ||
         sample_count == 0) {
         preparation.error =
             "labeling task creation identity is empty";
         return preparation;
     }
 
-    SampleLabelingTask slot_candidate =
-        CreateSampleLabelingTask(
-            std::string(requested_task_id),
-            std::string(requested_task_id),
-            sample_count);
-    ExclusiveFileLeaseAcquireResult slot_lease =
-        TryAttachTemporarySlotLease(
-            preparation.leases,
-            source_identity,
-            slot_candidate);
-    preparation.lease_status = slot_lease.status;
-    preparation.error = std::move(slot_lease.error);
-    if (slot_lease.status !=
-        ExclusiveFileLeaseAcquireStatus::Acquired) {
-        return preparation;
+    preparation.lease_status =
+        ExclusiveFileLeaseAcquireStatus::Acquired;
+    if (requires_temporary_slot) {
+        SampleLabelingTask slot_candidate =
+            CreateSampleLabelingTask(
+                std::string(requested_task_id),
+                std::string(requested_task_id),
+                sample_count);
+        ExclusiveFileLeaseAcquireResult slot_lease =
+            TryAttachTemporarySlotLease(
+                preparation.leases,
+                source_identity,
+                slot_candidate);
+        preparation.lease_status = slot_lease.status;
+        preparation.error = std::move(slot_lease.error);
+        if (slot_lease.status !=
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            return preparation;
+        }
     }
 
     if (state_cache_path_.empty()) {
-        preparation.task_id =
-            UniqueTaskIdForCreation(
-                requested_task_id,
-                {},
-                known_tasks,
-                {});
+        const bool requested_id_exists = std::any_of(
+            known_tasks.begin(),
+            known_tasks.end(),
+            [requested_task_id](const SampleLabelingTask& task) {
+                return task.task_id == requested_task_id;
+            });
+        if (!requested_id_exists) {
+            preparation.task_id = requested_task_id;
+        } else {
+            constexpr std::size_t kMaximumIdAttempts = 64;
+            for (std::size_t attempt = 0;
+                 attempt < kMaximumIdAttempts;
+                 ++attempt) {
+                const std::optional<std::string> generated =
+                    task_id_generator_();
+                if (generated &&
+                    IsCanonicalUuidV4(*generated) &&
+                    std::none_of(
+                        known_tasks.begin(),
+                        known_tasks.end(),
+                        [&generated](const SampleLabelingTask& task) {
+                            return task.task_id == *generated;
+                        })) {
+                    preparation.task_id = *generated;
+                    break;
+                }
+            }
+        }
         preparation.leases.task_identity_key =
             TaskIdentityEditLeaseKey(
                 source_identity,
@@ -4547,7 +4633,8 @@ SampleLabelingController::PrepareTaskCreation(
             }
             latest_tasks =
                 &latest_source->second.tasks;
-            if (std::any_of(
+            if (requires_temporary_slot &&
+                std::any_of(
                     latest_tasks->begin(),
                     latest_tasks->end(),
                     [](const SampleLabelingTask& task) {
@@ -4559,12 +4646,42 @@ SampleLabelingController::PrepareTaskCreation(
             }
         }
 
-        const std::string candidate_id =
-            UniqueTaskIdForCreation(
-                requested_task_id,
-                *latest_tasks,
-                known_tasks,
-                reserved_ids);
+        std::unordered_set<std::string> existing_ids =
+            reserved_ids;
+        existing_ids.reserve(
+            existing_ids.size() + latest_tasks->size() +
+            known_tasks.size());
+        for (const SampleLabelingTask& task : *latest_tasks) {
+            existing_ids.insert(task.task_id);
+        }
+        for (const SampleLabelingTask& task : known_tasks) {
+            existing_ids.insert(task.task_id);
+        }
+
+        std::string candidate_id;
+        if (!existing_ids.contains(
+                std::string(requested_task_id))) {
+            candidate_id = requested_task_id;
+        } else {
+            constexpr std::size_t kMaximumIdAttempts = 64;
+            for (std::size_t id_attempt = 0;
+                 id_attempt < kMaximumIdAttempts;
+                 ++id_attempt) {
+                const std::optional<std::string> generated =
+                    task_id_generator_();
+                if (generated &&
+                    IsCanonicalUuidV4(*generated) &&
+                    !existing_ids.contains(*generated)) {
+                    candidate_id = *generated;
+                    break;
+                }
+            }
+        }
+        if (candidate_id.empty()) {
+            preparation.error =
+                "could not generate a canonical labeling task identity";
+            return preparation;
+        }
         const std::string candidate_lease_key =
             TaskIdentityEditLeaseKey(
                 source_identity,
@@ -4619,7 +4736,8 @@ SampleLabelingController::PrepareTaskCreation(
                     "labeling source sample count changed while creating a task";
                 return preparation;
             }
-            if (std::any_of(
+            if (requires_temporary_slot &&
+                std::any_of(
                     verified_source->second.tasks.begin(),
                     verified_source->second.tasks.end(),
                     [](const SampleLabelingTask& task) {

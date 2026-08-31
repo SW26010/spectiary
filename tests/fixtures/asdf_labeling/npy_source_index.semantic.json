@@ -1,6 +1,6 @@
 {
   "format_kind": "specforge.sample_labeling",
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "source_kind": "npy",
   "source_name": "matrix.npy",
   "source_identity": "source:npy-index",
@@ -9,11 +9,16 @@
   "roster_identity_kind": "source_index",
   "sample_names": [],
   "annotation_kind": "categorical_integer",
-  "annotation_name": "NPY index labels",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
-  "task_id": "npy-index-task",
+  "task_id": "10e14550-d85a-4548-8f87-2a024a884f74",
   "task_name": "NPY index labels",
+  "created_at": "2026-08-30T08:00:00.000Z",
+  "modified_at": "2026-08-30T08:00:00.000Z",
+  "origin_kind": "manual",
+  "origin_annotation": null,
+  "description": null,
+  "authors": [],
   "labels": [
     {
       "code": 0,

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,22 @@ struct LabelDefinition {
     std::string shortcut;
 };
 
+struct AnnotationOrigin {
+    std::string name;
+    std::string format;
+    std::optional<std::string> fingerprint;
+};
+
+struct TaskOrigin {
+    std::string kind;
+    std::optional<AnnotationOrigin> annotation;
+};
+
+struct Author {
+    std::string name;
+    std::optional<std::string> identifier;
+};
+
 struct LabelingDocument {
     std::string format_kind;
     std::string schema_version;
@@ -27,11 +44,15 @@ struct LabelingDocument {
     std::string roster_identity_kind;
     std::vector<std::string> sample_names;
     std::string annotation_kind;
-    std::string annotation_name;
     std::string missing_semantic;
     std::int32_t missing_value = kUnlabeled;
     std::string task_id;
     std::string task_name;
+    std::string created_at;
+    std::string modified_at;
+    TaskOrigin origin;
+    std::optional<std::string> description;
+    std::vector<Author> authors;
     std::vector<LabelDefinition> labels;
     std::vector<std::int32_t> values;
 };

@@ -1,6 +1,6 @@
 {
   "format_kind": "specforge.sample_labeling",
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "source_kind": "folder",
   "source_name": "巡天样本",
   "source_identity": "source:unicode",
@@ -13,11 +13,25 @@
     "échelle-γ.fits"
   ],
   "annotation_kind": "categorical_integer",
-  "annotation_name": "天体分类",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
-  "task_id": "任务-α",
+  "task_id": "68ba7284-413c-4354-8deb-7a812de750e2",
   "task_name": "天体分类",
+  "created_at": "2026-08-30T08:00:00.000Z",
+  "modified_at": "2026-08-30T08:00:00.000Z",
+  "origin_kind": "manual",
+  "origin_annotation": null,
+  "description": "跨语言描述：星系分类 🧪",
+  "authors": [
+    {
+      "name": "SpecForge maintainer",
+      "identifier": "https://example.invalid/maintainer"
+    },
+    {
+      "name": "验证者",
+      "identifier": null
+    }
+  ],
   "labels": [
     {
       "code": 0,

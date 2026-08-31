@@ -102,21 +102,24 @@ specforge::SampleAnnotationResult MakeFloatAnnotation(
 
 void TestTaskNamingRules()
 {
-    std::vector<specforge::SampleLabelingTask> tasks;
-    tasks.push_back(MakeTask("quality-review", "Quality review", 3));
-
     Require(
         specforge::DefaultedSampleLabelingTaskName("  Quality review  ") == "Quality review",
         "task names should trim ASCII whitespace");
     Require(
         specforge::DefaultedSampleLabelingTaskName("   ") == "Manual labeling",
         "blank task names should use the default label");
-    Require(
-        specforge::TaskIdForNewSampleLabelingTask("Quality review", &tasks) == "quality-review-2",
-        "new task ids should never reuse an existing task record");
-    Require(
-        specforge::SampleLabelingTaskNameForOutputPath("saved-review.npy") == "saved-review",
-        "formal task names should derive from the selected output filename");
+}
+
+specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+{
+    const auto timestamp =
+        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+    Require(timestamp.has_value(), "test canonical timestamp should parse");
+    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    metadata.created_at = *timestamp;
+    metadata.modified_at = *timestamp;
+    metadata.origin.kind = "manual";
+    return metadata;
 }
 
 void TestPlainAnnotationActivationPlanCreatesEditableTask()
@@ -124,6 +127,12 @@ void TestPlainAnnotationActivationPlanCreatesEditableTask()
     const std::filesystem::path path = TempPath("_plain.npy");
     specforge::SampleAnnotationResult annotation =
         MakeIntegerAnnotation("  Quality rank  ", path, {7, specforge::kUnlabeledSampleLabelCode, 5});
+    annotation.artifact_provenance =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "selected-rank.npy",
+            .format = "npy",
+            .fingerprint = std::string{
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}};
 
     specforge::SampleAnnotationLabelingActivationPlan plan =
         specforge::PlanSampleAnnotationLabelingActivation(
@@ -132,13 +141,17 @@ void TestPlainAnnotationActivationPlanCreatesEditableTask()
     Require(
         plan.kind == specforge::SampleAnnotationLabelingActivationKind::CreateTaskFromAnnotation,
         "plain integer annotations should create editable labeling tasks");
-    Require(plan.task_id == "quality-rank", "plain activation should derive a stable task id");
+    Require(plan.task_id.empty(), "plain activation should leave identity generation to the controller");
     Require(plan.task_name == "Quality rank", "plain activation should trim the task name");
     Require(!plan.metadata_clean, "plain activation should require metadata to be written");
     Require(plan.values == std::vector<int>({7, specforge::kUnlabeledSampleLabelCode, 5}), "values should be copied");
     Require(plan.label_set.labels.size() == 2, "label set should contain unique labeled values only");
     Require(plan.label_set.labels[0].code == 5, "label set should sort unique values");
     Require(plan.label_set.labels[1].code == 7, "label set should include the second unique value");
+    Require(
+        plan.origin.kind == "annotation_promotion" &&
+            plan.origin.annotation == annotation.artifact_provenance,
+        "plain activation should carry the I/O adapter's portable artifact provenance");
 }
 
 void TestMetadataActivationPlanReusesExistingTask()
@@ -181,6 +194,10 @@ void TestMetadataCreatePlanAvoidsTaskIdCollision()
     std::vector<specforge::SampleLabelingTask> tasks;
     tasks.push_back(MakeTask("quality", "Quality", 3, TempPath("_other.npy")));
     specforge::SampleAnnotationResult annotation = MakeIntegerAnnotation("Quality", path, {5, -1, 9});
+    annotation.artifact_provenance =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "metadata_new.npy",
+            .format = "npy"};
     specforge::SampleLabelResultMetadata metadata;
     metadata.task_id = "quality";
     metadata.task_name = "Quality";
@@ -196,8 +213,10 @@ void TestMetadataCreatePlanAvoidsTaskIdCollision()
     Require(
         plan.kind == specforge::SampleAnnotationLabelingActivationKind::CreateTaskFromAnnotation,
         "metadata without a matching output task should create a local task");
-    Require(plan.task_id == "quality-2", "metadata task id collisions should be avoided");
-    Require(plan.metadata_clean, "metadata-backed creation should start clean");
+    Require(plan.task_id.empty(), "promotion should not inherit a sidecar task id");
+    Require(
+        !plan.metadata_clean,
+        "fresh promotion identity should require the legacy sidecar metadata to be republished");
     Require(plan.label_set.labels.size() == 1 && plan.label_set.labels[0].name == "bad", "metadata labels should be reused");
 }
 
@@ -235,6 +254,51 @@ void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
         "a same-path local task must not activate when its sample count differs");
 }
 
+void TestCsvTextAnnotationActivationBuildsDeterministicLabels()
+{
+    const std::filesystem::path path = TempPath("_plain.csv");
+    specforge::SampleAnnotationResult annotation =
+        MakeTextAnnotation(
+            "  Imported groups  ",
+            path,
+            {"zeta", "unlabeled", "alpha", "unlabeled", "zeta"});
+    annotation.values[1].missing = true;
+    annotation.artifact_provenance =
+        specforge::SampleLabelingAnnotationOrigin{
+            .name = "portable-groups.csv",
+            .format = "csv",
+            .fingerprint = std::string{
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}};
+
+    const specforge::SampleAnnotationLabelingActivationPlan plan =
+        specforge::PlanSampleAnnotationLabelingActivation(
+            specforge::SampleAnnotationLabelingActivationRequest{
+                .annotation = &annotation});
+
+    Require(
+        plan.kind ==
+            specforge::SampleAnnotationLabelingActivationKind::
+                CreateTaskFromAnnotation,
+        "plain CSV text annotations should create editable labeling tasks");
+    Require(
+        plan.values == std::vector<int>({2, -1, 0, 1, 2}),
+        "CSV text values should map missing to -1 and labeled text to stable lexical codes");
+    Require(
+        plan.label_set.labels.size() == 3 &&
+            plan.label_set.labels[0].code == 0 &&
+            plan.label_set.labels[0].name == "alpha" &&
+            plan.label_set.labels[1].code == 1 &&
+            plan.label_set.labels[1].name == "unlabeled" &&
+            plan.label_set.labels[2].code == 2 &&
+            plan.label_set.labels[2].name == "zeta",
+        "CSV text label definitions should be sorted by exact UTF-8 bytes before assigning codes");
+    Require(
+        plan.task_name == "Imported groups" &&
+            plan.origin.kind == "annotation_promotion" &&
+            plan.origin.annotation == annotation.artifact_provenance,
+        "CSV promotion should retain the portable task name and artifact provenance");
+}
+
 void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
 {
     const std::filesystem::path path = TempPath("_canonical.asdf");
@@ -250,10 +314,10 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
     document->source.name = "source.npy";
     document->source.fingerprint = "source-fingerprint";
     document->source.sample_count = 3;
-    document->annotation.name = "quality-code";
     document->annotation.values = {-1, 5, 9};
-    document->labeling.id = "canonical-quality";
+    document->labeling.id = "33333333-3333-4333-8333-333333333333";
     document->labeling.name = "Canonical quality";
+    document->labeling.canonical_metadata = TestCanonicalMetadata();
     document->labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -268,13 +332,13 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
                     AdoptCanonicalAsdfTask &&
-            plan.task_id == "canonical-quality",
+            plan.task_id == "33333333-3333-4333-8333-333333333333",
         "standalone canonical ASDF annotations should adopt their embedded task identity");
 
     std::vector<specforge::SampleLabelingTask> tasks;
     tasks.push_back(
         MakeTask(
-            "canonical-quality",
+            "33333333-3333-4333-8333-333333333333",
             "Canonical quality",
             3,
             path));
@@ -289,7 +353,7 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
                     ActivateExistingTask &&
-            plan.task_id == "canonical-quality" &&
+            plan.task_id == "33333333-3333-4333-8333-333333333333" &&
             specforge::FindLocalTaskForLoadedAnnotation(
                 &tasks,
                 annotation) == &tasks[0],
@@ -304,10 +368,10 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
         plan.kind ==
             specforge::SampleAnnotationLabelingActivationKind::
                 AdoptCanonicalAsdfTask &&
-            plan.task_id == "canonical-quality",
+        plan.task_id == "33333333-3333-4333-8333-333333333333",
         "canonical adoption should preserve the embedded identity so the controller can report an owner conflict");
 
-    tasks[0].task_id = "canonical-quality";
+    tasks[0].task_id = "33333333-3333-4333-8333-333333333333";
     tasks[0].output_path = TempPath("_different_owner.asdf");
     plan = specforge::PlanSampleAnnotationLabelingActivation(
         specforge::SampleAnnotationLabelingActivationRequest{
@@ -317,7 +381,7 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
                     AdoptCanonicalAsdfTask &&
-            plan.task_id == "canonical-quality",
+            plan.task_id == "33333333-3333-4333-8333-333333333333",
         "same-id different-owner conflicts must not be hidden by generating a replacement task id");
 
     const specforge::SampleFilterSource filter =
@@ -572,10 +636,10 @@ void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
             {5, 9, 5}));
     auto document =
         std::make_shared<specforge::SampleLabelingDocument>();
-    document->annotation.name = "quality-code";
     document->annotation.values = {5, 9, 5};
-    document->labeling.id = "canonical-quality";
+    document->labeling.id = "33333333-3333-4333-8333-333333333333";
     document->labeling.name = "Canonical quality";
+    document->labeling.canonical_metadata = TestCanonicalMetadata();
     document->labeling.labels = {
         {5, "bad", "b"},
         {9, "good", "g"},
@@ -586,7 +650,7 @@ void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
     std::vector<specforge::SampleLabelingTask> tasks;
     tasks.push_back(
         MakeTask(
-            "canonical-quality",
+            "33333333-3333-4333-8333-333333333333",
             "structural cache placeholder",
             3,
             annotation_path));
@@ -862,6 +926,7 @@ int main()
 {
     TestTaskNamingRules();
     TestPlainAnnotationActivationPlanCreatesEditableTask();
+    TestCsvTextAnnotationActivationBuildsDeterministicLabels();
     TestMetadataActivationPlanReusesExistingTask();
     TestMetadataCreatePlanAvoidsTaskIdCollision();
     TestMetadataActivationPlanRejectsSamePathIdentityMismatch();

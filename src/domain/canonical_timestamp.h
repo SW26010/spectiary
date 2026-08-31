@@ -12,6 +12,10 @@ class CanonicalTimestamp final {
 public:
     using TimePoint = std::chrono::sys_time<std::chrono::milliseconds>;
 
+    // The epoch default keeps aggregate runtime state constructible. Public
+    // factories replace it before a task is exposed or serialized.
+    CanonicalTimestamp() noexcept = default;
+
     [[nodiscard]] static std::optional<CanonicalTimestamp> FromTimePoint(
         TimePoint value) noexcept;
 
@@ -23,7 +27,7 @@ public:
 private:
     explicit CanonicalTimestamp(TimePoint value) noexcept;
 
-    TimePoint value_;
+    TimePoint value_{};
 };
 
 [[nodiscard]] CanonicalTimestamp CurrentCanonicalTimestamp();

@@ -7,9 +7,11 @@
 #include "domain/sample_labeling_asdf_codec.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
+#include "domain/stable_sha256.h"
 #include "platform/atomic_file.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -99,6 +101,64 @@ bool IsNpyPath(const std::filesystem::path& path)
 bool IsCsvPath(const std::filesystem::path& path)
 {
     return LowerAscii(PathToUtf8(path.extension())) == ".csv";
+}
+
+SampleLabelingAnnotationOrigin PlainAnnotationArtifactProvenance(
+    const std::filesystem::path& path,
+    std::string_view display_name,
+    std::string format,
+    std::optional<std::string> digest)
+{
+    SampleLabelingAnnotationOrigin provenance;
+    provenance.name =
+        IsValidSampleLabelingAnnotationOriginName(display_name)
+        ? std::string(display_name)
+        : FileNameToUtf8(path);
+    provenance.format = std::move(format);
+    if (digest) {
+        provenance.fingerprint = "sha256:" + *digest;
+    }
+    return provenance;
+}
+
+std::optional<std::string> ComputeOpenedFileSha256(
+    std::ifstream& stream)
+{
+    // Rewind the handle used by the parser instead of resolving the path a
+    // second time. A path replacement can therefore never pair values from
+    // one opened file generation with a digest from another.
+    try {
+        stream.clear();
+        stream.seekg(0, std::ios::beg);
+        if (!stream) {
+            return std::nullopt;
+        }
+
+        StableSha256 sha256;
+        constexpr std::size_t kHashBufferSize = 64U * 1024U;
+        std::array<char, kHashBufferSize> buffer = {};
+        for (;;) {
+            stream.read(
+                buffer.data(),
+                static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize read_count = stream.gcount();
+            if (read_count > 0) {
+                sha256.Append(std::string_view(
+                    buffer.data(),
+                    static_cast<std::size_t>(read_count)));
+            }
+            if (stream.eof()) {
+                return sha256.FinishHex();
+            }
+            if (stream.fail()) {
+                return std::nullopt;
+            }
+        }
+    } catch (...) {
+        // Provenance is optional. A successfully parsed annotation remains
+        // usable when the already-open artifact cannot be rewound or hashed.
+        return std::nullopt;
+    }
 }
 
 std::filesystem::path Utf8ToPath(const std::string& value)
@@ -370,6 +430,45 @@ struct ValidatedNpyInput {
     NpyScalarType scalar_type;
 };
 
+void ValidateOpenedNpyPayloadSize(
+    std::ifstream& stream,
+    const NpyHeader& header,
+    std::size_t value_count,
+    std::size_t item_size)
+{
+    if (item_size == 0 ||
+        value_count >
+            std::numeric_limits<std::uint64_t>::max() /
+                item_size) {
+        throw NpyAnnotationError("NPY byte size overflows");
+    }
+    const std::uint64_t data_bytes =
+        static_cast<std::uint64_t>(value_count) * item_size;
+    if (header.data_offset >
+        std::numeric_limits<std::uint64_t>::max() - data_bytes) {
+        throw NpyAnnotationError("NPY byte size overflows");
+    }
+    const std::uint64_t required_bytes =
+        header.data_offset + data_bytes;
+    if (required_bytes >
+        static_cast<std::uint64_t>(
+            std::numeric_limits<std::streamoff>::max())) {
+        throw NpyAnnotationError("NPY byte size overflows");
+    }
+
+    stream.clear();
+    stream.seekg(0, std::ios::end);
+    const std::streamoff file_size = stream.tellg();
+    if (!stream || file_size < 0) {
+        throw NpyAnnotationError(
+            "could not inspect NPY file size");
+    }
+    if (file_size < static_cast<std::streamoff>(required_bytes)) {
+        throw NpyAnnotationError(
+            "NPY file is smaller than the declared array data");
+    }
+}
+
 ValidatedNpyInput OpenValidatedNpyInput(
     const std::filesystem::path& path,
     std::size_t expected_count,
@@ -391,7 +490,11 @@ ValidatedNpyInput OpenValidatedNpyInput(
     if (!scalar_type) {
         throw NpyAnnotationError("NPY dtype is not supported for read-only sample annotations");
     }
-    ValidateNpyPayloadSize(path, header, expected_count, scalar_type->item_size);
+    ValidateOpenedNpyPayloadSize(
+        stream,
+        header,
+        expected_count,
+        scalar_type->item_size);
     SeekNpyData(stream, header);
     return ValidatedNpyInput{
         std::move(stream),
@@ -556,7 +659,12 @@ SampleAnnotationResult ReadAnnotationCsvValues(
         cancellation_checkpoint();
     }
 
-    BoundedCsvFileReader reader(path);
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw CsvAnnotationError(
+            "could not open the CSV sample annotation");
+    }
+    BoundedCsvRecordReader reader(input);
     CsvRecordReadResult header = reader.ReadRecord();
     if (header.status == CsvRecordReadStatus::Error) {
         throw CsvAnnotationError(
@@ -668,6 +776,12 @@ SampleAnnotationResult ReadAnnotationCsvValues(
     if (cancellation_checkpoint) {
         cancellation_checkpoint();
     }
+    result.artifact_provenance =
+        PlainAnnotationArtifactProvenance(
+            path,
+            result.name,
+            "csv",
+            ComputeOpenedFileSha256(input));
     return result;
 }
 
@@ -749,6 +863,12 @@ SampleAnnotationResult ReadAnnotationNpyValues(
     }
 
     ApplyLabelResultMetadata(result, path, expected_count, cancellation_checkpoint);
+    result.artifact_provenance =
+        PlainAnnotationArtifactProvenance(
+            path,
+            result.name,
+            "npy",
+            ComputeOpenedFileSha256(input.stream));
     return result;
 }
 

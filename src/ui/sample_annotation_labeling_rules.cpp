@@ -1,7 +1,10 @@
 #include "ui/sample_annotation_labeling_rules.h"
 
+#include "domain/utf8.h"
+
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -22,63 +25,6 @@ std::string TrimAscii(std::string value)
         return {};
     }
     return std::string(first, last);
-}
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string value = path.u8string();
-    return {reinterpret_cast<const char*>(value.data()), value.size()};
-}
-
-std::string TaskIdFromName(std::string_view task_name)
-{
-    std::string task_id;
-    bool previous_dash = false;
-    for (const unsigned char character : task_name) {
-        if (std::isalnum(character) != 0) {
-            task_id.push_back(static_cast<char>(std::tolower(character)));
-            previous_dash = false;
-        } else if (!task_id.empty() && !previous_dash) {
-            task_id.push_back('-');
-            previous_dash = true;
-        }
-    }
-    while (!task_id.empty() && task_id.back() == '-') {
-        task_id.pop_back();
-    }
-    return task_id.empty() ? "labeling" : task_id;
-}
-
-bool TaskIdExists(const std::vector<SampleLabelingTask>& tasks, std::string_view task_id)
-{
-    return std::any_of(tasks.begin(), tasks.end(), [task_id](const SampleLabelingTask& task) {
-        return task.task_id == task_id;
-    });
-}
-
-bool TaskIdExists(const std::vector<SampleLabelingTask>* tasks, std::string_view task_id)
-{
-    return tasks != nullptr && TaskIdExists(*tasks, task_id);
-}
-
-std::string UniqueTaskIdFromName(
-    std::string_view task_name,
-    const std::vector<SampleLabelingTask>* active_source_tasks)
-{
-    const std::string base_task_id = TaskIdFromName(task_name);
-    if (!TaskIdExists(active_source_tasks, base_task_id)) {
-        return base_task_id;
-    }
-
-    for (std::size_t suffix = 2; suffix < 10000; ++suffix) {
-        std::string candidate = base_task_id;
-        candidate += '-';
-        candidate += std::to_string(suffix);
-        if (!TaskIdExists(*active_source_tasks, candidate)) {
-            return candidate;
-        }
-    }
-    return base_task_id + "-copy";
 }
 
 bool PathExists(const std::filesystem::path& path)
@@ -103,22 +49,91 @@ bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesyst
     return left.lexically_normal() == right.lexically_normal();
 }
 
-std::optional<std::vector<int>> AnnotationIntegerValues(const SampleAnnotationResult& annotation)
+struct AnnotationPromotionProjection {
+    SampleLabelSet label_set;
+    std::vector<int> values;
+};
+
+SampleLabelSet LabelSetFromUniqueIntegerValues(
+    const std::vector<int>& values);
+
+std::optional<AnnotationPromotionProjection>
+BuildAnnotationPromotionProjection(
+    const SampleAnnotationResult& annotation)
 {
-    if (annotation.kind != SampleAnnotationKind::CategoricalInteger) {
+    AnnotationPromotionProjection projection;
+    projection.values.reserve(annotation.values.size());
+    if (annotation.kind ==
+        SampleAnnotationKind::CategoricalInteger) {
+        for (const SampleAnnotationValue& value :
+             annotation.values) {
+            const std::optional<int> integer_value =
+                SampleAnnotationValueAsInt(value);
+            if (!integer_value) {
+                return std::nullopt;
+            }
+            projection.values.push_back(*integer_value);
+        }
+        projection.label_set =
+            LabelSetFromUniqueIntegerValues(
+                projection.values);
+        return projection;
+    }
+
+    if (annotation.kind != SampleAnnotationKind::Text ||
+        !annotation.artifact_provenance ||
+        annotation.artifact_provenance->format != "csv") {
         return std::nullopt;
     }
 
-    std::vector<int> values;
-    values.reserve(annotation.values.size());
+    std::vector<std::string> label_names;
+    label_names.reserve(annotation.values.size());
     for (const SampleAnnotationValue& value : annotation.values) {
-        const std::optional<int> integer_value = SampleAnnotationValueAsInt(value);
-        if (!integer_value) {
+        if (value.missing) {
+            continue;
+        }
+        const std::string* text =
+            std::get_if<std::string>(&value.semantic);
+        if (text == nullptr ||
+            !IsValidUtf8WithNonWhitespace(*text)) {
             return std::nullopt;
         }
-        values.push_back(*integer_value);
+        label_names.push_back(*text);
     }
-    return values;
+    std::sort(label_names.begin(), label_names.end());
+    label_names.erase(
+        std::unique(label_names.begin(), label_names.end()),
+        label_names.end());
+    if (label_names.size() >
+        static_cast<std::size_t>(
+            std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+
+    projection.label_set.labels.reserve(label_names.size());
+    for (std::size_t index = 0;
+         index < label_names.size();
+         ++index) {
+        projection.label_set.labels.push_back(
+            SampleLabelDefinition{
+                static_cast<int>(index),
+                label_names[index],
+                '\0'});
+    }
+    for (const SampleAnnotationValue& value : annotation.values) {
+        if (value.missing) {
+            projection.values.push_back(
+                kUnlabeledSampleLabelCode);
+            continue;
+        }
+        const std::string& text =
+            std::get<std::string>(value.semantic);
+        const auto match = std::lower_bound(
+            label_names.begin(), label_names.end(), text);
+        projection.values.push_back(static_cast<int>(
+            std::distance(label_names.begin(), match)));
+    }
+    return projection;
 }
 
 SampleLabelSet LabelSetFromUniqueIntegerValues(const std::vector<int>& values)
@@ -187,21 +202,12 @@ std::string DefaultedSampleLabelingTaskName(std::string task_name)
     return task_name.empty() ? "Manual labeling" : task_name;
 }
 
-std::string TaskIdForNewSampleLabelingTask(
-    std::string_view task_name,
-    const std::vector<SampleLabelingTask>* active_source_tasks)
+bool CanPromoteSampleAnnotationToLabeling(
+    const SampleAnnotationResult& annotation)
 {
-    return UniqueTaskIdFromName(task_name, active_source_tasks);
-}
-
-std::string SampleLabelingTaskNameForOutputPath(const std::filesystem::path& output_path)
-{
-    const std::filesystem::path stem = output_path.stem();
-    if (!stem.empty()) {
-        return PathToUtf8(stem);
-    }
-    const std::filesystem::path filename = output_path.filename();
-    return filename.empty() ? std::string{kTemporarySampleLabelingTaskName} : PathToUtf8(filename);
+    return annotation.artifact_provenance.has_value() &&
+        BuildAnnotationPromotionProjection(annotation)
+            .has_value();
 }
 
 const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
@@ -319,8 +325,9 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
         return plan;
     }
 
-    std::optional<std::vector<int>> values = AnnotationIntegerValues(annotation);
-    if (!values) {
+    std::optional<AnnotationPromotionProjection> projection =
+        BuildAnnotationPromotionProjection(annotation);
+    if (!projection || !annotation.artifact_provenance) {
         return plan;
     }
 
@@ -328,22 +335,17 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
         ? request.metadata->task_name
         : annotation.name;
     task_name = DefaultedSampleLabelingTaskName(std::move(task_name));
-    const std::string preferred_task_id =
-        request.metadata != nullptr && !request.metadata->task_id.empty()
-        ? request.metadata->task_id
-        : UniqueTaskIdFromName(task_name, request.active_source_tasks);
-    const std::string task_id = TaskIdExists(request.active_source_tasks, preferred_task_id)
-        ? UniqueTaskIdFromName(task_name, request.active_source_tasks)
-        : preferred_task_id;
-
     plan.kind = SampleAnnotationLabelingActivationKind::CreateTaskFromAnnotation;
-    plan.task_id = task_id;
     plan.task_name = std::move(task_name);
     plan.label_set = request.metadata != nullptr
         ? request.metadata->label_set
-        : LabelSetFromUniqueIntegerValues(*values);
-    plan.values = std::move(*values);
-    plan.metadata_clean = request.metadata != nullptr;
+        : std::move(projection->label_set);
+    plan.values = std::move(projection->values);
+    plan.origin.kind = "annotation_promotion";
+    plan.origin.annotation = *annotation.artifact_provenance;
+    // A promoted task always receives a fresh UUID, so even a verified legacy
+    // sidecar cannot already contain the new canonical task identity.
+    plan.metadata_clean = false;
     return plan;
 }
 

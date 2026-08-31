@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reference fixtures and measurements for SpecForge labeling ASDF v1."""
+"""ASDF fixtures and measurements for SpecForge sample-labeling schema 2.0.0."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -22,9 +23,72 @@ import psutil
 
 
 FORMAT_KIND = "specforge.sample_labeling"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
 REFERENCE_STANDARD_VERSION = "1.5.0"
 UNLABELED = -1
+CREATED_AT = "2026-08-30T08:00:00.000Z"
+MODIFIED_AT = "2026-08-30T08:00:00.000Z"
+UUID_V4_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+
+def _task_uuid(value: str) -> str:
+    if UUID_V4_PATTERN.fullmatch(value):
+        return value
+    raw = bytearray(hashlib.sha256(value.encode("utf-8")).digest()[:16])
+    raw[6] = (raw[6] & 0x0F) | 0x40
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    text = raw.hex()
+    return f"{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:]}"
+
+
+def _is_canonical_timestamp(value: str) -> bool:
+    match = re.fullmatch(
+        r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z",
+        value,
+    )
+    if match is None:
+        return False
+    year, month, day, hour, minute, second, _millisecond = (
+        int(part) for part in match.groups()
+    )
+    if month < 1 or month > 12 or hour > 23 or minute > 59 or second > 59:
+        return False
+    month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+        month_days[1] = 29
+    return 1 <= day <= month_days[month - 1]
+
+
+def _is_non_whitespace_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return any(not character.isspace() for character in value)
+
+
+def _is_lowercase_token(value: str) -> bool:
+    return re.fullmatch(r"[a-z][a-z0-9_]*", value) is not None
+
+
+def _is_annotation_fingerprint(value: str) -> bool:
+    return re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+
+
+def _is_portable_annotation_origin_name(value: Any) -> bool:
+    if not _is_non_whitespace_text(value):
+        return False
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        return False
+    return not (
+        len(value) >= 2
+        and value[1] == ":"
+        and ("A" <= value[0] <= "Z" or "a" <= value[0] <= "z")
+    )
 
 
 def _values(value: Any) -> np.ndarray:
@@ -47,6 +111,11 @@ def _tree(
     task_id: str,
     task_name: str,
     labels: list[dict[str, Any]],
+    created_at: str = CREATED_AT,
+    modified_at: str = MODIFIED_AT,
+    origin: dict[str, Any] | None = None,
+    description: str | None = None,
+    authors: list[dict[str, Any]] | None = None,
     roster_representation: str = "string_ndarray",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -78,16 +147,22 @@ def _tree(
         "sample_roster": roster,
         "annotation": {
             "kind": "categorical_integer",
-            "name": task_name,
             "values": array,
             "missing": {"semantic": "unlabeled", "value": UNLABELED},
         },
         "labeling_task": {
-            "id": task_id,
+            "id": _task_uuid(task_id),
             "name": task_name,
+            "created_at": created_at,
+            "modified_at": modified_at,
+            "origin": origin if origin is not None else {"kind": "manual"},
             "labels": labels,
         },
     }
+    if description is not None:
+        tree["labeling_task"]["description"] = description
+    if authors:
+        tree["labeling_task"]["authors"] = authors
     if extra:
         tree.update(extra)
     return tree
@@ -136,11 +211,34 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
         "roster_identity_kind": str(roster["identity_kind"]),
         "sample_names": _names(roster["names"]) if "names" in roster else [],
         "annotation_kind": str(annotation["kind"]),
-        "annotation_name": str(annotation["name"]),
         "missing_semantic": str(annotation["missing"]["semantic"]),
         "missing_value": int(annotation["missing"]["value"]),
         "task_id": str(task["id"]),
         "task_name": str(task["name"]),
+        "created_at": str(task["created_at"]),
+        "modified_at": str(task["modified_at"]),
+        "origin_kind": str(task["origin"]["kind"]),
+        "origin_annotation": (
+            {
+                "name": str(task["origin"]["annotation"]["name"]),
+                "format": str(task["origin"]["annotation"]["format"]),
+                "fingerprint": (
+                    str(task["origin"]["annotation"]["fingerprint"])
+                    if "fingerprint" in task["origin"]["annotation"]
+                    else None
+                ),
+            }
+            if "annotation" in task["origin"]
+            else None
+        ),
+        "description": str(task["description"]) if "description" in task else None,
+        "authors": [
+            {
+                "name": str(author["name"]),
+                "identifier": str(author["identifier"]) if "identifier" in author else None,
+            }
+            for author in task.get("authors", [])
+        ],
         "labels": [
             {
                 "code": int(label["code"]),
@@ -180,6 +278,50 @@ def _semantic_errors(tree: Any) -> list[str]:
         errors.append("roster identity kind")
     if summary["annotation_kind"] != "categorical_integer":
         errors.append("annotation kind")
+    if "name" in tree["annotation"]:
+        errors.append("annotation.name is not in SpecForge sample-labeling schema 2.0.0")
+    if not UUID_V4_PATTERN.fullmatch(summary["task_id"]):
+        errors.append("task id")
+    if not _is_non_whitespace_text(summary["task_name"]):
+        errors.append("task name")
+    if not _is_canonical_timestamp(summary["created_at"]):
+        errors.append("created_at")
+    if not _is_canonical_timestamp(summary["modified_at"]):
+        errors.append("modified_at")
+    if summary["created_at"] > summary["modified_at"]:
+        errors.append("timestamp order")
+    origin = tree["labeling_task"]["origin"]
+    origin_kind = summary["origin_kind"]
+    origin_annotation = summary["origin_annotation"]
+    if not _is_lowercase_token(origin_kind):
+        errors.append("origin kind")
+    if (origin_kind == "manual" and "annotation" in origin) or (
+        origin_kind == "annotation_promotion" and "annotation" not in origin
+    ):
+        errors.append("origin annotation")
+    if origin_annotation is not None:
+        if not _is_portable_annotation_origin_name(origin_annotation["name"]):
+            errors.append("origin annotation name")
+        if origin_annotation["format"] not in {"csv", "npy"}:
+            errors.append("origin annotation format")
+        fingerprint = origin_annotation["fingerprint"]
+        if fingerprint is not None and not _is_annotation_fingerprint(fingerprint):
+            errors.append("origin annotation fingerprint")
+    description = summary["description"]
+    if description is not None:
+        try:
+            description.encode("utf-8")
+        except UnicodeEncodeError:
+            errors.append("description")
+    for author in summary["authors"]:
+        if not _is_non_whitespace_text(author["name"]):
+            errors.append("author name")
+        if author["identifier"] is not None and not _is_non_whitespace_text(
+            author["identifier"]
+        ):
+            errors.append("author identifier")
+    if len(summary["authors"]) > 10_000:
+        errors.append("author count")
     if summary["missing_semantic"] != "unlabeled" or summary["missing_value"] != UNLABELED:
         errors.append("missing semantics")
 
@@ -241,6 +383,14 @@ def _fixture_cases() -> list[dict[str, Any]]:
                 task_id="任务-α",
                 task_name="天体分类",
                 labels=unicode_labels,
+                description="跨语言描述：星系分类 🧪",
+                authors=[
+                    {
+                        "name": "SpecForge maintainer",
+                        "identifier": "https://example.invalid/maintainer",
+                    },
+                    {"name": "验证者"},
+                ],
             ),
         },
         {
@@ -389,6 +539,59 @@ def _fixture_cases() -> list[dict[str, Any]]:
                 labels=[{"code": 0, "name": "A"}],
             ),
         },
+        {
+            "name": "promoted_unicode_origin",
+            "valid": True,
+            "tree": _tree(
+                source_kind="npy",
+                source_name="promoted.npy",
+                source_fingerprint="sha256:promoted-origin-unicode",
+                values=[0],
+                names=None,
+                task_id="promoted-unicode-origin",
+                task_name="Promoted Unicode labels",
+                labels=[{"code": 0, "name": "星系"}],
+                origin={
+                    "kind": "annotation_promotion",
+                    "annotation": {
+                        "name": "初始标签-😀.csv",
+                        "format": "csv",
+                    },
+                },
+            ),
+        },
+        *[
+            {
+                "name": fixture_name,
+                "valid": False,
+                "expected_error": "origin annotation name",
+                "tree": _tree(
+                    source_kind="npy",
+                    source_name="promoted.npy",
+                    source_fingerprint="sha256:promoted-origin",
+                    values=[0],
+                    names=None,
+                    task_id=fixture_name,
+                    task_name="Promoted labels",
+                    labels=[{"code": 0, "name": "A"}],
+                    origin={
+                        "kind": "annotation_promotion",
+                        "annotation": {
+                            "name": annotation_name,
+                            "format": "csv",
+                        },
+                    },
+                ),
+            }
+            for fixture_name, annotation_name in (
+                ("invalid_origin_dot", "."),
+                ("invalid_origin_dotdot", ".."),
+                ("invalid_origin_absolute", "/home/user/labels.csv"),
+                ("invalid_origin_forward_directory", "folder/labels.csv"),
+                ("invalid_origin_backslash_directory", r"folder\labels.csv"),
+                ("invalid_origin_drive_prefix", "C:labels.csv"),
+            )
+        ],
     ]
 
 
@@ -631,7 +834,7 @@ def wire_version_experiment(output: Path) -> dict[str, Any]:
         "asdf": asdf.__version__,
         "supported": records,
         "selected_baseline": REFERENCE_STANDARD_VERSION,
-        "selection_note": "1.5.0 is the maintained stable baseline; 1.6.0 adds no required v1 labeling construct.",
+        "selection_note": "ASDF Standard 1.5.0 is the maintained stable baseline; 1.6.0 adds no wire construct required by SpecForge sample-labeling schema 2.0.0.",
     }
 
 
@@ -1272,7 +1475,7 @@ def _yaml_special_character_matrix() -> str:
 def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
     return {
         "format_kind": "specforge.sample_labeling",
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "source_kind": "folder",
         "source_name": "巡天样本",
         "source_identity": "sha256-v1:production-source",
@@ -1281,11 +1484,16 @@ def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
         "roster_identity_kind": "explicit_names",
         "sample_names": ["alpha.fits", "星系-β.fits", "échelle-γ.fits"],
         "annotation_kind": "categorical_integer",
-        "annotation_name": "天体分类",
         "missing_semantic": "unlabeled",
         "missing_value": -1,
-        "task_id": "task-alpha",
+        "task_id": "00000000-0000-4000-8000-000000000001",
         "task_name": "天体分类",
+        "created_at": CREATED_AT,
+        "modified_at": MODIFIED_AT,
+        "origin_kind": "manual",
+        "origin_annotation": None,
+        "description": None,
+        "authors": [],
         "labels": [
             {"code": 0, "name": "Galaxy", "shortcut": "g"},
             {"code": 1, "name": "Quasar", "shortcut": "q"},
@@ -1350,7 +1558,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             raise RuntimeError("native writer Unicode roster mismatch")
         native_compressions = _asdf_block_compressions(native_path)
         if native_compressions != ["zlib", "zlib"]:
-            raise RuntimeError(f"native writer did not emit the compressed v1 profile: {native_compressions}")
+            raise RuntimeError(f"native writer did not emit the compressed ASDF wire profile: {native_compressions}")
         records.append(
             {
                 "fixture": "native-writer",
@@ -1702,7 +1910,6 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
                 encoding="utf-8"
             )
         )
-        expected_forward["annotation_name"] = "Forward metadata edited"
         expected_forward["task_name"] = "Forward metadata edited"
         expected_forward["labels"][0]["name"] = "Edited Galaxy"
         expected_forward["labels"][0]["shortcut"] = "1"
@@ -1827,7 +2034,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             raise RuntimeError("native rewrite did not preserve the compressed roster block verbatim")
         rewrite_compressions = _asdf_block_compressions(rewrite_path)
         if rewrite_compressions != ["zlib", "zlib"]:
-            raise RuntimeError(f"native rewrite did not preserve the compressed v1 profile: {rewrite_compressions}")
+            raise RuntimeError(f"native rewrite did not preserve the compressed ASDF wire profile: {rewrite_compressions}")
         completed = subprocess.run(
             [str(native), "read", str(rewrite_path)],
             capture_output=True,

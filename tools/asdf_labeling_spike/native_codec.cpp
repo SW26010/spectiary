@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
@@ -20,8 +19,9 @@ namespace specforge::asdf_labeling_spike {
 namespace {
 
 constexpr std::string_view kFormatKind = "specforge.sample_labeling";
-constexpr std::string_view kSchemaVersion = "1.0.0";
+constexpr std::string_view kSchemaVersion = "2.0.0";
 constexpr std::uint64_t kMaximumSampleCount = 100'000'000;
+constexpr std::size_t kMaximumAuthorCount = 10'000;
 constexpr std::array<unsigned char, 4> kBlockMagic{0xd3, 'B', 'L', 'K'};
 constexpr std::array<unsigned char, 4> kZlibCompression{'z', 'l', 'i', 'b'};
 constexpr int kZlibCompressionLevel = 6;
@@ -207,7 +207,7 @@ struct Block {
         const std::size_t fields = offset + 6;
         const std::uint32_t flags = ReadBigEndian<std::uint32_t>(bytes, fields);
         if ((flags & 1U) != 0U) {
-            throw CodecError("streamed ASDF blocks are outside the v1 profile");
+            throw CodecError("streamed ASDF blocks are outside the native wire profile");
         }
         const auto compression_begin = bytes.begin() + static_cast<std::ptrdiff_t>(fields + 4);
         const auto compression_end = bytes.begin() + static_cast<std::ptrdiff_t>(fields + 8);
@@ -442,6 +442,120 @@ void RequireUtf8(std::string_view value, std::string_view field)
     }
 }
 
+[[nodiscard]] bool IsUnicodeWhitespace(std::uint32_t codepoint)
+{
+    return (codepoint >= 0x0009U && codepoint <= 0x000dU) ||
+        codepoint == 0x0020U || codepoint == 0x0085U || codepoint == 0x00a0U ||
+        codepoint == 0x1680U || (codepoint >= 0x2000U && codepoint <= 0x200aU) ||
+        codepoint == 0x2028U || codepoint == 0x2029U || codepoint == 0x202fU ||
+        codepoint == 0x205fU || codepoint == 0x3000U;
+}
+
+void RequireNonWhitespaceUtf8(std::string_view value, std::string_view field)
+{
+    RequireUtf8(value, field);
+    const std::vector<std::uint32_t> codepoints = DecodeUtf8Codepoints(value);
+    if (std::ranges::all_of(codepoints, IsUnicodeWhitespace)) {
+        throw CodecError("ASDF field contains only Unicode whitespace: " + std::string(field));
+    }
+}
+
+[[nodiscard]] bool IsLowercaseToken(std::string_view value)
+{
+    return !value.empty() && value.front() >= 'a' && value.front() <= 'z' &&
+        std::ranges::all_of(value, [](char character) {
+            return (character >= 'a' && character <= 'z') ||
+                (character >= '0' && character <= '9') || character == '_';
+        });
+}
+
+[[nodiscard]] bool IsPortableAnnotationOriginName(std::string_view name)
+{
+    if (name == "." || name == ".." ||
+        name.find_first_of("/\\") != std::string_view::npos) {
+        return false;
+    }
+    const bool has_ascii_drive_prefix = name.size() >= 2U &&
+        ((name.front() >= 'A' && name.front() <= 'Z') ||
+         (name.front() >= 'a' && name.front() <= 'z')) &&
+        name[1] == ':';
+    return !has_ascii_drive_prefix;
+}
+
+[[nodiscard]] bool IsCanonicalUuidV4(std::string_view value)
+{
+    if (value.size() != 36 || value[8] != '-' || value[13] != '-' ||
+        value[18] != '-' || value[23] != '-' || value[14] != '4' ||
+        (value[19] != '8' && value[19] != '9' && value[19] != 'a' && value[19] != 'b')) {
+        return false;
+    }
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (index == 8 || index == 13 || index == 18 || index == 23) {
+            continue;
+        }
+        const char character = value[index];
+        if (!((character >= '0' && character <= '9') ||
+              (character >= 'a' && character <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] unsigned ParseDecimal(std::string_view value, std::size_t offset, std::size_t count)
+{
+    unsigned result = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        const char character = value[offset + index];
+        if (character < '0' || character > '9') {
+            return std::numeric_limits<unsigned>::max();
+        }
+        result = result * 10U + static_cast<unsigned>(character - '0');
+    }
+    return result;
+}
+
+[[nodiscard]] bool IsLeapYear(unsigned year)
+{
+    return year % 4U == 0U && (year % 100U != 0U || year % 400U == 0U);
+}
+
+[[nodiscard]] bool IsCanonicalTimestamp(std::string_view value)
+{
+    if (value.size() != 24 || value[4] != '-' || value[7] != '-' ||
+        value[10] != 'T' || value[13] != ':' || value[16] != ':' ||
+        value[19] != '.' || value[23] != 'Z') {
+        return false;
+    }
+    const unsigned year = ParseDecimal(value, 0, 4);
+    const unsigned month = ParseDecimal(value, 5, 2);
+    const unsigned day = ParseDecimal(value, 8, 2);
+    const unsigned hour = ParseDecimal(value, 11, 2);
+    const unsigned minute = ParseDecimal(value, 14, 2);
+    const unsigned second = ParseDecimal(value, 17, 2);
+    const unsigned millisecond = ParseDecimal(value, 20, 3);
+    if (year == std::numeric_limits<unsigned>::max() || month < 1U || month > 12U ||
+        hour > 23U || minute > 59U || second > 59U || millisecond > 999U) {
+        return false;
+    }
+    constexpr std::array<unsigned, 12> month_days{
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const unsigned maximum_day = month == 2U && IsLeapYear(year)
+        ? 29U
+        : month_days[month - 1U];
+    return day >= 1U && day <= maximum_day;
+}
+
+[[nodiscard]] bool IsSha256Fingerprint(std::string_view value)
+{
+    constexpr std::string_view prefix = "sha256:";
+    return value.size() == prefix.size() + 64U && value.starts_with(prefix) &&
+        std::ranges::all_of(value.substr(prefix.size()), [](char character) {
+            return (character >= '0' && character <= '9') ||
+                (character >= 'a' && character <= 'f');
+        });
+}
+
 [[nodiscard]] std::int32_t DecodeInt32(
     const std::vector<unsigned char>& bytes,
     std::size_t offset,
@@ -497,7 +611,7 @@ void ValidateDocument(const LabelingDocument& document)
     std::set<std::int32_t> codes;
     std::set<std::string> shortcuts;
     for (const LabelDefinition& label : document.labels) {
-        RequireUtf8(label.name, "label.name");
+        RequireNonWhitespaceUtf8(label.name, "label.name");
         if (label.code == kUnlabeled) {
             throw CodecError("label code collides with unlabeled");
         }
@@ -513,13 +627,52 @@ void ValidateDocument(const LabelingDocument& document)
             throw CodecError("categorical value has no label definition");
         }
     }
-    RequireUtf8(document.source_kind, "source_kind");
-    RequireUtf8(document.source_name, "source_name");
-    RequireUtf8(document.source_identity, "source_identity");
-    RequireUtf8(document.source_fingerprint, "source_fingerprint");
-    RequireUtf8(document.annotation_name, "annotation_name");
-    RequireUtf8(document.task_id, "task_id");
-    RequireUtf8(document.task_name, "task_name");
+    RequireNonWhitespaceUtf8(document.source_kind, "source_kind");
+    RequireNonWhitespaceUtf8(document.source_name, "source_name");
+    RequireNonWhitespaceUtf8(document.source_identity, "source_identity");
+    RequireNonWhitespaceUtf8(document.source_fingerprint, "source_fingerprint");
+    if (!IsCanonicalUuidV4(document.task_id)) {
+        throw CodecError("labeling_task.id is not a canonical UUID v4");
+    }
+    RequireNonWhitespaceUtf8(document.task_name, "task_name");
+    if (!IsCanonicalTimestamp(document.created_at) ||
+        !IsCanonicalTimestamp(document.modified_at) ||
+        document.modified_at < document.created_at) {
+        throw CodecError("labeling task timestamps are invalid");
+    }
+    if (!IsLowercaseToken(document.origin.kind)) {
+        throw CodecError("labeling task origin kind is invalid");
+    }
+    if ((document.origin.kind == "manual" && document.origin.annotation) ||
+        (document.origin.kind == "annotation_promotion" && !document.origin.annotation)) {
+        throw CodecError("labeling task origin annotation is inconsistent");
+    }
+    if (document.origin.annotation) {
+        const AnnotationOrigin& annotation = *document.origin.annotation;
+        RequireNonWhitespaceUtf8(annotation.name, "labeling_task.origin.annotation.name");
+        if (!IsPortableAnnotationOriginName(annotation.name)) {
+            throw CodecError(
+                "labeling task annotation origin name is not a portable basename");
+        }
+        if (annotation.format != "csv" && annotation.format != "npy") {
+            throw CodecError("labeling task annotation origin format is invalid");
+        }
+        if (annotation.fingerprint && !IsSha256Fingerprint(*annotation.fingerprint)) {
+            throw CodecError("labeling task annotation origin fingerprint is invalid");
+        }
+    }
+    if (document.description) {
+        RequireUtf8(*document.description, "labeling_task.description");
+    }
+    if (document.authors.size() > kMaximumAuthorCount) {
+        throw CodecError("labeling task author count exceeds the native profile");
+    }
+    for (const Author& author : document.authors) {
+        RequireNonWhitespaceUtf8(author.name, "labeling_task.authors.name");
+        if (author.identifier) {
+            RequireNonWhitespaceUtf8(*author.identifier, "labeling_task.authors.identifier");
+        }
+    }
 }
 
 [[nodiscard]] std::string QuoteJson(std::string_view text)
@@ -669,7 +822,9 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
 
     const YAML::Node annotation = RequiredNode(root, "annotation");
     document.annotation_kind = RequiredScalar<std::string>(annotation, "kind");
-    document.annotation_name = RequiredScalar<std::string>(annotation, "name");
+    if (annotation["name"]) {
+        throw CodecError("annotation.name is not part of schema 2.0");
+    }
     const YAML::Node missing = RequiredNode(annotation, "missing");
     document.missing_semantic = RequiredScalar<std::string>(missing, "semantic");
     document.missing_value = RequiredScalar<std::int32_t>(missing, "value");
@@ -707,6 +862,40 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
     const YAML::Node task = RequiredNode(root, "labeling_task");
     document.task_id = RequiredScalar<std::string>(task, "id");
     document.task_name = RequiredScalar<std::string>(task, "name");
+    document.created_at = RequiredScalar<std::string>(task, "created_at");
+    document.modified_at = RequiredScalar<std::string>(task, "modified_at");
+    const YAML::Node origin = RequiredNode(task, "origin");
+    document.origin.kind = RequiredScalar<std::string>(origin, "kind");
+    if (origin["annotation"]) {
+        const YAML::Node annotation_origin = RequiredNode(origin, "annotation");
+        AnnotationOrigin parsed;
+        parsed.name = RequiredScalar<std::string>(annotation_origin, "name");
+        parsed.format = RequiredScalar<std::string>(annotation_origin, "format");
+        if (annotation_origin["fingerprint"]) {
+            parsed.fingerprint =
+                RequiredScalar<std::string>(annotation_origin, "fingerprint");
+        }
+        document.origin.annotation = std::move(parsed);
+    }
+    if (task["description"]) {
+        document.description = RequiredScalar<std::string>(task, "description");
+    }
+    if (const YAML::Node authors = task["authors"]) {
+        if (!authors.IsSequence()) {
+            throw CodecError("labeling task authors must be a sequence");
+        }
+        if (authors.size() > kMaximumAuthorCount) {
+            throw CodecError("labeling task author count exceeds the native profile");
+        }
+        for (const YAML::Node& node : authors) {
+            Author author;
+            author.name = RequiredScalar<std::string>(node, "name");
+            if (node["identifier"]) {
+                author.identifier = RequiredScalar<std::string>(node, "identifier");
+            }
+            document.authors.push_back(std::move(author));
+        }
+    }
     const YAML::Node labels = RequiredNode(task, "labels");
     if (!labels.IsSequence()) {
         throw CodecError("label definitions must be a sequence");
@@ -730,6 +919,10 @@ void RewriteLabelValuePreservingRosterBlock(
     std::size_t value_index,
     std::int32_t value)
 {
+    // Validate the complete schema-2 document before the experimental raw-block
+    // rewrite. The tree prefix is copied byte-for-byte, so forward fields at all
+    // preserved mapping levels retain their original representation.
+    static_cast<void>(ReadLabelingDocument(input_path));
     const std::vector<unsigned char> bytes = ReadAll(input_path);
     const std::size_t tree_end = FindTreeEnd(bytes);
     YAML::Node root;
@@ -809,7 +1002,7 @@ void RewriteLabelValuePreservingRosterBlock(
 
     const std::vector<Block> blocks = ReadBlocks(bytes, tree_end);
     if (blocks.size() != 2 || roster_source != 0 || values_source != 1) {
-        throw CodecError("block reuse requires the v1 roster/value block order");
+        throw CodecError("block reuse requires the canonical roster/value block order");
     }
     const Block& roster_block = blocks[0];
     const Block& values_block = blocks[1];
@@ -923,7 +1116,6 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
     }
     metadata << "annotation:\n"
              << "  kind: " << QuoteYaml(document.annotation_kind) << "\n"
-             << "  name: " << QuoteYaml(document.annotation_name) << "\n"
              << "  values: !core/ndarray-1.0.0\n"
              << "    source: " << values_source << "\n"
              << "    datatype: int32\n"
@@ -935,7 +1127,33 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
              << "labeling_task:\n"
              << "  id: " << QuoteYaml(document.task_id) << "\n"
              << "  name: " << QuoteYaml(document.task_name) << "\n"
-             << "  labels:\n";
+             << "  created_at: " << QuoteYaml(document.created_at) << "\n"
+             << "  modified_at: " << QuoteYaml(document.modified_at) << "\n"
+             << "  origin:\n"
+             << "    kind: " << QuoteYaml(document.origin.kind) << "\n";
+    if (document.origin.annotation) {
+        const AnnotationOrigin& annotation_origin = *document.origin.annotation;
+        metadata << "    annotation:\n"
+                 << "      name: " << QuoteYaml(annotation_origin.name) << "\n"
+                 << "      format: " << QuoteYaml(annotation_origin.format) << "\n";
+        if (annotation_origin.fingerprint) {
+            metadata << "      fingerprint: "
+                     << QuoteYaml(*annotation_origin.fingerprint) << "\n";
+        }
+    }
+    if (document.description) {
+        metadata << "  description: " << QuoteYaml(*document.description) << "\n";
+    }
+    if (!document.authors.empty()) {
+        metadata << "  authors:\n";
+        for (const Author& author : document.authors) {
+            metadata << "  - name: " << QuoteYaml(author.name) << "\n";
+            if (author.identifier) {
+                metadata << "    identifier: " << QuoteYaml(*author.identifier) << "\n";
+            }
+        }
+    }
+    metadata << "  labels:\n";
     for (const LabelDefinition& label : document.labels) {
         metadata << "  - code: " << label.code << "\n"
                  << "    name: " << QuoteYaml(label.name) << "\n";
@@ -994,11 +1212,53 @@ std::string SemanticJson(const LabelingDocument& document)
         << "\"sample_names\":";
     WriteStringArray(out, document.sample_names);
     out << ",\"annotation_kind\":" << QuoteJson(document.annotation_kind)
-        << ",\"annotation_name\":" << QuoteJson(document.annotation_name)
         << ",\"missing_semantic\":" << QuoteJson(document.missing_semantic)
         << ",\"missing_value\":" << document.missing_value
         << ",\"task_id\":" << QuoteJson(document.task_id)
         << ",\"task_name\":" << QuoteJson(document.task_name)
+        << ",\"created_at\":" << QuoteJson(document.created_at)
+        << ",\"modified_at\":" << QuoteJson(document.modified_at)
+        << ",\"origin_kind\":" << QuoteJson(document.origin.kind)
+        << ",\"origin_annotation\":";
+    if (!document.origin.annotation) {
+        out << "null";
+    }
+    else {
+        const AnnotationOrigin& annotation_origin = *document.origin.annotation;
+        out << "{\"name\":" << QuoteJson(annotation_origin.name)
+            << ",\"format\":" << QuoteJson(annotation_origin.format)
+            << ",\"fingerprint\":";
+        if (annotation_origin.fingerprint) {
+            out << QuoteJson(*annotation_origin.fingerprint);
+        }
+        else {
+            out << "null";
+        }
+        out << '}';
+    }
+    out << ",\"description\":";
+    if (document.description) {
+        out << QuoteJson(*document.description);
+    }
+    else {
+        out << "null";
+    }
+    out << ",\"authors\":[";
+    for (std::size_t index = 0; index < document.authors.size(); ++index) {
+        if (index != 0) {
+            out << ',';
+        }
+        const Author& author = document.authors[index];
+        out << "{\"name\":" << QuoteJson(author.name) << ",\"identifier\":";
+        if (author.identifier) {
+            out << QuoteJson(*author.identifier);
+        }
+        else {
+            out << "null";
+        }
+        out << '}';
+    }
+    out << ']'
         << ",\"labels\":[";
     for (std::size_t index = 0; index < document.labels.size(); ++index) {
         if (index != 0) {
@@ -1032,11 +1292,21 @@ LabelingDocument NativeFixture()
     document.roster_identity_kind = "explicit_names";
     document.sample_names = {"alpha.fits", "星系-β.fits", "gamma.fits"};
     document.annotation_kind = "categorical_integer";
-    document.annotation_name = "Native writer task";
     document.missing_semantic = "unlabeled";
     document.missing_value = kUnlabeled;
-    document.task_id = "native-writer-task";
+    document.task_id = "00000000-0000-4000-8000-000000000002";
     document.task_name = "Native writer task";
+    document.created_at = "2026-08-30T08:00:00.000Z";
+    document.modified_at = "2026-08-30T08:00:00.000Z";
+    document.origin.kind = "annotation_promotion";
+    document.origin.annotation = AnnotationOrigin{
+        "native-labels.csv",
+        "csv",
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"};
+    document.description = "Native schema 2.0 interoperability fixture 🚀";
+    document.authors = {
+        {"SpecForge spike", "https://example.invalid/specforge-spike"},
+        {"验证者", std::nullopt}};
     document.labels = {{0, "Galaxy", "g"}, {1, "Quasar", "q"}};
     document.values = {kUnlabeled, 0, 1};
     return document;

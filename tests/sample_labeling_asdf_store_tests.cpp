@@ -166,10 +166,16 @@ specforge::SampleLabelingDocument MakeDocument()
         "sample-b",
         "sample-c",
     };
-    document.annotation.name = "quality-code";
     document.annotation.values = {-1, 2, 7};
-    document.labeling.id = "quality-task";
+    document.labeling.id =
+        "00000000-0000-4000-8000-000000000005";
     document.labeling.name = "Quality review";
+    const auto timestamp = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:00.000Z");
+    Require(timestamp.has_value(), "store timestamp fixture should parse");
+    document.labeling.canonical_metadata.created_at = *timestamp;
+    document.labeling.canonical_metadata.modified_at = *timestamp;
+    document.labeling.canonical_metadata.origin.kind = "manual";
     document.labeling.labels = {
         {2, "accepted", "a"},
         {7, "rejected", "r"},
@@ -424,10 +430,13 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
         FirstRawBlock(ReadAllBytes(path));
 
     const std::array<std::int32_t, 3> first_values = {7, 2, -1};
+    const auto first_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:01.000Z");
     const specforge::SampleLabelingAsdfStoreWriteResult first_rewrite =
         specforge::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
-            first_values);
+            first_values,
+            *first_modified_at);
     Require(
         first_rewrite.succeeded() &&
             first_rewrite.roster_block_reused &&
@@ -448,10 +457,13 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
         "value-only rewrite should preserve the raw roster block verbatim");
 
     const std::array<std::int32_t, 3> second_values = {2, 2, 7};
+    const auto second_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:02.000Z");
     const specforge::SampleLabelingAsdfStoreWriteResult second_rewrite =
         specforge::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
-            second_values);
+            second_values,
+            *second_modified_at);
     Require(
             second_rewrite.succeeded() &&
             second_rewrite.roster_block_reused &&
@@ -574,7 +586,10 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
         "metadata preservation must not carry unknown fields into another document identity");
     specforge::SampleLabelingDocument edited_again =
         snapshot_rewrite.snapshot->document();
-    edited_again.annotation.name = "Edited through path write";
+    edited_again.labeling.name = "Edited through path write";
+    edited_again.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:03.000Z");
     const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
         specforge::WriteSampleLabelingAsdfDocumentAtomically(
             path,
@@ -586,6 +601,89 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
         path_rewrite.error.message.empty()
             ? "path-based full rewrite should not bypass unknown metadata preservation"
             : path_rewrite.error.message);
+}
+
+void TestFullDocumentRewritePreservesCanonicalLifecycleIdentity()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge-asdf-store-canonical-identity");
+    const std::filesystem::path path = directory / "labels.asdf";
+    specforge::SampleLabelingDocument original = MakeDocument();
+    original.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:05.000Z");
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+            .succeeded(),
+        "canonical-identity store fixture should write");
+
+    specforge::SampleLabelingAsdfStoreOpenResult opened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            CompatibleSource(original));
+    Require(
+        opened.succeeded(),
+        "canonical-identity store fixture should open");
+    const std::vector<unsigned char> durable_bytes = ReadAllBytes(path);
+
+    const auto require_rejected_without_replacement =
+        [&](const specforge::SampleLabelingDocument& replacement,
+            std::string_view message) {
+            const specforge::SampleLabelingAsdfStoreWriteResult result =
+                specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+                    *opened.snapshot,
+                    replacement);
+            Require(
+                !result.succeeded() &&
+                    result.error.kind ==
+                        specforge::SampleLabelingAsdfStoreErrorKind::
+                            PreservationIdentityMismatch &&
+                    ReadAllBytes(path) == durable_bytes &&
+                    !HasTemporarySibling(path),
+                message);
+        };
+
+    specforge::SampleLabelingDocument changed_created_at = original;
+    changed_created_at.labeling.canonical_metadata.created_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T07:59:59.000Z");
+    require_rejected_without_replacement(
+        changed_created_at,
+        "full-document rewrite must preserve the durable created_at");
+
+    specforge::SampleLabelingDocument changed_origin = original;
+    changed_origin.labeling.canonical_metadata.origin = {
+        .kind = "annotation_promotion",
+        .annotation = specforge::SampleLabelingAnnotationOrigin{
+            .name = "labels.npy",
+            .format = "npy",
+            .fingerprint = std::string(64U, 'a'),
+        },
+    };
+    require_rejected_without_replacement(
+        changed_origin,
+        "full-document rewrite must preserve the durable origin");
+
+    specforge::SampleLabelingDocument regressed_modified_at = original;
+    regressed_modified_at.labeling.canonical_metadata.modified_at =
+        *specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:03.000Z");
+    require_rejected_without_replacement(
+        regressed_modified_at,
+        "full-document rewrite must not regress the durable modified_at");
+
+    const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            path,
+            changed_created_at);
+    Require(
+        !path_rewrite.succeeded() &&
+            path_rewrite.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    PreservationIdentityMismatch &&
+            ReadAllBytes(path) == durable_bytes &&
+            !HasTemporarySibling(path),
+        "path-based full rewrite must enforce canonical lifecycle identity before replacement");
 }
 
 void TestWriteFailuresPreserveThePreviousDocument()
@@ -648,7 +746,9 @@ void TestWriteFailuresPreserveThePreviousDocument()
     const specforge::SampleLabelingAsdfStoreWriteResult rewrite_codec_failure =
         specforge::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
-            wrong_count);
+            wrong_count,
+            opened.snapshot->document()
+                .labeling.canonical_metadata.modified_at);
     Require(
         !rewrite_codec_failure.succeeded() &&
             rewrite_codec_failure.error.kind ==
@@ -693,6 +793,8 @@ void TestWriteFailuresPreserveThePreviousDocument()
                 RewriteWithBeforeReplace(
                     *opened.snapshot,
                     replacement,
+                    opened.snapshot->document()
+                        .labeling.canonical_metadata.modified_at,
                     [&rewrite_publish_hook_reached](const auto&, const auto&) {
                         rewrite_publish_hook_reached = true;
                         throw std::runtime_error(
@@ -709,6 +811,117 @@ void TestWriteFailuresPreserveThePreviousDocument()
         "a rewrite pre-replacement abort should preserve the previous document");
 }
 
+void TestValueRewriteReplacementFailurePreservesWholeGeneration()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge-asdf-store-value-replace-failure");
+    const std::filesystem::path path = directory / "labels.asdf";
+    const specforge::SampleLabelingDocument original = MakeDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+            .succeeded(),
+        "value replacement failure fixture should write");
+
+    std::vector<unsigned char> fixture_bytes = ReadAllBytes(path);
+    ReplaceTextOnce(
+        fixture_bytes,
+        "\nschema_version: ",
+        "\nfuture_failure_mapping: \"must-survive\"\nschema_version: ");
+    WriteAllBytes(path, fixture_bytes);
+
+    specforge::SampleLabelingAsdfStoreOpenResult opened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            CompatibleSource(original));
+    Require(
+        opened.succeeded(),
+        "value replacement failure fixture should open");
+    const std::vector<unsigned char> durable_bytes = ReadAllBytes(path);
+    const std::vector<unsigned char> durable_roster_block =
+        FirstRawBlock(durable_bytes);
+    const std::vector<std::int32_t> durable_values =
+        opened.snapshot->document().annotation.values;
+    const specforge::CanonicalTimestamp durable_modified_at =
+        opened.snapshot->document()
+            .labeling.canonical_metadata.modified_at;
+    const auto replacement_modified_at =
+        specforge::ParseCanonicalTimestamp(
+            "2026-08-30T08:00:04.000Z");
+    Require(
+        replacement_modified_at.has_value(),
+        "replacement timestamp fixture should parse");
+
+    bool replacement_hook_reached = false;
+    bool temporary_generation_matches = false;
+    const std::array<std::int32_t, 3> replacement_values = {7, 7, 2};
+    const specforge::SampleLabelingAsdfStoreWriteResult aborted =
+        specforge::sample_labeling_asdf_store_test_seam::
+            RewriteWithBeforeReplace(
+                *opened.snapshot,
+                replacement_values,
+                *replacement_modified_at,
+                [&replacement_hook_reached,
+                    &temporary_generation_matches,
+                    &replacement_values,
+                    &replacement_modified_at,
+                    &durable_roster_block](
+                    const std::filesystem::path& temporary_path,
+                    const auto&) {
+                    replacement_hook_reached = true;
+                    const std::vector<unsigned char> temporary_bytes =
+                        ReadAllBytes(temporary_path);
+                    const specforge::SampleLabelingAsdfReadResult
+                        temporary_document =
+                            specforge::ReadSampleLabelingAsdfDocument(
+                                temporary_path);
+                    temporary_generation_matches =
+                        temporary_document.succeeded() &&
+                        temporary_document.document->annotation.values ==
+                            std::vector<std::int32_t>(
+                                replacement_values.begin(),
+                                replacement_values.end()) &&
+                        temporary_document.document->labeling
+                                .canonical_metadata.modified_at ==
+                            *replacement_modified_at &&
+                        ContainsText(
+                            temporary_bytes,
+                            "future_failure_mapping") &&
+                        FirstRawBlock(temporary_bytes) ==
+                            durable_roster_block;
+                    throw std::runtime_error(
+                        "injected value replacement abort");
+                });
+
+    const std::vector<unsigned char> after_abort = ReadAllBytes(path);
+    const specforge::SampleLabelingAsdfStoreOpenResult reopened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            CompatibleSource(original));
+    Require(
+        replacement_hook_reached &&
+            temporary_generation_matches &&
+            !aborted.succeeded() &&
+            aborted.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    AtomicWriteFailure &&
+            after_abort == durable_bytes &&
+            ContainsText(after_abort, "future_failure_mapping") &&
+            FirstRawBlock(after_abort) == durable_roster_block &&
+            opened.snapshot->document().annotation.values ==
+                durable_values &&
+            opened.snapshot->document()
+                    .labeling.canonical_metadata.modified_at ==
+                durable_modified_at &&
+            reopened.succeeded() &&
+            reopened.snapshot->document().annotation.values ==
+                durable_values &&
+            reopened.snapshot->document()
+                    .labeling.canonical_metadata.modified_at ==
+                durable_modified_at &&
+            !HasTemporarySibling(path),
+        "an aborted value replacement must preserve old values, timestamp, unknown mappings, roster bytes, and snapshot generation");
+}
+
 }  // namespace
 
 int main()
@@ -719,7 +932,9 @@ int main()
         TestInitialCanonicalPublicationReopensExactGeneration();
         TestValueOnlyRewriteReusesRosterBlockWithoutReopen();
         TestMetadataChangingRewritesPreserveForwardUnknownFields();
+        TestFullDocumentRewritePreservesCanonicalLifecycleIdentity();
         TestWriteFailuresPreserveThePreviousDocument();
+        TestValueRewriteReplacementFailurePreservesWholeGeneration();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

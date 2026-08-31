@@ -37,18 +37,6 @@ DefaultLegacyOutputPublisher()
     };
 }
 
-SampleLabelingController::CanonicalValuesPublisher
-DefaultCanonicalValuesPublisher()
-{
-    return [](
-               SampleLabelingAsdfOpenSnapshot& snapshot,
-               std::span<const std::int32_t> values) {
-        return RewriteSampleLabelingAsdfValuesAtomically(
-            snapshot,
-            values);
-    };
-}
-
 SampleLabelingController::CanonicalDocumentPublisher
 DefaultCanonicalDocumentPublisher()
 {
@@ -264,8 +252,8 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     }
     view.can_activate_labeling =
         local_task != nullptr ||
-        annotation.kind ==
-            SampleAnnotationKind::CategoricalInteger;
+        CanPromoteSampleAnnotationToLabeling(annotation) ||
+        annotation.labeling_document != nullptr;
     view.can_filter_samples = local_task != nullptr || annotation.kind != SampleAnnotationKind::ContinuousFloat;
     view.can_sort_samples = local_task == nullptr &&
                             annotation.relationship == SampleAnnotationWorkflowRelationship::PlainAnnotation &&
@@ -432,7 +420,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           std::move(workflow_state_cache_path),
           std::move(labeling_state_cache_loader),
           std::move(workflow_state_cache_loader),
-          {})
+          SampleLabelingController::CanonicalDocumentPublisher{})
 {
 }
 
@@ -442,8 +430,6 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path workflow_state_cache_path,
     SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
     WorkflowStateCacheLoader workflow_state_cache_loader,
-    SampleLabelingController::CanonicalValuesPublisher
-        canonical_values_publisher,
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher)
     : navigation_(std::move(navigation_state_cache_path)),
@@ -451,9 +437,6 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           std::move(labeling_state_cache_path),
           std::move(labeling_state_cache_loader),
           DefaultLegacyOutputPublisher(),
-          canonical_values_publisher
-              ? std::move(canonical_values_publisher)
-              : DefaultCanonicalValuesPublisher(),
           canonical_document_publisher
               ? std::move(canonical_document_publisher)
               : DefaultCanonicalDocumentPublisher()),
@@ -1592,12 +1575,12 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     }
 
     const SampleLabelingOperationResult create_result = labeling_.CreateTaskFromAnnotation(
-        std::move(plan.task_id),
         std::move(plan.task_name),
         std::move(plan.label_set),
         std::move(plan.values),
         annotation->path,
-        plan.metadata_clean);
+        plan.metadata_clean,
+        std::move(plan.origin));
     ApplyLabelingLeaseIssue(outcome, create_result);
     if (!create_result.accepted) {
         if (create_result.task_projection_changed) {
@@ -1777,9 +1760,7 @@ SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
         ? labeling_.MigrateActiveLegacyTaskToCanonicalAsdf(
               std::move(output_path))
         : labeling_.SaveActiveTemporaryTaskToOutput(
-              std::move(output_path),
-              SampleLabelingTaskNameForOutputPath(
-                  selected_output_path));
+              std::move(output_path));
     ApplyLabelingLeaseIssue(outcome, operation);
     if (operation.output_saved) {
         (void)SynchronizeActiveCanonicalAsdfAttachment(

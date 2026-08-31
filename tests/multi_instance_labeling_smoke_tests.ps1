@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 $script:PipeIoTimeoutMilliseconds = 30000
+$script:LabelingTaskId = '77777777-7777-4777-8777-777777777777'
 $script:PairedBarrierTimeoutMilliseconds = 5000
 $script:RunnerMainFlowBudgetMilliseconds = 180000
 $script:CleanupBudgetMilliseconds = 30000
@@ -1078,7 +1079,7 @@ function Get-PortableApp {
     $destinationExecutable = Join-Path $Destination 'SpecForge.exe'
     Copy-Item -LiteralPath $ResolvedExecutable -Destination $destinationExecutable
     $buildRoot = Split-Path -Parent $ResolvedExecutable
-    foreach ($runtimeFile in @('zd.dll')) {
+    foreach ($runtimeFile in @('zd.dll', 'yaml-cppd.dll')) {
         $source = Join-Path $buildRoot $runtimeFile
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $Destination $runtimeFile)
@@ -1244,7 +1245,8 @@ function Invoke-SourceOpenAndAssert {
         Assert-True `
             -Condition (
                 [bool]$state.state.labeling.has_active_task -and
-                [string]$state.state.labeling.active_task.id -eq 'quality') `
+                [string]$state.state.labeling.active_task.id -eq
+                    $script:LabelingTaskId) `
             -Message (
                 "$Description should retain the seeded quality task in the GUI cache. " +
                 "State=$($state | ConvertTo-Json -Compress -Depth 12)")
@@ -1452,7 +1454,7 @@ try {
     }
     $cacheDocument = [ordered]@{
         format_kind = 'specforge.sample_labeling_tasks.cache'
-        schema_version = 3
+        schema_version = 4
         sources = @($seedSources)
     }
     Write-Utf8File `
@@ -1573,7 +1575,9 @@ try {
         -Condition (-not [bool]$conflictState.state.labeling.has_active_task) `
         -Message 'A second instance opening the same formal target should expose a read-only labeling projection.'
     Assert-True `
-        -Condition (@($conflictState.state.labeling.task_ids) -contains 'quality') `
+        -Condition (
+            @($conflictState.state.labeling.task_ids) -contains
+                $script:LabelingTaskId) `
         -Message (
             'A read-only conflicting instance should retain the quality task projection. ' +
             ($conflictState | ConvertTo-Json -Compress -Depth 12))
@@ -1616,7 +1620,7 @@ try {
     Invoke-StateFixture -Arguments @(
         '--exercise-labeling-delete', $cachePath,
         '--source', $fixtures['deleted'].SourcePath,
-        '--task-id', 'quality')
+        '--task-id', $script:LabelingTaskId)
 
     $script:CurrentStep = 'reopen deleted source from both stale GUI caches after tombstone'
     [void](Invoke-SourceOpenAndAssert `
@@ -1733,7 +1737,9 @@ try {
     foreach ($name in @('formal-a', 'formal-b', 'temporary-a', 'temporary-b')) {
         $entry = Get-SourceEntry -Cache $finalCache -Identity $fixtures[$name].Identity
         Assert-True `
-            -Condition ([string]$entry.active_task_id -eq 'quality') `
+            -Condition (
+                [string]$entry.active_task_id -eq
+                    $script:LabelingTaskId) `
             -Message "Source $name should retain its explicit active task selection."
     }
     $deletedEntry = Get-SourceEntry -Cache $finalCache -Identity $fixtures['deleted'].Identity
@@ -1749,7 +1755,7 @@ try {
         (Join-Path $sharedStateRoot 'outputs\formal-a.npy'),
         '--source', $fixtures['formal-a'].SourcePath,
         '--expected-values', '5,7,-1',
-        '--task-id', 'quality')
+        '--task-id', $script:LabelingTaskId)
     Invoke-StateFixtureEventually `
         -Description 'formal-b durable label output' `
         -Arguments @(
@@ -1757,7 +1763,7 @@ try {
         (Join-Path $sharedStateRoot 'outputs\formal-b.npy'),
         '--source', $fixtures['formal-b'].SourcePath,
         '--expected-values', '7,-1,-1',
-        '--task-id', 'quality')
+        '--task-id', $script:LabelingTaskId)
 
     $script:CurrentStep = 'quit the remaining owned GUI process'
     $quit = $null

@@ -1,6 +1,7 @@
 #include "domain/sample_labeling.h"
 
 #include "domain/sample_annotation_io.h"
+#include "domain/utf8.h"
 
 #include <algorithm>
 #include <cctype>
@@ -33,6 +34,25 @@ bool HasPendingPersistence(const SampleLabelingTask& task)
     return !task.pending_sample_indices.empty() || task.metadata_save_pending;
 }
 
+bool HaveSameSampleLabels(
+    const SampleLabelSet& left,
+    const SampleLabelSet& right)
+{
+    if (left.labels.size() != right.labels.size()) {
+        return false;
+    }
+    return std::all_of(
+        left.labels.begin(),
+        left.labels.end(),
+        [&right](const SampleLabelDefinition& label) {
+            const SampleLabelDefinition* match =
+                FindSampleLabel(right, label.code);
+            return match != nullptr &&
+                match->name == label.name &&
+                match->shortcut == label.shortcut;
+        });
+}
+
 void RefreshPendingSaveState(SampleLabelingTask& task)
 {
     task.save_state.pending_count = task.pending_sample_indices.size();
@@ -56,14 +76,48 @@ void RefreshPendingSaveState(SampleLabelingTask& task)
 
 }  // namespace
 
+bool IsValidSampleLabelingAnnotationOriginName(
+    std::string_view name) noexcept
+{
+    if (!IsValidUtf8WithNonWhitespace(name) ||
+        name == "." || name == ".." ||
+        name.find_first_of("/\\") != std::string_view::npos) {
+        return false;
+    }
+    const bool has_ascii_drive_prefix = name.size() >= 2U &&
+        ((name.front() >= 'A' && name.front() <= 'Z') ||
+         (name.front() >= 'a' && name.front() <= 'z')) &&
+        name[1] == ':';
+    return !has_ascii_drive_prefix;
+}
+
 SampleLabelingTask CreateSampleLabelingTask(
     std::string task_id,
     std::string task_name,
     std::size_t sample_count)
 {
+    const CanonicalTimestamp created_at = CurrentCanonicalTimestamp();
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    canonical_metadata.created_at = created_at;
+    canonical_metadata.modified_at = created_at;
+    canonical_metadata.origin.kind = "manual";
+    return CreateSampleLabelingTask(
+        std::move(task_id),
+        std::move(task_name),
+        sample_count,
+        std::move(canonical_metadata));
+}
+
+SampleLabelingTask CreateSampleLabelingTask(
+    std::string task_id,
+    std::string task_name,
+    std::size_t sample_count,
+    SampleLabelingTaskCanonicalMetadata canonical_metadata)
+{
     SampleLabelingTask task;
     task.task_id = std::move(task_id);
     task.task_name = std::move(task_name);
+    task.canonical_metadata = std::move(canonical_metadata);
     task.values.assign(sample_count, kUnlabeledSampleLabelCode);
     task.label_usage_counts.clear();
     task.labeled_count = 0;
@@ -220,6 +274,9 @@ bool UpdateSampleLabel(
             }),
         updated_label_set.labels.end());
     if (!UpsertSampleLabel(updated_label_set, std::move(label))) {
+        return false;
+    }
+    if (HaveSameSampleLabels(updated_label_set, task.label_set)) {
         return false;
     }
     task.label_set = std::move(updated_label_set);
@@ -441,6 +498,29 @@ void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task)
         return;
     }
     task.metadata_save_pending = true;
+    RefreshPendingSaveState(task);
+}
+
+void MarkCanonicalValueMutation(
+    SampleLabelingTask& task,
+    CanonicalTimestamp mutation_time)
+{
+    if (mutation_time > task.canonical_metadata.modified_at) {
+        task.canonical_metadata.modified_at = mutation_time;
+    }
+    RefreshPendingSaveState(task);
+}
+
+void MarkCanonicalSemanticMutation(
+    SampleLabelingTask& task,
+    CanonicalTimestamp mutation_time)
+{
+    if (mutation_time > task.canonical_metadata.modified_at) {
+        task.canonical_metadata.modified_at = mutation_time;
+    }
+    if (task.output_path) {
+        task.metadata_save_pending = true;
+    }
     RefreshPendingSaveState(task);
 }
 

@@ -36,12 +36,12 @@ struct SampleLabelingAsdfStoreError {
 struct SampleLabelingAsdfStoreOpenResult;
 struct SampleLabelingAsdfStoreWriteResult;
 
-// One source-validated open generation. The document advances after each
-// successful value-only rewrite, while the durable base remains reusable
-// because those rewrites preserve its metadata/roster prefix verbatim. A full
-// write or any external replacement starts a new file generation and requires
-// reopening the store; using this old snapshot after that point could restore
-// its old metadata/roster prefix.
+// One source-validated open generation. Each successful value-only rewrite
+// re-emits modified_at, preserves forward-compatible unknown mappings and the
+// encoded roster block, then refreshes the durable base for the new generation.
+// A full write or any external replacement starts a new file generation and
+// requires reopening the store; using this old snapshot after that point could
+// restore its old metadata/roster generation.
 class SampleLabelingAsdfOpenSnapshot {
 public:
     SampleLabelingAsdfOpenSnapshot(
@@ -83,8 +83,8 @@ private:
 
     std::filesystem::path path_;
     // The open generation owns one stable document object. Value-only
-    // publications replace only its values vector so metadata and an explicit
-    // roster are never copied on the autosave path. Public handles remain
+    // publications replace its values vector and modified_at while an explicit
+    // roster is never copied on the autosave path. Public handles remain
     // read-only and observe the advanced generation.
     std::shared_ptr<SampleLabelingDocument> document_;
     SampleLabelingAsdfDurableBase durable_base_;
@@ -98,7 +98,8 @@ private:
     friend SampleLabelingAsdfStoreWriteResult
     RewriteSampleLabelingAsdfValuesAtomically(
         SampleLabelingAsdfOpenSnapshot& snapshot,
-        std::span<const std::int32_t> values) noexcept;
+        std::span<const std::int32_t> values,
+        CanonicalTimestamp modified_at) noexcept;
 };
 
 struct SampleLabelingAsdfStoreOpenResult {
@@ -144,9 +145,10 @@ OpenSampleLabelingAsdfDocumentStore(
     const SampleLabelingAsdfReadCheckpoint& checkpoint = {}) noexcept;
 
 // Publishes a new full-document generation. If path already contains a readable
-// production-profile v1 document, this operation first obtains its durable base
-// and preserves forward-compatible unknown metadata. An existing document that
-// cannot provide such a base is rejected instead of being silently replaced.
+// SpecForge sample-labeling schema 2.0.0 document, this operation first obtains
+// its durable base and preserves forward-compatible unknown metadata. An
+// existing document that cannot provide such a base is rejected instead of
+// being silently replaced.
 // Every snapshot previously opened for this path must be discarded and
 // reopened before another rewrite.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
@@ -166,7 +168,8 @@ WriteSampleLabelingAsdfDocumentAndOpenAtomically(
 
 // Metadata-changing rewrite of one opened generation. This preserves unknown
 // metadata from the snapshot while replacing the known canonical fields from
-// document. The snapshot is stale after success and must be discarded.
+// document. created_at and origin remain immutable, and modified_at may only
+// advance. The snapshot is stale after success and must be discarded.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfDocumentAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
@@ -188,7 +191,8 @@ RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
     SampleLabelingAsdfOpenSnapshot& snapshot,
-    std::span<const std::int32_t> values) noexcept;
+    std::span<const std::int32_t> values,
+    CanonicalTimestamp modified_at) noexcept;
 
 namespace sample_labeling_asdf_store_test_seam {
 
@@ -204,6 +208,12 @@ using BeforeReplace = std::function<void(
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     std::span<const std::int32_t> values,
+    const BeforeReplace& before_replace) noexcept;
+
+[[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    std::span<const std::int32_t> values,
+    CanonicalTimestamp modified_at,
     const BeforeReplace& before_replace) noexcept;
 
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult

@@ -80,6 +80,10 @@ struct SampleAnnotationResult {
     // only the document's values after atomic publication; the coordinator
     // invalidates affected projections in the same maintenance transition.
     std::shared_ptr<const SampleLabelingDocument> labeling_document;
+    // Portable provenance for promoting a plain CSV/NPY annotation into a
+    // canonical labeling task. Canonical ASDF documents already carry their
+    // own task provenance and therefore leave this empty.
+    std::optional<SampleLabelingAnnotationOrigin> artifact_provenance;
     std::string metadata_warning;
     std::vector<SampleAnnotationValue> values;
 };

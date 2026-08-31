@@ -1,6 +1,6 @@
 {
   "format_kind": "specforge.sample_labeling",
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "source_kind": "npy",
   "source_name": "spectra.npy",
   "source_identity": "source:npy-names",
@@ -13,11 +13,16 @@
     "spec-0003"
   ],
   "annotation_kind": "categorical_integer",
-  "annotation_name": "NPY named labels",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
-  "task_id": "npy-named-task",
+  "task_id": "ad2019d6-9937-4473-b40a-fcef8ab0e918",
   "task_name": "NPY named labels",
+  "created_at": "2026-08-30T08:00:00.000Z",
+  "modified_at": "2026-08-30T08:00:00.000Z",
+  "origin_kind": "manual",
+  "origin_annotation": null,
+  "description": null,
+  "authors": [],
   "labels": [
     {
       "code": 0,

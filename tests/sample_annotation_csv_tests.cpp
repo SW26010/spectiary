@@ -3,6 +3,7 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_label_export.h"
 #include "domain/sample_labeling_source_compatibility.h"
+#include "platform/file_sha256.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -33,6 +34,27 @@ std::filesystem::path FreshTestDirectory(std::string_view name)
     std::filesystem::create_directories(path);
     return path;
 }
+
+class ScopedCurrentPath {
+public:
+    explicit ScopedCurrentPath(const std::filesystem::path& path)
+        : original_(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(path);
+    }
+
+    ~ScopedCurrentPath()
+    {
+        std::error_code error;
+        std::filesystem::current_path(original_, error);
+    }
+
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+private:
+    std::filesystem::path original_;
+};
 
 void WriteCsv(
     const std::filesystem::path& path,
@@ -87,6 +109,26 @@ std::optional<specforge::SampleAnnotationResult> LoadCsv(
             error);
 }
 
+std::optional<specforge::SampleAnnotationResult> LoadCsvCancelable(
+    const std::filesystem::path& path,
+    std::size_t sample_count,
+    const specforge::SampleAnnotationCancellationCheckpoint& checkpoint,
+    std::string* error)
+{
+    return specforge::SampleAnnotationIoAdapter{}.
+        LoadForSourceCancelable(
+            path,
+            specforge::SampleAnnotationSourceCompatibility{
+                .base_identity = "csv-test-source",
+                .source_kind = "npy",
+                .source_name = "source",
+                .source_fingerprint = "fingerprint",
+                .sample_count = sample_count,
+            },
+            checkpoint,
+            error);
+}
+
 void TestNamedCsvMapsRowsToCanonicalRoster()
 {
     const std::filesystem::path directory =
@@ -132,6 +174,17 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
             !annotation->label_metadata.has_value() &&
             annotation->labeling_document == nullptr,
         "CSV ingestion should create only a plain text annotation");
+    const std::optional<std::string> artifact_digest =
+        specforge::ComputeFileSha256(path);
+    Require(
+        artifact_digest.has_value() &&
+            annotation->artifact_provenance.has_value() &&
+            annotation->artifact_provenance->name == "labels.csv" &&
+            annotation->artifact_provenance->format == "csv" &&
+            annotation->artifact_provenance->fingerprint ==
+                std::optional<std::string>{
+                    "sha256:" + *artifact_digest},
+        "CSV ingestion should capture portable display-name, format, and full-artifact SHA-256 provenance");
     Require(
         TextValues(*annotation) ==
             std::vector<std::string>({
@@ -233,6 +286,248 @@ void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
             !annotation->label_metadata &&
             !annotation->labeling_document,
         "CSV reload should preserve annotation values without inventing labeling task provenance");
+}
+
+void TestNpyLoadCapturesPortableArtifactProvenance()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge-sample-annotation-npy-provenance");
+    const std::filesystem::path path =
+        directory / "selected-labels.npy";
+    const std::vector<int> values{1, 2, 3};
+    std::string error;
+    Require(
+        specforge::ExportLabelValuesToNpy(path, values, &error),
+        error.empty()
+            ? "NPY provenance fixture should write"
+            : error);
+
+    const std::optional<specforge::SampleAnnotationResult> annotation =
+        specforge::SampleAnnotationIoAdapter{}.Load(
+            path,
+            values.size(),
+            &error);
+    const std::optional<std::string> artifact_digest =
+        specforge::ComputeFileSha256(path);
+    Require(
+        annotation.has_value() &&
+            artifact_digest.has_value() &&
+            annotation->artifact_provenance.has_value() &&
+            annotation->artifact_provenance->name ==
+                "selected-labels.npy" &&
+            annotation->artifact_provenance->format == "npy" &&
+            annotation->artifact_provenance->fingerprint ==
+                std::optional<std::string>{
+                    "sha256:" + *artifact_digest},
+        error.empty()
+            ? "NPY ingestion should capture portable display-name, format, and full-artifact SHA-256 provenance"
+            : error);
+}
+
+void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge-sample-annotation-npy-portable-provenance-name");
+    const std::filesystem::path path =
+        directory / "selected-labels.npy";
+    const std::vector<int> values{1, 2, 3};
+    std::string error;
+    Require(
+        specforge::ExportLabelValuesToNpy(path, values, &error),
+        error.empty()
+            ? "NPY portable provenance fixture should write"
+            : error);
+
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "portable-provenance-task",
+            "initial",
+            values.size());
+    const std::vector<std::string> nonportable_names{
+        "/home/user/labels.npy",
+        R"(C:\labels.npy)",
+        R"(\\server\share\labels.npy)",
+        "nested/labels.npy",
+        R"(nested\labels.npy)",
+        R"(C:labels.npy)",
+    };
+    for (const std::string& nonportable_name : nonportable_names) {
+        task.task_name = nonportable_name;
+        error.clear();
+        Require(
+            specforge::SampleAnnotationIoAdapter{}.
+                SaveLabelMetadata(path, task, nullptr, &error),
+            error.empty()
+                ? "NPY nonportable sidecar fixture should write"
+                : error);
+
+        const std::optional<specforge::SampleAnnotationResult> annotation =
+            specforge::SampleAnnotationIoAdapter{}.
+                Load(path, values.size(), &error);
+        Require(
+            annotation.has_value(),
+            error.empty()
+                ? "NPY nonportable sidecar fixture should load"
+                : error);
+        Require(
+            annotation->artifact_provenance.has_value() &&
+                annotation->artifact_provenance->name ==
+                    "selected-labels.npy",
+            "NPY provenance must replace absolute paths and directory components with the artifact basename");
+    }
+
+    task.task_name = "初始标签-😀.npy";
+    error.clear();
+    Require(
+        specforge::SampleAnnotationIoAdapter{}.
+            SaveLabelMetadata(path, task, nullptr, &error),
+        error.empty()
+            ? "NPY Unicode sidecar fixture should write"
+            : error);
+    const std::optional<specforge::SampleAnnotationResult> annotation =
+        specforge::SampleAnnotationIoAdapter{}.
+            Load(path, values.size(), &error);
+    Require(
+        annotation.has_value() &&
+            annotation->artifact_provenance.has_value() &&
+            annotation->artifact_provenance->name ==
+                "初始标签-😀.npy",
+        "a valid Unicode portable display name should remain preferred provenance");
+}
+
+void TestCsvProvenanceUsesTheParsedFileGeneration()
+{
+    const std::filesystem::path root =
+        FreshTestDirectory(
+            "specforge-sample-annotation-csv-generation");
+    const std::filesystem::path generation_a = root / "generation-a";
+    const std::filesystem::path generation_b = root / "generation-b";
+    std::filesystem::create_directories(generation_a);
+    std::filesystem::create_directories(generation_b);
+    const std::filesystem::path path = "labels.csv";
+    WriteCsv(
+        generation_a / path,
+        {
+            {"sample", "label"},
+            {"0", "A"},
+            {"1", "B"},
+        });
+    WriteCsv(
+        generation_b / path,
+        {
+            {"sample", "label"},
+            {"0", "X"},
+            {"1", "Y"},
+        });
+    const std::optional<std::string> parsed_generation_digest =
+        specforge::ComputeFileSha256(generation_a / path);
+    Require(
+        parsed_generation_digest.has_value(),
+        "CSV generation fixture should hash");
+
+    std::size_t checkpoint_calls = 0;
+    std::string error;
+    ScopedCurrentPath current_path(generation_a);
+    const std::optional<specforge::SampleAnnotationResult> annotation =
+        LoadCsvCancelable(
+            path,
+            2,
+            [&]() {
+                ++checkpoint_calls;
+                if (checkpoint_calls == 5U) {
+                    std::filesystem::current_path(generation_b);
+                }
+            },
+            &error);
+
+    Require(
+        checkpoint_calls == 5U,
+        "CSV regression seam should rebind the path after parsing");
+    Require(
+        annotation.has_value(),
+        error.empty()
+            ? "CSV generation fixture should load"
+            : error);
+    Require(
+        TextValues(*annotation) ==
+            std::vector<std::string>({"A", "B"}),
+        "CSV load should retain values from the parsed generation");
+    Require(
+        annotation->artifact_provenance.has_value() &&
+            annotation->artifact_provenance->fingerprint ==
+                std::optional<std::string>{
+                    "sha256:" + *parsed_generation_digest},
+        "CSV provenance must hash the same opened generation as the parsed values");
+}
+
+void TestNpyProvenanceUsesTheParsedFileGeneration()
+{
+    const std::filesystem::path root =
+        FreshTestDirectory(
+            "specforge-sample-annotation-npy-generation");
+    const std::filesystem::path generation_a = root / "generation-a";
+    const std::filesystem::path generation_b = root / "generation-b";
+    std::filesystem::create_directories(generation_a);
+    std::filesystem::create_directories(generation_b);
+    const std::filesystem::path path = "labels.npy";
+    std::string error;
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            generation_a / path,
+            std::vector<int>{1, 2, 3},
+            &error) &&
+            specforge::ExportLabelValuesToNpy(
+                generation_b / path,
+                std::vector<int>{9, 8, 7},
+                &error),
+        error.empty()
+            ? "NPY generation fixtures should write"
+            : error);
+    const std::optional<std::string> parsed_generation_digest =
+        specforge::ComputeFileSha256(generation_a / path);
+    Require(
+        parsed_generation_digest.has_value(),
+        "NPY generation fixture should hash");
+
+    std::size_t checkpoint_calls = 0;
+    ScopedCurrentPath current_path(generation_a);
+    const std::optional<specforge::SampleAnnotationResult> annotation =
+        specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
+            path,
+            3,
+            [&]() {
+                ++checkpoint_calls;
+                if (checkpoint_calls == 6U) {
+                    std::filesystem::current_path(generation_b);
+                }
+            },
+            &error);
+
+    Require(
+        checkpoint_calls == 6U,
+        "NPY regression seam should rebind the path after parsing");
+    Require(
+        annotation.has_value(),
+        error.empty()
+            ? "NPY generation fixture should load"
+            : error);
+    Require(
+        annotation->values.size() == 3U &&
+            specforge::SampleAnnotationValueAsInt(
+                annotation->values[0]) == 1 &&
+            specforge::SampleAnnotationValueAsInt(
+                annotation->values[1]) == 2 &&
+            specforge::SampleAnnotationValueAsInt(
+                annotation->values[2]) == 3,
+        "NPY load should retain values from the parsed generation");
+    Require(
+        annotation->artifact_provenance.has_value() &&
+            annotation->artifact_provenance->fingerprint ==
+                std::optional<std::string>{
+                    "sha256:" + *parsed_generation_digest},
+        "NPY provenance must hash the same opened generation as the parsed values");
 }
 
 void TestSourceIndexCsvMapsByCanonicalDecimalIdentity()
@@ -483,6 +778,10 @@ int main()
     try {
         TestNamedCsvMapsRowsToCanonicalRoster();
         TestFolderExportReloadsWithoutCanonicalTaskProvenance();
+        TestNpyLoadCapturesPortableArtifactProvenance();
+        TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance();
+        TestCsvProvenanceUsesTheParsedFileGeneration();
+        TestNpyProvenanceUsesTheParsedFileGeneration();
         TestSourceIndexCsvMapsByCanonicalDecimalIdentity();
         TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion();
         TestCsvIdentityContractRejectsInvalidMappings();

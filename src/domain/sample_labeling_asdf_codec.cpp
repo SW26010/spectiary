@@ -34,6 +34,9 @@ struct SampleLabelingAsdfDurableBase::State {
     std::vector<unsigned char> encoded_prefix;
     std::vector<std::int32_t> label_codes;
     std::string preservation_identity_digest;
+    CanonicalTimestamp created_at;
+    CanonicalTimestamp modified_at;
+    SampleLabelingOrigin origin;
     std::size_t sample_count = 0;
     std::size_t metadata_bytes = 0;
     std::size_t roster_string_width = 0;
@@ -59,6 +62,7 @@ constexpr std::size_t kMaximumDecodedBlockBytes = 512ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kMaximumSampleCount = 100'000'000ULL;
 constexpr std::uint64_t kMaximumRosterStringWidth = 1'000'000ULL;
 constexpr std::size_t kMaximumLabelCount = 100'000ULL;
+constexpr std::size_t kMaximumAuthorCount = 10'000ULL;
 constexpr std::size_t kMaximumBlockCount = 64ULL;
 constexpr std::size_t kMaximumBlockIndexBytes = 64ULL * 1024ULL;
 constexpr std::size_t kMaximumInterBlockPaddingBytes = 1024ULL * 1024ULL;
@@ -91,7 +95,7 @@ void AppendIdentityDigestField(StableSha256& digest,
 {
     StableSha256 digest;
     AppendIdentityDigestField(
-        digest, "specforge.sample_labeling.asdf-preservation-identity-v1");
+        digest, "specforge.sample_labeling.asdf-preservation-identity-v2");
     AppendIdentityDigestField(digest, document.format_kind);
     AppendIdentityDigestField(digest, document.schema_version);
     AppendIdentityDigestField(digest, document.source.base_identity);
@@ -110,6 +114,21 @@ void AppendIdentityDigestField(StableSha256& digest,
     }
     AppendIdentityDigestField(digest, document.annotation.kind);
     AppendIdentityDigestField(digest, document.labeling.id);
+    const SampleLabelingTaskCanonicalMetadata& metadata =
+        document.labeling.canonical_metadata;
+    AppendIdentityDigestField(
+        digest, FormatCanonicalTimestamp(metadata.created_at));
+    AppendIdentityDigestField(digest, metadata.origin.kind);
+    AppendIdentityDigestField(
+        digest, metadata.origin.annotation ? "annotation" : "no-annotation");
+    if (metadata.origin.annotation) {
+        const SampleLabelingAnnotationOrigin& annotation =
+            *metadata.origin.annotation;
+        AppendIdentityDigestField(digest, annotation.name);
+        AppendIdentityDigestField(digest, annotation.format);
+        AppendIdentityDigestField(
+            digest, annotation.fingerprint.value_or(std::string{}));
+    }
     return digest.FinishHex();
 }
 
@@ -1071,6 +1090,7 @@ struct ProfilePreflight {
     std::optional<ArrayDescriptor> roster_array;
     ArrayDescriptor values_array;
     std::size_t label_count = 0;
+    std::size_t author_count = 0;
     std::size_t metadata_bytes = 0;
     std::uint64_t canonical_text_bytes = 0;
     std::uint64_t label_storage_bytes = 0;
@@ -1157,9 +1177,10 @@ struct ProfilePreflight {
         parsed.document.annotation.kind =
             RequiredScalar<std::string>(
                 annotation, "kind", &materialization_budget);
-        parsed.document.annotation.name =
-            RequiredScalar<std::string>(
-                annotation, "name", &materialization_budget);
+        if (annotation["name"]) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "annotation.name is not a schema 2.0 field");
+        }
         parsed.values_array =
             ParseArrayDescriptor(RequiredNode(annotation, "values"),
                 false,
@@ -1177,6 +1198,81 @@ struct ProfilePreflight {
         parsed.document.labeling.name =
             RequiredScalar<std::string>(
                 task, "name", &materialization_budget);
+        const std::string created_at = RequiredScalar<std::string>(
+            task, "created_at", &materialization_budget);
+        const std::string modified_at = RequiredScalar<std::string>(
+            task, "modified_at", &materialization_budget);
+        const auto parsed_created_at = ParseCanonicalTimestamp(created_at);
+        const auto parsed_modified_at = ParseCanonicalTimestamp(modified_at);
+        if (!parsed_created_at || !parsed_modified_at) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "labeling timestamps are not canonical UTC milliseconds");
+        }
+        parsed.document.labeling.canonical_metadata.created_at =
+            *parsed_created_at;
+        parsed.document.labeling.canonical_metadata.modified_at =
+            *parsed_modified_at;
+
+        const YAML::Node origin = RequiredNode(task, "origin");
+        if (!origin.IsMap()) {
+            Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
+                "labeling origin must be a map");
+        }
+        SampleLabelingOrigin& parsed_origin =
+            parsed.document.labeling.canonical_metadata.origin;
+        parsed_origin.kind = RequiredScalar<std::string>(
+            origin, "kind", &materialization_budget);
+        if (origin["annotation"]) {
+            const YAML::Node annotation_origin = origin["annotation"];
+            if (!annotation_origin.IsMap()) {
+                Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
+                    "labeling annotation origin must be a map");
+            }
+            SampleLabelingAnnotationOrigin parsed_annotation;
+            parsed_annotation.name = RequiredScalar<std::string>(
+                annotation_origin, "name", &materialization_budget);
+            parsed_annotation.format = RequiredScalar<std::string>(
+                annotation_origin, "format", &materialization_budget);
+            if (annotation_origin["fingerprint"]) {
+                parsed_annotation.fingerprint = RequiredScalar<std::string>(
+                    annotation_origin,
+                    "fingerprint",
+                    &materialization_budget);
+            }
+            parsed_origin.annotation = std::move(parsed_annotation);
+        }
+        if (task["description"]) {
+            parsed.document.labeling.canonical_metadata.description =
+                RequiredScalar<std::string>(
+                    task, "description", &materialization_budget);
+        }
+        if (const YAML::Node authors = task["authors"]) {
+            if (!authors.IsSequence()) {
+                Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
+                    "labeling authors must be a sequence");
+            }
+            if (authors.size() > kMaximumAuthorCount) {
+                Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+                    "labeling author count exceeds the production limit");
+            }
+            parsed.document.labeling.canonical_metadata.authors.reserve(
+                authors.size());
+            for (const YAML::Node& node : authors) {
+                if (!node.IsMap()) {
+                    Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
+                        "labeling author entry must be a map");
+                }
+                SampleLabelingAuthor author;
+                author.name = RequiredScalar<std::string>(
+                    node, "name", &materialization_budget);
+                if (node["identifier"]) {
+                    author.identifier = RequiredScalar<std::string>(
+                        node, "identifier", &materialization_budget);
+                }
+                parsed.document.labeling.canonical_metadata.authors.push_back(
+                    std::move(author));
+            }
+        }
         const YAML::Node labels = RequiredNode(task, "labels");
         if (!labels.IsSequence()) {
             Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
@@ -1285,6 +1381,10 @@ void ValidateProfilePreflight(const ProfilePreflight& profile)
         Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
             "label definition count exceeds the production profile limit");
     }
+    if (profile.author_count > kMaximumAuthorCount) {
+        Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            "labeling author count exceeds the production profile limit");
+    }
     if (profile.metadata_bytes > kMaximumMetadataBytes) {
         Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
             "ASDF YAML metadata exceeds the production profile limit");
@@ -1381,6 +1481,8 @@ void ValidateProfilePreflight(const ProfilePreflight& profile)
         .roster_array = parsed.roster_array,
         .values_array = parsed.values_array,
         .label_count = parsed.document.labeling.labels.size(),
+        .author_count =
+            parsed.document.labeling.canonical_metadata.authors.size(),
         .metadata_bytes = metadata_bytes,
         .canonical_text_bytes = parsed.canonical_text_bytes,
         .label_storage_bytes = parsed.label_storage_bytes,
@@ -1490,11 +1592,33 @@ void ValidateDocumentText(const SampleLabelingDocument& document)
         }
     }
     RequireUtf8(document.annotation.kind, "annotation.kind");
-    RequireUtf8(document.annotation.name, "annotation.name");
     RequireUtf8(
         document.annotation.missing.semantic, "annotation.missing.semantic");
     RequireUtf8(document.labeling.id, "labeling_task.id");
     RequireUtf8(document.labeling.name, "labeling_task.name");
+    const SampleLabelingTaskCanonicalMetadata& metadata =
+        document.labeling.canonical_metadata;
+    RequireUtf8(metadata.origin.kind, "labeling_task.origin.kind");
+    if (metadata.origin.annotation) {
+        RequireUtf8(metadata.origin.annotation->name,
+            "labeling_task.origin.annotation.name");
+        RequireUtf8(metadata.origin.annotation->format,
+            "labeling_task.origin.annotation.format");
+        if (metadata.origin.annotation->fingerprint) {
+            RequireUtf8(*metadata.origin.annotation->fingerprint,
+                "labeling_task.origin.annotation.fingerprint");
+        }
+    }
+    if (metadata.description) {
+        RequireUtf8(*metadata.description, "labeling_task.description");
+    }
+    for (const SampleLabelingAuthor& author : metadata.authors) {
+        RequireUtf8(author.name, "labeling_task.authors.name");
+        if (author.identifier) {
+            RequireUtf8(
+                *author.identifier, "labeling_task.authors.identifier");
+        }
+    }
     for (const SampleLabelingDocumentLabel& label : document.labeling.labels) {
         RequireUtf8(label.name, "labeling_task.labels.name");
         RequireUtf8(label.shortcut, "labeling_task.labels.shortcut");
@@ -1509,6 +1633,16 @@ void ValidateDocumentBusinessSemantics(
     if (!validation.valid()) {
         Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
             "SpecForge sample-labeling semantic validation failed");
+    }
+}
+
+void ValidateCurrentWriterOrigin(
+    const SampleLabelingTaskCanonicalMetadata& metadata)
+{
+    if (metadata.origin.kind != "manual" &&
+        metadata.origin.kind != "annotation_promotion") {
+        Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+            "the current writer only emits manual or annotation_promotion origins");
     }
 }
 
@@ -1898,8 +2032,6 @@ void EmitMetadata(std::ostream& metadata,
     }
     metadata << "annotation:\n  kind: ";
     WriteQuotedYaml(metadata, document.annotation.kind);
-    metadata << "\n  name: ";
-    WriteQuotedYaml(metadata, document.annotation.name);
     metadata << "\n  values: !core/ndarray-1.0.0\n"
              << "    source: " << values_source << "\n"
              << "    datatype: int32\n"
@@ -1912,7 +2044,48 @@ void EmitMetadata(std::ostream& metadata,
     WriteQuotedYaml(metadata, document.labeling.id);
     metadata << "\n  name: ";
     WriteQuotedYaml(metadata, document.labeling.name);
-    metadata << "\n";
+    const SampleLabelingTaskCanonicalMetadata& canonical_metadata =
+        document.labeling.canonical_metadata;
+    metadata << "\n  created_at: ";
+    WriteQuotedYaml(metadata,
+        FormatCanonicalTimestamp(canonical_metadata.created_at));
+    metadata << "\n  modified_at: ";
+    WriteQuotedYaml(metadata,
+        FormatCanonicalTimestamp(canonical_metadata.modified_at));
+    metadata << "\n  origin:\n    kind: ";
+    WriteQuotedYaml(metadata, canonical_metadata.origin.kind);
+    if (canonical_metadata.origin.annotation) {
+        const SampleLabelingAnnotationOrigin& origin_annotation =
+            *canonical_metadata.origin.annotation;
+        metadata << "\n    annotation:\n      name: ";
+        WriteQuotedYaml(metadata, origin_annotation.name);
+        metadata << "\n      format: ";
+        WriteQuotedYaml(metadata, origin_annotation.format);
+        if (origin_annotation.fingerprint) {
+            metadata << "\n      fingerprint: ";
+            WriteQuotedYaml(metadata, *origin_annotation.fingerprint);
+        }
+    }
+    if (canonical_metadata.description) {
+        metadata << "\n  description: ";
+        WriteQuotedYaml(metadata, *canonical_metadata.description);
+    }
+    if (!canonical_metadata.authors.empty()) {
+        metadata << "\n  authors:\n";
+        for (const SampleLabelingAuthor& author :
+            canonical_metadata.authors) {
+            metadata << "  - name: ";
+            WriteQuotedYaml(metadata, author.name);
+            metadata << "\n";
+            if (author.identifier) {
+                metadata << "    identifier: ";
+                WriteQuotedYaml(metadata, *author.identifier);
+                metadata << "\n";
+            }
+        }
+    } else {
+        metadata << "\n";
+    }
     if (document.labeling.labels.empty()) {
         metadata << "  labels: []\n";
     } else {
@@ -2193,7 +2366,7 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
 
     YAML::Node annotation = MapNodeOrNew(root, "annotation");
     SetYamlString(annotation, "kind", document.annotation.kind);
-    SetYamlString(annotation, "name", document.annotation.name);
+    annotation.remove("name");
     YAML::Node values = MapNodeOrNew(annotation, "values");
     SetCanonicalArrayDescriptor(values,
         explicit_roster ? 1U : 0U,
@@ -2207,6 +2380,54 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     YAML::Node task = MapNodeOrNew(root, "labeling_task");
     SetYamlString(task, "id", document.labeling.id);
     SetYamlString(task, "name", document.labeling.name);
+    const SampleLabelingTaskCanonicalMetadata& canonical_metadata =
+        document.labeling.canonical_metadata;
+    SetYamlString(task,
+        "created_at",
+        FormatCanonicalTimestamp(canonical_metadata.created_at));
+    SetYamlString(task,
+        "modified_at",
+        FormatCanonicalTimestamp(canonical_metadata.modified_at));
+    YAML::Node origin = MapNodeOrNew(task, "origin");
+    SetYamlString(origin, "kind", canonical_metadata.origin.kind);
+    if (canonical_metadata.origin.annotation) {
+        YAML::Node origin_annotation =
+            MapNodeOrNew(origin, "annotation");
+        SetYamlString(origin_annotation,
+            "name",
+            canonical_metadata.origin.annotation->name);
+        SetYamlString(origin_annotation,
+            "format",
+            canonical_metadata.origin.annotation->format);
+        if (canonical_metadata.origin.annotation->fingerprint) {
+            SetYamlString(origin_annotation,
+                "fingerprint",
+                *canonical_metadata.origin.annotation->fingerprint);
+        } else {
+            origin_annotation.remove("fingerprint");
+        }
+    } else {
+        origin.remove("annotation");
+    }
+    if (canonical_metadata.description) {
+        SetYamlString(task, "description", *canonical_metadata.description);
+    } else {
+        task.remove("description");
+    }
+    if (canonical_metadata.authors.empty()) {
+        task.remove("authors");
+    } else {
+        YAML::Node authors(YAML::NodeType::Sequence);
+        for (const SampleLabelingAuthor& author : canonical_metadata.authors) {
+            YAML::Node node(YAML::NodeType::Map);
+            SetYamlString(node, "name", author.name);
+            if (author.identifier) {
+                SetYamlString(node, "identifier", *author.identifier);
+            }
+            authors.push_back(std::move(node));
+        }
+        task["authors"] = std::move(authors);
+    }
     const YAML::Node previous_labels = task["labels"];
     YAML::Node labels(YAML::NodeType::Sequence);
     for (const SampleLabelingDocumentLabel& label :
@@ -2245,6 +2466,55 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     return metadata;
 }
 
+[[nodiscard]] std::string BuildMetadataWithModifiedAt(
+    std::span<const unsigned char> encoded_prefix,
+    std::size_t metadata_bytes,
+    CanonicalTimestamp modified_at)
+{
+    if (metadata_bytes > encoded_prefix.size()) {
+        Fail(SampleLabelingAsdfErrorKind::IoFailure,
+            "durable ASDF metadata prefix is inconsistent");
+    }
+    const std::string original_metadata(
+        reinterpret_cast<const char*>(encoded_prefix.data()),
+        metadata_bytes);
+    YAML::Node root = YAML::Load(original_metadata);
+    if (!root || !root.IsMap()) {
+        Fail(SampleLabelingAsdfErrorKind::IoFailure,
+            "durable ASDF metadata tree is unavailable");
+    }
+    PreserveParsedStringScalarTypes(root);
+    YAML::Node task = root["labeling_task"];
+    if (!task || !task.IsMap()) {
+        Fail(SampleLabelingAsdfErrorKind::IoFailure,
+            "durable ASDF labeling task metadata is unavailable");
+    }
+    SetYamlString(task,
+        "modified_at",
+        FormatCanonicalTimestamp(modified_at));
+
+    std::string metadata;
+    metadata.reserve(std::min<std::size_t>(
+        metadata_bytes + 64U, kMaximumMetadataBytes));
+    metadata.append("#ASDF ")
+        .append(kSampleLabelingAsdfFileFormatVersion)
+        .append("\n#ASDF_STANDARD ")
+        .append(kSampleLabelingAsdfStandardVersion)
+        .append("\n%YAML 1.1\n%TAG ! tag:stsci.edu:asdf/\n--- ");
+    StringAppendStreamBuffer buffer(metadata, kMaximumMetadataBytes);
+    std::ostream metadata_stream(&buffer);
+    YAML::Emitter body(metadata_stream);
+    body.SetIndent(2);
+    body << root;
+    if (!body.good() || !metadata_stream ||
+        metadata.size() > kMaximumMetadataBytes - 5U) {
+        Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            "ASDF YAML metadata exceeds the production limit");
+    }
+    metadata.append("\n...\n");
+    return metadata;
+}
+
 [[nodiscard]] std::uint64_t CanonicalYamlTextResidentBytes(
     const SampleLabelingDocument& document)
 {
@@ -2260,10 +2530,33 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     account(document.source.fingerprint);
     account(document.source.roster.identity_kind);
     account(document.annotation.kind);
-    account(document.annotation.name);
     account(document.annotation.missing.semantic);
     account(document.labeling.id);
     account(document.labeling.name);
+    account(FormatCanonicalTimestamp(
+        document.labeling.canonical_metadata.created_at));
+    account(FormatCanonicalTimestamp(
+        document.labeling.canonical_metadata.modified_at));
+    account(document.labeling.canonical_metadata.origin.kind);
+    if (document.labeling.canonical_metadata.origin.annotation) {
+        const SampleLabelingAnnotationOrigin& origin_annotation =
+            *document.labeling.canonical_metadata.origin.annotation;
+        account(origin_annotation.name);
+        account(origin_annotation.format);
+        if (origin_annotation.fingerprint) {
+            account(*origin_annotation.fingerprint);
+        }
+    }
+    if (document.labeling.canonical_metadata.description) {
+        account(*document.labeling.canonical_metadata.description);
+    }
+    for (const SampleLabelingAuthor& author :
+        document.labeling.canonical_metadata.authors) {
+        account(author.name);
+        if (author.identifier) {
+            account(*author.identifier);
+        }
+    }
     for (const SampleLabelingDocumentLabel& label : document.labeling.labels) {
         account(label.name);
         if (!label.shortcut.empty()) {
@@ -2300,6 +2593,7 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
             .item_width = 1,
             .little_endian = true},
         .label_count = document.labeling.labels.size(),
+        .author_count = document.labeling.canonical_metadata.authors.size(),
         .metadata_bytes = metadata_bytes,
         .canonical_text_bytes =
             CanonicalYamlTextResidentBytes(document),
@@ -2449,6 +2743,12 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
             state->encoded_prefix = std::move(reusable_prefix);
             state->preservation_identity_digest =
                 PreservationIdentityDigest(parsed.document);
+            state->created_at =
+                parsed.document.labeling.canonical_metadata.created_at;
+            state->modified_at =
+                parsed.document.labeling.canonical_metadata.modified_at;
+            state->origin =
+                parsed.document.labeling.canonical_metadata.origin;
             state->sample_count = parsed.document.source.sample_count;
             state->metadata_bytes = validated_metadata_bytes;
             state->roster_block_reused = parsed.roster_array.has_value();
@@ -2614,6 +2914,8 @@ SampleLabelingAsdfWriteResult WriteSampleLabelingAsdfDocument(
             metadata_size + (explicit_roster ? 54U : 0U),
             0));
         ValidateDocumentBusinessSemantics(document);
+        ValidateCurrentWriterOrigin(
+            document.labeling.canonical_metadata);
         if (g_before_metadata_build != nullptr) {
             g_before_metadata_build();
         }
@@ -2680,6 +2982,20 @@ RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
         const SampleLabelingAsdfDurableBase::State& state =
             *durable_base.state_;
         ValidateDocumentText(document);
+        const SampleLabelingTaskCanonicalMetadata& canonical_metadata =
+            document.labeling.canonical_metadata;
+        if (canonical_metadata.created_at != state.created_at) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "metadata rewrite created_at does not match the durable base");
+        }
+        if (canonical_metadata.origin != state.origin) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "metadata rewrite origin does not match the durable base");
+        }
+        if (canonical_metadata.modified_at < state.modified_at) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "metadata rewrite modified_at must be monotonic");
+        }
         if (state.preservation_identity_digest !=
             PreservationIdentityDigest(document)) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
@@ -2752,15 +3068,21 @@ SampleLabelingAsdfWriteResult
 RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     const SampleLabelingAsdfDurableBase& durable_base,
     std::ostream& output,
-    std::span<const std::int32_t> values) noexcept
+    std::span<const std::int32_t> values,
+    CanonicalTimestamp modified_at) noexcept
 {
     try {
         if (!durable_base.state_) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-                "label-only rewrite requires a validated durable base");
+                "values rewrite requires a validated durable base");
         }
         const SampleLabelingAsdfDurableBase::State& state =
             *durable_base.state_;
+        if (modified_at < state.created_at ||
+            modified_at < state.modified_at) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "values rewrite modified_at must be monotonic");
+        }
         if (state.sample_count != values.size()) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
                 "replacement values do not match the canonical sample count");
@@ -2773,6 +3095,19 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             }
         }
 
+        const std::string metadata =
+            BuildMetadataWithModifiedAt(
+                state.encoded_prefix,
+                state.metadata_bytes,
+                modified_at);
+        if (state.metadata_bytes > state.encoded_prefix.size()) {
+            Fail(SampleLabelingAsdfErrorKind::IoFailure,
+                "durable ASDF metadata prefix is inconsistent");
+        }
+        const std::span<const unsigned char> roster_block{
+            state.encoded_prefix.data() + state.metadata_bytes,
+            state.encoded_prefix.size() - state.metadata_bytes};
+
         ProfilePreflight profile{
             .source_sample_count = state.sample_count,
             .values_array = ArrayDescriptor{.source_index = 0,
@@ -2780,10 +3115,10 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                 .item_width = 1,
                 .little_endian = true},
             .label_count = state.label_codes.size(),
-            .metadata_bytes = state.metadata_bytes,
+            .metadata_bytes = metadata.size(),
             .label_storage_bytes =
                 state.label_codes.size() * sizeof(std::int32_t),
-            .reusable_prefix_bytes = state.encoded_prefix.size(),
+            .reusable_prefix_bytes = metadata.size() + roster_block.size(),
             .codec_scratch_bytes = kDeflateResidentScratchBytes};
         if (state.roster_block_reused) {
             profile.roster_array = ArrayDescriptor{.source_index = 0,
@@ -2795,18 +3130,44 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
 
         std::unique_ptr<DeflateSpool> values_spool =
             EncodeValuesToSpool(values);
-        profile.file_bytes =
-            state.encoded_prefix.size() + values_spool->block_size();
+        profile.file_bytes = profile.reusable_prefix_bytes +
+            values_spool->block_size();
         ValidateProfilePreflight(profile);
 
-        WriteBytes(output, state.encoded_prefix);
+        WriteText(output, metadata);
+        WriteBytes(output, roster_block);
         values_spool->WriteBlock(output);
         if (!output) {
             Fail(SampleLabelingAsdfErrorKind::IoFailure,
                 "could not complete ASDF block-reuse write");
         }
+
+        auto refreshed_state =
+            std::make_shared<SampleLabelingAsdfDurableBase::State>();
+        refreshed_state->encoded_prefix.reserve(
+            metadata.size() + roster_block.size());
+        refreshed_state->encoded_prefix.insert(
+            refreshed_state->encoded_prefix.end(),
+            metadata.begin(),
+            metadata.end());
+        refreshed_state->encoded_prefix.insert(
+            refreshed_state->encoded_prefix.end(),
+            roster_block.begin(),
+            roster_block.end());
+        refreshed_state->label_codes = state.label_codes;
+        refreshed_state->preservation_identity_digest =
+            state.preservation_identity_digest;
+        refreshed_state->created_at = state.created_at;
+        refreshed_state->modified_at = modified_at;
+        refreshed_state->origin = state.origin;
+        refreshed_state->sample_count = state.sample_count;
+        refreshed_state->metadata_bytes = metadata.size();
+        refreshed_state->roster_string_width = state.roster_string_width;
+        refreshed_state->roster_block_reused = state.roster_block_reused;
         return SampleLabelingAsdfWriteResult{.written = true,
             .roster_block_reused = state.roster_block_reused,
+            .durable_base = SampleLabelingAsdfDurableBase(
+                std::move(refreshed_state)),
             .error = {}};
     } catch (const CodecFailure& failure) {
         return SampleLabelingAsdfWriteResult{
