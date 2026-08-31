@@ -304,6 +304,20 @@ target_include_directories(specforge_core PRIVATE
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
 target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp CFITSIO::cfitsio ZLIB::ZLIB bcrypt)
+if(MSVC)
+    # Cancellation-stage tests resolve optimized and inlined source locations
+    # at runtime, so retain line tables for the production code they exercise.
+    set_property(
+        SOURCE
+            src/domain/fits_file_reader.cpp
+            src/domain/fits_spectrum_loader.cpp
+            src/domain/spectrum_loader_support.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS
+            "$<$<CONFIG:Release>:/Z7>"
+            "$<$<CONFIG:Release>:/Zo>"
+    )
+endif()
 
 add_library(specforge_imgui_layout STATIC
     src/app/imgui_layout_persistence.cpp
@@ -1171,6 +1185,40 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_loader_tests PRIVATE ZLIB::ZLIB)
+target_compile_definitions(
+    specforge_loader_tests
+    PRIVATE
+        SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(specforge_loader_tests PRIVATE dbghelp)
+specforge_add_test(
+    specforge_fits_file_reader_tests
+    tests/fits_file_reader_tests.cpp
+    specforge_core
+)
+target_link_libraries(
+    specforge_fits_file_reader_tests
+    PRIVATE
+        dbghelp
+        ZLIB::ZLIB
+)
+target_compile_definitions(
+    specforge_fits_file_reader_tests
+    PRIVATE
+        SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+if(MSVC)
+    target_link_options(
+        specforge_loader_tests
+        PRIVATE
+            "$<$<CONFIG:Release>:/DEBUG:FULL>"
+    )
+    target_link_options(
+        specforge_fits_file_reader_tests
+        PRIVATE
+            "$<$<CONFIG:Release>:/DEBUG:FULL>"
+    )
+endif()
 specforge_add_test(
     specforge_source_open_resolution_tests
     tests/source_open_resolution_tests.cpp

@@ -1,5 +1,5 @@
 #include "domain/spectrum_loader.h"
-#include "domain/fits_file_reader.h"
+#include "cancellation_stage_probe.h"
 #include "domain/npy_array_io.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling_asdf_codec.h"
@@ -26,7 +26,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <vector>
 
 #include <zlib.h>
@@ -39,17 +38,10 @@ using specforge::SpectrumDiagnosticSeverity;
 using specforge::SpectrumSnapshotHandle;
 using specforge::SpectrumValueQuantity;
 using specforge::SampleAnnotationKind;
+using specforge::tests::CancellationStageProbe;
+using specforge::tests::SourceStage;
 
 constexpr double kSpeedOfLightKmPerSecond = 299792.458;
-
-static_assert(
-    std::is_move_constructible_v<specforge::detail::FitsFile>);
-static_assert(
-    std::is_move_assignable_v<specforge::detail::FitsFile>);
-static_assert(
-    !std::is_copy_constructible_v<specforge::detail::FitsFile>);
-static_assert(
-    !std::is_copy_assignable_v<specforge::detail::FitsFile>);
 
 void Require(bool condition, std::string_view message)
 {
@@ -606,43 +598,6 @@ void WriteFitsImageWithTruncatedUnselectedTail(
     Require(
         stream.good(),
         "could not write selected rows of truncated-tail FITS image fixture");
-}
-
-void WriteLargeFitsImage(
-    const std::filesystem::path& path,
-    std::size_t column_count)
-{
-    std::ofstream stream(path, std::ios::binary);
-    Require(stream.good(), "could not open large FITS image fixture");
-    const std::string column_count_text = std::to_string(column_count);
-    Require(
-        column_count_text.size() <= 20U,
-        "large FITS image width should fit a numeric card");
-    WriteFitsHeader(stream, {
-                                FitsCard("SIMPLE", "                   T"),
-                                FitsCard("BITPIX", "                 -32"),
-                                FitsCard("NAXIS", "                   2"),
-                                FitsCard(
-                                    "NAXIS1",
-                                    std::string(
-                                        20U - column_count_text.size(),
-                                        ' ') +
-                                        column_count_text),
-                                FitsCard("NAXIS2", "                   1"),
-                                FitsCard("COEFF0", "                 3.0"),
-                                FitsCard("COEFF1", "               0.001"),
-                            });
-
-    std::vector<unsigned char> data;
-    data.reserve(column_count * sizeof(float));
-    for (std::size_t index = 0; index < column_count; ++index) {
-        AppendBigEndianFloat(data, static_cast<float>(index));
-    }
-    stream.write(
-        reinterpret_cast<const char*>(data.data()),
-        static_cast<std::streamsize>(data.size()));
-    PadFitsData(stream, data.size());
-    Require(stream.good(), "could not write large FITS image fixture");
 }
 
 void WriteFitsImageThenScalarTable(const std::filesystem::path& path)
@@ -2075,22 +2030,6 @@ void TestUndefinedOptionalFitsKeywordsAreAbsent()
         "specforge_loader_undefined_optional_table.fits";
     WriteFitsTableWithUndefinedOptionalKeywords(table_path);
 
-    specforge::detail::FitsFile table_file =
-        specforge::detail::FitsFile::Open(
-            table_path,
-            specforge::detail::FitsSourceEncoding::Plain);
-    const specforge::detail::FitsHdu& table_hdu =
-        table_file.hdus().at(1);
-    Require(
-        !table_file.ReadKeywordString(table_hdu, "CLASS"),
-        "undefined string FITS keywords should be absent");
-    Require(
-        !table_file.ReadKeywordInteger(table_hdu, "ZWARNING"),
-        "undefined integer FITS keywords should be absent");
-    Require(
-        !table_file.ReadKeywordDouble(table_hdu, "Z"),
-        "undefined floating-point FITS keywords should be absent");
-
     const SpectrumSnapshotHandle table_snapshot =
         specforge::LoadSpectrumSnapshotFromPath(table_path, 0);
     Require(
@@ -2108,15 +2047,6 @@ void TestUndefinedOptionalFitsKeywordsAreAbsent()
         std::filesystem::temp_directory_path() /
         "specforge_loader_undefined_optional_image.fits";
     WriteFitsImageWithUndefinedCoefficients(image_path);
-    specforge::detail::FitsFile image_file =
-        specforge::detail::FitsFile::Open(
-            image_path,
-            specforge::detail::FitsSourceEncoding::Plain);
-    Require(
-        !image_file.ReadKeywordDouble(
-            image_file.hdus().front(),
-            "COEFF0"),
-        "undefined image coefficient keywords should be absent");
 
     const SpectrumSnapshotHandle image_snapshot =
         specforge::LoadSpectrumSnapshotFromPath(image_path, 0);
@@ -2139,20 +2069,6 @@ void TestRejectsTruncatedUnselectedFitsData()
     const auto require_invalid_shape = [](
                                            const std::filesystem::path& path,
                                            std::string_view context) {
-        bool rejected = false;
-        try {
-            (void)specforge::detail::FitsFile::Open(
-                path,
-                specforge::detail::FitsSourceEncoding::Plain);
-        } catch (const specforge::detail::FitsFileError& error) {
-            rejected = error.code() ==
-                specforge::detail::FitsFileErrorCode::InvalidShape;
-        }
-        Require(
-            rejected,
-            std::string(context) +
-                ": reader open should reject the incomplete declared HDU");
-
         const SpectrumSnapshotHandle snapshot =
             specforge::LoadSpectrumSnapshotFromPath(path, 0);
         RequireNonPlottableErrorSnapshot(snapshot, context);
@@ -2523,6 +2439,48 @@ void WriteLargeFitsLoglamVectorTable(const std::filesystem::path& path, std::siz
     Require(stream.good(), "could not write large vector FITS fixture");
 }
 
+void WriteLargeFitsMaskedVectorTable(
+    const std::filesystem::path& path,
+    std::size_t value_count)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open large masked FITS fixture");
+    WriteFitsPrimary(stream);
+    const std::size_t row_width = value_count * 3U * sizeof(float);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", std::to_string(row_width)),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   3"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'" + std::to_string(value_count) + "E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'" + std::to_string(value_count) + "E'"),
+                                FitsCard("TTYPE3", "'ORMASK'"),
+                                FitsCard("TFORM3", "'" + std::to_string(value_count) + "E'"),
+                            });
+    std::vector<unsigned char> data;
+    data.reserve(row_width);
+    for (std::size_t index = 0; index < value_count; ++index) {
+        AppendBigEndianFloat(data, 5000.0F + static_cast<float>(index));
+    }
+    for (std::size_t index = 0; index < value_count; ++index) {
+        AppendBigEndianFloat(data, static_cast<float>(index));
+    }
+    for (std::size_t index = 0; index < value_count; ++index) {
+        AppendBigEndianFloat(data, index % 11U == 0U ? 1.0F : 0.0F);
+    }
+    stream.write(
+        reinterpret_cast<const char*>(data.data()),
+        static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write large masked FITS fixture");
+}
+
 void TestCancelableCsvLoadStopsInsideParsingAndSorting()
 {
     const std::filesystem::path path =
@@ -2754,185 +2712,62 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
     Require(manifest.annotations.size() == 1, "shared ingestion should not duplicate an existing annotation path");
 }
 
-void TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline()
-{
-    const std::filesystem::path fits_path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancel_source.fits";
-    const std::filesystem::path gzip_path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancel_source.fits.gz";
-    WriteFitsScalarTable(fits_path);
-    WriteBytes(gzip_path, GzipBytes(ReadBytes(fits_path)));
-
-    std::size_t cancellation_checks = 0;
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
-        gzip_path,
-        0,
-        [&cancellation_checks]() {
-            ++cancellation_checks;
-            return cancellation_checks >= 5;
-        });
-    Require(snapshot == nullptr, "cancelable FITS.GZ loading should stop without publishing an error snapshot");
-    Require(cancellation_checks >= 5, "FITS.GZ loading should poll cancellation after entering zlib");
-}
-
-void TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms()
+void TestCancelableFitsLoadStopsDuringLoglamTransform()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancel_numeric_decode.fits";
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_cancel_loglam_transform.fits";
     WriteLargeFitsLoglamVectorTable(path, 50'000);
 
-    std::size_t cancellation_checks = 0;
+    const std::filesystem::path loader_source =
+        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        "src/domain/fits_spectrum_loader.cpp";
+    CancellationStageProbe probe(SourceStage::Between(
+        loader_source,
+        "std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(",
+        "if (uses_loglam) {",
+        "loaded.y_values ="));
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
-        [&cancellation_checks]() {
-            ++cancellation_checks;
-            return cancellation_checks >= 36;
-        });
-    Require(snapshot == nullptr, "FITS cancellation during numeric work must not publish a snapshot");
+        [&probe]() { return probe.Poll(); });
     Require(
-        cancellation_checks >= 36,
-        "FITS cancellation should remain wired beyond file read and HDU parsing");
+        snapshot == nullptr,
+        "LOGLAM cancellation must not publish a partial or error snapshot");
+    Require(
+        probe.stage_observed(),
+        "LOGLAM conversion should deliver cooperative cancellation");
 
     std::error_code error;
     std::filesystem::remove(path, error);
 }
 
-void TestFitsColumnAndImageReadersPollDuringValueConversion()
+void TestCancelableFitsLoadStopsDuringMaskFiltering()
 {
-    constexpr std::size_t kValueCount = 20'000;
-    const std::filesystem::path table_path =
-        std::filesystem::temp_directory_path() /
-        "specforge_loader_cancel_cfitsio_column.fits";
-    WriteLargeFitsLoglamVectorTable(table_path, kValueCount);
-    specforge::detail::FitsFile table_file =
-        specforge::detail::FitsFile::Open(
-            table_path,
-            specforge::detail::FitsSourceEncoding::Plain);
-    const auto table_hdu = std::find_if(
-        table_file.hdus().begin(),
-        table_file.hdus().end(),
-        [](const specforge::detail::FitsHdu& hdu) {
-            return hdu.kind ==
-                specforge::detail::FitsHduKind::BinaryTable;
-        });
-    Require(
-        table_hdu != table_file.hdus().end(),
-        "large FITS table fixture should expose a binary table");
-    const auto column = std::find_if(
-        table_hdu->columns.begin(),
-        table_hdu->columns.end(),
-        [](const specforge::detail::FitsColumn& candidate) {
-            return candidate.normalized_name == "FLUX";
-        });
-    Require(
-        column != table_hdu->columns.end(),
-        "large FITS table fixture should expose its flux column");
-
-    std::size_t column_checks = 0;
-    bool column_canceled = false;
-    try {
-        (void)table_file.ReadColumnVector(
-            *table_hdu,
-            *column,
-            0,
-            false,
-            [&column_checks]() { return ++column_checks >= 5; });
-    } catch (const specforge::detail::FitsFileError& error) {
-        column_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
-    }
-    Require(column_canceled, "FITS table value conversion should honor cooperative cancellation");
-    Require(
-        column_checks >= 5,
-        "FITS table cancellation should occur after a CFITSIO read");
-
-    const std::filesystem::path image_path =
-        std::filesystem::temp_directory_path() /
-        "specforge_loader_cancel_cfitsio_image.fits";
-    WriteLargeFitsImage(image_path, kValueCount);
-    specforge::detail::FitsFile image_file =
-        specforge::detail::FitsFile::Open(
-            image_path,
-            specforge::detail::FitsSourceEncoding::Plain);
-    const specforge::detail::FitsHdu& image_hdu =
-        image_file.hdus().front();
-    std::size_t image_checks = 0;
-    bool image_canceled = false;
-    try {
-        (void)image_file.ReadImageRow(
-            image_hdu,
-            0,
-            kValueCount,
-            [&image_checks]() { return ++image_checks >= 5; });
-    } catch (const specforge::detail::FitsFileError& error) {
-        image_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
-    }
-    Require(image_canceled, "FITS image value conversion should honor cooperative cancellation");
-    Require(
-        image_checks >= 5,
-        "FITS image cancellation should occur after a CFITSIO read");
-
-    std::error_code error;
-    std::filesystem::remove(table_path, error);
-    error.clear();
-    std::filesystem::remove(image_path, error);
-}
-
-void TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop()
-{
-    constexpr std::size_t kFieldCount = 999;
-    std::vector<std::string> cards = {
-        FitsCard("XTENSION", "'BINTABLE'"),
-        FitsCard("BITPIX", "                   8"),
-        FitsCard("NAXIS", "                   2"),
-        FitsCard("NAXIS1", "                3996"),
-        FitsCard("NAXIS2", "                   1"),
-        FitsCard("PCOUNT", "                   0"),
-        FitsCard("GCOUNT", "                   1"),
-        FitsCard("TFIELDS", "                 999"),
-    };
-    cards.reserve(cards.size() + kFieldCount * 2);
-    for (std::size_t index = 1; index <= kFieldCount; ++index) {
-        cards.push_back(FitsCard("TTYPE" + std::to_string(index), "'VALUE'"));
-        cards.push_back(FitsCard("TFORM" + std::to_string(index), "'E'"));
-    }
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_cancel_cfitsio_columns.fits";
-    {
-        std::ofstream stream(path, std::ios::binary);
-        Require(
-            stream.good(),
-            "could not open large-column FITS fixture");
-        WriteFitsPrimary(stream);
-        WriteFitsHeader(stream, cards);
-        const std::vector<unsigned char> data(3996, 0);
-        stream.write(
-            reinterpret_cast<const char*>(data.data()),
-            static_cast<std::streamsize>(data.size()));
-        PadFitsData(stream, data.size());
-        Require(
-            stream.good(),
-            "could not write large-column FITS fixture");
-    }
+        "specforge_loader_cancel_mask_filter.fits";
+    WriteLargeFitsMaskedVectorTable(path, 50'000);
 
-    constexpr std::size_t kCancelInsideColumnEnumeration = 30;
-    std::size_t cancellation_checks = 0;
-    bool canceled = false;
-    try {
-        (void)specforge::detail::FitsFile::Open(
+    const std::filesystem::path support_source =
+        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        "src/domain/spectrum_loader_support.cpp";
+    CancellationStageProbe probe(SourceStage::Between(
+        support_source,
+        "void FilterSpectrumPixels(",
+        "for (std::size_t index = 0; index < x_values.size(); ++index) {",
+        "x_values = std::move(filtered_x);"));
+    const SpectrumSnapshotHandle snapshot =
+        specforge::LoadSpectrumSnapshotFromPathCancelable(
             path,
-            specforge::detail::FitsSourceEncoding::Plain,
-            specforge::detail::kMaxSynchronousFitsFileBytes,
-            specforge::detail::kMaxSynchronousInflatedFitsBytes,
-            [&cancellation_checks]() {
-                return ++cancellation_checks >=
-                    kCancelInsideColumnEnumeration;
-            });
-    } catch (const specforge::detail::FitsFileError& error) {
-        canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
-    }
-    Require(canceled, "FITS TFIELDS column discovery should honor cancellation inside its column loop");
+            0,
+            [&probe]() { return probe.Poll(); });
+    Require(
+        snapshot == nullptr,
+        "mask/filter cancellation must not publish a partial or error snapshot");
+    Require(
+        probe.stage_observed(),
+        "mask/filter processing should deliver cooperative cancellation");
 
     std::error_code error;
     std::filesystem::remove(path, error);
@@ -2940,24 +2775,29 @@ void TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop()
 
 void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
 {
-    constexpr std::size_t kTrailingHduCount = 3'000;
+    constexpr std::size_t kTrailingHduCount = 96U;
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "specforge_loader_cancel_many_hdu_metadata.fits";
     WriteFitsScalarTableWithTrailingEmptyHdus(path, kTrailingHduCount);
 
-    // CFITSIO enumeration accounts for four checks per empty image HDU.
-    // Arming beyond that boundary targets the repeated keyword scans.
-    const std::size_t cancel_at =
-        4 * (kTrailingHduCount + 2) + 150;
-    std::size_t cancellation_checks = 0;
+    const std::filesystem::path loader_source =
+        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        "src/domain/fits_spectrum_loader.cpp";
+    CancellationStageProbe probe(SourceStage::Between(
+        loader_source,
+        "std::optional<FitsMetadataMatch> FirstFitsHeaderValue(",
+        "for (const FitsHdu& hdu : hdus) {",
+        "return std::nullopt;"));
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
-        [&cancellation_checks, cancel_at]() { return ++cancellation_checks >= cancel_at; });
-    Require(snapshot == nullptr, "FITS metadata scan should stop without publishing a snapshot");
+        [&probe]() { return probe.Poll(); });
     Require(
-        cancellation_checks >= cancel_at,
-        "FITS header metadata lookup should keep polling after HDU parsing finishes");
+        snapshot == nullptr,
+        "metadata traversal cancellation must not publish a partial or error snapshot");
+    Require(
+        probe.stage_observed(),
+        "FITS metadata traversal should deliver cooperative cancellation");
 
     std::error_code error;
     std::filesystem::remove(path, error);
@@ -3260,10 +3100,8 @@ int main()
     TestLoadsConcatenatedGzipMembers();
     TestRejectsDataAfterValidGzipMember();
     TestLoadsFitsFromNonAsciiPath();
-    TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline();
-    TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms();
-    TestFitsColumnAndImageReadersPollDuringValueConversion();
-    TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop();
+    TestCancelableFitsLoadStopsDuringLoglamTransform();
+    TestCancelableFitsLoadStopsDuringMaskFiltering();
     TestFitsHeaderMetadataScanPollsAcrossManyHdus();
     TestRejectsCorruptGzippedFits();
     TestRejectsOversizedInflatedGzippedFits();
