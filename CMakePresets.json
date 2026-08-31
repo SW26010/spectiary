@@ -13,6 +13,7 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "OFF",
         "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "OFF",
         "SPECFORGE_BUILD_SOURCE_MODE": "working_tree",
         "SPECFORGE_BUILD_SOURCE_REVISION": "",
@@ -104,6 +105,19 @@
         "CMAKE_BUILD_TYPE": "Release",
         "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON"
       }
+    },
+    {
+      "name": "ninja-msvc-release-static-asdf-labeling-hardening",
+      "displayName": "Ninja MSVC static Release with production ASDF labeling hardening tools",
+      "inherits": [
+        "base",
+        "static-release-base"
+      ],
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -132,6 +146,10 @@
     {
       "name": "ninja-msvc-release-static-asdf-labeling-spike",
       "configurePreset": "ninja-msvc-release-static-asdf-labeling-spike"
+    },
+    {
+      "name": "ninja-msvc-release-static-asdf-labeling-hardening",
+      "configurePreset": "ninja-msvc-release-static-asdf-labeling-hardening"
     }
   ]
 }

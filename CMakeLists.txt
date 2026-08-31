@@ -12,6 +12,11 @@ option(
     "Build the ASDF labeling research spike."
     OFF
 )
+option(
+    SPECFORGE_BUILD_ASDF_LABELING_HARDENING
+    "Build explicit production ASDF labeling hardening tools."
+    OFF
+)
 set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
 set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
 set(SPECFORGE_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
@@ -555,6 +560,9 @@ enable_testing()
 
 if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
     add_subdirectory(tools/asdf_labeling_spike)
+endif()
+if(SPECFORGE_BUILD_ASDF_LABELING_HARDENING)
+    add_subdirectory(tools/asdf_labeling_production_benchmark)
 endif()
 
 set(SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY
