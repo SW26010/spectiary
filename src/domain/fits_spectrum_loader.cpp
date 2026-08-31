@@ -75,8 +75,7 @@ const FitsColumn* FindFitsMaskColumn(const FitsHdu& hdu)
 
 bool IsFitsNumericColumn(const FitsColumn& column)
 {
-    return column.code == 'B' || column.code == 'I' || column.code == 'J' || column.code == 'K' ||
-           column.code == 'E' || column.code == 'D';
+    return column.numeric_type.has_value();
 }
 
 SpectrumDiagnosticCode ToSpectrumDiagnosticCode(FitsFileErrorCode code)
@@ -132,6 +131,7 @@ std::optional<double> LoadedMetadataDouble(const LoadedSpectrum& loaded, std::st
 }
 
 std::optional<FitsMetadataMatch> FirstFitsHeaderValue(
+    const FitsFile& file,
     const std::vector<FitsHdu>& hdus,
     std::initializer_list<std::string_view> header_keys,
     const std::function<bool()>& cancellation_requested)
@@ -139,7 +139,11 @@ std::optional<FitsMetadataMatch> FirstFitsHeaderValue(
     for (const FitsHdu& hdu : hdus) {
         ThrowIfFitsLoadCanceled(cancellation_requested);
         for (std::string_view key : header_keys) {
-            const std::optional<std::string> value = FitsValue(hdu.header, key);
+            const std::optional<std::string> value =
+                file.ReadKeywordString(
+                    hdu,
+                    key,
+                    cancellation_requested);
             if (value && !value->empty()) {
                 return FitsMetadataMatch{std::string(key), *value};
             }
@@ -258,6 +262,7 @@ void AddFitsTargetRestFrameMetadata(LoadedSpectrum& loaded)
 
 void AddFitsHeaderMetadata(
     LoadedSpectrum& loaded,
+    const FitsFile& file,
     const std::vector<FitsHdu>& hdus,
     const std::function<bool()>& cancellation_requested)
 {
@@ -266,13 +271,18 @@ void AddFitsHeaderMetadata(
             return;
         }
         if (const std::optional<FitsMetadataMatch> match =
-                FirstFitsHeaderValue(hdus, header_keys, cancellation_requested)) {
+                FirstFitsHeaderValue(
+                    file,
+                    hdus,
+                    header_keys,
+                    cancellation_requested)) {
             loaded.source_metadata.push_back({std::string(output_key), match->value, "fits"});
         }
     };
 
     if (!HasLoadedMetadataKey(loaded, "radial_velocity_km_s")) {
         if (const std::optional<FitsMetadataMatch> match = FirstFitsHeaderValue(
+                file,
                 hdus,
                 {"RADVEL", "RAD_VEL", "RADIALV", "RADIAL_V", "RV", "VRAD", "RVEL", "1D_RV"},
                 cancellation_requested)) {
@@ -298,7 +308,7 @@ void AddFitsHeaderMetadata(
 }
 
 std::optional<FitsMetadataMatch> FitsScalarColumnMetadata(
-    const std::vector<unsigned char>& bytes,
+    const FitsFile& file,
     const FitsHdu& hdu,
     std::size_t row_index,
     std::initializer_list<std::string_view> column_names,
@@ -309,7 +319,12 @@ std::optional<FitsMetadataMatch> FitsScalarColumnMetadata(
         return std::nullopt;
     }
     std::vector<double> values =
-        ReadFitsColumnVector(bytes, hdu, *column, row_index, false, cancellation_requested);
+        file.ReadColumnVector(
+            hdu,
+            *column,
+            row_index,
+            false,
+            cancellation_requested);
     if (values.empty() || !std::isfinite(values.front())) {
         return std::nullopt;
     }
@@ -318,7 +333,7 @@ std::optional<FitsMetadataMatch> FitsScalarColumnMetadata(
 
 void AddFitsTableMetadata(
     LoadedSpectrum& loaded,
-    const std::vector<unsigned char>& bytes,
+    const FitsFile& file,
     const FitsHdu& hdu,
     std::size_t row_index,
     bool scalar_rows,
@@ -330,7 +345,7 @@ void AddFitsTableMetadata(
 
     if (!HasLoadedMetadataKey(loaded, "radial_velocity_km_s")) {
         if (const std::optional<FitsMetadataMatch> match = FitsScalarColumnMetadata(
-                bytes,
+                file,
                 hdu,
                 row_index,
                 {"RADIALVELOCITYKMS",
@@ -349,7 +364,7 @@ void AddFitsTableMetadata(
     if (!HasLoadedMetadataKey(loaded, "redshift")) {
         if (const std::optional<FitsMetadataMatch> match =
                 FitsScalarColumnMetadata(
-                    bytes,
+                    file,
                     hdu,
                     row_index,
                     {"REDSHIFT", "Z", "ZHELIO", "1DZ"},
@@ -360,7 +375,7 @@ void AddFitsTableMetadata(
     if (!HasLoadedMetadataKey(loaded, "redshift_error")) {
         if (const std::optional<FitsMetadataMatch> match =
                 FitsScalarColumnMetadata(
-                    bytes,
+                    file,
                     hdu,
                     row_index,
                     {"ZERR", "ZERROR", "ZERRPIPE", "ZERRNOQSO", "ZERRFULL"},
@@ -371,7 +386,7 @@ void AddFitsTableMetadata(
     if (!HasLoadedMetadataKey(loaded, "redshift_warning")) {
         if (const std::optional<FitsMetadataMatch> match =
                 FitsScalarColumnMetadata(
-                    bytes,
+                    file,
                     hdu,
                     row_index,
                     {"ZWARNING", "ZWARN", "ZWARNINGNOQSO"},
@@ -382,7 +397,7 @@ void AddFitsTableMetadata(
 }
 
 std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
-    const std::vector<unsigned char>& bytes,
+    const FitsFile& file,
     const std::vector<FitsHdu>& hdus,
     const FitsHdu& hdu,
     const std::filesystem::path& path,
@@ -391,7 +406,8 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
     const std::function<bool()>& cancellation_requested)
 {
     ThrowIfFitsLoadCanceled(cancellation_requested);
-    if (hdu.columns.empty()) {
+    if (hdu.kind != FitsHduKind::BinaryTable ||
+        hdu.columns.empty()) {
         return std::nullopt;
     }
 
@@ -404,6 +420,12 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
 
     const FitsColumn* x_column = wavelength_column != nullptr ? wavelength_column : loglam_column;
     const bool uses_loglam = loglam_column != nullptr && wavelength_column == nullptr;
+    if (!IsFitsNumericColumn(*flux_column) ||
+        !IsFitsNumericColumn(*x_column)) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "FITS wavelength/loglam and flux columns must use supported fixed numeric types.");
+    }
     const bool scalar_rows = flux_column->repeat == 1 && x_column->repeat == 1;
     if (!scalar_rows && flux_column->repeat != x_column->repeat) {
         throw SpectrumFileLoadError(
@@ -411,7 +433,7 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
             "FITS table wavelength/loglam and flux vector columns have different lengths.");
     }
 
-    const std::size_t row_count = static_cast<std::size_t>(FitsInteger(hdu.header, "NAXIS2"));
+    const std::size_t row_count = hdu.row_count;
     LoadedSpectrum loaded;
     loaded.source_type = "fits_spectrum";
     loaded.format = std::move(format);
@@ -423,14 +445,25 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
     loaded.source_metadata.push_back({"hdu_type", "bintable", "fits"});
     loaded.source_metadata.push_back({"x_column", x_column->name, "fits"});
     loaded.source_metadata.push_back({"flux_column", flux_column->name, "fits"});
-    AddFitsTableMetadata(loaded, bytes, hdu, requested_index, scalar_rows, cancellation_requested);
+    AddFitsTableMetadata(
+        loaded,
+        file,
+        hdu,
+        requested_index,
+        scalar_rows,
+        cancellation_requested);
     loaded.spectrum_metadata.push_back({"hdu_index", std::to_string(hdu.index), "fits"});
     if (!scalar_rows) {
         loaded.spectrum_metadata.push_back({"row_index", std::to_string(requested_index), "fits"});
     }
 
     loaded.x_values =
-        ReadFitsColumnVector(bytes, hdu, *x_column, requested_index, scalar_rows, cancellation_requested);
+        file.ReadColumnVector(
+            hdu,
+            *x_column,
+            requested_index,
+            scalar_rows,
+            cancellation_requested);
     if (uses_loglam) {
         for (std::size_t index = 0; index < loaded.x_values.size(); ++index) {
             if ((index & 0xfffU) == 0U) {
@@ -440,7 +473,12 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
         }
     }
     loaded.y_values =
-        ReadFitsColumnVector(bytes, hdu, *flux_column, requested_index, scalar_rows, cancellation_requested);
+        file.ReadColumnVector(
+            hdu,
+            *flux_column,
+            requested_index,
+            scalar_rows,
+            cancellation_requested);
 
     const FitsColumn* ivar_column = FindFitsColumn(hdu, {"IVAR", "INVERSEVARIANCE"});
     const FitsColumn* mask_column = FindFitsMaskColumn(hdu);
@@ -450,12 +488,22 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
     const bool use_ivar = !use_mask && ivar_column != nullptr;
     if (use_ivar) {
         ivar_values =
-            ReadFitsColumnVector(bytes, hdu, *ivar_column, requested_index, scalar_rows, cancellation_requested);
+            file.ReadColumnVector(
+                hdu,
+                *ivar_column,
+                requested_index,
+                scalar_rows,
+                cancellation_requested);
         loaded.source_metadata.push_back({"valid_pixel_rule", "ivar_positive", "fits"});
     }
     if (use_mask) {
         mask_values =
-            ReadFitsColumnVector(bytes, hdu, *mask_column, requested_index, scalar_rows, cancellation_requested);
+            file.ReadColumnVector(
+                hdu,
+                *mask_column,
+                requested_index,
+                scalar_rows,
+                cancellation_requested);
         loaded.source_metadata.push_back({"valid_pixel_rule", "ormask_zero", "fits"});
     }
 
@@ -473,12 +521,16 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
         SpectrumDiagnosticSeverity::Warning,
         SpectrumDiagnosticCode::RestFrameNotApplied,
         "FITS wavelength values are plotted as provided; no rest-frame correction was applied."));
-    AddFitsHeaderMetadata(loaded, hdus, cancellation_requested);
+    AddFitsHeaderMetadata(
+        loaded,
+        file,
+        hdus,
+        cancellation_requested);
     return loaded;
 }
 
 std::optional<LoadedSpectrum> TryLoadFitsImageSpectrum(
-    const std::vector<unsigned char>& bytes,
+    const FitsFile& file,
     const std::vector<FitsHdu>& hdus,
     const FitsHdu& hdu,
     const std::filesystem::path& path,
@@ -486,21 +538,32 @@ std::optional<LoadedSpectrum> TryLoadFitsImageSpectrum(
     const std::function<bool()>& cancellation_requested)
 {
     ThrowIfFitsLoadCanceled(cancellation_requested);
-    if (UpperAscii(FitsValue(hdu.header, "XTENSION").value_or({})) == "BINTABLE") {
+    if (hdu.kind != FitsHduKind::Image) {
         return std::nullopt;
     }
-    const std::int64_t axis_count = FitsInteger(hdu.header, "NAXIS");
-    if (axis_count < 1) {
+    if (hdu.image_axes.empty()) {
         return std::nullopt;
     }
-    const std::optional<double> coeff0 = FitsDouble(hdu.header, "COEFF0");
-    const std::optional<double> coeff1 = FitsDouble(hdu.header, "COEFF1");
+    if (hdu.image_axes.size() > 2U) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "Only one- or two-dimensional FITS image spectra are supported.");
+    }
+    const std::optional<double> coeff0 = file.ReadKeywordDouble(
+        hdu,
+        "COEFF0",
+        cancellation_requested);
+    const std::optional<double> coeff1 = file.ReadKeywordDouble(
+        hdu,
+        "COEFF1",
+        cancellation_requested);
     if (!coeff0 || !coeff1) {
         return std::nullopt;
     }
 
-    const std::size_t column_count = static_cast<std::size_t>(FitsInteger(hdu.header, "NAXIS1"));
-    const std::size_t row_count = axis_count >= 2 ? static_cast<std::size_t>(FitsInteger(hdu.header, "NAXIS2")) : 1U;
+    const std::size_t column_count = hdu.image_axes.front();
+    const std::size_t row_count =
+        hdu.image_axes.size() >= 2U ? hdu.image_axes[1] : 1U;
     if (column_count == 0 || row_count == 0) {
         throw SpectrumFileLoadError(SpectrumDiagnosticCode::EmptyData, "FITS image spectrum has an empty shape.");
     }
@@ -515,7 +578,11 @@ std::optional<LoadedSpectrum> TryLoadFitsImageSpectrum(
     loaded.source_metadata.push_back({"coeff0", std::to_string(*coeff0), "fits"});
     loaded.source_metadata.push_back({"coeff1", std::to_string(*coeff1), "fits"});
     loaded.spectrum_metadata.push_back({"hdu_index", std::to_string(hdu.index), "fits"});
-    loaded.y_values = ReadFitsImageRow(bytes, hdu, 0, column_count, cancellation_requested);
+    loaded.y_values = file.ReadImageRow(
+        hdu,
+        0,
+        column_count,
+        cancellation_requested);
     loaded.x_values.reserve(column_count);
     for (std::size_t index = 0; index < column_count; ++index) {
         if ((index & 0xfffU) == 0U) {
@@ -526,11 +593,19 @@ std::optional<LoadedSpectrum> TryLoadFitsImageSpectrum(
 
     std::vector<double> ivar_values;
     if (row_count > 1) {
-        ivar_values = ReadFitsImageRow(bytes, hdu, 1, column_count, cancellation_requested);
+        ivar_values = file.ReadImageRow(
+            hdu,
+            1,
+            column_count,
+            cancellation_requested);
     }
     std::vector<double> mask_values;
     if (row_count > 4) {
-        mask_values = ReadFitsImageRow(bytes, hdu, 4, column_count, cancellation_requested);
+        mask_values = file.ReadImageRow(
+            hdu,
+            4,
+            column_count,
+            cancellation_requested);
     }
     if (!ivar_values.empty() && !mask_values.empty()) {
         loaded.source_metadata.push_back({"valid_pixel_rule", "ivar_positive_and_ormask_zero", "fits"});
@@ -554,7 +629,11 @@ std::optional<LoadedSpectrum> TryLoadFitsImageSpectrum(
         SpectrumDiagnosticSeverity::Warning,
         SpectrumDiagnosticCode::RestFrameNotApplied,
         "FITS wavelength values are plotted as provided; no rest-frame correction was applied."));
-    AddFitsHeaderMetadata(loaded, hdus, cancellation_requested);
+    AddFitsHeaderMetadata(
+        loaded,
+        file,
+        hdus,
+        cancellation_requested);
     return loaded;
 }
 
@@ -578,15 +657,15 @@ SpectrumSnapshotHandle LoadFitsSnapshotCancelable(
 {
     const std::string format = SourceFormatLabel(path);
     try {
-        std::vector<unsigned char> bytes =
-            ReadFitsFileBytes(path, kMaxSynchronousFitsFileBytes, cancellation_requested);
-        if (format == "fits.gz") {
-            bytes = DecompressGzipFitsBytes(
-                bytes,
-                kMaxSynchronousInflatedFitsBytes,
-                cancellation_requested);
-        }
-        const std::vector<FitsHdu> hdus = ParseFitsHdus(bytes, cancellation_requested);
+        FitsFile file = FitsFile::Open(
+            path,
+            format == "fits.gz"
+                ? FitsSourceEncoding::Gzip
+                : FitsSourceEncoding::Plain,
+            kMaxSynchronousFitsFileBytes,
+            kMaxSynchronousInflatedFitsBytes,
+            cancellation_requested);
+        const std::vector<FitsHdu>& hdus = file.hdus();
 
         for (const FitsHdu& hdu : hdus) {
             if (cancellation_requested && cancellation_requested()) {
@@ -594,7 +673,7 @@ SpectrumSnapshotHandle LoadFitsSnapshotCancelable(
             }
             std::optional<LoadedSpectrum> loaded =
                 TryLoadFitsTableSpectrum(
-                    bytes,
+                    file,
                     hdus,
                     hdu,
                     path,
@@ -613,12 +692,27 @@ SpectrumSnapshotHandle LoadFitsSnapshotCancelable(
                 return nullptr;
             }
             std::optional<LoadedSpectrum> loaded =
-                TryLoadFitsImageSpectrum(bytes, hdus, hdu, path, format, cancellation_requested);
+                TryLoadFitsImageSpectrum(
+                    file,
+                    hdus,
+                    hdu,
+                    path,
+                    format,
+                    cancellation_requested);
             if (loaded) {
                 return MakeLoadedSpectrumSnapshot(
                     path,
                     std::move(*loaded),
                     [&cancellation_requested]() { ThrowIfFitsLoadCanceled(cancellation_requested); });
+            }
+        }
+
+        for (const FitsHdu& hdu : hdus) {
+            ThrowIfFitsLoadCanceled(cancellation_requested);
+            if (hdu.kind == FitsHduKind::AsciiTable) {
+                throw FitsFileError(
+                    FitsFileErrorCode::UnsupportedFormat,
+                    "ASCII FITS tables are not supported as spectra.");
             }
         }
 

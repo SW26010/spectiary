@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <zlib.h>
@@ -40,6 +41,15 @@ using specforge::SpectrumValueQuantity;
 using specforge::SampleAnnotationKind;
 
 constexpr double kSpeedOfLightKmPerSecond = 299792.458;
+
+static_assert(
+    std::is_move_constructible_v<specforge::detail::FitsFile>);
+static_assert(
+    std::is_move_assignable_v<specforge::detail::FitsFile>);
+static_assert(
+    !std::is_copy_constructible_v<specforge::detail::FitsFile>);
+static_assert(
+    !std::is_copy_assignable_v<specforge::detail::FitsFile>);
 
 void Require(bool condition, std::string_view message)
 {
@@ -346,6 +356,90 @@ void WriteFitsVectorTable(const std::filesystem::path& path)
     Require(stream.good(), "could not write vector FITS fixture");
 }
 
+void WriteFitsTableWithUndefinedOptionalKeywords(
+    const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(
+        stream.good(),
+        "could not open undefined-keyword FITS table fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   8"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'E'"),
+                                FitsCard("RV"),
+                                FitsCard("Z"),
+                                FitsCard("ZWARNING"),
+                                FitsCard("CLASS"),
+                                FitsCard("TELESCOP"),
+                                FitsCard("VACUUM"),
+                            });
+
+    std::vector<unsigned char> data;
+    for (const std::array<float, 2> row : {
+             std::array<float, 2>{5000.0F, 1.0F},
+             std::array<float, 2>{5001.0F, 2.0F},
+         }) {
+        AppendBigEndianFloat(data, row[0]);
+        AppendBigEndianFloat(data, row[1]);
+    }
+    stream.write(
+        reinterpret_cast<const char*>(data.data()),
+        static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(
+        stream.good(),
+        "could not write undefined-keyword FITS table fixture");
+}
+
+void WriteFitsVectorTableWithTruncatedLaterRow(
+    const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(
+        stream.good(),
+        "could not open truncated vector FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                  24"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'3E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'3E'"),
+                            });
+
+    std::vector<unsigned char> first_row;
+    for (float value : {5000.0F, 5001.0F, 5002.0F}) {
+        AppendBigEndianFloat(first_row, value);
+    }
+    for (float value : {1.0F, 2.0F, 3.0F}) {
+        AppendBigEndianFloat(first_row, value);
+    }
+    stream.write(
+        reinterpret_cast<const char*>(first_row.data()),
+        static_cast<std::streamsize>(first_row.size()));
+    Require(
+        stream.good(),
+        "could not write the selected row of truncated vector FITS fixture");
+}
+
 void WriteFitsInvalidRedshiftTable(const std::filesystem::path& path)
 {
     std::ofstream stream(path, std::ios::binary);
@@ -450,6 +544,105 @@ void WriteFitsImage(const std::filesystem::path& path, bool use_coeff_wavelength
     stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     Require(stream.good(), "could not write image FITS fixture");
+}
+
+void WriteFitsImageWithUndefinedCoefficients(
+    const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(
+        stream.good(),
+        "could not open undefined-keyword FITS image fixture");
+    WriteFitsHeader(stream, {
+                                FitsCard("SIMPLE", "                   T"),
+                                FitsCard("BITPIX", "                 -32"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   3"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("COEFF0"),
+                                FitsCard("COEFF1"),
+                            });
+
+    std::vector<unsigned char> data;
+    for (float value : {1.0F, 2.0F, 3.0F, 1.0F, 1.0F, 1.0F}) {
+        AppendBigEndianFloat(data, value);
+    }
+    stream.write(
+        reinterpret_cast<const char*>(data.data()),
+        static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(
+        stream.good(),
+        "could not write undefined-keyword FITS image fixture");
+}
+
+void WriteFitsImageWithTruncatedUnselectedTail(
+    const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(
+        stream.good(),
+        "could not open truncated-tail FITS image fixture");
+    WriteFitsHeader(stream, {
+                                FitsCard("SIMPLE", "                   T"),
+                                FitsCard("BITPIX", "                 -32"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   4"),
+                                FitsCard("NAXIS2", "                   4"),
+                                FitsCard("COEFF0", "                 3.0"),
+                                FitsCard("COEFF1", "               0.001"),
+                            });
+
+    std::vector<unsigned char> selected_rows;
+    for (float value : {
+             1.0F, 2.0F, 3.0F, 4.0F,
+             1.0F, 1.0F, 1.0F, 1.0F,
+         }) {
+        AppendBigEndianFloat(selected_rows, value);
+    }
+    stream.write(
+        reinterpret_cast<const char*>(selected_rows.data()),
+        static_cast<std::streamsize>(selected_rows.size()));
+    Require(
+        stream.good(),
+        "could not write selected rows of truncated-tail FITS image fixture");
+}
+
+void WriteLargeFitsImage(
+    const std::filesystem::path& path,
+    std::size_t column_count)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open large FITS image fixture");
+    const std::string column_count_text = std::to_string(column_count);
+    Require(
+        column_count_text.size() <= 20U,
+        "large FITS image width should fit a numeric card");
+    WriteFitsHeader(stream, {
+                                FitsCard("SIMPLE", "                   T"),
+                                FitsCard("BITPIX", "                 -32"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard(
+                                    "NAXIS1",
+                                    std::string(
+                                        20U - column_count_text.size(),
+                                        ' ') +
+                                        column_count_text),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("COEFF0", "                 3.0"),
+                                FitsCard("COEFF1", "               0.001"),
+                            });
+
+    std::vector<unsigned char> data;
+    data.reserve(column_count * sizeof(float));
+    for (std::size_t index = 0; index < column_count; ++index) {
+        AppendBigEndianFloat(data, static_cast<float>(index));
+    }
+    stream.write(
+        reinterpret_cast<const char*>(data.data()),
+        static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write large FITS image fixture");
 }
 
 void WriteFitsImageThenScalarTable(const std::filesystem::path& path)
@@ -561,6 +754,68 @@ void WriteFitsTableWithUnsupportedColumnLayout(const std::filesystem::path& path
     stream.write(data.data(), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     Require(stream.good(), "could not write unsupported-column FITS fixture");
+}
+
+void WriteFitsTableWithUnsupportedColumnType(
+    const std::filesystem::path& path,
+    std::string_view tform,
+    std::size_t row_width)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(
+        stream.good(),
+        "could not open unsupported-type FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", std::to_string(row_width)),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TFORM1", "'" + std::string(tform) + "'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'" + std::string(tform) + "'"),
+                            });
+    const std::vector<unsigned char> data(row_width, 0);
+    stream.write(
+        reinterpret_cast<const char*>(data.data()),
+        static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(
+        stream.good(),
+        "could not write unsupported-type FITS fixture");
+}
+
+void WriteAsciiFitsTable(const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open ASCII FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'TABLE   '"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                  16"),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'WAVELENGTH'"),
+                                FitsCard("TBCOL1", "                   1"),
+                                FitsCard("TFORM1", "'F8.2'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TBCOL2", "                   9"),
+                                FitsCard("TFORM2", "'F8.2'"),
+                            });
+    constexpr std::string_view data = " 5000.00    1.00";
+    static_assert(data.size() == 16U);
+    stream.write(data.data(), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write ASCII FITS fixture");
 }
 
 void WriteNpy(
@@ -1813,6 +2068,123 @@ void TestPrefersRecognizedFitsTableOverImageHdu()
     Require(snapshot->current_spectrum.y_values->at(1) == 71.0, "mixed-HDU selection should retain the table flux endpoint");
 }
 
+void TestUndefinedOptionalFitsKeywordsAreAbsent()
+{
+    const std::filesystem::path table_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_undefined_optional_table.fits";
+    WriteFitsTableWithUndefinedOptionalKeywords(table_path);
+
+    specforge::detail::FitsFile table_file =
+        specforge::detail::FitsFile::Open(
+            table_path,
+            specforge::detail::FitsSourceEncoding::Plain);
+    const specforge::detail::FitsHdu& table_hdu =
+        table_file.hdus().at(1);
+    Require(
+        !table_file.ReadKeywordString(table_hdu, "CLASS"),
+        "undefined string FITS keywords should be absent");
+    Require(
+        !table_file.ReadKeywordInteger(table_hdu, "ZWARNING"),
+        "undefined integer FITS keywords should be absent");
+    Require(
+        !table_file.ReadKeywordDouble(table_hdu, "Z"),
+        "undefined floating-point FITS keywords should be absent");
+
+    const SpectrumSnapshotHandle table_snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(table_path, 0);
+    Require(
+        table_snapshot->capabilities.can_plot_current_spectrum,
+        "undefined optional table keywords should not prevent loading");
+    Require(
+        MetadataValue(table_snapshot, "radial_velocity_km_s").empty() &&
+            MetadataValue(table_snapshot, "redshift").empty() &&
+            MetadataValue(table_snapshot, "redshift_warning").empty() &&
+            MetadataValue(table_snapshot, "survey_class").empty() &&
+            MetadataValue(table_snapshot, "telescope").empty(),
+        "undefined optional table keywords should not publish metadata");
+
+    const std::filesystem::path image_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_undefined_optional_image.fits";
+    WriteFitsImageWithUndefinedCoefficients(image_path);
+    specforge::detail::FitsFile image_file =
+        specforge::detail::FitsFile::Open(
+            image_path,
+            specforge::detail::FitsSourceEncoding::Plain);
+    Require(
+        !image_file.ReadKeywordDouble(
+            image_file.hdus().front(),
+            "COEFF0"),
+        "undefined image coefficient keywords should be absent");
+
+    const SpectrumSnapshotHandle image_snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(image_path, 0);
+    RequireNonPlottableErrorSnapshot(
+        image_snapshot,
+        "image with undefined optional spectrum coefficients");
+    Require(
+        FirstDiagnosticCode(image_snapshot) ==
+            SpectrumDiagnosticCode::CatalogNotSpectrum,
+        "undefined image coefficients should make the image unrecognized, not malformed");
+
+    std::error_code error;
+    std::filesystem::remove(table_path, error);
+    error.clear();
+    std::filesystem::remove(image_path, error);
+}
+
+void TestRejectsTruncatedUnselectedFitsData()
+{
+    const auto require_invalid_shape = [](
+                                           const std::filesystem::path& path,
+                                           std::string_view context) {
+        bool rejected = false;
+        try {
+            (void)specforge::detail::FitsFile::Open(
+                path,
+                specforge::detail::FitsSourceEncoding::Plain);
+        } catch (const specforge::detail::FitsFileError& error) {
+            rejected = error.code() ==
+                specforge::detail::FitsFileErrorCode::InvalidShape;
+        }
+        Require(
+            rejected,
+            std::string(context) +
+                ": reader open should reject the incomplete declared HDU");
+
+        const SpectrumSnapshotHandle snapshot =
+            specforge::LoadSpectrumSnapshotFromPath(path, 0);
+        RequireNonPlottableErrorSnapshot(snapshot, context);
+        Require(
+            FirstDiagnosticCode(snapshot) ==
+                SpectrumDiagnosticCode::InvalidShape,
+            std::string(context) +
+                ": truncation should map to invalid shape");
+    };
+
+    const std::filesystem::path table_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_truncated_unselected_table_row.fits";
+    WriteFitsVectorTableWithTruncatedLaterRow(table_path);
+    require_invalid_shape(
+        table_path,
+        "FITS table truncated after the selected vector row");
+
+    const std::filesystem::path image_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_truncated_unselected_image_tail.fits";
+    WriteFitsImageWithTruncatedUnselectedTail(image_path);
+    require_invalid_shape(
+        image_path,
+        "FITS image truncated after the selected data and mask rows");
+
+    std::error_code error;
+    std::filesystem::remove(table_path, error);
+    error.clear();
+    std::filesystem::remove(image_path, error);
+}
+
 void TestRejectsMalformedFitsTableWidth()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_bad_table_width.fits";
@@ -1830,30 +2202,119 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
     const std::filesystem::path truncated_header =
         std::filesystem::temp_directory_path() / "specforge_loader_truncated_header.fits";
     WriteTruncatedFitsHeader(truncated_header);
+    const SpectrumSnapshotHandle truncated_header_snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(
+            truncated_header,
+            0);
     RequireNonPlottableErrorSnapshot(
-        specforge::LoadSpectrumSnapshotFromPath(truncated_header, 0),
+        truncated_header_snapshot,
         "truncated FITS header");
+    Require(
+        FirstDiagnosticCode(truncated_header_snapshot) ==
+            SpectrumDiagnosticCode::InvalidShape,
+        "truncated FITS headers should map to invalid shape");
 
     const std::filesystem::path missing_image_data =
         std::filesystem::temp_directory_path() / "specforge_loader_missing_image_data.fits";
     WriteFitsHeaderWithMissingImageData(missing_image_data);
+    const SpectrumSnapshotHandle missing_image_data_snapshot =
+        specforge::LoadSpectrumSnapshotFromPathCancelable(
+            missing_image_data,
+            0,
+            []() { return false; });
     RequireNonPlottableErrorSnapshot(
-        specforge::LoadSpectrumSnapshotFromPathCancelable(missing_image_data, 0, []() { return false; }),
+        missing_image_data_snapshot,
         "complete FITS header with truncated data");
+    Require(
+        FirstDiagnosticCode(missing_image_data_snapshot) ==
+            SpectrumDiagnosticCode::InvalidShape,
+        "truncated FITS image data should map to invalid shape");
 
     const std::filesystem::path declared_data_mismatch =
         std::filesystem::temp_directory_path() / "specforge_loader_declared_data_mismatch.fits";
     WriteFitsTableWithDeclaredDataMismatch(declared_data_mismatch);
+    const SpectrumSnapshotHandle declared_data_mismatch_snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(
+            declared_data_mismatch,
+            0);
     RequireNonPlottableErrorSnapshot(
-        specforge::LoadSpectrumSnapshotFromPath(declared_data_mismatch, 0),
+        declared_data_mismatch_snapshot,
         "FITS declared dimensions larger than actual data");
+    Require(
+        FirstDiagnosticCode(declared_data_mismatch_snapshot) ==
+            SpectrumDiagnosticCode::InvalidShape,
+        "FITS declared data mismatches should map to invalid shape");
 
     const std::filesystem::path unsupported_columns =
         std::filesystem::temp_directory_path() / "specforge_loader_unsupported_columns.fits";
     WriteFitsTableWithUnsupportedColumnLayout(unsupported_columns);
+    const SpectrumSnapshotHandle unsupported_columns_snapshot =
+        specforge::LoadSpectrumSnapshotFromPathCancelable(
+            unsupported_columns,
+            0,
+            []() { return false; });
     RequireNonPlottableErrorSnapshot(
-        specforge::LoadSpectrumSnapshotFromPathCancelable(unsupported_columns, 0, []() { return false; }),
+        unsupported_columns_snapshot,
         "unsupported FITS table column layout");
+    Require(
+        FirstDiagnosticCode(unsupported_columns_snapshot) ==
+            SpectrumDiagnosticCode::UnsupportedFormat,
+        "non-numeric FITS spectrum columns should map to unsupported format");
+}
+
+void TestRejectsUnsupportedFitsStructures()
+{
+    struct UnsupportedColumnCase {
+        std::string_view name;
+        std::string_view tform;
+        std::size_t row_width;
+    };
+    constexpr std::array cases = {
+        UnsupportedColumnCase{"variable", "1PE(1)", 16U},
+        UnsupportedColumnCase{"complex", "C", 16U},
+        UnsupportedColumnCase{"bit", "8X", 2U},
+    };
+
+    for (const UnsupportedColumnCase& test_case : cases) {
+        const std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("specforge_loader_unsupported_" +
+             std::string(test_case.name) + ".fits");
+        WriteFitsTableWithUnsupportedColumnType(
+            path,
+            test_case.tform,
+            test_case.row_width);
+        const SpectrumSnapshotHandle snapshot =
+            specforge::LoadSpectrumSnapshotFromPathCancelable(
+                path,
+                0,
+                []() { return false; });
+        RequireNonPlottableErrorSnapshot(
+            snapshot,
+            "unsupported FITS column type");
+        Require(
+            FirstDiagnosticCode(snapshot) ==
+                SpectrumDiagnosticCode::UnsupportedFormat,
+            "variable, complex, and bit FITS spectrum columns should be unsupported");
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+
+    const std::filesystem::path ascii_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_unsupported_ascii_table.fits";
+    WriteAsciiFitsTable(ascii_path);
+    const SpectrumSnapshotHandle ascii_snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(ascii_path, 0);
+    RequireNonPlottableErrorSnapshot(
+        ascii_snapshot,
+        "ASCII FITS table");
+    Require(
+        FirstDiagnosticCode(ascii_snapshot) ==
+            SpectrumDiagnosticCode::UnsupportedFormat,
+        "ASCII FITS tables should be unsupported");
+    std::error_code error;
+    std::filesystem::remove(ascii_path, error);
 }
 
 void TestLoadsGzippedFitsSpectrum()
@@ -1868,6 +2329,103 @@ void TestLoadsGzippedFitsSpectrum()
     RequireEquivalentSpectrumSemantics(uncompressed, compressed, "compressed and uncompressed FITS");
     Require(MetadataValue(uncompressed, "format") == "fits", "uncompressed FITS should retain its format label");
     Require(MetadataValue(compressed, "format") == "fits.gz", "gzipped FITS should retain its format label");
+}
+
+void TestLoadsConcatenatedGzipMembers()
+{
+    const std::filesystem::path fits_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_concatenated_gzip_source.fits";
+    const std::filesystem::path gzip_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_concatenated_gzip_source.fits.gz";
+    WriteFitsScalarTable(fits_path);
+    const std::vector<unsigned char> fits_bytes = ReadBytes(fits_path);
+    const std::size_t split = fits_bytes.size() / 2U;
+    const std::vector<unsigned char> first_half(
+        fits_bytes.begin(),
+        fits_bytes.begin() + static_cast<std::ptrdiff_t>(split));
+    const std::vector<unsigned char> second_half(
+        fits_bytes.begin() + static_cast<std::ptrdiff_t>(split),
+        fits_bytes.end());
+    std::vector<unsigned char> compressed = GzipBytes(first_half);
+    const std::vector<unsigned char> second_member =
+        GzipBytes(second_half);
+    compressed.insert(
+        compressed.end(),
+        second_member.begin(),
+        second_member.end());
+    WriteBytes(gzip_path, compressed);
+
+    const SpectrumSnapshotHandle uncompressed =
+        specforge::LoadSpectrumSnapshotFromPath(fits_path, 0);
+    const SpectrumSnapshotHandle concatenated =
+        specforge::LoadSpectrumSnapshotFromPath(gzip_path, 0);
+    RequireEquivalentSpectrumSemantics(
+        uncompressed,
+        concatenated,
+        "concatenated gzip members and uncompressed FITS");
+
+    std::error_code error;
+    std::filesystem::remove(fits_path, error);
+    error.clear();
+    std::filesystem::remove(gzip_path, error);
+}
+
+void TestRejectsDataAfterValidGzipMember()
+{
+    const std::filesystem::path fits_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_gzip_trailing_source.fits";
+    WriteFitsScalarTable(fits_path);
+    const std::vector<unsigned char> valid_member =
+        GzipBytes(ReadBytes(fits_path));
+
+    const auto require_open_failed = [&valid_member](
+                                         const std::filesystem::path& path,
+                                         const std::vector<unsigned char>& suffix,
+                                         std::string_view context) {
+        std::vector<unsigned char> bytes = valid_member;
+        bytes.insert(bytes.end(), suffix.begin(), suffix.end());
+        WriteBytes(path, bytes);
+        const SpectrumSnapshotHandle snapshot =
+            specforge::LoadSpectrumSnapshotFromPath(path, 0);
+        RequireNonPlottableErrorSnapshot(snapshot, context);
+        Require(
+            FirstDiagnosticCode(snapshot) ==
+                SpectrumDiagnosticCode::OpenFailed,
+            std::string(context) +
+                ": invalid trailing compressed data should fail transport opening");
+    };
+
+    std::vector<unsigned char> broken_member =
+        GzipBytes({'b', 'r', 'o', 'k', 'e', 'n'});
+    Require(
+        broken_member.size() > 4U,
+        "broken-member fixture should include a gzip trailer");
+    broken_member.resize(broken_member.size() - 4U);
+    const std::filesystem::path broken_member_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_broken_trailing_member.fits.gz";
+    require_open_failed(
+        broken_member_path,
+        broken_member,
+        "valid FITS gzip followed by a broken member");
+
+    const std::filesystem::path garbage_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_trailing_gzip_garbage.fits.gz";
+    require_open_failed(
+        garbage_path,
+        {'g', 'a', 'r', 'b', 'a', 'g', 'e'},
+        "valid FITS gzip followed by garbage");
+
+    std::error_code error;
+    std::filesystem::remove(fits_path, error);
+    error.clear();
+    std::filesystem::remove(broken_member_path, error);
+    error.clear();
+    std::filesystem::remove(garbage_path, error);
 }
 
 void TestLoadsFitsFromNonAsciiPath()
@@ -1921,7 +2479,13 @@ void WriteFitsScalarTableWithTrailingEmptyHdus(
     stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     for (std::size_t index = 0; index < trailing_hdu_count; ++index) {
-        WriteFitsPrimary(stream);
+        WriteFitsHeader(stream, {
+                                    FitsCard("XTENSION", "'IMAGE   '"),
+                                    FitsCard("BITPIX", "                   8"),
+                                    FitsCard("NAXIS", "                   0"),
+                                    FitsCard("PCOUNT", "                   0"),
+                                    FitsCard("GCOUNT", "                   1"),
+                                });
     }
     Require(stream.good(), "could not write multi-HDU FITS fixture");
 }
@@ -2205,10 +2769,10 @@ void TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline()
         0,
         [&cancellation_checks]() {
             ++cancellation_checks;
-            return cancellation_checks >= 4;
+            return cancellation_checks >= 5;
         });
     Require(snapshot == nullptr, "cancelable FITS.GZ loading should stop without publishing an error snapshot");
-    Require(cancellation_checks >= 4, "FITS.GZ loading should poll cancellation beyond initial dispatch");
+    Require(cancellation_checks >= 5, "FITS.GZ loading should poll cancellation after entering zlib");
 }
 
 void TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms()
@@ -2237,53 +2801,81 @@ void TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms()
 void TestFitsColumnAndImageReadersPollDuringValueConversion()
 {
     constexpr std::size_t kValueCount = 20'000;
-    std::vector<unsigned char> bytes;
-    bytes.reserve(kValueCount * sizeof(float));
-    for (std::size_t index = 0; index < kValueCount; ++index) {
-        AppendBigEndianFloat(bytes, static_cast<float>(index));
-    }
-
-    specforge::detail::FitsHdu table_hdu;
-    table_hdu.header.values["NAXIS1"] = std::to_string(bytes.size());
-    table_hdu.header.values["NAXIS2"] = "1";
-    table_hdu.data_size = bytes.size();
-    specforge::detail::FitsColumn column;
-    column.repeat = kValueCount;
-    column.code = 'E';
-    column.element_size = sizeof(float);
-    column.byte_width = bytes.size();
+    const std::filesystem::path table_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_cancel_cfitsio_column.fits";
+    WriteLargeFitsLoglamVectorTable(table_path, kValueCount);
+    specforge::detail::FitsFile table_file =
+        specforge::detail::FitsFile::Open(
+            table_path,
+            specforge::detail::FitsSourceEncoding::Plain);
+    const auto table_hdu = std::find_if(
+        table_file.hdus().begin(),
+        table_file.hdus().end(),
+        [](const specforge::detail::FitsHdu& hdu) {
+            return hdu.kind ==
+                specforge::detail::FitsHduKind::BinaryTable;
+        });
+    Require(
+        table_hdu != table_file.hdus().end(),
+        "large FITS table fixture should expose a binary table");
+    const auto column = std::find_if(
+        table_hdu->columns.begin(),
+        table_hdu->columns.end(),
+        [](const specforge::detail::FitsColumn& candidate) {
+            return candidate.normalized_name == "FLUX";
+        });
+    Require(
+        column != table_hdu->columns.end(),
+        "large FITS table fixture should expose its flux column");
 
     std::size_t column_checks = 0;
     bool column_canceled = false;
     try {
-        (void)specforge::detail::ReadFitsColumnVector(
-            bytes,
-            table_hdu,
-            column,
+        (void)table_file.ReadColumnVector(
+            *table_hdu,
+            *column,
             0,
             false,
-            [&column_checks]() { return ++column_checks >= 3; });
+            [&column_checks]() { return ++column_checks >= 5; });
     } catch (const specforge::detail::FitsFileError& error) {
         column_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
     }
     Require(column_canceled, "FITS table value conversion should honor cooperative cancellation");
+    Require(
+        column_checks >= 5,
+        "FITS table cancellation should occur after a CFITSIO read");
 
-    specforge::detail::FitsHdu image_hdu;
-    image_hdu.header.values["BITPIX"] = "-32";
-    image_hdu.data_size = bytes.size();
+    const std::filesystem::path image_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_cancel_cfitsio_image.fits";
+    WriteLargeFitsImage(image_path, kValueCount);
+    specforge::detail::FitsFile image_file =
+        specforge::detail::FitsFile::Open(
+            image_path,
+            specforge::detail::FitsSourceEncoding::Plain);
+    const specforge::detail::FitsHdu& image_hdu =
+        image_file.hdus().front();
     std::size_t image_checks = 0;
     bool image_canceled = false;
     try {
-        (void)specforge::detail::ReadFitsImageRow(
-            bytes,
+        (void)image_file.ReadImageRow(
             image_hdu,
             0,
             kValueCount,
-            [&image_checks]() { return ++image_checks >= 3; });
+            [&image_checks]() { return ++image_checks >= 5; });
     } catch (const specforge::detail::FitsFileError& error) {
         image_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
     }
     Require(image_canceled, "FITS image value conversion should honor cooperative cancellation");
+    Require(
+        image_checks >= 5,
+        "FITS image cancellation should occur after a CFITSIO read");
+
+    std::error_code error;
+    std::filesystem::remove(table_path, error);
+    error.clear();
+    std::filesystem::remove(image_path, error);
 }
 
 void TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop()
@@ -2304,28 +2896,46 @@ void TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop()
         cards.push_back(FitsCard("TTYPE" + std::to_string(index), "'VALUE'"));
         cards.push_back(FitsCard("TFORM" + std::to_string(index), "'E'"));
     }
-    std::string header;
-    for (const std::string& card : cards) {
-        header += card;
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_loader_cancel_cfitsio_columns.fits";
+    {
+        std::ofstream stream(path, std::ios::binary);
+        Require(
+            stream.good(),
+            "could not open large-column FITS fixture");
+        WriteFitsPrimary(stream);
+        WriteFitsHeader(stream, cards);
+        const std::vector<unsigned char> data(3996, 0);
+        stream.write(
+            reinterpret_cast<const char*>(data.data()),
+            static_cast<std::streamsize>(data.size()));
+        PadFitsData(stream, data.size());
+        Require(
+            stream.good(),
+            "could not write large-column FITS fixture");
     }
-    header += FitsCard("END");
-    header.append((2880 - (header.size() % 2880)) % 2880, ' ');
-    std::vector<unsigned char> bytes(header.begin(), header.end());
-    bytes.resize(bytes.size() + 3996, 0);
-    bytes.resize(bytes.size() + ((2880 - (3996 % 2880)) % 2880), 0);
 
-    const std::size_t header_block_count = header.size() / 2880;
-    const std::size_t cancel_at = 1 + header_block_count + 2;
+    constexpr std::size_t kCancelInsideColumnEnumeration = 30;
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::detail::ParseFitsHdus(
-            bytes,
-            [&cancellation_checks, cancel_at]() { return ++cancellation_checks >= cancel_at; });
+        (void)specforge::detail::FitsFile::Open(
+            path,
+            specforge::detail::FitsSourceEncoding::Plain,
+            specforge::detail::kMaxSynchronousFitsFileBytes,
+            specforge::detail::kMaxSynchronousInflatedFitsBytes,
+            [&cancellation_checks]() {
+                return ++cancellation_checks >=
+                    kCancelInsideColumnEnumeration;
+            });
     } catch (const specforge::detail::FitsFileError& error) {
         canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
     }
     Require(canceled, "FITS TFIELDS column discovery should honor cancellation inside its column loop");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
 }
 
 void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
@@ -2335,9 +2945,10 @@ void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
         std::filesystem::temp_directory_path() / "specforge_loader_cancel_many_hdu_metadata.fits";
     WriteFitsScalarTableWithTrailingEmptyHdus(path, kTrailingHduCount);
 
-    // File read and ParseFitsHdus account for just over two checks per HDU.
-    // Arming beyond that boundary targets the repeated header-metadata scans.
-    const std::size_t cancel_at = 2 * (kTrailingHduCount + 2) + 100;
+    // CFITSIO enumeration accounts for four checks per empty image HDU.
+    // Arming beyond that boundary targets the repeated keyword scans.
+    const std::size_t cancel_at =
+        4 * (kTrailingHduCount + 2) + 150;
     std::size_t cancellation_checks = 0;
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
         path,
@@ -2640,9 +3251,14 @@ int main()
     TestLoadsLimitedFitsImageSpectrum();
     TestRejectsFitsImageWcsFallback();
     TestPrefersRecognizedFitsTableOverImageHdu();
+    TestUndefinedOptionalFitsKeywordsAreAbsent();
+    TestRejectsTruncatedUnselectedFitsData();
     TestRejectsMalformedFitsTableWidth();
     TestMalformedFitsInputsReturnErrorSnapshots();
+    TestRejectsUnsupportedFitsStructures();
     TestLoadsGzippedFitsSpectrum();
+    TestLoadsConcatenatedGzipMembers();
+    TestRejectsDataAfterValidGzipMember();
     TestLoadsFitsFromNonAsciiPath();
     TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline();
     TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms();

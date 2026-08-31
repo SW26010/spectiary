@@ -1,28 +1,51 @@
 #include "domain/fits_file_reader.h"
 
+#include "domain/spectrum_loader_support.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
+#include <cstddef>
 #include <fstream>
 #include <limits>
-#include <optional>
+#include <memory>
 #include <string>
-#include <string_view>
-#include <system_error>
 #include <utility>
 
+#include <fitsio.h>
 #include <zlib.h>
 
 namespace specforge::detail {
+
+struct FitsFile::Impl {
+    fitsfile* handle = nullptr;
+    std::vector<unsigned char> memory;
+    void* memory_address = nullptr;
+    std::size_t memory_size = 0;
+    std::vector<FitsHdu> hdus;
+
+    ~Impl()
+    {
+        if (handle != nullptr) {
+            int status = 0;
+            fits_close_file(handle, &status);
+        }
+    }
+};
+
 namespace {
 
-void ThrowIfCanceled(const std::function<bool()>& cancellation_requested)
+constexpr std::size_t kTransportChunkBytes = 64U * 1024U;
+constexpr std::size_t kCfitsioReadChunkElements = 8192U;
+
+void ThrowIfCanceled(
+    const std::function<bool()>& cancellation_requested)
 {
     if (cancellation_requested && cancellation_requested()) {
-        throw FitsFileError(FitsFileErrorCode::Canceled, "FITS loading was canceled.");
+        throw FitsFileError(
+            FitsFileErrorCode::Canceled,
+            "FITS loading was canceled.");
     }
 }
 
@@ -47,25 +70,22 @@ private:
 
 std::string TrimAscii(std::string value)
 {
-    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    });
-    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    }).base();
-
+    const auto first = std::find_if_not(
+        value.begin(),
+        value.end(),
+        [](unsigned char character) {
+            return std::isspace(character) != 0;
+        });
+    const auto last = std::find_if_not(
+        value.rbegin(),
+        value.rend(),
+        [](unsigned char character) {
+            return std::isspace(character) != 0;
+        }).base();
     if (first >= last) {
         return {};
     }
     return std::string(first, last);
-}
-
-std::string UpperAscii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::toupper(character));
-    });
-    return value;
 }
 
 std::string NormalizedColumnName(std::string value)
@@ -74,347 +94,693 @@ std::string NormalizedColumnName(std::string value)
     std::string normalized;
     normalized.reserve(value.size());
     for (const char character : value) {
-        if (std::isalnum(static_cast<unsigned char>(character)) != 0) {
+        if (std::isalnum(
+                static_cast<unsigned char>(character)) != 0) {
             normalized.push_back(character);
         }
     }
     return normalized;
 }
 
-std::optional<std::size_t> ParsePositiveSize(std::string_view text)
+std::string CfitsioFailureMessage(
+    std::string_view stable_message,
+    int status)
 {
-    if (text.empty()) {
-        return std::nullopt;
+    std::array<char, FLEN_STATUS> status_text = {};
+    fits_get_errstatus(status, status_text.data());
+
+    std::string message(stable_message);
+    message += " (CFITSIO status ";
+    message += std::to_string(status);
+    if (status_text.front() != '\0') {
+        message += ": ";
+        message += status_text.data();
     }
 
-    std::size_t value = 0;
-    for (const char character : text) {
-        if (character < '0' || character > '9') {
-            return std::nullopt;
-        }
-        const std::size_t digit = static_cast<std::size_t>(character - '0');
-        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
-            return std::nullopt;
-        }
-        value = value * 10U + digit;
-    }
-    return value == 0 ? std::nullopt : std::optional<std::size_t>{value};
-}
-
-std::optional<double> ParseDouble(std::string text)
-{
-    text = TrimAscii(std::move(text));
-    if (text.empty()) {
-        return std::nullopt;
-    }
-    std::replace(text.begin(), text.end(), 'D', 'E');
-    std::replace(text.begin(), text.end(), 'd', 'e');
-
-    char* end = nullptr;
-    const double value = std::strtod(text.c_str(), &end);
-    if (end == text.c_str() || end == nullptr || *end != '\0') {
-        return std::nullopt;
-    }
-    return value;
-}
-
-std::optional<std::int64_t> ParseInteger(std::string text)
-{
-    text = TrimAscii(std::move(text));
-    if (text.empty()) {
-        return std::nullopt;
-    }
-
-    std::size_t parsed_offset = 0;
-    try {
-        const long long value = std::stoll(text, &parsed_offset, 10);
-        if (parsed_offset != text.size()) {
-            return std::nullopt;
-        }
-        return static_cast<std::int64_t>(value);
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
-}
-
-std::string ParseFitsCardValue(std::string_view card)
-{
-    if (card.size() < 10 || card[8] != '=') {
-        return {};
-    }
-
-    const std::string_view field = card.substr(10);
-    std::string raw;
-    bool in_quote = false;
-    for (std::size_t index = 0; index < field.size(); ++index) {
-        const char character = field[index];
-        if (character == '\'') {
-            raw.push_back(character);
-            if (in_quote && index + 1 < field.size() && field[index + 1] == '\'') {
-                raw.push_back(field[index + 1]);
-                ++index;
-            } else {
-                in_quote = !in_quote;
-            }
-        } else if (character == '/' && !in_quote) {
-            break;
+    std::array<char, FLEN_ERRMSG> stack_entry = {};
+    bool has_stack_entry = false;
+    while (fits_read_errmsg(stack_entry.data()) != 0) {
+        if (!has_stack_entry) {
+            message += "; ";
+            has_stack_entry = true;
         } else {
-            raw.push_back(character);
+            message += " | ";
         }
+        message += stack_entry.data();
     }
-
-    raw = TrimAscii(std::move(raw));
-    if (raw.size() >= 2 && raw.front() == '\'' && raw.back() == '\'') {
-        std::string text;
-        for (std::size_t index = 1; index + 1 < raw.size(); ++index) {
-            if (raw[index] == '\'' && index + 1 < raw.size() - 1 && raw[index + 1] == '\'') {
-                text.push_back('\'');
-                ++index;
-            } else {
-                text.push_back(raw[index]);
-            }
-        }
-        return TrimAscii(std::move(text));
-    }
-    return raw;
+    message += ")";
+    return message;
 }
 
-std::size_t RoundUpFitsBlock(std::size_t value)
+[[noreturn]] void ThrowCfitsioError(
+    FitsFileErrorCode code,
+    std::string_view message,
+    int status)
 {
-    constexpr std::size_t kFitsBlockSize = 2880;
-    return ((value + kFitsBlockSize - 1U) / kFitsBlockSize) * kFitsBlockSize;
-}
-
-std::size_t FitsBitpixElementSize(std::int64_t bitpix)
-{
-    switch (bitpix) {
-    case 8:
-        return 1;
-    case 16:
-        return 2;
-    case 32:
-    case -32:
-        return 4;
-    case 64:
-    case -64:
-        return 8;
-    default:
-        return 0;
-    }
-}
-
-std::size_t FitsTableRowDataSize(const FitsHeader& header)
-{
-    const std::int64_t row_width = FitsInteger(header, "NAXIS1");
-    const std::int64_t row_count = FitsInteger(header, "NAXIS2");
-    if (row_width < 0 || row_count < 0) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS binary table has invalid dimensions.");
-    }
-    const auto width = static_cast<std::size_t>(row_width);
-    const auto count = static_cast<std::size_t>(row_count);
-    if (width != 0 && count > std::numeric_limits<std::size_t>::max() / width) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS binary table dimensions overflow.");
-    }
-    return width * count;
-}
-
-std::size_t FitsDataSize(const FitsHeader& header)
-{
-    const std::string xtension = UpperAscii(FitsValue(header, "XTENSION").value_or({}));
-    if (xtension == "BINTABLE") {
-        const std::int64_t heap_bytes = FitsInteger(header, "PCOUNT");
-        if (heap_bytes < 0) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS binary table has invalid dimensions.");
-        }
-        const auto heap = static_cast<std::size_t>(heap_bytes);
-        const std::size_t table_bytes = FitsTableRowDataSize(header);
-        if (heap > std::numeric_limits<std::size_t>::max() - table_bytes) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS binary table heap size overflows.");
-        }
-        return table_bytes + heap;
-    }
-
-    const std::int64_t axis_count = FitsInteger(header, "NAXIS");
-    if (axis_count <= 0) {
-        return 0;
-    }
-    const std::size_t element_size = FitsBitpixElementSize(FitsInteger(header, "BITPIX"));
-    if (element_size == 0) {
-        throw FitsFileError(FitsFileErrorCode::UnsupportedFormat, "FITS image BITPIX is not supported.");
-    }
-
-    std::size_t element_count = 1;
-    for (std::int64_t axis = 1; axis <= axis_count; ++axis) {
-        const std::int64_t axis_size = FitsInteger(header, "NAXIS" + std::to_string(axis));
-        if (axis_size < 0) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS image has invalid axis dimensions.");
-        }
-        if (axis_size == 0) {
-            return 0;
-        }
-        if (element_count > std::numeric_limits<std::size_t>::max() / static_cast<std::size_t>(axis_size)) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS image dimensions overflow.");
-        }
-        element_count *= static_cast<std::size_t>(axis_size);
-    }
-    if (element_count > std::numeric_limits<std::size_t>::max() / element_size) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS image byte size overflows.");
-    }
-    return element_count * element_size;
-}
-
-std::optional<FitsColumn> ParseFitsColumn(const FitsHeader& header, std::size_t column_index, std::size_t byte_offset)
-{
-    const std::optional<std::string> name = FitsValue(header, "TTYPE" + std::to_string(column_index));
-    const std::optional<std::string> form = FitsValue(header, "TFORM" + std::to_string(column_index));
-    if (!name || !form) {
-        return std::nullopt;
-    }
-
-    const std::string tform = TrimAscii(*form);
-    std::size_t cursor = 0;
-    while (cursor < tform.size() && std::isdigit(static_cast<unsigned char>(tform[cursor])) != 0) {
-        ++cursor;
-    }
-    const std::size_t repeat =
-        cursor == 0 ? 1U : ParsePositiveSize(std::string_view(tform).substr(0, cursor)).value_or(0);
-    if (repeat == 0 || cursor >= tform.size()) {
-        return std::nullopt;
-    }
-
-    const char code = static_cast<char>(std::toupper(static_cast<unsigned char>(tform[cursor])));
-    std::size_t element_size = 0;
-    switch (code) {
-    case 'A':
-    case 'B':
-    case 'L':
-        element_size = 1;
-        break;
-    case 'I':
-        element_size = 2;
-        break;
-    case 'J':
-    case 'E':
-        element_size = 4;
-        break;
-    case 'K':
-    case 'D':
-        element_size = 8;
-        break;
-    default:
-        return std::nullopt;
-    }
-
-    if (repeat > std::numeric_limits<std::size_t>::max() / element_size) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table column width overflows.");
-    }
-
-    return FitsColumn{
-        TrimAscii(*name),
-        NormalizedColumnName(*name),
-        repeat,
+    throw FitsFileError(
         code,
-        element_size,
-        byte_offset,
-        repeat * element_size,
-    };
+        CfitsioFailureMessage(message, status));
 }
 
-void PopulateFitsColumns(
-    FitsHdu& hdu,
+bool IsCfitsioTruncationStatus(int status)
+{
+    return status == END_OF_FILE ||
+        status == READ_ERROR ||
+        status == NO_END;
+}
+
+std::uintmax_t InspectSourceSize(
+    const std::filesystem::path& path,
+    std::uintmax_t max_file_bytes,
     const std::function<bool()>& cancellation_requested)
 {
     ThrowIfCanceled(cancellation_requested);
-    if (UpperAscii(FitsValue(hdu.header, "XTENSION").value_or({})) != "BINTABLE") {
-        return;
+    std::error_code size_error;
+    const std::uintmax_t file_size =
+        std::filesystem::file_size(path, size_error);
+    if (size_error) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "Could not inspect the FITS file size.");
     }
-
-    const std::int64_t field_count = FitsInteger(hdu.header, "TFIELDS");
-    if (field_count <= 0) {
-        return;
-    }
-    const std::int64_t row_width_value = FitsInteger(hdu.header, "NAXIS1");
-    if (row_width_value < 0) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS binary table has invalid dimensions.");
-    }
-    const auto row_width = static_cast<std::size_t>(row_width_value);
-
-    std::size_t offset = 0;
-    std::vector<FitsColumn> columns;
-    columns.reserve(static_cast<std::size_t>(field_count));
-    for (std::int64_t index = 1; index <= field_count; ++index) {
-        if ((static_cast<std::size_t>(index) & 0xffU) == 1U) {
-            ThrowIfCanceled(cancellation_requested);
-        }
-        const std::optional<FitsColumn> column = ParseFitsColumn(hdu.header, static_cast<std::size_t>(index), offset);
-        if (!column) {
-            hdu.columns.clear();
-            return;
-        }
-        if (column->byte_width > row_width || offset > row_width - column->byte_width) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table column layout exceeds NAXIS1 row width.");
-        }
-        offset += column->byte_width;
-        columns.push_back(*column);
+    if (file_size > max_file_bytes) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "FITS file is too large for the synchronous single-spectrum loader.");
     }
     ThrowIfCanceled(cancellation_requested);
-    if (offset != row_width) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table column layout does not match NAXIS1 row width.");
+    return file_size;
+}
+
+std::vector<unsigned char> InflateGzipFile(
+    const std::filesystem::path& path,
+    std::uintmax_t compressed_size,
+    std::size_t max_inflated_bytes,
+    const std::function<bool()>& cancellation_requested)
+{
+    ThrowIfCanceled(cancellation_requested);
+    if (compressed_size == 0) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "Compressed FITS file is empty.");
     }
-    hdu.columns = std::move(columns);
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "Could not open the compressed FITS file.");
+    }
+
+    z_stream stream = {};
+    if (inflateInit2(&stream, MAX_WBITS + 16) != Z_OK) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "Could not initialize gzip decompression.");
+    }
+    const InflateEndGuard inflate_guard(stream);
+
+    std::array<unsigned char, kTransportChunkBytes> input_buffer = {};
+    std::array<unsigned char, kTransportChunkBytes> output_buffer = {};
+    std::vector<unsigned char> output;
+    bool input_finished = false;
+    bool member_finished = false;
+
+    for (;;) {
+        ThrowIfCanceled(cancellation_requested);
+        if (stream.avail_in == 0 && !input_finished) {
+            input.read(
+                reinterpret_cast<char*>(input_buffer.data()),
+                static_cast<std::streamsize>(input_buffer.size()));
+            const std::streamsize bytes_read = input.gcount();
+            if (input.bad()) {
+                throw FitsFileError(
+                    FitsFileErrorCode::OpenFailed,
+                    "Could not read the compressed FITS file.");
+            }
+            if (bytes_read == 0) {
+                if (!input.eof()) {
+                    throw FitsFileError(
+                        FitsFileErrorCode::OpenFailed,
+                        "Could not read the compressed FITS file.");
+                }
+                input_finished = true;
+            } else {
+                stream.next_in = reinterpret_cast<Bytef*>(
+                    input_buffer.data());
+                stream.avail_in = static_cast<uInt>(bytes_read);
+                input_finished = input.eof();
+            }
+        }
+
+        if (member_finished) {
+            if (stream.avail_in == 0 && input_finished) {
+                break;
+            }
+
+            Bytef* const remaining_input = stream.next_in;
+            const uInt remaining_count = stream.avail_in;
+            if (inflateReset2(&stream, MAX_WBITS + 16) != Z_OK) {
+                throw FitsFileError(
+                    FitsFileErrorCode::OpenFailed,
+                    "Could not continue gzip decompression.");
+            }
+            stream.next_in = remaining_input;
+            stream.avail_in = remaining_count;
+            member_finished = false;
+        }
+
+        if (stream.avail_in == 0 && input_finished) {
+            throw FitsFileError(
+                FitsFileErrorCode::OpenFailed,
+                "Could not decompress the gzip FITS file.");
+        }
+
+        stream.next_out = reinterpret_cast<Bytef*>(
+            output_buffer.data());
+        stream.avail_out = static_cast<uInt>(output_buffer.size());
+        const int result = inflate(&stream, Z_NO_FLUSH);
+        ThrowIfCanceled(cancellation_requested);
+
+        const std::size_t produced =
+            output_buffer.size() - stream.avail_out;
+        if (produced > max_inflated_bytes ||
+            output.size() > max_inflated_bytes - produced) {
+            throw FitsFileError(
+                FitsFileErrorCode::UnsupportedFormat,
+                "Gzipped FITS expands beyond the synchronous single-spectrum loader limit.");
+        }
+        output.insert(
+            output.end(),
+            output_buffer.begin(),
+            output_buffer.begin() +
+                static_cast<std::ptrdiff_t>(produced));
+
+        if (result == Z_STREAM_END) {
+            member_finished = true;
+            continue;
+        }
+        if (result != Z_OK ||
+            (input_finished && stream.avail_in == 0 && produced == 0)) {
+            throw FitsFileError(
+                FitsFileErrorCode::OpenFailed,
+                "Could not decompress the gzip FITS file.");
+        }
+    }
+
+    ThrowIfCanceled(cancellation_requested);
+    if (output.empty()) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "Compressed FITS file contains no data.");
+    }
+    return output;
 }
 
-std::uint16_t ReadBigEndianU16(const unsigned char* bytes)
+std::size_t CheckedSize(
+    LONGLONG value,
+    std::string_view invalid_message)
 {
-    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[0]) << 8U) | bytes[1]);
+    if (value < 0 ||
+        static_cast<unsigned long long>(value) >
+            static_cast<unsigned long long>(
+                std::numeric_limits<std::size_t>::max())) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            std::string(invalid_message));
+    }
+    return static_cast<std::size_t>(value);
 }
 
-std::uint32_t ReadBigEndianU32(const unsigned char* bytes)
+LONGLONG CheckedCfitsioIndex(
+    std::size_t value,
+    std::string_view invalid_message)
 {
-    return (static_cast<std::uint32_t>(bytes[0]) << 24U) | (static_cast<std::uint32_t>(bytes[1]) << 16U) |
-           (static_cast<std::uint32_t>(bytes[2]) << 8U) | static_cast<std::uint32_t>(bytes[3]);
+    if (value > static_cast<std::size_t>(
+                    std::numeric_limits<LONGLONG>::max())) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            std::string(invalid_message));
+    }
+    return static_cast<LONGLONG>(value);
 }
 
-std::uint64_t ReadBigEndianU64(const unsigned char* bytes)
+std::optional<FitsNumericType> NumericTypeForImage(int bitpix)
 {
-    std::uint64_t value = 0;
-    for (std::size_t index = 0; index < 8; ++index) {
-        value = (value << 8U) | static_cast<std::uint64_t>(bytes[index]);
+    switch (bitpix) {
+    case BYTE_IMG:
+        return FitsNumericType::UnsignedByte;
+    case SHORT_IMG:
+        return FitsNumericType::SignedInt16;
+    case LONG_IMG:
+        return FitsNumericType::SignedInt32;
+    case LONGLONG_IMG:
+        return FitsNumericType::SignedInt64;
+    case FLOAT_IMG:
+        return FitsNumericType::Float32;
+    case DOUBLE_IMG:
+        return FitsNumericType::Float64;
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<FitsNumericType> NumericTypeForColumn(
+    int type_code)
+{
+    if (type_code < 0) {
+        return std::nullopt;
+    }
+    switch (type_code) {
+    case TBYTE:
+        return FitsNumericType::UnsignedByte;
+    case TSHORT:
+        return FitsNumericType::SignedInt16;
+    case TINT:
+    case TLONG:
+        return FitsNumericType::SignedInt32;
+    case TLONGLONG:
+        return FitsNumericType::SignedInt64;
+    case TFLOAT:
+        return FitsNumericType::Float32;
+    case TDOUBLE:
+        return FitsNumericType::Float64;
+    default:
+        return std::nullopt;
+    }
+}
+
+FitsHduKind HduKindFromCfitsio(int hdu_type)
+{
+    switch (hdu_type) {
+    case IMAGE_HDU:
+        return FitsHduKind::Image;
+    case BINARY_TBL:
+        return FitsHduKind::BinaryTable;
+    case ASCII_TBL:
+        return FitsHduKind::AsciiTable;
+    default:
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "FITS HDU type is not supported.");
+    }
+}
+
+void MoveToHdu(
+    fitsfile* handle,
+    const FitsHdu& hdu,
+    const std::function<bool()>& cancellation_requested)
+{
+    ThrowIfCanceled(cancellation_requested);
+    if (hdu.index >= static_cast<std::size_t>(
+                         std::numeric_limits<int>::max())) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS HDU index is not addressable.");
+    }
+    int status = 0;
+    int hdu_type = 0;
+    fits_movabs_hdu(
+        handle,
+        static_cast<int>(hdu.index + 1U),
+        &hdu_type,
+        &status);
+    ThrowIfCanceled(cancellation_requested);
+    if (status != 0) {
+        ThrowCfitsioError(
+            FitsFileErrorCode::InvalidShape,
+            "Could not select the requested FITS HDU.",
+            status);
+    }
+}
+
+std::optional<std::string> ReadOptionalStringKey(
+    fitsfile* handle,
+    std::string_view key,
+    FitsFileErrorCode failure_code,
+    std::string_view failure_message,
+    const std::function<bool()>& cancellation_requested)
+{
+    ThrowIfCanceled(cancellation_requested);
+    fits_clear_errmsg();
+    std::array<char, FLEN_VALUE> value = {};
+    const std::string key_name(key);
+    int status = 0;
+    fits_read_key(
+        handle,
+        TSTRING,
+        key_name.c_str(),
+        value.data(),
+        nullptr,
+        &status);
+    ThrowIfCanceled(cancellation_requested);
+    if (status == KEY_NO_EXIST || status == VALUE_UNDEFINED) {
+        fits_clear_errmsg();
+        return std::nullopt;
+    }
+    if (status != 0) {
+        ThrowCfitsioError(failure_code, failure_message, status);
+    }
+    return TrimAscii(value.data());
+}
+
+template <typename T>
+std::optional<T> ReadOptionalTypedKey(
+    fitsfile* handle,
+    int data_type,
+    std::string_view key,
+    std::string_view failure_message,
+    const std::function<bool()>& cancellation_requested)
+{
+    ThrowIfCanceled(cancellation_requested);
+    fits_clear_errmsg();
+    T value = {};
+    const std::string key_name(key);
+    int status = 0;
+    fits_read_key(
+        handle,
+        data_type,
+        key_name.c_str(),
+        &value,
+        nullptr,
+        &status);
+    ThrowIfCanceled(cancellation_requested);
+    if (status == KEY_NO_EXIST || status == VALUE_UNDEFINED) {
+        fits_clear_errmsg();
+        return std::nullopt;
+    }
+    if (status != 0) {
+        ThrowCfitsioError(
+            FitsFileErrorCode::InvalidShape,
+            failure_message,
+            status);
     }
     return value;
 }
 
-double ReadFitsNumericValue(const unsigned char* bytes, char code)
+std::uintmax_t ValidateCurrentHduRange(
+    fitsfile* handle,
+    std::uintmax_t source_length,
+    const std::function<bool()>& cancellation_requested)
 {
-    switch (code) {
-    case 'B':
-        return static_cast<double>(bytes[0]);
-    case 'I':
-        return static_cast<double>(static_cast<std::int16_t>(ReadBigEndianU16(bytes)));
-    case 'J':
-        return static_cast<double>(static_cast<std::int32_t>(ReadBigEndianU32(bytes)));
-    case 'K':
-        return static_cast<double>(static_cast<std::int64_t>(ReadBigEndianU64(bytes)));
-    case 'E': {
-        const std::uint32_t bits = ReadBigEndianU32(bytes);
-        float value = 0.0F;
-        std::memcpy(&value, &bits, sizeof(value));
-        return static_cast<double>(value);
+    ThrowIfCanceled(cancellation_requested);
+    LONGLONG header_start = 0;
+    LONGLONG data_start = 0;
+    LONGLONG data_end = 0;
+    int status = 0;
+    fits_get_hduaddrll(
+        handle,
+        &header_start,
+        &data_start,
+        &data_end,
+        &status);
+    ThrowIfCanceled(cancellation_requested);
+    if (status != 0) {
+        ThrowCfitsioError(
+            FitsFileErrorCode::InvalidShape,
+            "Could not inspect the FITS HDU storage range.",
+            status);
     }
-    case 'D': {
-        const std::uint64_t bits = ReadBigEndianU64(bytes);
-        double value = 0.0;
-        std::memcpy(&value, &bits, sizeof(value));
-        return value;
+    if (header_start < 0 || data_start < header_start ||
+        data_end < data_start) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS HDU has an invalid storage range.");
     }
-    default:
-        throw FitsFileError(FitsFileErrorCode::UnsupportedFormat, "FITS numeric column type is not supported.");
+    const std::uintmax_t expected_end =
+        static_cast<std::uintmax_t>(data_end);
+    if (expected_end > source_length) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS HDU data is truncated.");
+    }
+    return expected_end;
+}
+
+std::vector<FitsHdu> InspectHdus(
+    fitsfile* handle,
+    std::uintmax_t source_length,
+    const std::function<bool()>& cancellation_requested)
+{
+    std::vector<FitsHdu> hdus;
+    std::uintmax_t last_hdu_end = 0;
+    for (int hdu_number = 1;; ++hdu_number) {
+        ThrowIfCanceled(cancellation_requested);
+        int hdu_type = 0;
+        int status = 0;
+        fits_movabs_hdu(
+            handle,
+            hdu_number,
+            &hdu_type,
+            &status);
+        ThrowIfCanceled(cancellation_requested);
+        if (status == END_OF_FILE) {
+            fits_clear_errmsg();
+            if (!hdus.empty() && last_hdu_end != source_length) {
+                throw FitsFileError(
+                    FitsFileErrorCode::InvalidShape,
+                    "FITS source contains data outside its declared HDUs.");
+            }
+            break;
+        }
+        if (status != 0) {
+            ThrowCfitsioError(
+                FitsFileErrorCode::InvalidShape,
+                "Could not inspect a FITS HDU.",
+                status);
+        }
+
+        last_hdu_end = ValidateCurrentHduRange(
+            handle,
+            source_length,
+            cancellation_requested);
+
+        FitsHdu hdu;
+        hdu.index = static_cast<std::size_t>(hdu_number - 1);
+        hdu.kind = HduKindFromCfitsio(hdu_type);
+        if (hdu.kind == FitsHduKind::Image) {
+            int axis_count = 0;
+            status = 0;
+            fits_get_img_dim(handle, &axis_count, &status);
+            ThrowIfCanceled(cancellation_requested);
+            if (status != 0 || axis_count < 0) {
+                if (status != 0) {
+                    ThrowCfitsioError(
+                        FitsFileErrorCode::InvalidShape,
+                        "Could not inspect FITS image dimensions.",
+                        status);
+                }
+                throw FitsFileError(
+                    FitsFileErrorCode::InvalidShape,
+                    "FITS image has invalid dimensions.");
+            }
+
+            std::vector<LONGLONG> axes(
+                static_cast<std::size_t>(axis_count));
+            if (!axes.empty()) {
+                status = 0;
+                fits_get_img_sizell(
+                    handle,
+                    axis_count,
+                    axes.data(),
+                    &status);
+                ThrowIfCanceled(cancellation_requested);
+                if (status != 0) {
+                    ThrowCfitsioError(
+                        FitsFileErrorCode::InvalidShape,
+                        "Could not inspect FITS image dimensions.",
+                        status);
+                }
+            }
+            hdu.image_axes.reserve(axes.size());
+            for (const LONGLONG axis : axes) {
+                ThrowIfCanceled(cancellation_requested);
+                hdu.image_axes.push_back(CheckedSize(
+                    axis,
+                    "FITS image has invalid dimensions."));
+            }
+
+            int bitpix = 0;
+            status = 0;
+            fits_get_img_type(handle, &bitpix, &status);
+            ThrowIfCanceled(cancellation_requested);
+            if (status != 0) {
+                ThrowCfitsioError(
+                    FitsFileErrorCode::InvalidShape,
+                    "Could not inspect the FITS image type.",
+                    status);
+            }
+            hdu.image_type = NumericTypeForImage(bitpix);
+        } else if (hdu.kind == FitsHduKind::BinaryTable) {
+            LONGLONG row_count = 0;
+            status = 0;
+            fits_get_num_rowsll(handle, &row_count, &status);
+            ThrowIfCanceled(cancellation_requested);
+            if (status != 0) {
+                ThrowCfitsioError(
+                    FitsFileErrorCode::InvalidShape,
+                    "Could not inspect FITS table rows.",
+                    status);
+            }
+            hdu.row_count = CheckedSize(
+                row_count,
+                "FITS binary table has invalid dimensions.");
+
+            const std::optional<LONGLONG> row_width_value =
+                ReadOptionalTypedKey<LONGLONG>(
+                    handle,
+                    TLONGLONG,
+                    "NAXIS1",
+                    "Could not inspect the FITS table row width.",
+                    cancellation_requested);
+            if (!row_width_value) {
+                throw FitsFileError(
+                    FitsFileErrorCode::InvalidShape,
+                    "FITS binary table is missing its row width.");
+            }
+            const std::size_t row_width = CheckedSize(
+                *row_width_value,
+                "FITS binary table has an invalid row width.");
+
+            int column_count = 0;
+            status = 0;
+            fits_get_num_cols(handle, &column_count, &status);
+            ThrowIfCanceled(cancellation_requested);
+            if (status != 0 || column_count < 0) {
+                if (status != 0) {
+                    ThrowCfitsioError(
+                        FitsFileErrorCode::InvalidShape,
+                        "Could not inspect FITS table columns.",
+                        status);
+                }
+                throw FitsFileError(
+                    FitsFileErrorCode::InvalidShape,
+                    "FITS binary table has invalid columns.");
+            }
+            hdu.columns.reserve(
+                static_cast<std::size_t>(column_count));
+            std::size_t numeric_row_width = 0;
+            bool all_columns_are_fixed_numeric = true;
+            for (int column_number = 1;
+                 column_number <= column_count;
+                 ++column_number) {
+                ThrowIfCanceled(cancellation_requested);
+                int type_code = 0;
+                LONGLONG repeat = 0;
+                LONGLONG width = 0;
+                status = 0;
+                fits_get_coltypell(
+                    handle,
+                    column_number,
+                    &type_code,
+                    &repeat,
+                    &width,
+                    &status);
+                ThrowIfCanceled(cancellation_requested);
+                if (status != 0) {
+                    ThrowCfitsioError(
+                        FitsFileErrorCode::InvalidShape,
+                        "Could not inspect a FITS table column.",
+                        status);
+                }
+
+                const std::size_t column_repeat = CheckedSize(
+                    repeat,
+                    "FITS table column has invalid dimensions.");
+                const std::optional<FitsNumericType> numeric_type =
+                    NumericTypeForColumn(type_code);
+                if (!numeric_type) {
+                    all_columns_are_fixed_numeric = false;
+                } else {
+                    const std::size_t element_width = CheckedSize(
+                        width,
+                        "FITS table column has an invalid element width.");
+                    if (column_repeat == 0 || element_width == 0 ||
+                        column_repeat >
+                            (std::numeric_limits<std::size_t>::max() -
+                             numeric_row_width) /
+                                element_width) {
+                        throw FitsFileError(
+                            FitsFileErrorCode::InvalidShape,
+                            "FITS table column layout overflows.");
+                    }
+                    numeric_row_width += column_repeat * element_width;
+                }
+
+                const std::string key =
+                    "TTYPE" + std::to_string(column_number);
+                const std::string name = ReadOptionalStringKey(
+                    handle,
+                    key,
+                    FitsFileErrorCode::InvalidShape,
+                    "Could not read a FITS table column name.",
+                    cancellation_requested).value_or(std::string{});
+                hdu.columns.push_back(FitsColumn{
+                    .index = static_cast<std::size_t>(column_number),
+                    .name = name,
+                    .normalized_name = NormalizedColumnName(name),
+                    .repeat = column_repeat,
+                    .numeric_type = numeric_type,
+                });
+            }
+            if (all_columns_are_fixed_numeric &&
+                numeric_row_width != row_width) {
+                throw FitsFileError(
+                    FitsFileErrorCode::InvalidShape,
+                    "FITS table column layout does not match its row width.");
+            }
+        }
+        hdus.push_back(std::move(hdu));
+    }
+    if (hdus.empty()) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "FITS file has no readable HDUs.");
+    }
+    ThrowIfCanceled(cancellation_requested);
+    return hdus;
+}
+
+void ReadColumnChunk(
+    fitsfile* handle,
+    const FitsColumn& column,
+    LONGLONG first_row,
+    LONGLONG first_element,
+    std::size_t count,
+    double* output,
+    const std::function<bool()>& cancellation_requested)
+{
+    ThrowIfCanceled(cancellation_requested);
+    int status = 0;
+    int any_null = 0;
+    double null_value = std::numeric_limits<double>::quiet_NaN();
+    fits_read_col(
+        handle,
+        TDOUBLE,
+        static_cast<int>(column.index),
+        first_row,
+        first_element,
+        CheckedCfitsioIndex(
+            count,
+            "FITS table read size is not addressable."),
+        &null_value,
+        output,
+        &any_null,
+        &status);
+    ThrowIfCanceled(cancellation_requested);
+    if (status != 0) {
+        ThrowCfitsioError(
+            FitsFileErrorCode::InvalidShape,
+            "Could not read the requested FITS table values.",
+            status);
     }
 }
 
 }  // namespace
 
-FitsFileError::FitsFileError(FitsFileErrorCode code, std::string message)
+FitsFileError::FitsFileError(
+    FitsFileErrorCode code,
+    std::string message)
     : std::runtime_error(std::move(message))
     , code_(code)
 {
@@ -425,257 +791,268 @@ FitsFileErrorCode FitsFileError::code() const noexcept
     return code_;
 }
 
-std::vector<unsigned char> ReadFitsFileBytes(
-    const std::filesystem::path& path,
-    std::uintmax_t max_bytes,
-    const std::function<bool()>& cancellation_requested)
+FitsFile::FitsFile(std::unique_ptr<Impl> impl) noexcept
+    : impl_(std::move(impl))
 {
-    ThrowIfCanceled(cancellation_requested);
-    std::error_code size_error;
-    const std::uintmax_t file_size = std::filesystem::file_size(path, size_error);
-    if (size_error) {
-        throw FitsFileError(FitsFileErrorCode::OpenFailed, "Could not inspect the FITS file size.");
-    }
-    if (file_size > max_bytes) {
-        throw FitsFileError(
-            FitsFileErrorCode::UnsupportedFormat,
-            "FITS file is too large for the synchronous single-spectrum loader.");
-    }
-    if (file_size > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
-        throw FitsFileError(FitsFileErrorCode::UnsupportedFormat, "FITS file size is not addressable.");
-    }
-
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
-        throw FitsFileError(FitsFileErrorCode::OpenFailed, "Could not open the FITS file.");
-    }
-
-    std::vector<unsigned char> bytes(static_cast<std::size_t>(file_size));
-    constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
-    for (std::size_t offset = 0; offset < bytes.size();) {
-        ThrowIfCanceled(cancellation_requested);
-        const std::size_t chunk_size = std::min(kReadChunkBytes, bytes.size() - offset);
-        stream.read(
-            reinterpret_cast<char*>(bytes.data() + offset),
-            static_cast<std::streamsize>(chunk_size));
-        if (!stream) {
-            throw FitsFileError(FitsFileErrorCode::OpenFailed, "Could not read the complete FITS file.");
-        }
-        offset += chunk_size;
-    }
-    ThrowIfCanceled(cancellation_requested);
-    return bytes;
 }
 
-std::vector<unsigned char> DecompressGzipFitsBytes(
-    const std::vector<unsigned char>& compressed,
+FitsFile::~FitsFile() = default;
+FitsFile::FitsFile(FitsFile&&) noexcept = default;
+FitsFile& FitsFile::operator=(FitsFile&&) noexcept = default;
+
+FitsFile FitsFile::Open(
+    const std::filesystem::path& path,
+    FitsSourceEncoding encoding,
+    std::uintmax_t max_file_bytes,
     std::size_t max_inflated_bytes,
     const std::function<bool()>& cancellation_requested)
 {
+    const std::uintmax_t file_size = InspectSourceSize(
+        path,
+        max_file_bytes,
+        cancellation_requested);
+    auto impl = std::make_unique<Impl>();
+
+    fits_clear_errmsg();
+    int status = 0;
+    if (encoding == FitsSourceEncoding::Gzip) {
+        impl->memory = InflateGzipFile(
+            path,
+            file_size,
+            max_inflated_bytes,
+            cancellation_requested);
+        impl->memory_address = impl->memory.data();
+        impl->memory_size = impl->memory.size();
+        fits_open_memfile(
+            &impl->handle,
+            "SpecForge gzip transport",
+            READONLY,
+            &impl->memory_address,
+            &impl->memory_size,
+            0,
+            nullptr,
+            &status);
+    } else {
+        const std::string path_utf8 = PathToUtf8(path);
+        fits_open_diskfile(
+            &impl->handle,
+            path_utf8.c_str(),
+            READONLY,
+            &status);
+    }
     ThrowIfCanceled(cancellation_requested);
-    if (compressed.empty() || compressed.size() > std::numeric_limits<uInt>::max()) {
-        throw FitsFileError(FitsFileErrorCode::OpenFailed, "Compressed FITS file is empty or too large.");
-    }
-
-    z_stream stream = {};
-    stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(compressed.data()));
-    stream.avail_in = static_cast<uInt>(compressed.size());
-    if (inflateInit2(&stream, MAX_WBITS + 16) != Z_OK) {
-        throw FitsFileError(FitsFileErrorCode::OpenFailed, "Could not initialize gzip decompression.");
-    }
-    const InflateEndGuard inflate_guard(stream);
-
-    std::vector<unsigned char> output;
-    std::array<unsigned char, 64 * 1024> buffer = {};
-    int result = Z_OK;
-    while (result != Z_STREAM_END) {
-        ThrowIfCanceled(cancellation_requested);
-        stream.next_out = reinterpret_cast<Bytef*>(buffer.data());
-        stream.avail_out = static_cast<uInt>(buffer.size());
-        result = inflate(&stream, Z_NO_FLUSH);
-        if (result != Z_OK && result != Z_STREAM_END) {
-            throw FitsFileError(FitsFileErrorCode::OpenFailed, "Could not decompress the gzip FITS file.");
-        }
-
-        const std::size_t produced = buffer.size() - stream.avail_out;
-        if (produced > max_inflated_bytes || output.size() > max_inflated_bytes - produced) {
+    if (status != 0 || impl->handle == nullptr) {
+        if (status == 0) {
             throw FitsFileError(
-                FitsFileErrorCode::UnsupportedFormat,
-                "Gzipped FITS expands beyond the synchronous single-spectrum loader limit.");
+                FitsFileErrorCode::OpenFailed,
+                "CFITSIO could not open the FITS file.");
         }
-        output.insert(output.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(produced));
+        const bool truncated = IsCfitsioTruncationStatus(status);
+        const FitsFileErrorCode error_code =
+            truncated
+            ? FitsFileErrorCode::InvalidShape
+            : FitsFileErrorCode::OpenFailed;
+        ThrowCfitsioError(
+            error_code,
+            truncated
+                ? "The FITS input is truncated."
+                : "CFITSIO could not open the FITS file.",
+            status);
     }
 
-    ThrowIfCanceled(cancellation_requested);
-    return output;
+    impl->hdus = InspectHdus(
+        impl->handle,
+        encoding == FitsSourceEncoding::Gzip
+            ? static_cast<std::uintmax_t>(impl->memory.size())
+            : file_size,
+        cancellation_requested);
+    return FitsFile(std::move(impl));
 }
 
-std::optional<std::string> FitsValue(const FitsHeader& header, std::string_view key)
+const std::vector<FitsHdu>& FitsFile::hdus() const noexcept
 {
-    const auto found = header.values.find(UpperAscii(std::string(key)));
-    if (found == header.values.end()) {
+    return impl_->hdus;
+}
+
+std::optional<std::string> FitsFile::ReadKeywordString(
+    const FitsHdu& hdu,
+    std::string_view key,
+    const std::function<bool()>& cancellation_requested) const
+{
+    MoveToHdu(impl_->handle, hdu, cancellation_requested);
+    return ReadOptionalStringKey(
+        impl_->handle,
+        key,
+        FitsFileErrorCode::InvalidShape,
+        "Could not read a FITS keyword.",
+        cancellation_requested);
+}
+
+std::optional<std::int64_t> FitsFile::ReadKeywordInteger(
+    const FitsHdu& hdu,
+    std::string_view key,
+    const std::function<bool()>& cancellation_requested) const
+{
+    MoveToHdu(impl_->handle, hdu, cancellation_requested);
+    const std::optional<LONGLONG> value =
+        ReadOptionalTypedKey<LONGLONG>(
+            impl_->handle,
+            TLONGLONG,
+            key,
+            "Could not read an integer FITS keyword.",
+            cancellation_requested);
+    if (!value) {
         return std::nullopt;
     }
-    return found->second;
+    if (*value < static_cast<LONGLONG>(
+                     std::numeric_limits<std::int64_t>::min()) ||
+        *value > static_cast<LONGLONG>(
+                     std::numeric_limits<std::int64_t>::max())) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS integer keyword is out of range.");
+    }
+    return static_cast<std::int64_t>(*value);
 }
 
-std::int64_t FitsInteger(const FitsHeader& header, std::string_view key, std::int64_t default_value)
+std::optional<double> FitsFile::ReadKeywordDouble(
+    const FitsHdu& hdu,
+    std::string_view key,
+    const std::function<bool()>& cancellation_requested) const
 {
-    const std::optional<std::string> value = FitsValue(header, key);
-    if (!value) {
-        return default_value;
-    }
-    return ParseInteger(*value).value_or(default_value);
+    MoveToHdu(impl_->handle, hdu, cancellation_requested);
+    return ReadOptionalTypedKey<double>(
+        impl_->handle,
+        TDOUBLE,
+        key,
+        "Could not read a numeric FITS keyword.",
+        cancellation_requested);
 }
 
-std::optional<double> FitsDouble(const FitsHeader& header, std::string_view key)
-{
-    const std::optional<std::string> value = FitsValue(header, key);
-    if (!value) {
-        return std::nullopt;
-    }
-    return ParseDouble(std::string(*value));
-}
-
-std::vector<FitsHdu> ParseFitsHdus(
-    const std::vector<unsigned char>& bytes,
-    const std::function<bool()>& cancellation_requested)
-{
-    constexpr std::size_t kFitsBlockSize = 2880;
-    std::vector<FitsHdu> hdus;
-    std::size_t offset = 0;
-
-    while (offset + kFitsBlockSize <= bytes.size()) {
-        ThrowIfCanceled(cancellation_requested);
-        FitsHdu hdu;
-        hdu.index = hdus.size();
-        std::size_t header_offset = offset;
-        bool found_end = false;
-
-        while (header_offset + kFitsBlockSize <= bytes.size()) {
-            ThrowIfCanceled(cancellation_requested);
-            for (std::size_t card_offset = 0; card_offset < kFitsBlockSize; card_offset += 80U) {
-                const std::size_t absolute = header_offset + card_offset;
-                const std::string card(
-                    reinterpret_cast<const char*>(bytes.data() + absolute),
-                    reinterpret_cast<const char*>(bytes.data() + absolute + 80U));
-                const std::string key = TrimAscii(card.substr(0, 8));
-                if (key == "END") {
-                    found_end = true;
-                    break;
-                }
-                if (card.size() >= 10 && card[8] == '=') {
-                    hdu.header.values[UpperAscii(key)] = ParseFitsCardValue(card);
-                }
-            }
-            header_offset += kFitsBlockSize;
-            if (found_end) {
-                break;
-            }
-        }
-
-        if (!found_end) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS header is missing END.");
-        }
-
-        hdu.data_offset = header_offset;
-        hdu.data_size = FitsDataSize(hdu.header);
-        if (hdu.data_offset > bytes.size() || hdu.data_size > bytes.size() - hdu.data_offset) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS HDU data is truncated.");
-        }
-        PopulateFitsColumns(hdu, cancellation_requested);
-        hdus.push_back(std::move(hdu));
-
-        offset = header_offset + RoundUpFitsBlock(hdus.back().data_size);
-    }
-
-    if (hdus.empty()) {
-        throw FitsFileError(FitsFileErrorCode::UnsupportedFormat, "FITS file has no readable HDUs.");
-    }
-    return hdus;
-}
-
-std::vector<double> ReadFitsColumnVector(
-    const std::vector<unsigned char>& bytes,
+std::vector<double> FitsFile::ReadColumnVector(
     const FitsHdu& hdu,
     const FitsColumn& column,
     std::size_t row_index,
     bool scalar_rows,
-    const std::function<bool()>& cancellation_requested)
+    const std::function<bool()>& cancellation_requested) const
 {
     ThrowIfCanceled(cancellation_requested);
-    const std::size_t row_width = static_cast<std::size_t>(FitsInteger(hdu.header, "NAXIS1"));
-    const std::size_t row_count = static_cast<std::size_t>(FitsInteger(hdu.header, "NAXIS2"));
-    const std::size_t table_data_size = FitsTableRowDataSize(hdu.header);
-    if (table_data_size > hdu.data_size) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table row data exceeds the HDU data range.");
+    if (hdu.kind != FitsHduKind::BinaryTable ||
+        !column.numeric_type || column.index == 0 ||
+        column.index > static_cast<std::size_t>(
+                           std::numeric_limits<int>::max())) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "FITS table column type is not supported.");
     }
-    std::vector<double> values;
-
-    if (scalar_rows) {
-        values.reserve(row_count);
-        for (std::size_t row = 0; row < row_count; ++row) {
-            if ((row & 0xfffU) == 0U) {
-                ThrowIfCanceled(cancellation_requested);
-            }
-            const std::size_t relative_offset = row * row_width + column.byte_offset;
-            if (relative_offset > table_data_size || column.element_size > table_data_size - relative_offset) {
-                throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table column data is truncated.");
-            }
-            const std::size_t offset = hdu.data_offset + relative_offset;
-            values.push_back(ReadFitsNumericValue(bytes.data() + offset, column.code));
-        }
-        ThrowIfCanceled(cancellation_requested);
-        return values;
+    if (scalar_rows && column.repeat != 1U) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS scalar-row column has an invalid repeat count.");
+    }
+    if (!scalar_rows && row_index >= hdu.row_count) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "Requested FITS table row is out of range.");
     }
 
-    if (row_index >= row_count) {
-        throw FitsFileError(FitsFileErrorCode::InvalidShape, "Requested FITS table row is out of range.");
-    }
-    values.reserve(column.repeat);
-    const std::size_t row_offset = row_index * row_width + column.byte_offset;
-    for (std::size_t item = 0; item < column.repeat; ++item) {
-        if ((item & 0xfffU) == 0U) {
-            ThrowIfCanceled(cancellation_requested);
-        }
-        const std::size_t relative_offset = row_offset + item * column.element_size;
-        if (relative_offset > table_data_size || column.element_size > table_data_size - relative_offset) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS table vector data is truncated.");
-        }
-        const std::size_t offset = hdu.data_offset + relative_offset;
-        values.push_back(ReadFitsNumericValue(bytes.data() + offset, column.code));
+    MoveToHdu(impl_->handle, hdu, cancellation_requested);
+    const std::size_t value_count =
+        scalar_rows ? hdu.row_count : column.repeat;
+    std::vector<double> values(value_count);
+    for (std::size_t offset = 0; offset < value_count;) {
+        const std::size_t count = std::min(
+            kCfitsioReadChunkElements,
+            value_count - offset);
+        const std::size_t row = scalar_rows ? offset : row_index;
+        const std::size_t element = scalar_rows ? 0U : offset;
+        ReadColumnChunk(
+            impl_->handle,
+            column,
+            CheckedCfitsioIndex(
+                row + 1U,
+                "FITS table row is not addressable."),
+            CheckedCfitsioIndex(
+                element + 1U,
+                "FITS table element is not addressable."),
+            count,
+            values.data() + offset,
+            cancellation_requested);
+        offset += count;
     }
     ThrowIfCanceled(cancellation_requested);
     return values;
 }
 
-std::vector<double> ReadFitsImageRow(
-    const std::vector<unsigned char>& bytes,
+std::vector<double> FitsFile::ReadImageRow(
     const FitsHdu& hdu,
     std::size_t row_index,
     std::size_t column_count,
-    const std::function<bool()>& cancellation_requested)
+    const std::function<bool()>& cancellation_requested) const
 {
     ThrowIfCanceled(cancellation_requested);
-    const std::int64_t bitpix = FitsInteger(hdu.header, "BITPIX");
-    const std::size_t element_size = FitsBitpixElementSize(bitpix);
-    if ((bitpix != -32 && bitpix != -64) || element_size == 0) {
-        throw FitsFileError(FitsFileErrorCode::UnsupportedFormat, "Only float32/float64 FITS image spectra are supported.");
+    if (hdu.kind != FitsHduKind::Image ||
+        (hdu.image_type != FitsNumericType::Float32 &&
+         hdu.image_type != FitsNumericType::Float64)) {
+        throw FitsFileError(
+            FitsFileErrorCode::UnsupportedFormat,
+            "Only float32/float64 FITS image spectra are supported.");
+    }
+    if (hdu.image_axes.empty() ||
+        hdu.image_axes.front() != column_count ||
+        hdu.image_axes.size() > 2U) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS image shape does not match the requested spectrum row.");
+    }
+    const std::size_t row_count =
+        hdu.image_axes.size() >= 2U ? hdu.image_axes[1] : 1U;
+    if (row_index >= row_count) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "Requested FITS image row is out of range.");
+    }
+    if (column_count != 0 &&
+        row_index >
+            (std::numeric_limits<std::size_t>::max() - 1U) /
+                column_count) {
+        throw FitsFileError(
+            FitsFileErrorCode::InvalidShape,
+            "FITS image row offset overflows.");
     }
 
-    std::vector<double> values;
-    values.reserve(column_count);
-    const std::size_t row_offset = hdu.data_offset + row_index * column_count * element_size;
-    for (std::size_t column = 0; column < column_count; ++column) {
-        if ((column & 0xfffU) == 0U) {
-            ThrowIfCanceled(cancellation_requested);
+    MoveToHdu(impl_->handle, hdu, cancellation_requested);
+    std::vector<double> values(column_count);
+    const std::size_t row_offset = row_index * column_count;
+    for (std::size_t offset = 0; offset < column_count;) {
+        ThrowIfCanceled(cancellation_requested);
+        const std::size_t count = std::min(
+            kCfitsioReadChunkElements,
+            column_count - offset);
+        int status = 0;
+        int any_null = 0;
+        double null_value = std::numeric_limits<double>::quiet_NaN();
+        fits_read_img(
+            impl_->handle,
+            TDOUBLE,
+            CheckedCfitsioIndex(
+                row_offset + offset + 1U,
+                "FITS image offset is not addressable."),
+            CheckedCfitsioIndex(
+                count,
+                "FITS image read size is not addressable."),
+            &null_value,
+            values.data() + offset,
+            &any_null,
+            &status);
+        ThrowIfCanceled(cancellation_requested);
+        if (status != 0) {
+            ThrowCfitsioError(
+                FitsFileErrorCode::InvalidShape,
+                "Could not read the requested FITS image values.",
+                status);
         }
-        const std::size_t offset = row_offset + column * element_size;
-        if (offset > bytes.size() || element_size > bytes.size() - offset) {
-            throw FitsFileError(FitsFileErrorCode::InvalidShape, "FITS image row data is truncated.");
-        }
-        const unsigned char* value_bytes = bytes.data() + offset;
-        values.push_back(ReadFitsNumericValue(value_bytes, bitpix == -32 ? 'E' : 'D'));
+        offset += count;
     }
     ThrowIfCanceled(cancellation_requested);
     return values;
