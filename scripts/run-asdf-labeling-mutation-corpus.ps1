@@ -1,7 +1,18 @@
+<#
+.SYNOPSIS
+Runs a bounded, deterministic production ASDF mutation corpus.
+
+.EXAMPLE
+scripts\run-asdf-labeling-mutation-corpus.ps1 `
+  -Cases 100000 `
+  -Seed 20260831 `
+  -ArtifactsDirectory build\asdf-labeling-mutation-long-run
+#>
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Seed = '0x78c0de2026',
-    [ValidateRange(1, 512)]
+    [Alias('Cases')]
+    [ValidateRange(1, 1000000)]
     [int]$CaseCount = 73,
     [ValidateRange(-1, [long]::MaxValue)]
     [long]$CaseIndex = -1,
@@ -9,9 +20,12 @@ param(
     [string]$ReplayFile = '',
     [ValidateRange(1, 8388608)]
     [int]$MaxInputBytes = 1048576,
+    [Alias('ArtifactsDirectory')]
     [string]$OutputDirectory = '',
     [ValidateRange(-1, [long]::MaxValue)]
     [long]$InjectFailureCase = -1,
+    [ValidateRange(-1, [long]::MaxValue)]
+    [long]$InjectAbruptExitCase = -1,
     [ValidateRange(60, 3600)]
     [int]$BuildTimeoutSec = 900
 )
@@ -138,6 +152,11 @@ try {
         $arguments.Add($InjectFailureCase.ToString(
             [Globalization.CultureInfo]::InvariantCulture))
     }
+    if ($InjectAbruptExitCase -ge 0) {
+        $arguments.Add('--inject-abrupt-exit-case')
+        $arguments.Add($InjectAbruptExitCase.ToString(
+            [Globalization.CultureInfo]::InvariantCulture))
+    }
 
     $nativeArguments = @($arguments | ForEach-Object {
         ConvertTo-NativeCommandLineArgument -Value $_
@@ -181,6 +200,12 @@ try {
             max_input_bytes = $MaxInputBytes
             inject_failure_case = if ($InjectFailureCase -ge 0) {
                 $InjectFailureCase
+            }
+            else {
+                $null
+            }
+            inject_abrupt_exit_case = if ($InjectAbruptExitCase -ge 0) {
+                $InjectAbruptExitCase
             }
             else {
                 $null

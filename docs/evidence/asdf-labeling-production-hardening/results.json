@@ -1,0 +1,418 @@
+{
+  "format_kind": "specforge.asdf_labeling.production_hardening_results",
+  "schema_version": 1,
+  "generated_at_utc": "2026-08-31T16:25:50.9727813Z",
+  "measurement_source_commit": "9873608166134a09ad72d38d807cf0a222321a32",
+  "benchmark_protocol": {
+    "build_configuration": "Release",
+    "warmup_iterations_per_operation": 1,
+    "measured_iterations_per_operation": 5,
+    "subprocess_per_operation_iteration": true,
+    "unique_temporary_directory_per_subprocess": true,
+    "cache_state": "not controlled or claimed",
+    "memory_sampling_scope": "production API call only",
+    "process_lifetime_peak_reported_separately": true,
+    "cpu_time_resolution_note": "Windows process CPU time was quantized at 15.625 ms on this host; sub-quantum operations can report 0 ms."
+  },
+  "datasets": [
+    {
+      "case": "source-index",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width_codepoints": 0,
+      "explicit_names_block": false
+    },
+    {
+      "case": "explicit-unicode",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width_codepoints": 20,
+      "explicit_names_block": true,
+      "name_pattern": "样本-%08u-α-𐐷.fits"
+    }
+  ],
+  "generator": {
+    "version": "asdf-production-benchmark-source-v1",
+    "labels": [
+      {"code": 0, "name": "accepted", "shortcut": "a"},
+      {"code": 1, "name": "review", "shortcut": "r"},
+      {"code": 2, "name": "rejected", "shortcut": "x"},
+      {"code": 3, "name": "uncertain", "shortcut": "u"}
+    ],
+    "base_value_distribution": {
+      "-1": 990000,
+      "0": 2500,
+      "1": 2500,
+      "2": 2500,
+      "3": 2500
+    },
+    "distribution_rule": "Initialize to -1; at every index divisible by 100 assign (index / 100) modulo 4."
+  },
+  "benchmark_operations": [
+    {
+      "case": "source-index",
+      "operation": "initial-write",
+      "api": "WriteSampleLabelingAsdfDocumentAndOpenAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width": 0,
+      "iterations": 5,
+      "wall_time_samples_ms": [22.772, 26.252, 23.939, 23.614, 24.472],
+      "cpu_time_samples_ms": [31.25, 0.0, 15.625, 31.25, 31.25],
+      "statistics": {
+        "wall_time_ms": {"min": 22.772, "median": 23.939, "max": 26.252},
+        "cpu_time_ms": {"min": 0.0, "median": 31.25, "max": 31.25},
+        "file_size_bytes": {"min": 26135, "median": 26135, "max": 26135},
+        "working_set_before": {"min": 8343552, "median": 8351744, "max": 8355840},
+        "sampled_peak_working_set": {"min": 8921088, "median": 12881920, "max": 16416768},
+        "private_bytes_before": {"min": 4767744, "median": 4780032, "max": 4788224},
+        "sampled_peak_private_bytes": {"min": 5197824, "median": 8945664, "max": 12967936},
+        "process_peak_working_set": {"min": 16879616, "median": 16883712, "max": 16891904}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Production write result succeeded and document_replaced was true; the API reopened and verified the generation.",
+      "publication_result": "atomic_replace_and_reopen_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "source-index",
+      "operation": "read-open",
+      "api": "OpenSampleLabelingAsdfDocumentStore",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width": 0,
+      "iterations": 5,
+      "wall_time_samples_ms": [10.677, 10.841, 10.981, 10.693, 10.586],
+      "cpu_time_samples_ms": [0.0, 0.0, 0.0, 0.0, 0.0],
+      "statistics": {
+        "wall_time_ms": {"min": 10.586, "median": 10.693, "max": 10.981},
+        "cpu_time_ms": {"min": 0.0, "median": 0.0, "max": 0.0},
+        "file_size_bytes": {"min": 26327, "median": 26327, "max": 26327},
+        "working_set_before": {"min": 9072640, "median": 9084928, "max": 9207808},
+        "sampled_peak_working_set": {"min": 9089024, "median": 9142272, "max": 16822272},
+        "private_bytes_before": {"min": 4915200, "median": 4931584, "max": 5201920},
+        "sampled_peak_private_bytes": {"min": 4915200, "median": 5214208, "max": 13234176},
+        "process_peak_working_set": {"min": 17174528, "median": 17190912, "max": 17256448}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Opened sample_count matched, durable base was valid, and seeded unknown mappings remained present.",
+      "publication_result": "not_applicable",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "source-index",
+      "operation": "values-rewrite-1",
+      "api": "RewriteSampleLabelingAsdfValuesAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width": 0,
+      "iterations": 5,
+      "wall_time_samples_ms": [14.132, 17.379, 13.792, 13.739, 14.504],
+      "cpu_time_samples_ms": [15.625, 15.625, 31.25, 15.625, 15.625],
+      "statistics": {
+        "wall_time_ms": {"min": 13.739, "median": 14.132, "max": 17.379},
+        "cpu_time_ms": {"min": 15.625, "median": 15.625, "max": 31.25},
+        "file_size_bytes": {"min": 27188, "median": 27188, "max": 27188},
+        "working_set_before": {"min": 17133568, "median": 17154048, "max": 17166336},
+        "sampled_peak_working_set": {"min": 21291008, "median": 21516288, "max": 21549056},
+        "private_bytes_before": {"min": 12984320, "median": 13017088, "max": 13230080},
+        "sampled_peak_private_bytes": {"min": 17178624, "median": 17420288, "max": 17428480},
+        "process_peak_working_set": {"min": 21540864, "median": 21549056, "max": 21577728}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Published snapshot values equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_snapshot_handoff_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "source-index",
+      "operation": "values-rewrite-1000",
+      "api": "RewriteSampleLabelingAsdfValuesAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width": 0,
+      "iterations": 5,
+      "wall_time_samples_ms": [13.408, 13.432, 14.274, 13.506, 16.186],
+      "cpu_time_samples_ms": [15.625, 15.625, 15.625, 15.625, 15.625],
+      "statistics": {
+        "wall_time_ms": {"min": 13.408, "median": 13.506, "max": 16.186},
+        "cpu_time_ms": {"min": 15.625, "median": 15.625, "max": 15.625},
+        "file_size_bytes": {"min": 27919, "median": 27919, "max": 27919},
+        "working_set_before": {"min": 17141760, "median": 17149952, "max": 17174528},
+        "sampled_peak_working_set": {"min": 21540864, "median": 21544960, "max": 21569536},
+        "private_bytes_before": {"min": 12988416, "median": 13004800, "max": 13238272},
+        "sampled_peak_private_bytes": {"min": 17412096, "median": 17420288, "max": 17440768},
+        "process_peak_working_set": {"min": 21544960, "median": 21553152, "max": 21569536}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Published snapshot values equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_snapshot_handoff_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "source-index",
+      "operation": "metadata-rewrite",
+      "api": "RewriteSampleLabelingAsdfDocumentAndReopenAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "source_index",
+      "roster_width": 0,
+      "iterations": 5,
+      "wall_time_samples_ms": [22.947, 24.571, 23.5, 23.417, 24.995],
+      "cpu_time_samples_ms": [31.25, 15.625, 31.25, 31.25, 31.25],
+      "statistics": {
+        "wall_time_ms": {"min": 22.947, "median": 23.5, "max": 24.995},
+        "cpu_time_ms": {"min": 15.625, "median": 31.25, "max": 31.25},
+        "file_size_bytes": {"min": 27162, "median": 27162, "max": 27162},
+        "working_set_before": {"min": 17133568, "median": 17154048, "max": 17170432},
+        "sampled_peak_working_set": {"min": 17539072, "median": 21295104, "max": 24813568},
+        "private_bytes_before": {"min": 12992512, "median": 13012992, "max": 13217792},
+        "sampled_peak_private_bytes": {"min": 13398016, "median": 17137664, "max": 21143552},
+        "process_peak_working_set": {"min": 25296896, "median": 25313280, "max": 25325568}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Reopened task name equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_reopen_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "explicit-unicode",
+      "operation": "initial-write",
+      "api": "WriteSampleLabelingAsdfDocumentAndOpenAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width": 20,
+      "iterations": 5,
+      "wall_time_samples_ms": [1578.767, 1613.004, 1613.213, 1578.791, 1594.43],
+      "cpu_time_samples_ms": [1562.5, 1531.25, 1593.75, 1578.125, 1578.125],
+      "statistics": {
+        "wall_time_ms": {"min": 1578.767, "median": 1594.43, "max": 1613.213},
+        "cpu_time_ms": {"min": 1531.25, "median": 1578.125, "max": 1593.75},
+        "file_size_bytes": {"min": 2762553, "median": 2762553, "max": 2762553},
+        "working_set_before": {"min": 88674304, "median": 88674304, "max": 88678400},
+        "sampled_peak_working_set": {"min": 242913280, "median": 247758848, "max": 250818560},
+        "private_bytes_before": {"min": 88436736, "median": 88449024, "max": 88453120},
+        "sampled_peak_private_bytes": {"min": 248627200, "median": 253767680, "max": 254873600},
+        "process_peak_working_set": {"min": 252502016, "median": 252502016, "max": 252506112}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Production write result succeeded and document_replaced was true; the API reopened and verified the generation.",
+      "publication_result": "atomic_replace_and_reopen_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "explicit-unicode",
+      "operation": "read-open",
+      "api": "OpenSampleLabelingAsdfDocumentStore",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width": 20,
+      "iterations": 5,
+      "wall_time_samples_ms": [499.261, 481.409, 486.836, 478.792, 482.871],
+      "cpu_time_samples_ms": [484.375, 484.375, 484.375, 453.125, 468.75],
+      "statistics": {
+        "wall_time_ms": {"min": 478.792, "median": 482.871, "max": 499.261},
+        "cpu_time_ms": {"min": 453.125, "median": 484.375, "max": 484.375},
+        "file_size_bytes": {"min": 2762745, "median": 2762745, "max": 2762745},
+        "working_set_before": {"min": 92782592, "median": 93376512, "max": 93405184},
+        "sampled_peak_working_set": {"min": 247959552, "median": 248856576, "max": 250327040},
+        "private_bytes_before": {"min": 92729344, "median": 93118464, "max": 93130752},
+        "sampled_peak_private_bytes": {"min": 252600320, "median": 255062016, "max": 255238144},
+        "process_peak_working_set": {"min": 252698624, "median": 252731392, "max": 252776448}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Opened sample_count matched, durable base was valid, and seeded unknown mappings remained present.",
+      "publication_result": "not_applicable",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "explicit-unicode",
+      "operation": "values-rewrite-1",
+      "api": "RewriteSampleLabelingAsdfValuesAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width": 20,
+      "iterations": 5,
+      "wall_time_samples_ms": [302.27, 305.993, 302.931, 300.442, 303.226],
+      "cpu_time_samples_ms": [296.875, 281.25, 296.875, 281.25, 281.25],
+      "statistics": {
+        "wall_time_ms": {"min": 300.442, "median": 302.931, "max": 305.993},
+        "cpu_time_ms": {"min": 281.25, "median": 281.25, "max": 296.875},
+        "file_size_bytes": {"min": 2763706, "median": 2763706, "max": 2763706},
+        "working_set_before": {"min": 260911104, "median": 260927488, "max": 261017600},
+        "sampled_peak_working_set": {"min": 272936960, "median": 272953344, "max": 273043456},
+        "private_bytes_before": {"min": 266215424, "median": 266276864, "max": 266506240},
+        "sampled_peak_private_bytes": {"min": 278245376, "median": 278306816, "max": 278536192},
+        "process_peak_working_set": {"min": 272936960, "median": 272953344, "max": 273043456}
+      },
+      "roster_block_reused": true,
+      "semantic_equality": true,
+      "semantic_check": "Published snapshot values equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_snapshot_handoff_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "explicit-unicode",
+      "operation": "values-rewrite-1000",
+      "api": "RewriteSampleLabelingAsdfValuesAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width": 20,
+      "iterations": 5,
+      "wall_time_samples_ms": [308.919, 314.898, 307.577, 298.728, 306.516],
+      "cpu_time_samples_ms": [296.875, 281.25, 281.25, 281.25, 281.25],
+      "statistics": {
+        "wall_time_ms": {"min": 298.728, "median": 307.577, "max": 314.898},
+        "cpu_time_ms": {"min": 281.25, "median": 281.25, "max": 296.875},
+        "file_size_bytes": {"min": 2764437, "median": 2764437, "max": 2764437},
+        "working_set_before": {"min": 260911104, "median": 260915200, "max": 260947968},
+        "sampled_peak_working_set": {"min": 272936960, "median": 272941056, "max": 272973824},
+        "private_bytes_before": {"min": 266272768, "median": 266289152, "max": 266514432},
+        "sampled_peak_private_bytes": {"min": 278302720, "median": 278323200, "max": 278548480},
+        "process_peak_working_set": {"min": 272936960, "median": 272941056, "max": 272973824}
+      },
+      "roster_block_reused": true,
+      "semantic_equality": true,
+      "semantic_check": "Published snapshot values equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_snapshot_handoff_succeeded",
+      "success": true,
+      "error_kind": "none"
+    },
+    {
+      "case": "explicit-unicode",
+      "operation": "metadata-rewrite",
+      "api": "RewriteSampleLabelingAsdfDocumentAndReopenAtomically",
+      "sample_count": 1000000,
+      "roster_kind": "explicit_names",
+      "roster_width": 20,
+      "iterations": 5,
+      "wall_time_samples_ms": [1692.353, 1726.106, 1697.332, 1677.87, 1717.104],
+      "cpu_time_samples_ms": [1640.625, 1671.875, 1687.5, 1671.875, 1703.125],
+      "statistics": {
+        "wall_time_ms": {"min": 1677.87, "median": 1697.332, "max": 1726.106},
+        "cpu_time_ms": {"min": 1640.625, "median": 1671.875, "max": 1703.125},
+        "file_size_bytes": {"min": 2763670, "median": 2763670, "max": 2763670},
+        "working_set_before": {"min": 260894720, "median": 260935680, "max": 260939776},
+        "sampled_peak_working_set": {"min": 415649792, "median": 420679680, "max": 421867520},
+        "private_bytes_before": {"min": 266113024, "median": 266387456, "max": 266526720},
+        "sampled_peak_private_bytes": {"min": 427200512, "median": 430526464, "max": 432881664},
+        "process_peak_working_set": {"min": 424140800, "median": 424304640, "max": 424341504}
+      },
+      "roster_block_reused": false,
+      "semantic_equality": true,
+      "semantic_check": "Reopened task name equaled the intended replacement and seeded unknown mappings remained present.",
+      "publication_result": "atomic_replace_and_reopen_succeeded",
+      "success": true,
+      "error_kind": "none"
+    }
+  ],
+  "hardening": {
+    "mutation_corpus": {
+      "success": true,
+      "seed_hex": "0x78c0de2026",
+      "seed_decimal": 518631858214,
+      "case_count": 73,
+      "accepted": 13,
+      "rejected": 60,
+      "max_input_bytes": 1048576,
+      "categories": {
+        "yaml_structure": 16,
+        "yaml_scalar": 10,
+        "block_header": 14,
+        "block_index": 11,
+        "payload": 16,
+        "unknown_metadata": 6
+      },
+      "reproducer_on_failure": true
+    },
+    "atomic_publication_properties": {
+      "success": true,
+      "elapsed_seconds": 6.10,
+      "operation_matrix": [
+        "first full publication",
+        "overwrite existing canonical document",
+        "values rewrite",
+        "metadata rewrite",
+        "rewrite and reopen",
+        "repeated values rewrite through one snapshot"
+      ],
+      "failure_matrix": [
+        "semantic preflight",
+        "resource-limit preflight",
+        "preservation identity mismatch",
+        "missing durable base",
+        "temporary output stream failure",
+        "replacement failure and retry",
+        "external replacement during publication",
+        "reopen generation mismatch",
+        "unsupported checksum profile",
+        "unknown metadata preservation construction failure"
+      ],
+      "before_replace_exception_covered_by_operation_matrix": true
+    },
+    "checksum_interoperability": {
+      "success": true,
+      "policy": {
+        "writer": "emit all-zero checksum",
+        "reader": "controlled rejection of nonzero checksum"
+      },
+      "python": "3.12.10",
+      "asdf": "5.3.1",
+      "asdf_standard": "1.5.0",
+      "numpy": "2.5.2",
+      "native_zero_checksum_semantics_equal": true,
+      "python_zero_checksum_native_durable_base_available": true,
+      "nonzero_uncompressed_native_error": "UnsupportedProfile",
+      "nonzero_zlib_native_error": "UnsupportedProfile",
+      "zero_checksum_corrupt_zlib_native_error": "MalformedDocument",
+      "checksummed_payload_validation_error": "checksum mismatch",
+      "checksum_field_validation_error": "checksum mismatch",
+      "checksummed_store_overwrite_target_unchanged": true,
+      "checksummed_store_overwrite_unknown_mapping_preserved": true
+    },
+    "python_interoperability": {
+      "success": true,
+      "asdf": "5.3.1",
+      "record_count": 36,
+      "failure_count": 0
+    },
+    "github_ci": {
+      "run_id": 33411277559,
+      "url": "https://github.com/SW26010/SpecForge/actions/runs/33411277559",
+      "head_sha": "9873608166134a09ad72d38d807cf0a222321a32",
+      "native_headless_job": "success",
+      "required_ctest_gate": "success",
+      "pinned_interoperability_and_checksum_ctest": "success",
+      "headless_artifact_name": "specforge-automation-headless-33411277559-1",
+      "headless_artifact_sha256": "6bfb9f164898e41ca236853ba371259b301099af31cdc1c5ff170502ac992e31"
+    }
+  },
+  "defects": {
+    "production_codec_or_store_defects_found": [],
+    "production_fix_commits_inserted": [],
+    "test_or_ci_reproducibility_defects_fixed": [
+      {
+        "commit": "04661e6",
+        "summary": "Preserve binary ASDF fixture bytes across checkouts."
+      },
+      {
+        "commit": "9873608",
+        "summary": "Pin the ASDF oracle to a compatible Python 3.12 ABI."
+      }
+    ]
+  }
+}

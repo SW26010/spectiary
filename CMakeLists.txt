@@ -1276,16 +1276,25 @@ specforge_add_test(
     tests/sample_labeling_asdf_store_property_tests.cpp
     specforge_core
 )
-specforge_add_test(
+add_executable(
     specforge_sample_labeling_asdf_mutation_tests
     tests/sample_labeling_asdf_mutation_tests.cpp
-    specforge_core
 )
 target_link_libraries(
     specforge_sample_labeling_asdf_mutation_tests
     PRIVATE
+        specforge_core
         yaml-cpp::yaml-cpp
         ZLIB::ZLIB
+)
+specforge_enable_warnings(specforge_sample_labeling_asdf_mutation_tests)
+add_test(
+    NAME specforge_sample_labeling_asdf_mutation_tests
+    COMMAND
+        specforge_sample_labeling_asdf_mutation_tests
+        --seed 0x78c0de2026
+        --case-count 73
+        --max-input-bytes 1048576
 )
 target_compile_definitions(
     specforge_sample_labeling_asdf_codec_tests
@@ -1330,6 +1339,13 @@ set_tests_properties(
     specforge_source_collection_session_tests
     PROPERTIES
         LABELS "labeling;asdf-lifecycle;ci-headless;required"
+)
+set_tests_properties(
+    specforge_sample_labeling_asdf_store_property_tests
+    specforge_sample_labeling_asdf_mutation_tests
+    PROPERTIES
+        LABELS "labeling;asdf-lifecycle;asdf-hardening;ci-headless;required"
+        TIMEOUT 120
 )
 specforge_add_test(
     specforge_source_collection_load_queue_tests

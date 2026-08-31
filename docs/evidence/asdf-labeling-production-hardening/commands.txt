@@ -1,0 +1,19 @@
+# All commands were run from C:\dev\SpecForge.
+# The benchmark and local hardening runs used the clean source commit shown below.
+
+git rev-parse HEAD
+# 9873608166134a09ad72d38d807cf0a222321a32
+
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-asdf-labeling-production-benchmark.ps1 -SampleCount 1000000 -WarmupCount 1 -Iterations 5 -OutputDirectory build\asdf-labeling-production-hardening-commit6 -BuildTimeoutSec 1800
+
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-asdf-labeling-mutation-corpus.ps1 -Seed 0x78c0de2026 -CaseCount 73 -MaxInputBytes 1048576 -OutputDirectory build\asdf-labeling-production-hardening-commit6-mutation -BuildTimeoutSec 900
+
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Preset ninja-msvc-debug -Target specforge_sample_labeling_asdf_store_property_tests -TimeoutSec 900
+
+ctest --test-dir build\ninja-msvc-debug -R ^specforge_sample_labeling_asdf_store_property_tests$ --output-on-failure --no-tests=error
+
+# The pinned Python interoperability and checksum matrix was also rerun by
+# .github/workflows/automation.yml at the same commit. The accepted run is:
+# https://github.com/SW26010/SpecForge/actions/runs/33411277559
+# Its exact workflow commands are the checked-in automation.yml commands at
+# measurement_source_commit; Python was pinned by actions/setup-python to 3.12.

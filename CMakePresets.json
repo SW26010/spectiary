@@ -65,7 +65,8 @@
       ],
       "generator": "Ninja",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "ON"
       }
     },
     {

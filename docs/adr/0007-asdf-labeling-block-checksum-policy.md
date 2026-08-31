@@ -134,7 +134,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 python -m pip install `
   --target build\asdf-labeling-checksum-policy\python `
-  -r tools\asdf_labeling_hardening\requirements.txt
+  -r tools\asdf_labeling_spike\requirements.txt
 
 $env:PYTHONPATH = (Resolve-Path build\asdf-labeling-checksum-policy\python)
 python tools\asdf_labeling_hardening\checksum_oracle.py `

@@ -127,7 +127,7 @@ inline constexpr std::array<MutationRecipe, 73> kMutationRecipes = {{
 
 inline constexpr std::size_t kDefaultMutationCaseCount =
     kMutationRecipes.size();
-inline constexpr std::size_t kMaximumMutationCaseCount = 512;
+inline constexpr std::size_t kMaximumMutationCaseCount = 1'000'000;
 inline constexpr std::size_t kDefaultMaximumInputBytes = 1024U * 1024U;
 inline constexpr std::size_t kMaximumInputBytes = 8U * 1024U * 1024U;
 inline constexpr std::uint64_t kProductionDecodedBlockLimitBytes =

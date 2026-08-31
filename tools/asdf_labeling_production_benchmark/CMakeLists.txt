@@ -1,4 +1,6 @@
-add_executable(specforge_asdf_labeling_production_benchmark
+# The hardening option exposes this target, but default builds must not compile
+# or run the benchmark. CI and local evidence runs request it explicitly.
+add_executable(specforge_asdf_labeling_production_benchmark EXCLUDE_FROM_ALL
     benchmark_document_factory.cpp
     benchmark_main.cpp
 )
