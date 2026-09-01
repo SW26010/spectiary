@@ -333,11 +333,16 @@ Assert-True `
         $releaseTests.Contains('build\ninja-msvc-release-static') -and
         $releaseTests.Contains("-L '^release$'") -and
         $releaseTests.Contains('--no-tests=error') -and
-        $releaseTests.Contains('--timeout 300') -and
+        [regex]::IsMatch(
+            $releaseTests,
+            '(?m)^\s*--timeout\s+600\s+2>&1\s*$') -and
+        [regex]::IsMatch(
+            $releaseTests,
+            '(?m)^\s*timeout-minutes:\s*15\s*$') -and
         $releaseTests.Contains('release.log') -and
         $releaseTests.Contains('Static Release CTest verification failed')
     ) `
-    -Message 'Static Release must run only its explicit release-owned CTests.'
+    -Message 'Static Release must run only its explicit release-owned CTests with exact nested and step deadlines.'
 Assert-True `
     -Condition (
         $coreArtifacts.Contains('always()') -and

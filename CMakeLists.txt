@@ -831,6 +831,19 @@ set_tests_properties(
         TIMEOUT 30
 )
 add_test(
+    NAME specforge_release_artifact_process_runner_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File
+            "${CMAKE_SOURCE_DIR}/tests/release_artifact_process_runner_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(
+    specforge_release_artifact_process_runner_tests
+    PROPERTIES
+        LABELS "ci-headless;required"
+        TIMEOUT 30
+)
+add_test(
     NAME specforge_automation_launcher_integration_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_launcher_integration_tests.ps1"
@@ -1155,11 +1168,11 @@ set_tests_properties(
     PROPERTIES
         LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
-        # Hosted Windows runners pay substantial startup cost for the many
-        # isolated PowerShell validation cases in this test. Keep the test
-        # bounded, but leave enough margin over the observed 180-second CI
-        # timeout; the enclosing Release suite still has a 600-second budget.
-        TIMEOUT 300
+        # Each external verification case has its own 30-120 second process-
+        # tree deadline. Retain a larger aggregate budget for hosted Windows
+        # ZIP/PE scanning variability while staying below the Release job's
+        # 900-second CTest step deadline.
+        TIMEOUT 600
 )
 add_test(
     NAME specforge_portable_pe_contract_tests
@@ -1667,6 +1680,7 @@ set(SPECFORGE_FAST_TESTS
     specforge_automation_samples_contract_tests
     specforge_automation_ci_contract_tests
     specforge_repository_verification_ci_contract_tests
+    specforge_release_artifact_process_runner_tests
     specforge_on_demand_frame_capture_tests
     specforge_profile_recording_ui_state_tests
     specforge_top_bar_status_layout_tests

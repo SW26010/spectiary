@@ -724,12 +724,22 @@ function Assert-CMakeAndFitsTestContract {
         $timeout = Get-CTestPropertyValue `
             -Test $releaseTests[0] `
             -Name 'TIMEOUT'
+        $runSerial = Get-CTestPropertyValue `
+            -Test $releaseTests[0] `
+            -Name 'RUN_SERIAL'
+        $timingContractSatisfied = if (
+            $releaseTestName -ceq 'specforge_release_artifacts_tests') {
+            [double]$timeout -eq 600 -and $runSerial -eq $true
+        }
+        else {
+            [double]$timeout -gt 0
+        }
         Assert-True `
             -Condition (
                 $labels -ccontains 'release' -and
                 $labels -ccontains 'ci-headless' -and
                 $labels -ccontains 'required' -and
-                [double]$timeout -gt 0
+                $timingContractSatisfied
             ) `
             -Message "$releaseTestName must be configured in the timed repository-wide ci-headless required selector."
     }
@@ -1955,6 +1965,52 @@ $configuredMutations = @(
             $labels[0].value = @($labels[0].value | Where-Object {
                 $_ -cne 'ci-headless'
             })
+            $mutatedInputs.DebugCTestJson =
+                $model | ConvertTo-Json -Depth 20
+            Invoke-SelectedContractValidation @mutatedInputs
+        }
+    };
+    [pscustomobject]@{
+        Description = 'Release artifact contract aggregate timeout changed from 600 seconds'
+        ExpectedId = 'SF-CFG-ARTIFACT-GATE'
+        Validate = {
+            $mutatedInputs = $contractInputs.Clone()
+            $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
+            $test = @($model.tests | Where-Object {
+                $_.name -ceq 'specforge_release_artifacts_tests'
+            })[0]
+            $timeout = @($test.properties | Where-Object {
+                $_.name -ceq 'TIMEOUT'
+            })[0]
+            Assert-ContractRule `
+                -Condition ($null -ne $timeout) `
+                -Id 'SF-HARNESS-MUTATION' `
+                -Message 'Artifact timeout mutation could not find configured timeout.'
+            # A greater value catches accidental weakening to a minimum-only
+            # contract and protects the 900-second enclosing step margin.
+            $timeout.value = 601.0
+            $mutatedInputs.DebugCTestJson =
+                $model | ConvertTo-Json -Depth 20
+            Invoke-SelectedContractValidation @mutatedInputs
+        }
+    };
+    [pscustomobject]@{
+        Description = 'Release artifact contract no longer runs serially'
+        ExpectedId = 'SF-CFG-ARTIFACT-GATE'
+        Validate = {
+            $mutatedInputs = $contractInputs.Clone()
+            $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
+            $test = @($model.tests | Where-Object {
+                $_.name -ceq 'specforge_release_artifacts_tests'
+            })[0]
+            $runSerial = @($test.properties | Where-Object {
+                $_.name -ceq 'RUN_SERIAL'
+            })[0]
+            Assert-ContractRule `
+                -Condition ($null -ne $runSerial) `
+                -Id 'SF-HARNESS-MUTATION' `
+                -Message 'Artifact serial mutation could not find RUN_SERIAL.'
+            $runSerial.value = $false
             $mutatedInputs.DebugCTestJson =
                 $model | ConvertTo-Json -Depth 20
             Invoke-SelectedContractValidation @mutatedInputs

@@ -163,7 +163,7 @@ jobs:
               -L '^release$' `
               --output-on-failure `
               --no-tests=error `
-              --timeout 300 2>&1
+              --timeout 600 2>&1
           )
           $releaseExitCode = $LASTEXITCODE
           $releaseOutput |
