@@ -38,14 +38,8 @@ function Get-ReleaseContractRuleId {
         'Static Release FITS verification cannot be conditional' {
             return 'SF-WF-STATIC-STEP-POLICY'
         }
-        'Configure Ninja/MSVC static Release cannot be conditional' {
-            return 'SF-WF-AUTOMATION-RELEASE-CONFIG-POLICY'
-        }
-        'Workflow must define active step ''Configure Ninja/MSVC static Release''' {
-            return 'SF-WF-AUTOMATION-RELEASE-CONFIG-STEP'
-        }
-        'Run required static Release CTest gate must run the expected configured' {
-            return 'SF-WF-AUTOMATION-RELEASE-GATE'
+        'Automation workflow must not retain repository-wide Release or ASDF ownership' {
+            return 'SF-WF-AUTOMATION-OWNER-SCOPE'
         }
         'Build native automation targets must fail through one directly reachable' {
             return 'SF-WF-AUTOMATION-DEBUG-EXIT'
@@ -65,7 +59,7 @@ function Get-ReleaseContractRuleId {
         'Static Release FITS verification command must fail through one directly reachable' {
             return 'SF-WF-STATIC-EXIT-GUARD'
         }
-        'expected configured ci-headless graph|bounded CTest|resolved ci-headless label' {
+        'expected configured automation-headless graph|bounded CTest|resolved automation-headless label' {
             return 'SF-WF-AUTOMATION-GATE'
         }
         'required build wrapper|must build .* exactly once|perform configuration' {
@@ -92,10 +86,10 @@ function Get-ReleaseContractRuleId {
         'specforge_fits_file_reader_tests must preserve the executable exit code' {
             return 'SF-CFG-READER-EXIT-AUTHORITY'
         }
-        'specforge_loader_tests must participate in the automatic ci-headless required gate' {
+        'specforge_loader_tests must participate in the repository-wide ci-headless required selector' {
             return 'SF-CFG-LOADER-GATE'
         }
-        'specforge_fits_file_reader_tests must participate in the automatic ci-headless required gate' {
+        'specforge_fits_file_reader_tests must participate in the repository-wide ci-headless required selector' {
             return 'SF-CFG-READER-GATE'
         }
         'Configured CTest graph must register specforge_loader_tests|specforge_loader_tests must (execute|be a configured executable)' {
@@ -140,7 +134,7 @@ function Get-ReleaseContractRuleId {
         'Configured CTest graph must register .* exactly once' {
             return 'SF-CFG-CONTRACT-REGISTRATION'
         }
-        'configured in the timed ci-headless required gate' {
+        'configured in the timed repository-wide ci-headless required selector' {
             return 'SF-CFG-REQUIRED-GATE'
         }
         'immediate failure guard|nonzero executable exit|directly reachable top-level throw' {
@@ -586,7 +580,7 @@ function Assert-ConfiguredTestExecutable {
             $labels -ccontains 'ci-headless' -and
             $labels -ccontains 'required'
         ) `
-        -Message "$Name must participate in the automatic ci-headless required gate."
+        -Message "$Name must participate in the repository-wide ci-headless required selector."
 
     $rule = [regex]::Match(
         $BuildGraphText,
@@ -730,14 +724,24 @@ function Assert-CMakeAndFitsTestContract {
         $timeout = Get-CTestPropertyValue `
             -Test $releaseTests[0] `
             -Name 'TIMEOUT'
+        $runSerial = Get-CTestPropertyValue `
+            -Test $releaseTests[0] `
+            -Name 'RUN_SERIAL'
+        $timingContractSatisfied = if (
+            $releaseTestName -ceq 'specforge_release_artifacts_tests') {
+            [double]$timeout -eq 600 -and $runSerial -eq $true
+        }
+        else {
+            [double]$timeout -gt 0
+        }
         Assert-True `
             -Condition (
                 $labels -ccontains 'release' -and
                 $labels -ccontains 'ci-headless' -and
                 $labels -ccontains 'required' -and
-                [double]$timeout -gt 0
+                $timingContractSatisfied
             ) `
-            -Message "$releaseTestName must be configured in the timed ci-headless required gate."
+            -Message "$releaseTestName must be configured in the timed repository-wide ci-headless required selector."
     }
 
     $readerBody = Get-CppFunctionBody `
@@ -983,26 +987,9 @@ function Assert-AutomationRequiredGate {
         },
         [pscustomobject]@{
             Name = 'Build native automation targets'
-            Count = 2
+            Count = 1
             Preset = $null
-            RequiredTargets = @(
-                'all',
-                'specforge_asdf_labeling_production_benchmark'
-            )
-            Configure = $false
-        },
-        [pscustomobject]@{
-            Name = 'Configure Ninja/MSVC static Release'
-            Count = 1
-            Preset = 'ninja-msvc-release-static'
-            RequiredTargets = @()
-            Configure = $true
-        },
-        [pscustomobject]@{
-            Name = 'Build static Release native/headless targets'
-            Count = 1
-            Preset = 'ninja-msvc-release-static'
-            RequiredTargets = @('all')
+            RequiredTargets = @('specforge_automation_headless_targets')
             Configure = $false
         }
     )) {
@@ -1071,14 +1058,20 @@ function Assert-AutomationRequiredGate {
         }
     }
 
+    Assert-True `
+        -Condition (
+            -not $headlessJob.Contains('-Target all') -and
+            -not $headlessJob.Contains('ninja-msvc-release-static') -and
+            -not $headlessJob.Contains('asdf-pinned-oracle') -and
+            -not $headlessJob.Contains('specforge_asdf_labeling') -and
+            -not $headlessJob.Contains('actions/setup-python')
+        ) `
+        -Message 'Automation workflow must not retain repository-wide Release or ASDF ownership.'
+
     foreach ($gateContract in @(
         [pscustomobject]@{
             Name = 'Run required native/headless CTest gate'
             BuildDirectory = 'build\ninja-msvc-debug'
-        },
-        [pscustomobject]@{
-            Name = 'Run required static Release CTest gate'
-            BuildDirectory = 'build\ninja-msvc-release-static'
         }
     )) {
         $gateBody = Get-YamlStepBody `
@@ -1117,7 +1110,7 @@ function Assert-AutomationRequiredGate {
                 (Get-CommandArgumentValue $runnerElements '-BuildDirectory') -ceq
                     $gateContract.BuildDirectory
             ) `
-            -Message "$($gateContract.Name) must run the expected configured ci-headless graph."
+            -Message "$($gateContract.Name) must run the expected configured automation-headless graph."
         Assert-CommandHasImmediateFailureGuard `
             -Ast $gateAst `
             -Command $runnerCommands[0] `
@@ -1141,9 +1134,9 @@ function Assert-AutomationRequiredGate {
         -Condition (
             $labelAssignments.Count -eq 1 -and
             $labelAssignments[0].Right.Extent.Text -match
-                '(?s)\$Mode\s+-eq\s+''Headless''.*''ci-headless''.*''real-gui'''
+                '(?s)\$Mode\s+-eq\s+''Headless''.*''automation-headless''.*''real-gui'''
         ) `
-        -Message 'Headless automation must resolve to the ci-headless CTest label.'
+        -Message 'Headless automation must resolve to the automation-headless CTest label.'
     $boundedCTestCommands = @(
         Get-PowerShellCommands -Ast $runnerAst | Where-Object {
             $_.GetCommandName() -ceq 'Invoke-BoundedCTest'
@@ -1159,7 +1152,7 @@ function Assert-AutomationRequiredGate {
         -Condition (
             (Get-CommandArgumentValue $boundedElements '-Label') -ceq '$label'
         ) `
-        -Message 'The bounded CTest gate must receive the resolved ci-headless label.'
+        -Message 'The bounded CTest gate must receive the resolved automation-headless label.'
     $boundedFunction = @(
         $runnerAst.FindAll(
             {
@@ -1647,25 +1640,21 @@ if ($ContractArea -ceq 'WorkflowStructure') {
                     '  native-headless:' + $newline + '    if: ${{ false }}')
             };
         New-TextMutationCase `
-            -Description 'Automatic gate missing static Release configuration' `
-            -ExpectedId 'SF-WF-AUTOMATION-RELEASE-CONFIG-STEP' `
+            -Description 'Repository-wide Release ownership reintroduced into automation' `
+            -ExpectedId 'SF-WF-AUTOMATION-OWNER-SCOPE' `
             -Key 'AutomationWorkflowText' `
             -Transform {
                 param($text)
-                [regex]::Replace(
-                    $text,
-                    '(?ms)^      - name: Configure Ninja/MSVC static Release\r?\n.*?(?=^      - name: )',
-                    '')
-            };
-        New-TextMutationCase `
-            -Description 'Automatic static Release gate rerouted to Debug graph' `
-            -ExpectedId 'SF-WF-AUTOMATION-RELEASE-GATE' `
-            -Key 'AutomationWorkflowText' `
-            -Transform {
-                param($text)
+                $step = @(
+                    '      - name: Reintroduced static Release work',
+                    '        shell: pwsh',
+                    '        run: |',
+                    '          Write-Host ninja-msvc-release-static'
+                ) -join $newline
                 $text.Replace(
-                    '            -BuildDirectory build\ninja-msvc-release-static `',
-                    '            -BuildDirectory build\ninja-msvc-debug `')
+                    '      - name: Upload headless logs and failure evidence',
+                    $step + $newline + $newline +
+                        '      - name: Upload headless logs and failure evidence')
             };
         New-TextMutationCase `
             -Description 'Debug build failure hidden behind nested if(false)' `
@@ -1676,14 +1665,14 @@ if ($ContractArea -ceq 'WorkflowStructure') {
                 $nestedGuard = @(
                     '          if ($LASTEXITCODE -ne 0) {',
                     '            if ($false) {',
-                    '              throw "Debug all-target build failed with exit code $LASTEXITCODE."',
+                    '              throw "Debug automation target build failed with exit code $LASTEXITCODE."',
                     '            }',
                     '          }'
                 ) -join $newline
                 [regex]::Replace(
                     $text,
                     '(?ms)^          if \(\$LASTEXITCODE -ne 0\) \{\r?\n' +
-                        '            throw "Debug all-target build failed with exit code ' +
+                        '            throw "Debug automation target build failed with exit code ' +
                         '\$LASTEXITCODE\."\r?\n          \}',
                     $nestedGuard,
                     1)
@@ -1976,6 +1965,52 @@ $configuredMutations = @(
             $labels[0].value = @($labels[0].value | Where-Object {
                 $_ -cne 'ci-headless'
             })
+            $mutatedInputs.DebugCTestJson =
+                $model | ConvertTo-Json -Depth 20
+            Invoke-SelectedContractValidation @mutatedInputs
+        }
+    };
+    [pscustomobject]@{
+        Description = 'Release artifact contract aggregate timeout changed from 600 seconds'
+        ExpectedId = 'SF-CFG-ARTIFACT-GATE'
+        Validate = {
+            $mutatedInputs = $contractInputs.Clone()
+            $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
+            $test = @($model.tests | Where-Object {
+                $_.name -ceq 'specforge_release_artifacts_tests'
+            })[0]
+            $timeout = @($test.properties | Where-Object {
+                $_.name -ceq 'TIMEOUT'
+            })[0]
+            Assert-ContractRule `
+                -Condition ($null -ne $timeout) `
+                -Id 'SF-HARNESS-MUTATION' `
+                -Message 'Artifact timeout mutation could not find configured timeout.'
+            # A greater value catches accidental weakening to a minimum-only
+            # contract and protects the 900-second enclosing step margin.
+            $timeout.value = 601.0
+            $mutatedInputs.DebugCTestJson =
+                $model | ConvertTo-Json -Depth 20
+            Invoke-SelectedContractValidation @mutatedInputs
+        }
+    };
+    [pscustomobject]@{
+        Description = 'Release artifact contract no longer runs serially'
+        ExpectedId = 'SF-CFG-ARTIFACT-GATE'
+        Validate = {
+            $mutatedInputs = $contractInputs.Clone()
+            $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
+            $test = @($model.tests | Where-Object {
+                $_.name -ceq 'specforge_release_artifacts_tests'
+            })[0]
+            $runSerial = @($test.properties | Where-Object {
+                $_.name -ceq 'RUN_SERIAL'
+            })[0]
+            Assert-ContractRule `
+                -Condition ($null -ne $runSerial) `
+                -Id 'SF-HARNESS-MUTATION' `
+                -Message 'Artifact serial mutation could not find RUN_SERIAL.'
+            $runSerial.value = $false
             $mutatedInputs.DebugCTestJson =
                 $model | ConvertTo-Json -Depth 20
             Invoke-SelectedContractValidation @mutatedInputs

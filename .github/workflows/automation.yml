@@ -80,48 +80,12 @@ jobs:
         timeout-minutes: 20
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Target all `
+            -Target specforge_automation_headless_targets `
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
-            throw "Debug all-target build failed with exit code $LASTEXITCODE."
-          }
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Target specforge_asdf_labeling_production_benchmark `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
-            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
-            -TimeoutSec 600
-          if ($LASTEXITCODE -ne 0) {
-            throw "Debug benchmark build failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Configure Ninja/MSVC static Release
-        shell: pwsh
-        timeout-minutes: 10
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Configure `
-            -Preset ninja-msvc-release-static `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
-            -LogDir "$env:AUTOMATION_RUN_ROOT\release-build" `
-            -TimeoutSec 600
-          if ($LASTEXITCODE -ne 0) {
-            throw "Static Release configure failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Build static Release native/headless targets
-        shell: pwsh
-        timeout-minutes: 25
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Preset ninja-msvc-release-static `
-            -Target all `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
-            -LogDir "$env:AUTOMATION_RUN_ROOT\release-build" `
-            -TimeoutSec 1500
-          if ($LASTEXITCODE -ne 0) {
-            throw "Static Release all-target build failed with exit code $LASTEXITCODE."
+            throw "Debug automation target build failed with exit code $LASTEXITCODE."
           }
 
       - name: Run required native/headless CTest gate
@@ -132,104 +96,12 @@ jobs:
           New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
           $env:TEMP = $ctestTemp
           $env:TMP = $ctestTemp
-          $env:SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY = `
-            Join-Path $env:AUTOMATION_RUN_ROOT 'asdf-hardening\mutation-failure'
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-debug `
             -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
           if ($LASTEXITCODE -ne 0) {
             throw "Debug native/headless CTest gate failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Run required static Release CTest gate
-        shell: pwsh
-        timeout-minutes: 15
-        run: |
-          $releaseCTestTemp = Join-Path $env:RUNNER_TEMP 'specforge-release-ctest-temp'
-          New-Item -ItemType Directory -Path $releaseCTestTemp -Force | Out-Null
-          $env:TEMP = $releaseCTestTemp
-          $env:TMP = $releaseCTestTemp
-          $env:SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY = `
-            Join-Path $env:AUTOMATION_RUN_ROOT 'release-asdf-hardening\mutation-failure'
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
-            -Mode Headless `
-            -BuildDirectory build\ninja-msvc-release-static `
-            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest-release" -SuiteTimeoutSec 600 -TestTimeoutSec 300
-          if ($LASTEXITCODE -ne 0) {
-            throw "Static Release native/headless CTest gate failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Set up pinned ASDF oracle Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-          check-latest: false
-
-      - name: Install pinned ASDF interoperability and hardening oracle
-        shell: pwsh
-        timeout-minutes: 5
-        run: |
-          python -m pip install --disable-pip-version-check `
-            --target build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-python `
-            -r tools\asdf_labeling_spike\requirements.txt
-
-      - name: Build ASDF interoperability and hardening targets
-        shell: pwsh
-        timeout-minutes: 15
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Configure `
-            -Preset ninja-msvc-debug-asdf-labeling-spike `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
-            -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
-            -TimeoutSec 600
-          if ($LASTEXITCODE -ne 0) {
-            throw "ASDF interoperability configure failed with exit code $LASTEXITCODE."
-          }
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Preset ninja-msvc-debug-asdf-labeling-spike `
-            -Target specforge_asdf_labeling_interoperability_targets `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
-            -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
-            -TimeoutSec 900
-          if ($LASTEXITCODE -ne 0) {
-            throw "ASDF interoperability target build failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Run pinned ASDF 5.3.1 interoperability and checksum CTests
-        shell: pwsh
-        timeout-minutes: 5
-        run: |
-          ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
-            -L '^asdf-pinned-oracle$' `
-            --output-on-failure
-          if ($LASTEXITCODE -ne 0) {
-            throw "Pinned ASDF CTest gate failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Collect final ASDF interoperability evidence
-        if: ${{ always() }}
-        shell: pwsh
-        timeout-minutes: 1
-        run: |
-          $destination = Join-Path $env:AUTOMATION_RUN_ROOT 'asdf-hardening\evidence'
-          New-Item -ItemType Directory -Path $destination -Force | Out-Null
-          $evidence = @(
-            @{
-              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-results\interoperability.json'
-              Name = 'interoperability.json'
-            },
-            @{
-              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-hardening-results\checksum-interoperability.json'
-              Name = 'checksum-interoperability.json'
-            }
-          )
-          foreach ($entry in $evidence) {
-            if (Test-Path -LiteralPath $entry.Source -PathType Leaf) {
-              Copy-Item -LiteralPath $entry.Source `
-                -Destination (Join-Path $destination $entry.Name) -Force
-            }
           }
 
       - name: Upload headless logs and failure evidence
@@ -245,7 +117,7 @@ jobs:
     name: Real-GUI runner preflight
     needs: native-headless
     if: >-
-      ${{ always() && needs.native-headless.result == 'success' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+      ${{ always() && needs.native-headless.result == 'success' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: windows-latest
     timeout-minutes: 5
     outputs:
@@ -320,7 +192,7 @@ jobs:
     name: Real-GUI automation (self-hosted desktop)
     needs: [native-headless, real-gui-preflight]
     if: >-
-      ${{ always() && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+      ${{ always() && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: [self-hosted, windows, desktop]
     environment:
       name: real-gui
@@ -381,7 +253,7 @@ jobs:
         timeout-minutes: 20
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Target all `
+            -Target specforge_automation_real_gui_targets `
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
@@ -412,7 +284,7 @@ jobs:
     name: Real-GUI queue watchdog
     needs: [native-headless, real-gui-preflight]
     if: >-
-      ${{ always() && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+      ${{ always() && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
@@ -567,7 +439,7 @@ jobs:
   real-gui-status-diagnostic:
     name: Real-GUI status diagnostic
     if: >-
-      ${{ always() && (vars.SPECFORGE_REAL_GUI_ENABLED != 'true' || !((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) || needs.native-headless.result != 'success' || needs.real-gui-preflight.result != 'success' || needs.real-gui-preflight.outputs.runner_available != 'true' || needs.real-gui-watchdog.result != 'success' || needs.real-gui.result != 'success') }}
+      ${{ always() && (vars.SPECFORGE_REAL_GUI_ENABLED != 'true' || !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true) || needs.native-headless.result != 'success' || needs.real-gui-preflight.result != 'success' || needs.real-gui-preflight.outputs.runner_available != 'true' || needs.real-gui-watchdog.result != 'success' || needs.real-gui.result != 'success') }}
     needs: [native-headless, real-gui-preflight, real-gui-watchdog, real-gui]
     runs-on: windows-latest
     timeout-minutes: 5
@@ -592,7 +464,6 @@ jobs:
           $directory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts\real-gui-status'
           New-Item -ItemType Directory -Path $directory -Force | Out-Null
           $policyAuthorized =
-            ($env:EVENT_NAME -eq 'push' -and $env:REF_NAME -eq 'refs/heads/master') -or
             ($env:EVENT_NAME -eq 'workflow_dispatch' -and
              $env:REF_NAME -eq 'refs/heads/master' -and
              $env:RUN_REAL_GUI -eq 'true')
@@ -651,7 +522,7 @@ jobs:
             base_ref = $env:BASE_REF
             repository_variable = $env:REAL_GUI_ENABLED
             workflow_input_run_real_gui = $env:RUN_REAL_GUI
-            authorization_policy = 'protected master push, or workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true'
+            authorization_policy = 'workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true'
             required_runner_labels = @('self-hosted', 'windows', 'desktop')
             headless_gate_result = $env:HEADLESS_RESULT
             preflight_result = $env:PREFLIGHT_RESULT
@@ -672,7 +543,7 @@ jobs:
             "base_ref: $($env:BASE_REF)"
             "repository_variable: SPECFORGE_REAL_GUI_ENABLED=$($env:REAL_GUI_ENABLED)"
             "workflow_input_run_real_gui: $($env:RUN_REAL_GUI)"
-            "authorization_policy: protected master push, or workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true"
+            "authorization_policy: workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true"
             "headless_gate_result: $($env:HEADLESS_RESULT)"
             "preflight_result: $($env:PREFLIGHT_RESULT)"
             "preflight_runner_available: $($env:PREFLIGHT_AVAILABLE)"

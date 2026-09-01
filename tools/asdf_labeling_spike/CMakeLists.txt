@@ -21,6 +21,15 @@ add_test(
         read
         "${PROJECT_SOURCE_DIR}/tests/fixtures/asdf_labeling/profile_zlib.asdf"
 )
+set_tests_properties(
+    specforge_asdf_labeling_spike_native_fixture_test
+    PROPERTIES
+        LABELS "asdf;asdf-lifecycle;asdf-pinned-oracle"
+)
+specforge_set_test_tier(
+    specforge_asdf_labeling_spike_native_fixture_test
+    extended
+)
 
 add_custom_target(specforge_asdf_labeling_interoperability_targets
     DEPENDS specforge_asdf_labeling_spike_native
@@ -45,6 +54,10 @@ set_tests_properties(
         LABELS "asdf;asdf-lifecycle;asdf-pinned-oracle;interoperability;required"
         TIMEOUT 120
 )
+specforge_set_test_tier(
+    specforge_asdf_labeling_interoperability
+    extended
+)
 
 add_test(
     NAME specforge_sample_labeling_asdf_checksum_interoperability
@@ -64,4 +77,8 @@ set_tests_properties(
     PROPERTIES
         LABELS "labeling;asdf-lifecycle;asdf-hardening;asdf-pinned-oracle;ci-headless;required"
         TIMEOUT 120
+)
+specforge_set_test_tier(
+    specforge_sample_labeling_asdf_checksum_interoperability
+    extended
 )

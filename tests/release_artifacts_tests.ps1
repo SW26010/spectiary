@@ -71,6 +71,11 @@ Import-Module `
     -ErrorAction Stop
 
 . (Join-Path $RepoRoot 'scripts\lib\portable_pe_helpers.ps1')
+. (Join-Path $RepoRoot 'scripts\lib\bounded_process.ps1')
+
+$script:FastExternalCaseTimeoutSec = 60
+$script:DeepArchiveCaseTimeoutSec = 120
+$script:CMakeCaseTimeoutSec = 30
 
 Add-Type -TypeDefinition @'
 using System;
@@ -474,36 +479,53 @@ function Assert-PortablePackage {
 
 function Assert-ScriptFails {
     param(
+        [Parameter(Mandatory = $true)] [string]$CaseId,
         [Parameter(Mandatory = $true)] [string]$ScriptPath,
         [Parameter(Mandatory = $true)] [object[]]$Arguments,
         [Parameter(Mandatory = $true)] [string]$Description,
-        [string]$ExpectedMessage
+        [string]$ExpectedMessage,
+        [int]$TimeoutSec = $script:FastExternalCaseTimeoutSec
     )
 
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $output = @(
-            & powershell `
-                -NoProfile `
-                -ExecutionPolicy Bypass `
-                -File $ScriptPath `
-                @Arguments 2>&1
-        )
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
+    $null = Invoke-SpecForgeBoundedValidationCase `
+        -CaseId $CaseId `
+        -Description $Description `
+        -FilePath 'powershell.exe' `
+        -Arguments (@(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $ScriptPath
+        ) + $Arguments) `
+        -TimeoutSec $TimeoutSec `
+        -ExpectedOutcome Failure `
+        -ExpectedMessage $ExpectedMessage
+}
 
-    if ($exitCode -eq 0) {
-        throw "$Description unexpectedly succeeded."
-    }
-    $outputText = $output -join [Environment]::NewLine
-    if (-not [string]::IsNullOrEmpty($ExpectedMessage) -and
-        $outputText.IndexOf($ExpectedMessage, [StringComparison]::Ordinal) -lt 0) {
-        throw "$Description failed for the wrong reason: $outputText"
-    }
+function Assert-ScriptSucceeds {
+    param(
+        [Parameter(Mandatory = $true)] [string]$CaseId,
+        [Parameter(Mandatory = $true)] [string]$ScriptPath,
+        [Parameter(Mandatory = $true)] [object[]]$Arguments,
+        [Parameter(Mandatory = $true)] [string]$Description,
+        [int]$TimeoutSec = $script:DeepArchiveCaseTimeoutSec
+    )
+
+    $null = Invoke-SpecForgeBoundedValidationCase `
+        -CaseId $CaseId `
+        -Description $Description `
+        -FilePath 'powershell.exe' `
+        -Arguments (@(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $ScriptPath
+        ) + $Arguments) `
+        -TimeoutSec $TimeoutSec `
+        -ExpectedOutcome Success `
+        -EchoOutput
 }
 
 function Copy-ZipWithMutations {
@@ -599,6 +621,7 @@ function Copy-ZipWithMutations {
 
 function Assert-BuildSourceCMakeContract {
     param(
+        [Parameter(Mandatory = $true)] [string]$CaseId,
         [Parameter(Mandatory = $true)] [string]$ContractPath,
         [Parameter(Mandatory = $true)] [string]$Mode,
         [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Revision,
@@ -606,27 +629,24 @@ function Assert-BuildSourceCMakeContract {
         [Parameter(Mandatory = $true)] [string]$Description
     )
 
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $output = @(
-            & cmake `
-                "-DSPECFORGE_BUILD_SOURCE_MODE=$Mode" `
-                "-DSPECFORGE_BUILD_SOURCE_REVISION=$Revision" `
-                -P $ContractPath 2>&1
-        )
-        $succeeded = $LASTEXITCODE -eq 0
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($succeeded -ne $ShouldSucceed) {
-        throw "$Description expected success '$ShouldSucceed'; output: $($output -join ' | ')"
-    }
+    $expectedOutcome = if ($ShouldSucceed) { 'Success' } else { 'Failure' }
+    $null = Invoke-SpecForgeBoundedValidationCase `
+        -CaseId $CaseId `
+        -Description $Description `
+        -FilePath 'cmake.exe' `
+        -Arguments @(
+            "-DSPECFORGE_BUILD_SOURCE_MODE=$Mode",
+            "-DSPECFORGE_BUILD_SOURCE_REVISION=$Revision",
+            '-P',
+            $ContractPath
+        ) `
+        -TimeoutSec $script:CMakeCaseTimeoutSec `
+        -ExpectedOutcome $expectedOutcome
 }
 
 function Assert-BuildIdentityHeader {
     param(
+        [Parameter(Mandatory = $true)] [string]$CaseId,
         [Parameter(Mandatory = $true)] [string]$FixturePath,
         [Parameter(Mandatory = $true)] [string]$SourceRoot,
         [Parameter(Mandatory = $true)] [string]$OutputPath,
@@ -638,18 +658,23 @@ function Assert-BuildIdentityHeader {
         [Parameter(Mandatory = $true)] [string]$Description
     )
 
-    & cmake `
-        "-DSOURCE_ROOT=$SourceRoot" `
-        "-DOUTPUT=$OutputPath" `
-        "-DEXPECTED_MODE=$Mode" `
-        "-DEXPECTED_REVISION=$Revision" `
-        "-DEXPECTED_VERSION=$Version" `
-        "-DEXPECTED_CONFIGURATION=$Configuration" `
-        "-DEXPECTED_ARCHITECTURE=$Architecture" `
-        -P $FixturePath
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Description failed."
-    }
+    $null = Invoke-SpecForgeBoundedValidationCase `
+        -CaseId $CaseId `
+        -Description $Description `
+        -FilePath 'cmake.exe' `
+        -Arguments @(
+            "-DSOURCE_ROOT=$SourceRoot",
+            "-DOUTPUT=$OutputPath",
+            "-DEXPECTED_MODE=$Mode",
+            "-DEXPECTED_REVISION=$Revision",
+            "-DEXPECTED_VERSION=$Version",
+            "-DEXPECTED_CONFIGURATION=$Configuration",
+            "-DEXPECTED_ARCHITECTURE=$Architecture",
+            '-P',
+            $FixturePath
+        ) `
+        -TimeoutSec $script:CMakeCaseTimeoutSec `
+        -ExpectedOutcome Success
 }
 
 function Assert-NoticeSectionContains {
@@ -1307,6 +1332,7 @@ try {
         windows_sdk_version = $packageWindowsSdkVersion
     }
     Assert-BuildIdentityHeader `
+        -CaseId 'build-identity-working-tree' `
         -FixturePath $buildIdentityFixturePath `
         -SourceRoot $RepoRoot `
         -OutputPath (Join-Path $testRoot 'working-tree-build-identity.h') `
@@ -1317,6 +1343,7 @@ try {
         -Architecture $TargetArchitecture `
         -Description 'Working-tree compile-time build identity'
     Assert-BuildIdentityHeader `
+        -CaseId 'build-identity-head' `
         -FixturePath $buildIdentityFixturePath `
         -SourceRoot $RepoRoot `
         -OutputPath (Join-Path $testRoot 'head-build-identity.h') `
@@ -1327,6 +1354,7 @@ try {
         -Architecture $TargetArchitecture `
         -Description 'HEAD compile-time build identity'
     Assert-ScriptFails `
+        -CaseId 'reject-unverified-package-outside-temp' `
         -ScriptPath $packageScriptPath `
         -Arguments @(
             '-PackageUnverifiedTestFixture',
@@ -1338,6 +1366,7 @@ try {
         -ExpectedMessage 'reserved for release-artifact tests' `
         -Description 'Unverified package fixture outside the temporary directory'
     Assert-ScriptFails `
+        -CaseId 'reject-direct-head-packaging' `
         -ScriptPath $packageScriptPath `
         -Arguments @(
             '-PackageUnverifiedTestFixture',
@@ -1414,14 +1443,25 @@ try {
             ConvertTo-Json -Depth 10 |
             Set-Content -LiteralPath $fixtureMetadataPath -Encoding UTF8
 
-        & $fixturePackageScriptPath `
-            -PackageUnverifiedTestFixture `
-            -Configuration $Configuration `
-            -PackageName $fixture.PackageName `
-            -BuildRoot $fixtureBuildRoot `
-            -DistRoot $testDistRoot `
-            -SourceMode $fixture.Mode `
-            -SourceRevision $fixture.Revision
+        Assert-ScriptSucceeds `
+            -CaseId "package-$($fixture.Mode.Replace('_', '-'))" `
+            -ScriptPath $fixturePackageScriptPath `
+            -Arguments @(
+                '-PackageUnverifiedTestFixture',
+                '-Configuration',
+                $Configuration,
+                '-PackageName',
+                $fixture.PackageName,
+                '-BuildRoot',
+                $fixtureBuildRoot,
+                '-DistRoot',
+                $testDistRoot,
+                '-SourceMode',
+                $fixture.Mode,
+                '-SourceRevision',
+                $fixture.Revision
+            ) `
+            -Description "$($fixture.Mode) Portable packaging and verification"
 
         $fixturePackageRoot = Join-Path $testDistRoot $fixture.PackageName
         $fixtureZipPath = Join-Path $testDistRoot "$($fixture.PackageName).zip"
@@ -1460,6 +1500,7 @@ try {
             -LiteralPath (Join-Path $tamperedMetadataBuildRoot 'specforge_metadata.json') `
             -Encoding UTF8
     Assert-ScriptFails `
+        -CaseId 'reject-tampered-build-metadata-hash' `
         -ScriptPath $packageScriptPath `
         -Arguments @(
             '-PackageUnverifiedTestFixture',
@@ -1490,6 +1531,7 @@ try {
             -LiteralPath (Join-Path $tamperedExecutableBuildRoot 'specforge_metadata.json') `
             -Encoding UTF8
     Assert-ScriptFails `
+        -CaseId 'reject-tampered-build-executable' `
         -ScriptPath $packageScriptPath `
         -Arguments @(
             '-PackageUnverifiedTestFixture',
@@ -1531,6 +1573,7 @@ try {
     $hiddenEntry.Attributes =
         $hiddenEntry.Attributes -bor [IO.FileAttributes]::Hidden
     Assert-ScriptFails `
+        -CaseId 'reject-hidden-extra-package-entry' `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
             '-BuildExecutable',
@@ -1560,6 +1603,7 @@ try {
         (Join-Path $wrongDataTypePackageRoot 'Data'),
         'not a directory')
     Assert-ScriptFails `
+        -CaseId 'reject-data-file' `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
             '-BuildExecutable',
@@ -1583,6 +1627,7 @@ try {
             (($tamperedPackageMetadata | ConvertTo-Json -Depth 10) + [Environment]::NewLine),
             (New-Object Text.UTF8Encoding($false)))
         Assert-ScriptFails `
+            -CaseId 'reject-packaged-metadata-tamper' `
             -ScriptPath $portableVerifierPath `
             -Arguments @(
                 '-BuildExecutable',
@@ -1617,6 +1662,7 @@ try {
             $verifiedPackageExecutablePath,
             $tamperedPackageExecutableBytes)
         Assert-ScriptFails `
+            -CaseId 'reject-packaged-executable-tamper' `
             -ScriptPath $portableVerifierPath `
             -Arguments @(
                 '-BuildExecutable',
@@ -1643,6 +1689,7 @@ try {
         -DestinationPath $tamperedZipPath `
         -TamperedEntryName 'specforge_metadata.json'
     Assert-ScriptFails `
+        -CaseId 'reject-zip-metadata-tamper' `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
             '-BuildExecutable',
@@ -1652,6 +1699,7 @@ try {
             '-ZipPath',
             $tamperedZipPath
         ) `
+        -TimeoutSec $script:DeepArchiveCaseTimeoutSec `
         -ExpectedMessage 'Portable ZIP metadata ZIP entry' `
         -Description 'Published Portable ZIP metadata tamper is detected'
 
@@ -1663,6 +1711,7 @@ try {
         -DestinationPath $tamperedExecutableZipPath `
         -TamperedEntryName 'SpecForge.exe'
     Assert-ScriptFails `
+        -CaseId 'reject-zip-executable-tamper' `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
             '-BuildExecutable',
@@ -1672,6 +1721,7 @@ try {
             '-ZipPath',
             $tamperedExecutableZipPath
         ) `
+        -TimeoutSec $script:DeepArchiveCaseTimeoutSec `
         -ExpectedMessage 'Portable ZIP executable ZIP entry' `
         -Description 'Published Portable ZIP executable tamper is detected'
 
@@ -1683,6 +1733,7 @@ try {
         -DestinationPath $injectedCfitsioZipPath `
         -AdditionalEntryName 'cfitsio.dll'
     Assert-ScriptFails `
+        -CaseId 'reject-zip-cfitsio-injection' `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
             '-BuildExecutable',
@@ -1692,6 +1743,7 @@ try {
             '-ZipPath',
             $injectedCfitsioZipPath
         ) `
+        -TimeoutSec $script:DeepArchiveCaseTimeoutSec `
         -ExpectedMessage 'Portable ZIP must not contain a CFITSIO DLL: cfitsio.dll' `
         -Description 'Published Portable ZIP rejects an injected CFITSIO DLL'
 
@@ -1708,6 +1760,7 @@ try {
                 [Environment]::NewLine),
             (New-Object Text.UTF8Encoding($false)))
         Assert-ScriptFails `
+            -CaseId 'reject-missing-windows-sdk-version' `
             -ScriptPath $portableVerifierPath `
             -Arguments @(
                 '-BuildExecutable',
@@ -1727,11 +1780,31 @@ try {
     }
 
     $invalidCfitsioVersions = @(
-        [pscustomobject]@{ Description = 'empty'; Value = '' },
-        [pscustomobject]@{ Description = 'blank'; Value = '   ' },
-        [pscustomobject]@{ Description = 'leading padding'; Value = ' 4.6.4' },
-        [pscustomobject]@{ Description = 'trailing padding'; Value = '4.6.4 ' },
-        [pscustomobject]@{ Description = 'non-numeric'; Value = '4.6.x' }
+        [pscustomobject]@{
+            CaseId = 'reject-cfitsio-empty'
+            Description = 'empty'
+            Value = ''
+        },
+        [pscustomobject]@{
+            CaseId = 'reject-cfitsio-blank'
+            Description = 'blank'
+            Value = '   '
+        },
+        [pscustomobject]@{
+            CaseId = 'reject-cfitsio-leading-padding'
+            Description = 'leading padding'
+            Value = ' 4.6.4'
+        },
+        [pscustomobject]@{
+            CaseId = 'reject-cfitsio-trailing-padding'
+            Description = 'trailing padding'
+            Value = '4.6.4 '
+        },
+        [pscustomobject]@{
+            CaseId = 'reject-cfitsio-nonnumeric'
+            Description = 'non-numeric'
+            Value = '4.6.x'
+        }
     )
     foreach ($invalidCfitsioVersion in $invalidCfitsioVersions) {
         try {
@@ -1746,6 +1819,7 @@ try {
                     [Environment]::NewLine),
                 (New-Object Text.UTF8Encoding($false)))
             Assert-ScriptFails `
+                -CaseId $invalidCfitsioVersion.CaseId `
                 -ScriptPath $portableVerifierPath `
                 -Arguments @(
                     '-BuildExecutable',
@@ -1770,6 +1844,7 @@ try {
 
     $invalidMetadataCases = @(
         [pscustomobject]@{
+            CaseId = 'reject-metadata-schema-string'
             Description = 'Metadata schema as string'
             PropertyName = 'schema_version'
             Remove = $false
@@ -1777,6 +1852,7 @@ try {
             ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-schema-decimal'
             Description = 'Metadata schema as decimal'
             PropertyName = 'schema_version'
             Remove = $false
@@ -1785,6 +1861,7 @@ try {
             ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-schema-array'
             Description = 'Metadata schema as array'
             PropertyName = 'schema_version'
             Remove = $false
@@ -1792,6 +1869,7 @@ try {
             ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-legacy-schema'
             Description = 'Metadata legacy schema'
             PropertyName = 'schema_version'
             Remove = $false
@@ -1799,6 +1877,7 @@ try {
             ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-missing-compiler-id'
             Description = 'Metadata missing compiler ID'
             PropertyName = 'compiler_id'
             Remove = $true
@@ -1806,6 +1885,7 @@ try {
             ExpectedMessage = "missing non-empty string 'compiler_id'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-blank-generator'
             Description = 'Metadata blank generator'
             PropertyName = 'generator'
             Remove = $false
@@ -1813,6 +1893,7 @@ try {
             ExpectedMessage = "missing non-empty string 'generator'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-unsupported-compiler'
             Description = 'Metadata unsupported compiler'
             PropertyName = 'compiler_id'
             Remove = $false
@@ -1820,6 +1901,7 @@ try {
             ExpectedMessage = "expected 'MSVC'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-invalid-compiler-version'
             Description = 'Metadata invalid compiler version'
             PropertyName = 'compiler_version'
             Remove = $false
@@ -1827,6 +1909,7 @@ try {
             ExpectedMessage = 'invalid compiler_version'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-invalid-cmake-version'
             Description = 'Metadata invalid CMake version'
             PropertyName = 'cmake_version'
             Remove = $false
@@ -1834,6 +1917,7 @@ try {
             ExpectedMessage = 'invalid cmake_version'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-unsupported-architecture'
             Description = 'Metadata unsupported target architecture'
             PropertyName = 'target_architecture'
             Remove = $false
@@ -1841,6 +1925,7 @@ try {
             ExpectedMessage = "expected 'amd64'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-missing-windows-sdk'
             Description = 'Metadata missing Windows SDK version'
             PropertyName = 'windows_sdk_version'
             Remove = $false
@@ -1848,6 +1933,7 @@ try {
             ExpectedMessage = "missing non-empty string 'windows_sdk_version'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-invalid-windows-sdk'
             Description = 'Metadata invalid Windows SDK version'
             PropertyName = 'windows_sdk_version'
             Remove = $false
@@ -1855,6 +1941,7 @@ try {
             ExpectedMessage = 'invalid windows_sdk_version'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-missing-cfitsio'
             Description = 'Metadata missing CFITSIO provenance'
             PropertyName = 'cfitsio'
             Remove = $true
@@ -1862,6 +1949,7 @@ try {
             ExpectedMessage = "missing non-empty string 'cfitsio'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-cfitsio-notice-mismatch'
             Description = 'Metadata CFITSIO provenance disagrees with notices'
             PropertyName = 'cfitsio'
             Remove = $false
@@ -1869,6 +1957,7 @@ try {
             ExpectedMessage = 'THIRD_PARTY_NOTICES.txt is stale for CFITSIO'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-missing-yaml-cpp'
             Description = 'Metadata missing yaml-cpp provenance'
             PropertyName = 'yaml_cpp'
             Remove = $true
@@ -1876,6 +1965,7 @@ try {
             ExpectedMessage = "missing non-empty string 'yaml_cpp'"
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-yaml-cpp-notice-mismatch'
             Description = 'Metadata yaml-cpp provenance disagrees with notices'
             PropertyName = 'yaml_cpp'
             Remove = $false
@@ -1883,6 +1973,7 @@ try {
             ExpectedMessage = 'THIRD_PARTY_NOTICES.txt is stale for yaml-cpp'
         },
         [pscustomobject]@{
+            CaseId = 'reject-metadata-working-tree-revision-array'
             Description = 'Working-tree revision as null array'
             PropertyName = 'source_revision'
             Remove = $false
@@ -1929,6 +2020,7 @@ try {
             -Value $invalidMetadataJson `
             -Encoding UTF8
         Assert-ScriptFails `
+            -CaseId $invalidCase.CaseId `
             -ScriptPath $packageScriptPath `
             -Arguments @(
                 '-PackageUnverifiedTestFixture',
@@ -1973,6 +2065,7 @@ try {
             ) `
             -Encoding UTF8
     Assert-ScriptFails `
+        -CaseId 'reject-head-revision-array' `
         -ScriptPath $snapshotPackageScriptPath `
         -Arguments @(
             '-PackageUnverifiedTestFixture',
@@ -2000,14 +2093,17 @@ try {
         $testDistRoot
     )
     Assert-ScriptFails `
+        -CaseId 'reject-unknown-source-mode' `
         -ScriptPath $packageScriptPath `
         -Arguments ($invalidBaseArguments + @('-SourceMode', 'unknown')) `
         -Description 'Unknown source mode'
     Assert-ScriptFails `
+        -CaseId 'reject-head-without-revision' `
         -ScriptPath $packageScriptPath `
         -Arguments ($invalidBaseArguments + @('-SourceMode', 'head')) `
         -Description 'Head mode without revision'
     Assert-ScriptFails `
+        -CaseId 'reject-working-tree-with-revision' `
         -ScriptPath $packageScriptPath `
         -Arguments ($invalidBaseArguments + @(
             '-SourceMode',
@@ -2017,6 +2113,7 @@ try {
         )) `
         -Description 'Working-tree mode with revision'
     Assert-ScriptFails `
+        -CaseId 'reject-head-invalid-revision' `
         -ScriptPath $packageScriptPath `
         -Arguments ($invalidBaseArguments + @(
             '-SourceMode',
@@ -2028,42 +2125,49 @@ try {
 
     $cmakeContractCases = @(
         [pscustomobject]@{
+            CaseId = 'cmake-working-tree'
             Mode = 'working_tree'
             Revision = ''
             ShouldSucceed = $true
             Description = 'CMake working-tree contract'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-head'
             Mode = 'head'
             Revision = $headRevision
             ShouldSucceed = $true
             Description = 'CMake head contract'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-reject-unknown-mode'
             Mode = 'unknown'
             Revision = ''
             ShouldSucceed = $false
             Description = 'CMake unknown mode'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-reject-head-without-revision'
             Mode = 'head'
             Revision = ''
             ShouldSucceed = $false
             Description = 'CMake head without revision'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-reject-working-tree-with-revision'
             Mode = 'working_tree'
             Revision = $headRevision
             ShouldSucceed = $false
             Description = 'CMake working tree with revision'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-reject-abbreviated-head'
             Mode = 'head'
             Revision = '0123456789ab'
             ShouldSucceed = $false
             Description = 'CMake abbreviated head revision'
         },
         [pscustomobject]@{
+            CaseId = 'cmake-reject-uppercase-head'
             Mode = 'head'
             Revision = '0123456789ABCDEF0123456789ABCDEF01234567'
             ShouldSucceed = $false
@@ -2072,6 +2176,7 @@ try {
     )
     foreach ($contractCase in $cmakeContractCases) {
         Assert-BuildSourceCMakeContract `
+            -CaseId $contractCase.CaseId `
             -ContractPath $buildSourceContractPath `
             -Mode $contractCase.Mode `
             -Revision $contractCase.Revision `
@@ -2080,8 +2185,24 @@ try {
     }
 }
 finally {
-    if (Test-Path -LiteralPath $testRoot) {
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+    $cleanupStatus = 'passed'
+    Write-Host "CASE CLEANUP BEGIN id=release-artifacts-temp-root path=$testRoot"
+    try {
+        if (Test-Path -LiteralPath $testRoot) {
+            Remove-Item -LiteralPath $testRoot -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $testRoot) {
+            throw "Release artifact test root remains after cleanup: $testRoot"
+        }
+    }
+    catch {
+        $cleanupStatus = 'failed'
+        throw
+    }
+    finally {
+        Write-Host (
+            'CASE CLEANUP END id=release-artifacts-temp-root status={0}' -f
+                $cleanupStatus)
     }
 }
 
