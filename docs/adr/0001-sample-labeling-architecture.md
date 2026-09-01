@@ -55,6 +55,9 @@ The canonical document keeps these concepts independent:
 | Annotation alignment | Required `annotation.alignment` declaration with exactly `mode: by_index` and `target: sample_roster`; values follow roster/source index order. |
 | ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not SpecForge schema versions. |
 
+Issue #82 is a bounded self-description patch within `schema_version: 2.0.0`;
+it does not define or require schema `2.1.0`.
+
 Canonical time is a millisecond-resolution strong time point in the runtime and
 the exact `YYYY-MM-DDTHH:MM:SS.sssZ` form on the wire. Dates and ranges are
 validated, `created_at` is immutable, and `modified_at` is monotonic. Assigning
@@ -90,7 +93,8 @@ non-whitespace UTF-8 text. Email is preserved exactly as user-supplied contact
 metadata; it is not parsed as an RFC address, normalized, or inferred from Git,
 the operating system, or other machine-local state.
 
-Schema 2.0 explicitly declares its only annotation alignment contract. For an
+Schema 2.0 explicitly declares its only annotation alignment contract.
+annotation.values[i] annotates canonical sample i. For an
 `explicit_names` roster, `values[i]` labels `names[i]`; for a `source_index`
 roster, `values[i]` labels source index `i`. Readers reject a missing or
 ill-typed alignment map and any mode/target other than `by_index` and

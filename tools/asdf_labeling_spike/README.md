@@ -18,7 +18,7 @@ $env:PYTHONPATH = (Resolve-Path build/asdf-labeling-spike-python).Path
 The checked profile is the canonical SpecForge sample-labeling schema `2.0.0`
 document: task IDs are
 lowercase UUID v4 values; task timestamps use fixed millisecond UTC text; task
-origin, optional description, and optional authors round-trip through the Python
+origin, optional description, and optional authors (including email) round-trip through the Python
 and native readers/writers; empty authors remain absent, and `annotation.name`
 is rejected. The corpus exercises a deterministic `head` build source with a
 full 40-character lowercase hexadecimal revision and `working_tree` with the

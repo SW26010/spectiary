@@ -871,6 +871,9 @@ interchangeably:
 | ASDF file-format version | The container framing version in `#ASDF 1.0.0`. | Independently versioned by ASDF. It does not mean SpecForge schema 1.0. |
 | ASDF Standard version | The tag/schema vocabulary declared by `#ASDF_STANDARD 1.5.0`. | Independently versioned by ASDF. The `!core/asdf-1.1.0` root tag is likewise an ASDF core tag, not the SpecForge schema version. |
 
+GitHub issue #82 is a bounded self-description patch incorporated into
+`schema_version: 2.0.0`. It does not introduce schema `2.1.0`.
+
 Task IDs use only the canonical UUID v4 text form: 36 lowercase ASCII
 characters in `8-4-4-4-12` groups, version nibble `4`, and RFC variant nibble
 `8`, `9`, `a`, or `b`. Uppercase hex, braces, `urn:uuid:` prefixes, missing
@@ -1019,9 +1022,9 @@ labeling_task:
       fingerprint: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   description: "Review promoted candidate labels."
   authors:
-    - name: "Example Maintainer"
-      identifier: "https://orcid.org/0000-0000-0000-0000"
-      email: "maintainer@example.org"
+    - name: "Alice"
+      identifier: "https://orcid.org/0000-0001-2345-6789"
+      email: "alice@example.org"
   labels:
     - code: 0
       name: "非目标"
@@ -1030,6 +1033,16 @@ labeling_task:
       name: "目标"
       shortcut: "t"
 ...
+```
+
+```text
+annotation.values[i] annotates canonical sample i.
+
+explicit_names:
+    canonical sample i = sample_roster.names[i]
+
+source_index:
+    canonical sample i = source index i
 ```
 
 For `sample_roster.identity_kind: source_index`, `sample_roster.names` is

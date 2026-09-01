@@ -3264,9 +3264,9 @@ int main(int argc, char* argv[])
             std::string_view(argv[1]) == "write-author-email-oracle") {
             specforge::SampleLabelingDocument document = ProductionDocument();
             document.labeling.canonical_metadata.authors = {
-                {.name = "SpecForge maintainer",
-                    .identifier = "https://example.invalid/maintainer",
-                    .email = "Maintainer@Example.INVALID"},
+                {.name = "Alice",
+                    .identifier = "https://orcid.org/0000-0001-2345-6789",
+                    .email = "alice@example.org"},
                 {.name = "验证者"}};
             const specforge::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], document);

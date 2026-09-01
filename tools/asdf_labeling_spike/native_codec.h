@@ -31,6 +31,7 @@ struct TaskOrigin {
 struct Author {
     std::string name;
     std::optional<std::string> identifier;
+    std::optional<std::string> email;
 };
 
 struct LabelingDocument {

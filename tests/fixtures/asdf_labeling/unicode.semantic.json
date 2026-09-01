@@ -28,8 +28,9 @@
   "description": "跨语言描述：星系分类 🧪",
   "authors": [
     {
-      "name": "SpecForge maintainer",
-      "identifier": "https://example.invalid/maintainer"
+      "name": "Alice",
+      "identifier": "https://orcid.org/0000-0001-2345-6789",
+      "email": "alice@example.org"
     },
     {
       "name": "验证者",

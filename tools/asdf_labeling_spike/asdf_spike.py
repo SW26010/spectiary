@@ -547,8 +547,9 @@ def _fixture_cases() -> list[dict[str, Any]]:
                 description="跨语言描述：星系分类 🧪",
                 authors=[
                     {
-                        "name": "SpecForge maintainer",
-                        "identifier": "https://example.invalid/maintainer",
+                        "name": "Alice",
+                        "identifier": "https://orcid.org/0000-0001-2345-6789",
+                        "email": "alice@example.org",
                     },
                     {"name": "验证者"},
                 ],
@@ -1723,9 +1724,9 @@ def _production_author_email_semantic_summary() -> dict[str, Any]:
     summary = _production_explicit_semantic_summary([-1, 0, 1])
     summary["authors"] = [
         {
-            "name": "SpecForge maintainer",
-            "identifier": "https://example.invalid/maintainer",
-            "email": "Maintainer@Example.INVALID",
+            "name": "Alice",
+            "identifier": "https://orcid.org/0000-0001-2345-6789",
+            "email": "alice@example.org",
         },
         {"name": "验证者", "identifier": None},
     ]
@@ -1764,6 +1765,38 @@ def _verify_author_email_type_rejections() -> None:
         raise RuntimeError(
             f"author-email oracle accepted a present {type_name} value"
         )
+
+
+def _verify_native_author_email_type_rejections(
+    native: Path, fixture: Path, output: Path
+) -> None:
+    source = fixture.read_bytes()
+    email_token = b"alice@example.org"
+    if source.count(email_token) != 1:
+        raise RuntimeError(
+            "native author-email rejection fixture must contain exactly one email token"
+        )
+    for type_name, scalar in (
+        ("null", b"null"),
+        ("integer", b"123"),
+        ("over-range-integer", b"184467440737095516160"),
+        ("boolean", b"true"),
+    ):
+        path = output / f"native-author-email-{type_name}.asdf"
+        path.write_bytes(source.replace(email_token, scalar, 1))
+        completed = subprocess.run(
+            [str(native), "read", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 2 or "not a string: email" not in completed.stderr:
+            raise RuntimeError(
+                "native reader did not reject a present "
+                f"{type_name} author email as a controlled string-type error: "
+                f"returncode={completed.returncode}, stderr={completed.stderr!r}"
+            )
 
 
 def interoperability(fixtures: Path, native: Path, production_native: Path) -> dict[str, Any]:
@@ -1805,6 +1838,16 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         records.append({"fixture": fixture["name"], "status": status, "returncode": completed.returncode})
 
     with tempfile.TemporaryDirectory(prefix="specforge-asdf-native-") as temporary:
+        _verify_native_author_email_type_rejections(
+            native, fixtures / "unicode.asdf", Path(temporary)
+        )
+        records.append(
+            {
+                "fixture": "native-author-email-non-string-types",
+                "status": "native-controlled-rejection/null+integer+over-range-integer+boolean",
+                "returncode": 0,
+            }
+        )
         native_path = Path(temporary) / "native.asdf"
         completed = subprocess.run([str(native), "write-fixture", str(native_path)], capture_output=True, text=True, encoding="utf-8", check=False)
         if completed.returncode != 0:

@@ -63,7 +63,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "7540a7dd1367ca680b90ad86ae2c51e038ac34698a46e3b8630b1d44d158be38"
+      "sha256": "aee6039d59875b752beb4ec76deca225db479c468865dd362c1a2c4883c75bf8"
     },
     {
       "name": "folder_roster",

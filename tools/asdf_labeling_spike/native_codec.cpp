@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr std::string_view kFormatKind = "specforge.sample_labeling";
 constexpr std::string_view kSchemaVersion = "2.0.0";
+constexpr std::string_view kYamlStringTag = "tag:yaml.org,2002:str";
 constexpr std::string_view kFixtureBuildSourceRevision =
     "0123456789abcdef0123456789abcdef01234567";
 constexpr std::uint64_t kMaximumSampleCount = 100'000'000;
@@ -327,6 +329,53 @@ template <typename Value>
     catch (const YAML::Exception&) {
         throw CodecError("required ASDF field has the wrong scalar type: " + std::string(key));
     }
+}
+
+[[nodiscard]] bool IsYaml11ImplicitNonStringScalar(std::string_view value)
+{
+    using namespace std::regex_constants;
+    static const std::regex null_bool_special{
+        R"(^(~|null|Null|NULL|y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|<<|=|!|&|\*)$)",
+        ECMAScript | optimize};
+    static const std::regex integer{
+        R"(^[-+]?(0b[0-1_]+|0[0-7_]+|0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|[1-9][0-9_]*(:[0-5]?[0-9])+)$)",
+        ECMAScript | optimize};
+    static const std::regex floating_point{
+        R"(^([-+]?(([0-9][0-9_]*)\.[0-9_]*([eE][-+][0-9]+)?|([0-9][0-9_]*)([eE][-+][0-9]+)|\.[0-9_]+([eE][-+][0-9]+)?|([0-9][0-9_]*)(:[0-5]?[0-9])+\.[0-9_]*|\.(inf|Inf|INF))|\.(nan|NaN|NAN))$)",
+        ECMAScript | optimize};
+    static const std::regex timestamp{
+        R"(^([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}([Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(\.[0-9]*)?([ \t]*(Z|[-+][0-9]{1,2}(:[0-9]{2})?))?)$)",
+        ECMAScript | optimize};
+    return std::regex_match(value.begin(), value.end(), null_bool_special) ||
+        std::regex_match(value.begin(), value.end(), integer) ||
+        std::regex_match(value.begin(), value.end(), floating_point) ||
+        std::regex_match(value.begin(), value.end(), timestamp);
+}
+
+[[nodiscard]] bool IsYamlStringScalar(const YAML::Node& node)
+{
+    if (!node.IsScalar()) {
+        return false;
+    }
+    const std::string tag = node.Tag();
+    if (tag == "!" || tag == kYamlStringTag) {
+        return true;
+    }
+    if (tag != "?") {
+        return false;
+    }
+    return !IsYaml11ImplicitNonStringScalar(node.Scalar());
+}
+
+[[nodiscard]] std::string RequiredStringScalar(
+    const YAML::Node& parent, std::string_view key)
+{
+    const YAML::Node node = RequiredNode(parent, key);
+    if (!IsYamlStringScalar(node)) {
+        throw CodecError("required ASDF field is not a string: " +
+            std::string(key));
+    }
+    return node.Scalar();
 }
 
 [[nodiscard]] bool IsValidUtf8(std::string_view text)
@@ -688,6 +737,9 @@ void ValidateDocument(const LabelingDocument& document)
         if (author.identifier) {
             RequireNonWhitespaceUtf8(*author.identifier, "labeling_task.authors.identifier");
         }
+        if (author.email) {
+            RequireNonWhitespaceUtf8(*author.email, "labeling_task.authors.email");
+        }
     }
 }
 
@@ -926,6 +978,9 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
             author.name = RequiredScalar<std::string>(node, "name");
             if (node["identifier"]) {
                 author.identifier = RequiredScalar<std::string>(node, "identifier");
+            }
+            if (const YAML::Node email = node["email"]; email.IsDefined()) {
+                author.email = RequiredStringScalar(node, "email");
             }
             document.authors.push_back(std::move(author));
         }
@@ -1194,6 +1249,9 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
             if (author.identifier) {
                 metadata << "    identifier: " << QuoteYaml(*author.identifier) << "\n";
             }
+            if (author.email) {
+                metadata << "    email: " << QuoteYaml(*author.email) << "\n";
+            }
         }
     }
     metadata << "  labels:\n";
@@ -1310,6 +1368,9 @@ std::string SemanticJson(const LabelingDocument& document)
         else {
             out << "null";
         }
+        if (author.email) {
+            out << ",\"email\":" << QuoteJson(*author.email);
+        }
         out << '}';
     }
     out << ']'
@@ -1363,8 +1424,9 @@ LabelingDocument NativeFixture()
         "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"};
     document.description = "Native schema 2.0 interoperability fixture 🚀";
     document.authors = {
-        {"SpecForge spike", "https://example.invalid/specforge-spike"},
-        {"验证者", std::nullopt}};
+        {"Alice", "https://orcid.org/0000-0001-2345-6789",
+            "alice@example.org"},
+        {"验证者", std::nullopt, std::nullopt}};
     document.labels = {{0, "Galaxy", "g"}, {1, "Quasar", "q"}};
     document.values = {kUnlabeled, 0, 1};
     return document;

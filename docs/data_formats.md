@@ -233,6 +233,15 @@ LAMOST DR13 -> SDSS DR17 -> SDSS DR19
 语义版本；文件头 `#ASDF 1.0.0` 是 ASDF file-format 版本；
 `#ASDF_STANDARD 1.5.0` 是 ASDF Standard 版本。ASDF 版本号中的 `1.0.0` 不表示
 SpecForge labeling schema 1.0，`!core/asdf-1.1.0` 也只是 ASDF core tag。
+GitHub issue #82 是纳入 `schema_version: 2.0.0` 的 bounded self-description
+patch，没有引入 `2.1.0`。
+
+每个当前 generation 都直接声明 producer：`asdf_library.name` 为 `SpecForge`，
+`asdf_library.version` 为 `0.8.0`。相邻的 `specforge_build` 只包含构建源码状态：
+`source_mode: head` 必须同时包含完整 40 位小写十六进制 `source_revision`；
+`source_mode: working_tree` 必须完全省略 `source_revision`，不能写成 `null`。
+fresh write、values-only rewrite 和 metadata rewrite 都写入当前 binary 的这一
+identity，而不是沿用被替换 generation 的 identity。
 
 下列标识不得混用：
 
@@ -241,6 +250,19 @@ SpecForge labeling schema 1.0，`!core/asdf-1.1.0` 也只是 ASDF core tag。
 | task ID | `labeling_task.id` 中不可变的 canonical lowercase UUID v4；重命名、Save As、export 或 relink 都不改变它。 |
 | task name | `labeling_task.name` 中可编辑的 UTF-8 文本；必须至少包含一个非 Unicode whitespace 字符，不 trim、不 normalization。 |
 | output filename | 用户选择的文件系统名称；对话框可以由 task name 生成安全建议，但该名称不是 task identity，后续重命名 task 不会重命名文件。 |
+
+```text
+annotation.values[i] annotates canonical sample i.
+
+explicit_names:
+    canonical sample i = sample_roster.names[i]
+
+source_index:
+    canonical sample i = source index i
+```
+
+因此 schema 2.0 的 `annotation.alignment` 必须明确写成 `mode: by_index` 和
+`target: sample_roster`；缺失、非字符串或其他 mode/target 都是 semantic error。
 
 schema 2.0 把 source identity/roster、`int32` label values、label definitions、task
 ID/name、`created_at`、`modified_at` 和 origin 放在同一个原子 ASDF generation。
@@ -257,11 +279,17 @@ fingerprint 为 `sha256:` 加 64 位小写十六进制。该摘要覆盖解析�
 payload；它不是 decoded values、sidecar、路径字符串或 source fingerprint 的摘要。
 
 `description` 和 `authors` 是可选 canonical 字段，当前没有编辑 UI；unset 时保持
-absent。Unknown-field preservation 只承诺基于同一 validated durable generation
+absent。每个 author 必须有非空白 UTF-8 `name`，并可带非空白 UTF-8
+`identifier` 和 `email`；email 按用户输入原样保留，不做地址解析、normalization
+或 machine-local 推断。包含 producer、build identity、alignment、typed values、
+task metadata 和 author email 的完整 `explicit_names` canonical YAML tree，以及
+两种 roster 的合同说明，见
+[Sample Labeling](sample_labeling.md#canonical-schema-20-identity-and-provenance)。
+Unknown-field preservation 只承诺基于同一 validated durable generation
 重写时保留现有 YAML tree 中受支持的 unknown mapping entries。它不承诺保留额外
 binary blocks、任意 sequence schema、metadata 原始字节、padding 或旧
-index/trailer。完整 YAML tree、semantic mutation/retry 时间戳规则和 preservation
-边界见 [Sample Labeling](sample_labeling.md#canonical-schema-20-identity-and-provenance)。
+index/trailer。semantic mutation/retry 时间戳规则和 preservation 边界也由上述
+Sample Labeling 合同定义。
 
 SpecForge labeling schema `1.0.0` 不读取迁移为 `2.0.0`；本地 labeling cache
 schemas 1–3 也不迁移，当前 cache schema 是 4。Canonical 文档不包含 task copy
