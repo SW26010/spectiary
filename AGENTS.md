@@ -12,6 +12,16 @@
 - See [Ninja/MSVC 卡住排查](docs/engineering_setup.md#ninjamsvc-卡住排查) for the rationale and
   recovery procedure.
 
+## GitHub Actions trigger policy
+
+- Keep `.github/workflows/automation.yml` manual-only with `workflow_dispatch`.
+- Do not add `push`, `pull_request`, scheduled, or other automatic triggers to that workflow unless
+  the user explicitly authorizes the trigger change in the current task.
+- The version-tag trigger in `.github/workflows/release.yml` is intentional and does not authorize
+  automatic triggers for other workflows.
+- Treat any workflow trigger change as repository policy, not as an implied implementation detail
+  of adding or strengthening a CI gate.
+
 ## Agent skills
 
 ### Issue tracker

@@ -98,10 +98,9 @@ Assert-True `
 $triggerBody = $triggerMatch.Groups['body'].Value
 foreach ($automaticTrigger in @('push', 'pull_request')) {
     Assert-True `
-        -Condition ($triggerBody -match (
-            '(?m)^  ' + [regex]::Escape($automaticTrigger) +
-            ':\r?\n    branches:\r?\n      - master\r?$')) `
-        -Message "Workflow must automatically run the required native/headless gate on $automaticTrigger for master."
+        -Condition ($triggerBody -notmatch (
+            '(?m)^  ' + [regex]::Escape($automaticTrigger) + '\s*:')) `
+        -Message "Workflow must not define automatic trigger '$automaticTrigger'."
 }
 
 $nativeBody = Get-JobBody -Text $workflowText -JobId 'native-headless'

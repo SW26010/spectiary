@@ -23,10 +23,10 @@ function Get-ReleaseContractRuleId {
     param([Parameter(Mandatory = $true)] [string]$Message)
 
     switch -Regex ($Message) {
-        'automatically on push' {
+        'must not run automatically on push' {
             return 'SF-WF-PUSH-TRIGGER'
         }
-        'automatically on pull_request' {
+        'must not run automatically on pull_request' {
             return 'SF-WF-PULL-REQUEST-TRIGGER'
         }
         'required release build job cannot be conditional' {
@@ -958,10 +958,9 @@ function Assert-AutomationRequiredGate {
         -Name 'on'
     foreach ($automaticTrigger in @('push', 'pull_request')) {
         Assert-True `
-            -Condition ($triggerBody -match (
-                '(?m)^  ' + [regex]::Escape($automaticTrigger) +
-                ':\r?\n    branches:\r?\n      - master\r?$')) `
-            -Message "Automation required gate must run automatically on $automaticTrigger for master."
+            -Condition ($triggerBody -notmatch (
+                '(?m)^  ' + [regex]::Escape($automaticTrigger) + '\s*:')) `
+            -Message "Automation workflow must not run automatically on $automaticTrigger."
     }
 
     $headlessJob = Get-YamlJobBody `
@@ -1777,16 +1776,30 @@ if ($ContractArea -ceq 'WorkflowStructure') {
                     '')
             };
         New-TextMutationCase `
-            -Description 'Required automation gate limited to workflow_dispatch' `
+            -Description 'Automatic push trigger added to manual automation workflow' `
             -ExpectedId 'SF-WF-PUSH-TRIGGER' `
             -Key 'AutomationWorkflowText' `
             -Transform {
                 param($text)
-                [regex]::Replace(
-                    $text,
-                    '(?ms)^  push:\r?\n    branches:\r?\n      - master\r?\n' +
-                        '  pull_request:\r?\n    branches:\r?\n      - master\r?\n',
-                    '')
+                $text.Replace(
+                    '  workflow_dispatch:',
+                    '  push:' + $newline +
+                        '    branches:' + $newline +
+                        '      - master' + $newline +
+                        '  workflow_dispatch:')
+            };
+        New-TextMutationCase `
+            -Description 'Automatic pull-request trigger added to manual automation workflow' `
+            -ExpectedId 'SF-WF-PULL-REQUEST-TRIGGER' `
+            -Key 'AutomationWorkflowText' `
+            -Transform {
+                param($text)
+                $text.Replace(
+                    '  workflow_dispatch:',
+                    '  pull_request:' + $newline +
+                        '    branches:' + $newline +
+                        '      - master' + $newline +
+                        '  workflow_dispatch:')
             };
     )
 
