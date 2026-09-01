@@ -732,7 +732,7 @@ target_link_libraries(
 set_tests_properties(
     specforge_automation_control_tests
     PROPERTIES
-        LABELS "automation;ci-headless;required"
+        LABELS "automation;automation-headless;ci-headless;required"
 )
 specforge_add_test(
     specforge_automation_panel_command_coordinator_tests
@@ -752,7 +752,7 @@ target_link_libraries(
 set_tests_properties(
     specforge_automation_panel_command_coordinator_tests
     PROPERTIES
-        LABELS "automation;ci-headless;required"
+        LABELS "automation;automation-headless;ci-headless;required"
 )
 specforge_add_test(
     specforge_automation_state_isolation_tests
@@ -771,7 +771,7 @@ add_dependencies(
 set_tests_properties(
     specforge_automation_state_isolation_tests
     PROPERTIES
-        LABELS "automation;ci-headless;required"
+        LABELS "automation;automation-headless;ci-headless;required"
 )
 add_test(
     NAME specforge_automation_samples_contract_tests
@@ -789,7 +789,7 @@ add_test(
 set_tests_properties(
     specforge_automation_samples_contract_tests
     PROPERTIES
-        LABELS "automation;ci-headless;required"
+        LABELS "automation;automation-headless;ci-headless;required"
         TIMEOUT 30
 )
 add_test(
@@ -806,7 +806,7 @@ add_test(
 set_tests_properties(
     specforge_automation_ci_contract_tests
     PROPERTIES
-        LABELS "automation;ci-headless;required"
+        LABELS "automation;automation-headless;ci-headless;required"
         TIMEOUT 30
 )
 add_test(
@@ -907,6 +907,24 @@ set_tests_properties(
         # alias-directory cleanup budget stay below 240s.
         TIMEOUT 240
         LABELS "automation;real-gui"
+)
+
+add_custom_target(specforge_automation_headless_targets)
+add_dependencies(
+    specforge_automation_headless_targets
+    specforge_automation_control_tests
+    specforge_automation_panel_command_coordinator_tests
+    specforge_automation_state_isolation_tests
+)
+
+add_custom_target(specforge_automation_real_gui_targets)
+add_dependencies(
+    specforge_automation_real_gui_targets
+    specforge_automation_launcher
+    specforge_native
+    specforge_automation_control_tests
+    specforge_automation_launcher_timeout_fixture
+    specforge_automation_state_isolation_tests
 )
 specforge_add_test(
     specforge_on_demand_frame_capture_tests

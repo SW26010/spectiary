@@ -434,7 +434,7 @@ New-Item -ItemType Directory -Path $ArtifactsDirectory -Force | Out-Null
 $resolvedArtifactsDirectory =
     (Resolve-Path -LiteralPath $ArtifactsDirectory).Path
 
-$label = if ($Mode -eq 'Headless') { 'ci-headless' } else { 'real-gui' }
+$label = if ($Mode -eq 'Headless') { 'automation-headless' } else { 'real-gui' }
 $logPath = Join-Path $resolvedArtifactsDirectory "ctest-$($Mode.ToLowerInvariant()).log"
 $summaryPath = Join-Path $resolvedArtifactsDirectory "ctest-$($Mode.ToLowerInvariant()).summary.json"
 $sampleArtifactsDirectory = Join-Path $resolvedArtifactsDirectory 'automation-samples'

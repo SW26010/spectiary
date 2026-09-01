@@ -4,31 +4,57 @@ SpecForge's automation workflow selects two CTest groups:
 
 | Group | CTest label | Environment | CI behavior |
 | --- | --- | --- | --- |
-| Native/headless gate | `ci-headless` | No GUI window or desktop interaction | Required on `windows-latest` |
-| Interactive desktop coverage | `real-gui` | A visible Windows desktop, normally self-hosted | Runs only when the event/ref policy and `github.ref_protected == true` allow a protected `master` push, or an explicitly authorized `workflow_dispatch` on protected `master` with `run_real_gui=true`; otherwise the workflow publishes an explicit diagnostic |
+| Native/headless gate | `automation-headless` | No GUI window or desktop interaction | Always runs on `windows-latest` for a manual dispatch |
+| Interactive desktop coverage | `real-gui` | A visible Windows desktop, normally self-hosted | Runs only for an explicitly authorized `workflow_dispatch` on protected `master` with `run_real_gui=true`; otherwise the workflow publishes an explicit diagnostic |
 
 The required headless gate covers the automation protocol/control plane, state
-root and seed isolation, the checked-in sample fixture contract, and the bounded
-sample-labeling controller/session regressions that protect canonical ASDF
-formalization and restart recovery. The comprehensive launcher workflow, the
-sample command sequences, and the
+root and seed isolation, the checked-in sample fixture contract, and the
+automation workflow contract. The comprehensive launcher workflow, the sample
+command sequences, and the
 two-process labeling coordination smoke are `real-gui` tests because they
 require a real Win32/D3D11 presentation path. They are not silently included
 in the hosted headless gate.
 
-## Required branch check
+`automation.yml` is manual-only and owns only those two automation selectors.
+The manual `repository-verification.yml` workflow owns the broader Debug
+`fast`/`extended`, static Release, and pinned ASDF oracle verification. Release
+packaging, Portable, PE/import, FITS, labeling, and other repository suites do
+not become automation work merely because they also retain the broad
+`ci-headless` or `required` repository labels.
 
-The `native-headless` job is the required CI gate; the exact GitHub check name
-is `Native/headless automation gate`. Repository administrators must add that
-check to `master` branch protection. The `required` CTest label only makes the
-local headless selection fail when a required test fails or no tests are
-selected; it cannot configure GitHub branch protection by itself.
-The current repository-level API check reports `master` as unprotected and
-GitHub rejects branch-protection configuration for this private repository with
-HTTP 403, so this external gate remains an administrator/platform blocker until
-the repository plan or visibility permits it. Consequently, a current
-master push has `github.ref_protected == false`, is reported as
-`unprotected_ref`, and cannot schedule the self-hosted Real-GUI job.
+## Scope timing evidence
+
+The 2026-09-02 before/after measurement used the same already-built Windows
+workspace and ran each old/new phase sequentially through the repository
+wrapper. It is an incremental scope comparison, not a clean hosted-run
+performance estimate:
+
+| Phase | Before ownership split | After ownership split |
+| --- | ---: | ---: |
+| Configure | 7.90s (Debug + static Release) | 3.10s (Debug only) |
+| Build | 3.40s (Debug `all` + benchmark + Release `all`) | 1.10s (`specforge_automation_headless_targets`) |
+| CTest | 298.53s (24 Debug + 24 Release `ci-headless` tests) | 4.01s (5 Debug `automation-headless` tests) |
+| Measured total | 309.83s | 8.21s |
+
+The measured local total fell by 301.62s (97.3%). The old pinned ASDF setup
+and oracle pass could not run in this local environment and is excluded from
+the before total, so the comparison understates the removed workflow scope.
+Issue #81's hosted baseline remains the clean-run reference: the earlier broad
+job spent about 43 minutes in Debug + static Release configure/build/test work
+before failing. A later manual hosted run can compare those same phase
+boundaries without changing the workflow's manual-only policy.
+
+## Manual execution policy
+
+`automation.yml` does not run on `push` or `pull_request`, so its
+`Native/headless automation gate` check must not be configured as a required
+branch check: ordinary commits do not create that status. Start the workflow
+explicitly with `workflow_dispatch`. Every dispatch runs the hosted
+native/headless job. Real-GUI additionally requires protected `master`,
+`run_real_gui=true`, and `SPECFORGE_REAL_GUI_ENABLED=true`; an unprotected
+manual `master` dispatch records `unprotected_ref` without scheduling the
+self-hosted job. The CTest `required` label remains a local selection property,
+not a GitHub branch-protection policy.
 
 ## Local commands
 
@@ -36,7 +62,8 @@ Configure and build with the repository wrapper:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target all
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+    -Target specforge_automation_headless_targets
 ```
 
 Run the required gate and retain its bounded log:
@@ -45,12 +72,14 @@ Run the required gate and retain its bounded log:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
     -Mode Headless `
     -BuildDirectory build\ninja-msvc-debug `
-    -ArtifactsDirectory build\ninja-msvc-debug\test-artifacts\ci-headless -SuiteTimeoutSec 300 -TestTimeoutSec 120
+    -ArtifactsDirectory build\ninja-msvc-debug\test-artifacts\automation-headless -SuiteTimeoutSec 300 -TestTimeoutSec 120
 ```
 
 On a desktop session, run the interactive group explicitly:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+    -Target specforge_automation_real_gui_targets
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
     -Mode RealGui `
     -BuildDirectory build\ninja-msvc-debug `
@@ -72,7 +101,7 @@ The CTest wrapper captures the launched process's start ticks in a held
 Job Object. Timeout and exception cleanup therefore cannot fall through to a
 PID-only/taskkill operation or accidentally terminate a reused PID.
 
-The native job has a 60-minute job budget. Checkout and toolchain discovery are
+The native job has a 90-minute job budget. Checkout and toolchain discovery are
 each bounded to five minutes, configure to ten, build to twenty, the headless
 gate step to ten, and artifact upload to five. The headless helper's
 `SuiteTimeoutSec 300` is the whole CTest-process budget; `TestTimeoutSec 120`
@@ -80,9 +109,11 @@ is the timeout applied to each selected test. The five-minute suite budget
 therefore runs before the ten-minute step limit and leaves job-level cleanup
 headroom.
 
-The CI helper maps `Headless` to `ci-headless` and `RealGui` to `real-gui`.
+The CI helper maps `Headless` to `automation-headless` and `RealGui` to `real-gui`.
 The workflow and the helper use these exact labels; `required` is an additional
-CTest label on the seven headless tests, not a different selector.
+CTest label on the five headless tests, not a different selector. The five tests
+also retain `ci-headless` for repository-wide selection; automation does not
+consume that broader label.
 
 The real-GUI job is opt-in because an ordinary hosted Windows runner does not
 provide a stable interactive desktop contract for this D3D11 path. The job
