@@ -44,7 +44,7 @@ $env:VCPKG_ROOT
 
 - `imgui[docking-experimental,win32-binding,dx11-binding]`
 - `implot`
-- `cfitsio`（`default-features=false`）
+- `cfitsio[pthreads]`（`default-features=false`，后台并发加载要求 reentrant build）
 - `yaml-cpp`
 - `zlib`
 
@@ -251,7 +251,8 @@ EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt` 仍是可审查、可维护的唯一来源，
 构建时原样嵌入 EXE。
 当前 Release 验证还直接读取 `SpecForge.exe` 的普通与 delay-load PE import table，拒绝
-`cfitsio.dll` 以及因误开 CFITSIO 可选功能而出现的 curl/bzip2 runtime DLL；
+`cfitsio.dll`、PThreads4W runtime DLL，以及因误开 CFITSIO 可选功能而出现的
+curl/bzip2 runtime DLL；
 Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`specforge_native` 完成最终链接后，

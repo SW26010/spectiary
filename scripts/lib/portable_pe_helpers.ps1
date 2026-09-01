@@ -284,10 +284,10 @@ function Assert-StaticCfitsioPeImports {
     $forbiddenImports = @(
         $imports | Where-Object {
             [IO.Path]::GetFileName($_) -match
-                '(?i)^.*(?:cfitsio|curl|bzip|bz2).*\.dll$'
+                '(?i)^.*(?:cfitsio|curl|bzip|bz2|pthread).*\.dll$'
         }
     )
     if ($forbiddenImports.Count -ne 0) {
-        throw "[SF-PE-IMPORTS-STATIC] $Description imports forbidden CFITSIO or optional-feature runtime DLLs: $($forbiddenImports -join ', ')."
+        throw "[SF-PE-IMPORTS-STATIC] $Description imports forbidden CFITSIO or dependency runtime DLLs: $($forbiddenImports -join ', ')."
     }
 }

@@ -14,7 +14,10 @@
     "implot",
     {
       "name": "cfitsio",
-      "default-features": false
+      "default-features": false,
+      "features": [
+        "pthreads"
+      ]
     },
     "yaml-cpp",
     "zlib"

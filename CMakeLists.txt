@@ -117,6 +117,7 @@ include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
 specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
 specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
 specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)
+specforge_read_vcpkg_package_version(pthreads SPECFORGE_PTHREADS_VERSION)
 specforge_read_vcpkg_package_version(yaml-cpp SPECFORGE_YAML_CPP_VERSION)
 specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
 specforge_require_notice_heading(
@@ -136,6 +137,11 @@ specforge_require_notice_heading(
 )
 specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "PThreads4W"
+    "PThreads4W ${SPECFORGE_PTHREADS_VERSION}"
+)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
     "yaml-cpp"
     "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}"
 )
@@ -149,6 +155,7 @@ message(STATUS
     "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, "
     "ImPlot ${SPECFORGE_IMPLOT_VERSION}, "
     "CFITSIO ${SPECFORGE_CFITSIO_VERSION}, "
+    "PThreads4W ${SPECFORGE_PTHREADS_VERSION}, "
     "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}, "
     "zlib ${SPECFORGE_ZLIB_VERSION}"
 )
@@ -1079,6 +1086,7 @@ add_test(
         -DearImGuiVersion "${SPECFORGE_IMGUI_VERSION}"
         -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
         -CfitsioVersion "${SPECFORGE_CFITSIO_VERSION}"
+        -PthreadsVersion "${SPECFORGE_PTHREADS_VERSION}"
         -YamlCppVersion "${SPECFORGE_YAML_CPP_VERSION}"
         -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
         -BuiltExecutable "$<TARGET_FILE:specforge_native>"
@@ -1232,6 +1240,7 @@ specforge_add_test(
 target_link_libraries(
     specforge_fits_file_reader_tests
     PRIVATE
+        CFITSIO::cfitsio
         dbghelp
         ZLIB::ZLIB
 )

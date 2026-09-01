@@ -144,7 +144,8 @@ try {
             'libcfitsio.dll',
             'vendor\cfitsio.dll',
             'libcurl.dll',
-            'bzip2.dll'
+            'bzip2.dll',
+            'pthreadVC3.dll'
         )) {
             $caseKind = $kind
             $caseDllName = $dllName

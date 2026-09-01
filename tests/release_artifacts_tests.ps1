@@ -13,6 +13,9 @@ param(
     [string]$CfitsioVersion,
 
     [Parameter(Mandatory = $true)]
+    [string]$PthreadsVersion,
+
+    [Parameter(Mandatory = $true)]
     [string]$YamlCppVersion,
 
     [Parameter(Mandatory = $true)]
@@ -825,9 +828,9 @@ if ($null -eq $defaultFeaturesProperty -or
     throw 'vcpkg.json cfitsio dependency must set default-features to false.'
 }
 $cfitsioFeaturesProperty = $cfitsioDependency.PSObject.Properties['features']
-if ($null -ne $cfitsioFeaturesProperty -and
-    @($cfitsioFeaturesProperty.Value).Count -ne 0) {
-    throw 'vcpkg.json cfitsio dependency must not enable optional features.'
+if ($null -eq $cfitsioFeaturesProperty -or
+    (@($cfitsioFeaturesProperty.Value) -join "`n") -cne 'pthreads') {
+    throw 'vcpkg.json cfitsio dependency must enable exactly the pthreads feature.'
 }
 
 $builtLegalRoot = Join-Path `
@@ -872,6 +875,9 @@ foreach ($expected in @(
     'Copyright (c) 2020 Evan Pezent',
     "CFITSIO $metadataCfitsioVersion",
     'Permission to freely use, copy, modify, and distribute this software',
+    "PThreads4W $PthreadsVersion",
+    'Apache License',
+    'Version 2.0, January 2004',
     "yaml-cpp $YamlCppVersion",
     'Copyright (c) 2008-2015 Jesse Beder',
     "zlib $ZlibVersion",
@@ -896,6 +902,21 @@ Assert-NoticeSectionContains `
         "THE SOFTWARE IS PROVIDED 'AS IS' WITHOUT ANY WARRANTY OF ANY KIND",
         'IN NO EVENT SHALL NASA BE LIABLE FOR ANY',
         'DAMAGES, INCLUDING, BUT NOT LIMITED TO, DIRECT, INDIRECT, SPECIAL OR'
+    )
+Assert-NoticeSectionContains `
+    -Text $notices `
+    -Heading "PThreads4W $PthreadsVersion" `
+    -Expected @(
+        'PThreads4W - POSIX threads for Windows',
+        'Copyright 1998 John E. Bossom',
+        'Copyright 1999-2018, Pthreads4w contributors',
+        'This product includes software developed through the colaborative',
+        'effort of several individuals, each of whom is listed in the file',
+        'CONTRIBUTORS included with this software.',
+        'Apache License',
+        'Version 2.0, January 2004',
+        'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION',
+        'Licensed under the Apache License, Version 2.0'
     )
 Assert-NoticeSectionContains `
     -Text $notices `
@@ -1113,6 +1134,9 @@ Assert-Contains $cmakeSource `
 Assert-Contains $cmakeSource `
     'specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)' `
     'CMake CFITSIO package version resolution'
+Assert-Contains $cmakeSource `
+    'specforge_read_vcpkg_package_version(pthreads SPECFORGE_PTHREADS_VERSION)' `
+    'CMake PThreads4W package version resolution'
 Assert-Contains $cmakeSource `
     'CFITSIO::cfitsio ZLIB::ZLIB' `
     'CMake core CFITSIO and zlib linkage'

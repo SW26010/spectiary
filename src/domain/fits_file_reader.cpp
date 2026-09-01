@@ -813,6 +813,11 @@ FitsFile FitsFile::Open(
         cancellation_requested);
     auto impl = std::make_unique<Impl>();
 
+    if (fits_init_cfitsio() != 0) {
+        throw FitsFileError(
+            FitsFileErrorCode::OpenFailed,
+            "CFITSIO runtime initialization failed.");
+    }
     fits_clear_errmsg();
     int status = 0;
     if (encoding == FitsSourceEncoding::Gzip) {

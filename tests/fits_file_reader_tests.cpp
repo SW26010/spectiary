@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include <fitsio.h>
 #include <zlib.h>
 
 namespace {
@@ -42,6 +43,13 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+void TestCfitsioReentrantBuild()
+{
+    Require(
+        fits_is_reentrant() != 0,
+        "[SF-FITS-CFITSIO-REENTRANT] CFITSIO must be built reentrant for concurrent background FITS loading");
 }
 
 template <typename Operation>
@@ -1049,6 +1057,7 @@ void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
 int main()
 {
     try {
+        TestCfitsioReentrantBuild();
         const TempDirectory temporary;
         TestPlainUnicodeAndMemoryBackedOpening(temporary);
         TestMoveLifetimeAndFailureRaii(temporary);

@@ -125,11 +125,17 @@ function Get-ReleaseContractRuleId {
         'Spectrum loader entry point must unconditionally execute TestLoadsLimitedFitsImageSpectrum' {
             return 'SF-CFG-LOADER-IMAGE-COVERAGE'
         }
+        'FITS reader entry point must verify the reentrant CFITSIO build' {
+            return 'SF-CFG-CFITSIO-REENTRANT'
+        }
         'FITS reader entry point' {
             return 'SF-CFG-READER-COVERAGE'
         }
         'production FITS reader and loader sources' {
             return 'SF-CFG-PRODUCTION-SOURCES'
+        }
+        'Static Release SpecForge.exe must link the static PThreads4W dependency' {
+            return 'SF-CFG-RELEASE-PTHREADS'
         }
         'Configured CTest graph must register .* exactly once' {
             return 'SF-CFG-CONTRACT-REGISTRATION'
@@ -674,6 +680,23 @@ function Assert-CMakeAndFitsTestContract {
                 'src\domain\spectrum_loader.cpp.obj')
         ) `
         -Message 'Configured specforge_core must compile the production FITS reader and loader sources.'
+    if ($Configuration -ceq 'Release') {
+        $nativeRule = [regex]::Match(
+            $BuildGraphText,
+            '(?ms)^build SpecForge\.exe:[^\r\n]*\r?\n' +
+                '(?<variables>(?:^  [^\r\n]*(?:\r?\n|\z))*)')
+        $nativeLinkLibraries = [regex]::Match(
+            $nativeRule.Groups['variables'].Value,
+            '(?m)^  LINK_LIBRARIES = (?<value>[^\r\n]*)\r?$')
+        Assert-True `
+            -Condition (
+                $nativeRule.Success -and
+                $nativeLinkLibraries.Success -and
+                $nativeLinkLibraries.Groups['value'].Value -match
+                    '(?:^|[\\/])lib[\\/]pthreadVC3\.lib(?:\s|$)'
+            ) `
+            -Message 'Static Release SpecForge.exe must link the static PThreads4W dependency.'
+    }
 
     Assert-ConfiguredTestExecutable `
         -CTestModel $ctestModel `
@@ -738,6 +761,20 @@ function Assert-CMakeAndFitsTestContract {
                 -ExpectedBraceDepth 1)
         ) `
         -Message 'FITS reader entry point must unconditionally execute the plain and memory-backed gzip CFITSIO case.'
+
+    $reentrantBody = Get-CppFunctionBody `
+        -Text $ReaderText `
+        -Name 'TestCfitsioReentrantBuild' `
+        -Description 'FITS reader tests'
+    Assert-True `
+        -Condition (
+            $reentrantBody.Contains('fits_is_reentrant()') -and
+            (Test-CppHasTopLevelInvocation `
+                -Body $readerMain `
+                -Name 'TestCfitsioReentrantBuild' `
+                -ExpectedBraceDepth 1)
+        ) `
+        -Message 'FITS reader entry point must verify the reentrant CFITSIO build.'
 
     $loaderMain = Get-CppFunctionBody `
         -Text $LoaderText `
@@ -1842,6 +1879,30 @@ $configuredMutations = @(
                 '')
         };
     New-TextMutationCase `
+        -Description 'Static Release graph missing the PThreads4W dependency' `
+        -ExpectedId 'SF-CFG-RELEASE-PTHREADS' `
+        -Key 'ReleaseBuildGraphText' `
+        -Transform {
+            param($text)
+            $nativeRule = [regex]::Match(
+                $text,
+                '(?ms)^build SpecForge\.exe:[^\r\n]*\r?\n' +
+                    '(?:^  [^\r\n]*(?:\r?\n|\z))*')
+            if (-not $nativeRule.Success) {
+                return $text
+            }
+            $mutatedRule = [regex]::Replace(
+                $nativeRule.Value,
+                '(?m)(^  LINK_LIBRARIES = [^\r\n]*?)' +
+                    'vcpkg_installed\\x64-windows-static\\lib\\pthreadVC3\.lib',
+                '$1')
+            return $text.Remove(
+                $nativeRule.Index,
+                $nativeRule.Length).Insert(
+                    $nativeRule.Index,
+                    $mutatedRule)
+        };
+    New-TextMutationCase `
         -Description 'Deleted loader gzip test invocation' `
         -ExpectedId 'SF-CFG-LOADER-GZIP-COVERAGE' `
         -Key 'LoaderText' `
@@ -1872,6 +1933,16 @@ $configuredMutations = @(
             $text.Replace(
                 '    TestLoadsGzippedFitsSpectrum();',
                 '    if (false) { TestLoadsGzippedFitsSpectrum(); }')
+        };
+    New-TextMutationCase `
+        -Description 'Deleted CFITSIO reentrant-build test invocation' `
+        -ExpectedId 'SF-CFG-CFITSIO-REENTRANT' `
+        -Key 'ReaderText' `
+        -Transform {
+            param($text)
+            $text.Replace(
+                '        TestCfitsioReentrantBuild();',
+                '        // TestCfitsioReentrantBuild();')
         };
     [pscustomobject]@{
         Description = 'Release artifact contract removed from ci-headless required gate'
