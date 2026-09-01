@@ -157,6 +157,48 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Preset ninja-msvc-release-static
 ```
 
+### CTest 验证层级
+
+完成 `ninja-msvc-debug` configure 并通过上面的包装器构建所需测试 target 后，日常开发的标准
+edit/test loop 是从仓库根目录运行：
+
+```powershell
+ctest --preset fast
+```
+
+`fast` 是确定性、低成本的日常开发反馈层。需要在提交前执行更完整但仍为 headless 的开发验证时，运行：
+
+```powershell
+ctest --preset extended
+```
+
+`extended` 会运行较慢的 headless 测试，但不会代替需要专门环境或目的的验证。验证入口分工如下：
+
+| 入口 | 用途 | 选择边界 |
+| --- | --- | --- |
+| `fast` preset | 日常开发 | 快速、确定性的 unit、component 和廉价 contract 测试 |
+| `extended` preset | 更完整 headless | 较慢的 headless 开发验证；排除下列专门验证 labels |
+| `real-gui` label | 专门 GUI 验证 | 需要交互式 Windows desktop；`gui-integration` 也按同一专门边界处理 |
+| `release` label | 专门发布验证 | release artifact、packaging、configured-build 等发布合同 |
+| `periodic` label | 专门周期验证 | 显式启用的资源稳定性 smoke/soak 工作负载 |
+| `asdf-pinned-oracle` label | 专门 ASDF oracle 验证 | 需要 dedicated ASDF preset、固定 Python ASDF 版本和 oracle 依赖 |
+
+`fast` / `extended` 是每项测试恰好选择一个的执行成本 tier；专门 labels 是与之正交的验证责任。
+因此廉价 component test 可以同时属于 `fast` 和 `release`，但完整 release suite 仍必须通过 `release`
+label 显式运行。`extended` preset 会排除 `real-gui`、`gui-integration`、`release`、`periodic` 和
+`asdf-pinned-oracle`，不会把这些专门验证静默计入普通 headless 结果。未限定的 aggregate `ctest`
+不是日常开发入口。
+
+专门验证应在满足相应 build、desktop、数据或 oracle 前置条件后，以对应 label 显式选择：
+
+```powershell
+ctest --test-dir <build-directory> --output-on-failure --no-tests=error -L '^<label>$'
+```
+
+真实 GUI 的 runner 与证据规则见[自动化 CI](automation_ci.md)，release 构建与 artifact 合同见
+[Release artifacts](release_artifacts.md)，periodic 资源稳定性 tier 见[响应速度测试流程](performance_testing.md)，
+ASDF pinned oracle 的环境与命令见[ASDF labeling spike 运行说明](../tools/asdf_labeling_spike/README.md)。
+
 ### Ninja/MSVC 卡住排查
 
 `ninja-msvc-debug` 和 `ninja-msvc-release-static` preset 依赖 MSVC developer
