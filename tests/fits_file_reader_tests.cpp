@@ -921,6 +921,45 @@ void TestMissingAddressErrorMatrix(const TempDirectory& temporary)
         "missing FITS column request");
 }
 
+void TestCfitsioErrorStackIsolation(const TempDirectory& temporary)
+{
+    const std::filesystem::path path =
+        temporary.path() / "error_stack_isolation.fits";
+    WritePrimaryFloatImage(path, 2U, 1U);
+    FitsFile file = FitsFile::Open(path, FitsSourceEncoding::Plain);
+    FitsHdu missing_hdu = file.hdus().front();
+    missing_hdu.index = 999U;
+
+    constexpr char kForeignStackEntry[] =
+        "SpecForge foreign CFITSIO error-stack sentinel";
+    fits_clear_errmsg();
+    ffpmsg(kForeignStackEntry);
+
+    bool threw = false;
+    try {
+        (void)file.ReadKeywordString(missing_hdu, "SIMPLE");
+    } catch (const FitsFileError& error) {
+        threw = true;
+        Require(
+            error.code() == FitsFileErrorCode::InvalidShape,
+            "[SF-FITS-CFITSIO-ERROR-STACK] unexpected FITS error category");
+        Require(
+            std::string(error.what()).find(kForeignStackEntry) ==
+                std::string::npos,
+            "[SF-FITS-CFITSIO-ERROR-STACK] exception included a foreign CFITSIO error-stack entry");
+    }
+    Require(
+        threw,
+        "[SF-FITS-CFITSIO-ERROR-STACK] expected a FITS error");
+
+    std::array<char, FLEN_ERRMSG> retained_entry = {};
+    Require(
+        fits_read_errmsg(retained_entry.data()) != 0 &&
+            std::string(retained_entry.data()) == kForeignStackEntry,
+        "[SF-FITS-CFITSIO-ERROR-STACK] exception formatting consumed the global CFITSIO error stack");
+    fits_clear_errmsg();
+}
+
 void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
 {
     const std::filesystem::path reader_source =
@@ -1066,6 +1105,7 @@ int main()
         TestOptionalUndefinedKeywords(temporary);
         TestOpenAndResourceErrorMatrix(temporary);
         TestMissingAddressErrorMatrix(temporary);
+        TestCfitsioErrorStackIsolation(temporary);
         TestCancellationAcrossReaderStages(temporary);
         return 0;
     } catch (const std::exception& error) {

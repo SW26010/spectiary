@@ -117,17 +117,6 @@ std::string CfitsioFailureMessage(
         message += status_text.data();
     }
 
-    std::array<char, FLEN_ERRMSG> stack_entry = {};
-    bool has_stack_entry = false;
-    while (fits_read_errmsg(stack_entry.data()) != 0) {
-        if (!has_stack_entry) {
-            message += "; ";
-            has_stack_entry = true;
-        } else {
-            message += " | ";
-        }
-        message += stack_entry.data();
-    }
     message += ")";
     return message;
 }
@@ -422,7 +411,6 @@ std::optional<std::string> ReadOptionalStringKey(
     const std::function<bool()>& cancellation_requested)
 {
     ThrowIfCanceled(cancellation_requested);
-    fits_clear_errmsg();
     std::array<char, FLEN_VALUE> value = {};
     const std::string key_name(key);
     int status = 0;
@@ -435,7 +423,6 @@ std::optional<std::string> ReadOptionalStringKey(
         &status);
     ThrowIfCanceled(cancellation_requested);
     if (status == KEY_NO_EXIST || status == VALUE_UNDEFINED) {
-        fits_clear_errmsg();
         return std::nullopt;
     }
     if (status != 0) {
@@ -453,7 +440,6 @@ std::optional<T> ReadOptionalTypedKey(
     const std::function<bool()>& cancellation_requested)
 {
     ThrowIfCanceled(cancellation_requested);
-    fits_clear_errmsg();
     T value = {};
     const std::string key_name(key);
     int status = 0;
@@ -466,7 +452,6 @@ std::optional<T> ReadOptionalTypedKey(
         &status);
     ThrowIfCanceled(cancellation_requested);
     if (status == KEY_NO_EXIST || status == VALUE_UNDEFINED) {
-        fits_clear_errmsg();
         return std::nullopt;
     }
     if (status != 0) {
@@ -535,7 +520,6 @@ std::vector<FitsHdu> InspectHdus(
             &status);
         ThrowIfCanceled(cancellation_requested);
         if (status == END_OF_FILE) {
-            fits_clear_errmsg();
             if (!hdus.empty() && last_hdu_end != source_length) {
                 throw FitsFileError(
                     FitsFileErrorCode::InvalidShape,
@@ -818,7 +802,6 @@ FitsFile FitsFile::Open(
             FitsFileErrorCode::OpenFailed,
             "CFITSIO runtime initialization failed.");
     }
-    fits_clear_errmsg();
     int status = 0;
     if (encoding == FitsSourceEncoding::Gzip) {
         impl->memory = InflateGzipFile(
