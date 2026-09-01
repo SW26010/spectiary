@@ -194,6 +194,19 @@ def _write_reference(
     af.write_to(path, **write_options)
 
 
+def _author_summary(author: Any) -> dict[str, Any]:
+    summary = {
+        "name": str(author["name"]),
+        "identifier": str(author["identifier"]) if "identifier" in author else None,
+    }
+    if "email" in author:
+        email = author["email"]
+        if not isinstance(email, str):
+            raise TypeError("author email must be a string")
+        summary["email"] = email
+    return summary
+
+
 def _semantic_summary(tree: Any) -> dict[str, Any]:
     source = tree["source_collection"]
     roster = tree["sample_roster"]
@@ -232,13 +245,7 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
             else None
         ),
         "description": str(task["description"]) if "description" in task else None,
-        "authors": [
-            {
-                "name": str(author["name"]),
-                "identifier": str(author["identifier"]) if "identifier" in author else None,
-            }
-            for author in task.get("authors", [])
-        ],
+        "authors": [_author_summary(author) for author in task.get("authors", [])],
         "labels": [
             {
                 "code": int(label["code"]),
@@ -320,6 +327,10 @@ def _semantic_errors(tree: Any) -> list[str]:
             author["identifier"]
         ):
             errors.append("author identifier")
+        if author.get("email") is not None and not _is_non_whitespace_text(
+            author["email"]
+        ):
+            errors.append("author email")
     if len(summary["authors"]) > 10_000:
         errors.append("author count")
     if summary["missing_semantic"] != "unlabeled" or summary["missing_value"] != UNLABELED:
@@ -1550,6 +1561,39 @@ def _production_source_index_semantic_summary(
     return summary
 
 
+def _production_author_email_semantic_summary() -> dict[str, Any]:
+    summary = _production_explicit_semantic_summary([-1, 0, 1])
+    summary["authors"] = [
+        {
+            "name": "SpecForge maintainer",
+            "identifier": "https://example.invalid/maintainer",
+            "email": "Maintainer@Example.INVALID",
+        },
+        {"name": "验证者", "identifier": None},
+    ]
+    return summary
+
+
+def _verify_author_email_type_rejections() -> None:
+    for type_name, value in (
+        ("null", None),
+        ("integer", 123),
+        ("over-range integer", 184467440737095516160),
+        ("boolean", True),
+    ):
+        try:
+            _author_summary({"name": "Author", "email": value})
+        except TypeError as exc:
+            if str(exc) == "author email must be a string":
+                continue
+            raise RuntimeError(
+                f"author-email oracle returned the wrong {type_name} error: {exc}"
+            ) from exc
+        raise RuntimeError(
+            f"author-email oracle accepted a present {type_name} value"
+        )
+
+
 def interoperability(fixtures: Path, native: Path, production_native: Path) -> dict[str, Any]:
     manifest = json.loads((fixtures / "manifest.json").read_text(encoding="utf-8"))
     if asdf.__version__ != manifest["reference"]["asdf"]:
@@ -1557,6 +1601,14 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             f"interoperability oracle must use ASDF {manifest['reference']['asdf']}, got {asdf.__version__}"
         )
     records: list[dict[str, Any]] = []
+    _verify_author_email_type_rejections()
+    records.append(
+        {
+            "fixture": "author-email-non-string-types",
+            "status": "oracle-controlled-rejection/null+integer+boolean",
+            "returncode": 0,
+        }
+    )
     for fixture in manifest["fixtures"]:
         command = [str(native), "read", str(fixtures / fixture["path"])]
         completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False)
@@ -1638,6 +1690,45 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             {
                 "fixture": "production-writer-yaml-specials",
                 "status": "production-writer/asdf-5.3.1-reader-all-yaml-specials-equal",
+                "returncode": 0,
+            }
+        )
+
+        production_author_email_path = (
+            Path(temporary) / "production-author-email.asdf"
+        )
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "write-author-email-oracle",
+                str(production_author_email_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"production author-email writer failed: {completed.stderr}"
+            )
+        with asdf.open(
+            production_author_email_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_author_email_errors = _semantic_errors(opened.tree)
+            production_author_email_summary = _semantic_summary(opened.tree)
+        if (
+            production_author_email_errors
+            or production_author_email_summary
+            != _production_author_email_semantic_summary()
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected or changed optional author email"
+            )
+        records.append(
+            {
+                "fixture": "production-author-email",
+                "status": "production-writer/asdf-5.3.1-reader-author-email-equal",
                 "returncode": 0,
             }
         )

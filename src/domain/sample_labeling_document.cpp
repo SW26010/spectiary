@@ -505,7 +505,8 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
         const SampleLabelingAuthor& author = metadata.authors[index];
         if (!HasNonWhitespaceText(author.name) ||
             (author.identifier &&
-             !HasNonWhitespaceText(*author.identifier))) {
+             !HasNonWhitespaceText(*author.identifier)) ||
+            (author.email && !HasNonWhitespaceText(*author.email))) {
             AddIssue(
                 result,
                 fail_fast,

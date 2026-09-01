@@ -539,6 +539,9 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
     document = ValidDocument();
     document.labeling.canonical_metadata.authors = {
         {.name = "Alice", .identifier = "   "},
+        {.name = "Bob", .email = " \t "},
+        {.name = "Carol",
+            .email = std::string(1, static_cast<char>(0xc3))},
         {.name = "\xE3\x80\x80"},
     };
     const auto invalid_authors =
@@ -553,8 +556,18 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
                 invalid_authors,
                 specforge::SampleLabelingDocumentValidationIssueKind::
                     InvalidAuthor,
-                1),
-        "author name and optional identifier must contain non-whitespace UTF-8 text");
+                1) &&
+            HasIssue(
+                invalid_authors,
+                specforge::SampleLabelingDocumentValidationIssueKind::
+                    InvalidAuthor,
+                2) &&
+            HasIssue(
+                invalid_authors,
+                specforge::SampleLabelingDocumentValidationIssueKind::
+                    InvalidAuthor,
+                3),
+        "author name, optional identifier, and optional email must contain non-whitespace UTF-8 text");
 
     document = ValidDocument();
     document.labeling.canonical_metadata.origin.kind =
@@ -567,8 +580,10 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
     document.labeling.canonical_metadata.description =
         "中日韩描述 🧪";
     document.labeling.canonical_metadata.authors = {
-        {.name = "Alice", .identifier = "https://example.test/alice"},
-        {.name = "山田太郎"},
+        {.name = "Alice",
+            .identifier = "https://example.test/alice",
+            .email = "Mixed.Case@Example.TEST"},
+        {.name = "山田太郎", .email = "連絡先"},
     };
     Require(
         specforge::ValidateSampleLabelingDocument(document).valid(),

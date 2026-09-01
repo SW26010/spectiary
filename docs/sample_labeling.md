@@ -826,7 +826,9 @@ canonical document owners use `canonical_asdf`, and existing or explicitly
 adopted legacy-format owners use `legacy_npy_with_sidecar`. Explicit promotion
 of an existing NPY annotation is one such adoption. Schema 4 also stores the
 canonical task metadata (`created_at`, `modified_at`, `origin`, optional
-`description`, and `authors`). Cache schemas 1 through 3 are unsupported and
+`description`, and `authors`). Schema 4 author records preserve required `name`
+plus optional `identifier` and `email`; absent optional fields remain absent.
+Cache schemas 1 through 3 are unsupported and
 ignored rather than migrated because they cannot supply both a strict UUID v4
 identity and trustworthy canonical creation metadata. Formal records do not
 duplicate the full values array in this cache; they retain only sparse pending
@@ -951,9 +953,13 @@ or fingerprint rules when an annotation origin is present.
 
 `description` and `authors` are optional canonical fields, but there is no UI
 for editing them. An unset description and an empty author list are omitted,
-not materialized as `null` or `authors: []`. Each author contains only a
-non-whitespace `name` and an optional non-whitespace `identifier`; role, email,
-organization, and author ID fields are not part of schema 2.0.
+not materialized as `null` or `authors: []`. Each author contains a required
+non-whitespace UTF-8 `name`, an optional non-whitespace UTF-8 `identifier`, and
+an optional non-whitespace UTF-8 `email`. The email is portable user-supplied
+contact metadata: SpecForge does not apply RFC address parsing, DNS validation,
+normalization, or case rewriting, and never infers it from Git, the operating
+system, or other machine-local state. Role, organization, and additional author
+ID fields are not part of schema 2.0.
 
 This is a complete schema 2.0 YAML-tree example. The two ndarray descriptors
 refer to the roster and values binary blocks that follow the YAML metadata in
@@ -1008,6 +1014,7 @@ labeling_task:
   authors:
     - name: "Example Maintainer"
       identifier: "https://orcid.org/0000-0000-0000-0000"
+      email: "maintainer@example.org"
   labels:
     - code: 0
       name: "非目标"

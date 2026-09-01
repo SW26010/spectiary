@@ -18,6 +18,7 @@
 #include <limits>
 #include <new>
 #include <ostream>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
@@ -163,6 +164,11 @@ void AppendIdentityDigestField(StableSha256& digest,
             digest, author.identifier ? "identifier" : "no-identifier");
         if (author.identifier) {
             AppendIdentityDigestField(digest, *author.identifier);
+        }
+        AppendIdentityDigestField(
+            digest, author.email ? "email" : "no-email");
+        if (author.email) {
+            AppendIdentityDigestField(digest, *author.email);
         }
     }
 
@@ -1047,6 +1053,58 @@ template <typename Value>
     }
 }
 
+[[nodiscard]] bool IsYaml11ImplicitNonStringScalar(std::string_view value)
+{
+    using namespace std::regex_constants;
+    static const std::regex null_bool_special{
+        R"(^(~|null|Null|NULL|y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|<<|=|!|&|\*)$)",
+        ECMAScript | optimize};
+    static const std::regex integer{
+        R"(^[-+]?(0b[0-1_]+|0[0-7_]+|0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|[1-9][0-9_]*(:[0-5]?[0-9])+)$)",
+        ECMAScript | optimize};
+    static const std::regex floating_point{
+        R"(^([-+]?(([0-9][0-9_]*)\.[0-9_]*([eE][-+][0-9]+)?|([0-9][0-9_]*)([eE][-+][0-9]+)|\.[0-9_]+([eE][-+][0-9]+)?|([0-9][0-9_]*)(:[0-5]?[0-9])+\.[0-9_]*|\.(inf|Inf|INF))|\.(nan|NaN|NAN))$)",
+        ECMAScript | optimize};
+    static const std::regex timestamp{
+        R"(^([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}([Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(\.[0-9]*)?([ \t]*(Z|[-+][0-9]{1,2}(:[0-9]{2})?))?)$)",
+        ECMAScript | optimize};
+    return std::regex_match(value.begin(), value.end(), null_bool_special) ||
+        std::regex_match(value.begin(), value.end(), integer) ||
+        std::regex_match(value.begin(), value.end(), floating_point) ||
+        std::regex_match(value.begin(), value.end(), timestamp);
+}
+
+[[nodiscard]] bool IsYamlStringScalar(const YAML::Node& node)
+{
+    if (!node.IsScalar()) {
+        return false;
+    }
+    const std::string tag = node.Tag();
+    if (tag == "!" || tag == kYamlStringTag) {
+        return true;
+    }
+    if (tag != "?") {
+        return false;
+    }
+    return !IsYaml11ImplicitNonStringScalar(node.Scalar());
+}
+
+[[nodiscard]] std::string RequiredStringScalar(
+    const YAML::Node& parent,
+    std::string_view key,
+    CanonicalMaterializationBudget* materialization_budget = nullptr)
+{
+    const YAML::Node node = RequiredNode(parent, key);
+    if (!IsYamlStringScalar(node)) {
+        Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
+            "required ASDF field is not a string: " + std::string(key));
+    }
+    if (materialization_budget != nullptr) {
+        materialization_budget->AccountString(node.Scalar().size());
+    }
+    return node.Scalar();
+}
+
 [[nodiscard]] bool HasProfileTag(const YAML::Node& node,
     std::string_view expected)
 {
@@ -1329,6 +1387,11 @@ struct ProfilePreflight {
                 if (node["identifier"]) {
                     author.identifier = RequiredScalar<std::string>(
                         node, "identifier", &materialization_budget);
+                }
+                if (const YAML::Node email = node["email"];
+                    email.IsDefined()) {
+                    author.email = RequiredStringScalar(
+                        node, "email", &materialization_budget);
                 }
                 parsed.document.labeling.canonical_metadata.authors.push_back(
                     std::move(author));
@@ -1678,6 +1741,9 @@ void ValidateDocumentText(const SampleLabelingDocument& document)
         if (author.identifier) {
             RequireUtf8(
                 *author.identifier, "labeling_task.authors.identifier");
+        }
+        if (author.email) {
+            RequireUtf8(*author.email, "labeling_task.authors.email");
         }
     }
     for (const SampleLabelingDocumentLabel& label : document.labeling.labels) {
@@ -2143,6 +2209,11 @@ void EmitMetadata(std::ostream& metadata,
                 WriteQuotedYaml(metadata, *author.identifier);
                 metadata << "\n";
             }
+            if (author.email) {
+                metadata << "    email: ";
+                WriteQuotedYaml(metadata, *author.email);
+                metadata << "\n";
+            }
         }
     } else {
         metadata << "\n";
@@ -2485,6 +2556,9 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
             if (author.identifier) {
                 SetYamlString(node, "identifier", *author.identifier);
             }
+            if (author.email) {
+                SetYamlString(node, "email", *author.email);
+            }
             authors.push_back(std::move(node));
         }
         task["authors"] = std::move(authors);
@@ -2567,6 +2641,9 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
         account(author.name);
         if (author.identifier) {
             account(*author.identifier);
+        }
+        if (author.email) {
+            account(*author.email);
         }
     }
     for (const SampleLabelingDocumentLabel& label : document.labeling.labels) {

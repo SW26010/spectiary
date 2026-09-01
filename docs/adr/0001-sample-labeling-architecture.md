@@ -73,8 +73,11 @@ future origin token unchanged, but current writers cannot introduce one and
 preserving rewrites cannot alter origin or `created_at`.
 
 `description` and `authors` are optional canonical fields without current UI.
-Unset values stay absent; the supported author model contains only `name` and
-optional `identifier`.
+Unset values stay absent; the supported author model contains required `name`
+plus optional `identifier` and optional `email`. Every present author field is
+non-whitespace UTF-8 text. Email is preserved exactly as user-supplied contact
+metadata; it is not parsed as an RFC address, normalized, or inferred from Git,
+the operating system, or other machine-local state.
 
 Full and values-only rewrites must start from the validated durable generation
 of the same source, roster, annotation, and task. The preservation contract is

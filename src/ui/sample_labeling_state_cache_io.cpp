@@ -458,6 +458,19 @@ ParseCanonicalMetadata(const JsonValue& task_object)
                     return std::nullopt;
                 }
             }
+            if (const JsonValue* email =
+                    ObjectMember(author_value, "email");
+                email != nullptr) {
+                if (email->kind != JsonValue::Kind::String) {
+                    return std::nullopt;
+                }
+                author.email =
+                    ReadStringMember(author_value, "email");
+                if (!author.email ||
+                    !IsValidUtf8WithNonWhitespace(*author.email)) {
+                    return std::nullopt;
+                }
+            }
             metadata.authors.push_back(std::move(author));
         }
     }
@@ -1616,6 +1629,10 @@ bool SaveSampleLabelingStateCache(
                             if (author.identifier) {
                                 stream << ", \"identifier\": ";
                                 WriteJsonString(stream, *author.identifier);
+                            }
+                            if (author.email) {
+                                stream << ", \"email\": ";
+                                WriteJsonString(stream, *author.email);
                             }
                             stream << " }";
                         }

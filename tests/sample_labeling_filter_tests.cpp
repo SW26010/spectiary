@@ -546,7 +546,9 @@ void TestSampleLabelingStateCacheRoundTrip()
             "2026-08-30T11:00:00.000Z");
     task.canonical_metadata.description = "Unicode 描述 🧪";
     task.canonical_metadata.authors = {
-        {.name = "Alice", .identifier = "researcher:alice"},
+        {.name = "Alice",
+            .identifier = "researcher:alice",
+            .email = "Mixed.Case@Example.TEST"},
         {.name = "山田太郎"},
     };
     const specforge::SampleLabelingTaskCanonicalMetadata expected_metadata =
@@ -573,13 +575,19 @@ void TestSampleLabelingStateCacheRoundTrip()
     Require(specforge::SaveSampleLabelingStateCache(cache_path, cache), "sample-labeling cache should save");
 
     const std::string cache_text = ReadTextFile(cache_path);
+    const std::size_t email_position =
+        cache_text.find("\"email\": \"Mixed.Case@Example.TEST\"");
     Require(
         cache_text.find("\"schema_version\": 4") != std::string::npos &&
             cache_text.find("\"output\": {") != std::string::npos &&
             cache_text.find("\"path\": null") != std::string::npos &&
             cache_text.find("\"format\": \"none\"") != std::string::npos &&
+            email_position != std::string::npos &&
+            cache_text.find("\"email\":", email_position + 1U) ==
+                std::string::npos &&
+            cache_text.find("\"email\": null") == std::string::npos &&
             cache_text.find("\"output_path\"") == std::string::npos,
-        "schema 4 should persist an explicit output owner and canonical metadata for temporary tasks");
+        "schema 4 should persist output ownership and only present author email fields");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
         specforge::LoadSampleLabelingStateCache(cache_path);
@@ -600,7 +608,7 @@ void TestSampleLabelingStateCacheRoundTrip()
     Require(restored_task.values.size() == 3 && restored_task.values[1] == 5, "draft values should round-trip");
     Require(
         restored_task.canonical_metadata == expected_metadata,
-        "schema 4 should round-trip canonical timestamps, origin, description, and authors");
+        "schema 4 should round-trip canonical metadata including exact author email text");
 }
 
 void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
@@ -881,6 +889,100 @@ void TestSampleLabelingStateCacheRejectsNonportablePromotionOriginName()
             source->second.tasks.empty() &&
             !source->second.active_task_id,
         "schema-4 recovery must reject a promotion draft whose provenance name contains an absolute local path");
+}
+
+void TestSampleLabelingStateCacheRejectsInvalidAuthorEmail()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge_labeling_invalid_cache_author_email");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    constexpr std::string_view kTaskId =
+        "00000000-0000-4000-8000-000000000180";
+
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            std::string{kTaskId},
+            "Email validation",
+            1);
+    task.canonical_metadata.authors = {
+        {.name = "Author", .email = "a@b"}};
+    specforge::SampleLabelingSourceState state;
+    state.sample_count = 1;
+    state.active_task_id = task.task_id;
+    state.tasks.push_back(std::move(task));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace("invalid-email-source", std::move(state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(cache_path, cache),
+        "valid cache-author-email fixture should save");
+
+    const std::string valid_text = ReadTextFile(cache_path);
+    constexpr std::string_view kEmailField = "\"email\": \"a@b\"";
+    const std::size_t email_offset = valid_text.find(kEmailField);
+    Require(
+        email_offset != std::string::npos,
+        "valid cache-author-email fixture should contain its email field");
+
+    const auto RequireRejectedTask = [&](std::string cache_text,
+                                         std::string_view message) {
+        WriteTextFile(cache_path, cache_text);
+        const specforge::SampleLabelingStateCacheLoadResult loaded =
+            specforge::LoadSampleLabelingStateCache(cache_path);
+        const auto source = loaded.cache.sources.find(
+            "invalid-email-source");
+        Require(
+            !loaded.warning.empty() &&
+                (source == loaded.cache.sources.end() ||
+                    (source->second.tasks.empty() &&
+                        !source->second.active_task_id)),
+            message);
+    };
+
+    std::string whitespace_text = valid_text;
+    whitespace_text.replace(
+        email_offset,
+        kEmailField.size(),
+        "\"email\": \"   \"");
+    RequireRejectedTask(
+        std::move(whitespace_text),
+        "schema-4 recovery must reject whitespace-only author email");
+
+    std::string null_text = valid_text;
+    null_text.replace(
+        email_offset,
+        kEmailField.size(),
+        "\"email\": null");
+    RequireRejectedTask(
+        std::move(null_text),
+        "schema-4 recovery must reject a present null author email");
+
+    std::string integer_text = valid_text;
+    integer_text.replace(
+        email_offset,
+        kEmailField.size(),
+        "\"email\": 123");
+    RequireRejectedTask(
+        std::move(integer_text),
+        "schema-4 recovery must reject a present integer author email");
+
+    std::string boolean_text = valid_text;
+    boolean_text.replace(
+        email_offset,
+        kEmailField.size(),
+        "\"email\": true");
+    RequireRejectedTask(
+        std::move(boolean_text),
+        "schema-4 recovery must reject a present boolean author email");
+
+    std::string invalid_utf8_text = valid_text;
+    const std::size_t email_value_offset =
+        email_offset + kEmailField.rfind('a');
+    invalid_utf8_text[email_value_offset] =
+        static_cast<char>(0xc3);
+    RequireRejectedTask(
+        std::move(invalid_utf8_text),
+        "schema-4 recovery must reject invalid UTF-8 in author email");
 }
 
 void TestSampleLabelTaskWritesStableCodes()
@@ -11739,6 +11841,7 @@ int main(int argc, char* argv[])
         TestSampleLabelingStateCacheReportsCorruptJson();
         TestSampleLabelingStateCacheReportsUnsupportedSchema();
         TestSampleLabelingStateCacheRejectsNonportablePromotionOriginName();
+        TestSampleLabelingStateCacheRejectsInvalidAuthorEmail();
         TestSampleLabelTaskWritesStableCodes();
         TestRemovingSampleLabelClearsAssignedValues();
         TestChangingUnusedSampleLabelCode();

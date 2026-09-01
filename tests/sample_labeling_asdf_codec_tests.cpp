@@ -168,12 +168,17 @@ specforge::JsonValue SemanticSummary(
     specforge::JsonValue authors = specforge::JsonArrayValue();
     for (const specforge::SampleLabelingAuthor& author :
         document.labeling.canonical_metadata.authors) {
-        authors.array.push_back(specforge::JsonObjectValue({
+        specforge::JsonValue summary = specforge::JsonObjectValue({
             {"name", specforge::JsonStringValue(author.name)},
             {"identifier", author.identifier
                  ? specforge::JsonStringValue(*author.identifier)
                  : specforge::JsonNullValue()},
-        }));
+        });
+        if (author.email) {
+            summary.object.emplace(
+                "email", specforge::JsonStringValue(*author.email));
+        }
+        authors.array.push_back(std::move(summary));
     }
 
     return specforge::JsonObjectValue({
@@ -1451,6 +1456,140 @@ void TestWriterRejectsInvalidUtf8BeforeOutput()
         "invalid UTF-8 validation must fail before writer output begins");
 }
 
+void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
+{
+    struct WriterCase {
+        std::string email;
+        specforge::SampleLabelingAsdfErrorKind expected;
+    };
+    const std::array writer_cases{
+        WriterCase{std::string(1, static_cast<char>(0xc3)),
+            specforge::SampleLabelingAsdfErrorKind::MalformedDocument},
+        WriterCase{" \t ",
+            specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed},
+    };
+    for (const WriterCase& writer_case : writer_cases) {
+        specforge::SampleLabelingDocument document = ProductionDocument(false);
+        document.labeling.canonical_metadata.authors = {
+            {.name = "Author", .email = writer_case.email}};
+        std::ostringstream output(std::ios::binary);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(output, document);
+        Require(
+            !write.succeeded() && write.error.kind == writer_case.expected &&
+                output.str().empty(),
+            "invalid author email must fail with a controlled error before writer output");
+    }
+
+    const std::filesystem::path path = TempPath("_invalid_author_email.asdf");
+    specforge::SampleLabelingDocument valid = ProductionDocument(false);
+    valid.labeling.canonical_metadata.authors = {
+        {.name = "Author", .email = "a@b"}};
+    Require(
+        WriteDocument(path, valid).succeeded(),
+        "invalid-author-email reader base should be written");
+    const std::vector<unsigned char> valid_bytes = ReadAllBytes(path);
+
+    struct ReaderStringCase {
+        std::string_view replacement;
+        std::string_view expected;
+    };
+    constexpr std::array reader_string_cases{
+        ReaderStringCase{
+            "    email: plain@example.org", "plain@example.org"},
+        ReaderStringCase{"    email: \"123\"", "123"},
+        ReaderStringCase{"    email: \"1_000\"", "1_000"},
+        ReaderStringCase{
+            "    email: \"184467440737095516160\"",
+            "184467440737095516160"},
+        ReaderStringCase{"    email: \"2026-09-01\"", "2026-09-01"},
+    };
+    for (const ReaderStringCase& reader_case : reader_string_cases) {
+        std::vector<unsigned char> string_bytes = valid_bytes;
+        ReplaceTextOnce(
+            string_bytes, "    email: \"a@b\"", reader_case.replacement);
+        WriteAllBytes(path, string_bytes);
+        const specforge::SampleLabelingAsdfReadResult string_read =
+            specforge::ReadSampleLabelingAsdfDocument(path);
+        Require(
+            string_read.succeeded() &&
+                string_read.document->labeling.canonical_metadata
+                        .authors[0]
+                        .email == reader_case.expected,
+            "native reader must accept plain and numeric-looking string email values exactly");
+    }
+
+    std::vector<unsigned char> whitespace_bytes = valid_bytes;
+    ReplaceTextOnce(
+        whitespace_bytes, "    email: \"a@b\"", "    email: \"   \"");
+    WriteAllBytes(path, whitespace_bytes);
+    const specforge::SampleLabelingAsdfReadResult whitespace_read =
+        specforge::ReadSampleLabelingAsdfDocument(path);
+    Require(
+        !whitespace_read.succeeded() &&
+            whitespace_read.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed,
+        "native reader must reject a present whitespace-only author email");
+
+    struct ReaderTypeCase {
+        std::string_view replacement;
+        std::string_view description;
+    };
+    constexpr std::array reader_type_cases{
+        ReaderTypeCase{"    email: null", "null"},
+        ReaderTypeCase{"    email: 123", "integer"},
+        ReaderTypeCase{"    email: 1_000", "underscored integer"},
+        ReaderTypeCase{
+            "    email: 184467440737095516160", "over-range integer"},
+        ReaderTypeCase{"    email: true", "boolean"},
+        ReaderTypeCase{"    email: ON", "YAML 1.1 boolean"},
+        ReaderTypeCase{"    email: 1.0", "floating-point"},
+        ReaderTypeCase{"    email: 2026-09-01", "timestamp"},
+    };
+    for (const ReaderTypeCase& reader_case : reader_type_cases) {
+        std::vector<unsigned char> typed_bytes = valid_bytes;
+        ReplaceTextOnce(
+            typed_bytes, "    email: \"a@b\"", reader_case.replacement);
+        WriteAllBytes(path, typed_bytes);
+        const specforge::SampleLabelingAsdfReadResult typed_read =
+            specforge::ReadSampleLabelingAsdfDocument(path);
+        Require(
+            !typed_read.succeeded() &&
+                typed_read.error.kind ==
+                    specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+            std::string("native reader must reject a present ") +
+                std::string(reader_case.description) +
+                " author email");
+    }
+
+    std::vector<unsigned char> invalid_utf8_bytes = valid_bytes;
+    const std::string_view email_token = "    email: \"a@b\"";
+    const auto email = std::search(invalid_utf8_bytes.begin(),
+        invalid_utf8_bytes.end(),
+        email_token.begin(),
+        email_token.end());
+    Require(
+        email != invalid_utf8_bytes.end(),
+        "author email token should exist before UTF-8 corruption");
+    const std::size_t email_value_offset = email_token.rfind('a');
+    Require(
+        email_value_offset != std::string_view::npos,
+        "author email value should exist before UTF-8 corruption");
+    email[static_cast<std::ptrdiff_t>(email_value_offset)] = 0xc3U;
+    WriteAllBytes(path, invalid_utf8_bytes);
+    const specforge::SampleLabelingAsdfReadResult invalid_utf8_read =
+        specforge::ReadSampleLabelingAsdfDocument(path);
+    Require(
+        !invalid_utf8_read.succeeded() &&
+            invalid_utf8_read.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+        "native reader must reject invalid UTF-8 in a present author email");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+}
+
 void TestReaderRejectsInvalidUtf8InUnknownYamlBeforeHydration()
 {
     const std::filesystem::path path = TempPath("_invalid_yaml_utf8.asdf");
@@ -1687,25 +1826,129 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
     specforge::SampleLabelingDocument authored = ProductionDocument();
     authored.labeling.canonical_metadata.authors = {
         {.name = "SpecForge maintainer",
-            .identifier = "https://example.invalid/maintainer"},
-        {.name = "验证者", .identifier = std::nullopt}};
+            .identifier = "https://example.invalid/maintainer",
+            .email = "Maintainer@Example.INVALID"},
+        {.name = "验证者", .identifier = std::nullopt, .email = std::nullopt}};
     const std::filesystem::path authored_path =
         TempPath("_authors_present.asdf");
     Require(
         WriteDocument(authored_path, authored).succeeded(),
         "document with authors should be written");
+    std::vector<unsigned char> authored_bytes = ReadAllBytes(authored_path);
+    const RawAsdf authored_raw = ParseRawAsdf(authored_bytes);
+    const std::string_view authored_metadata(
+        reinterpret_cast<const char*>(authored_bytes.data()),
+        authored_raw.tree_end);
+    const std::size_t first_email = authored_metadata.find("    email: ");
+    Require(
+        first_email != std::string_view::npos &&
+            authored_metadata.find("    email: ", first_email + 1U) ==
+                std::string_view::npos &&
+            authored_metadata.find("email: null") == std::string_view::npos,
+        "fresh writer must emit present author email once and leave absent email absent");
+    ReplaceTextOnce(authored_bytes,
+        "\n  authors:\n",
+        "\n  future_author_container: \"preserved\"\n  authors:\n");
+    WriteAllBytes(authored_path, authored_bytes);
     const specforge::SampleLabelingAsdfReadResult authored_read =
         specforge::ReadSampleLabelingAsdfDocument(authored_path);
     Require(
-        authored_read.succeeded() &&
+        authored_read.succeeded() && authored_read.durable_base &&
             authored_read.document->labeling.canonical_metadata.authors ==
                 authored.labeling.canonical_metadata.authors,
         "non-empty authors should round-trip without loss");
+
+    const auto values_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:01.000Z");
+    const auto metadata_modified_at = specforge::ParseCanonicalTimestamp(
+        "2026-08-30T08:00:02.000Z");
+    Require(
+        values_modified_at && metadata_modified_at,
+        "author rewrite timestamps should parse");
+    specforge::SampleLabelingDocument email_mismatch = *authored_read.document;
+    email_mismatch.labeling.canonical_metadata.authors[0].email =
+        "changed@example.invalid";
+    email_mismatch.labeling.canonical_metadata.modified_at =
+        *values_modified_at;
+    std::ostringstream mismatch_output(std::ios::binary);
+    const specforge::SampleLabelingAsdfWriteResult mismatch =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *authored_read.durable_base,
+            mismatch_output,
+            email_mismatch);
+    Require(
+        !mismatch.succeeded() &&
+            mismatch.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed &&
+            mismatch_output.str().empty(),
+        "values-only rewrite identity must include author email");
+
+    const std::filesystem::path values_path =
+        TempPath("_authors_values_rewrite.asdf");
+    specforge::SampleLabelingDocument values_replacement =
+        *authored_read.document;
+    values_replacement.annotation.values = {0, 0, 1};
+    values_replacement.labeling.canonical_metadata.modified_at =
+        *values_modified_at;
+    std::ofstream values_output(
+        values_path, std::ios::binary | std::ios::trunc);
+    Require(values_output.good(), "author values rewrite output should open");
+    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *authored_read.durable_base,
+            values_output,
+            values_replacement);
+    values_output.close();
+    Require(
+        values_rewrite.succeeded() && values_rewrite.durable_base,
+        values_rewrite.error.message.empty()
+            ? "values rewrite should preserve author email"
+            : values_rewrite.error.message);
+    const std::vector<unsigned char> values_bytes = ReadAllBytes(values_path);
+    Require(
+        ContainsText(values_bytes, "Maintainer@Example.INVALID") &&
+            ContainsText(values_bytes, "future_author_container"),
+        "values rewrite should preserve author email and unknown task metadata");
+
+    const std::filesystem::path metadata_path =
+        TempPath("_authors_metadata_rewrite.asdf");
+    specforge::SampleLabelingDocument metadata_replacement = values_replacement;
+    metadata_replacement.labeling.canonical_metadata.authors[0].email =
+        "updated@example.invalid";
+    metadata_replacement.labeling.canonical_metadata.modified_at =
+        *metadata_modified_at;
+    std::ofstream metadata_output(
+        metadata_path, std::ios::binary | std::ios::trunc);
+    Require(metadata_output.good(), "author metadata rewrite output should open");
+    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *values_rewrite.durable_base,
+            metadata_output,
+            metadata_replacement);
+    metadata_output.close();
+    Require(
+        metadata_rewrite.succeeded(),
+        metadata_rewrite.error.message.empty()
+            ? "metadata rewrite should update author email"
+            : metadata_rewrite.error.message);
+    const std::vector<unsigned char> metadata_bytes =
+        ReadAllBytes(metadata_path);
+    const specforge::SampleLabelingAsdfReadResult metadata_read =
+        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    Require(
+        metadata_read.succeeded() &&
+            metadata_read.document->labeling.canonical_metadata.authors ==
+                metadata_replacement.labeling.canonical_metadata.authors &&
+            ContainsText(metadata_bytes, "future_author_container"),
+        "metadata rewrite should round-trip edited author email without losing unknown fields");
 
     std::error_code cleanup_error;
     std::filesystem::remove(absent_path, cleanup_error);
     std::filesystem::remove(fresh_path, cleanup_error);
     std::filesystem::remove(authored_path, cleanup_error);
+    std::filesystem::remove(values_path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
 }
 
 void TestWriterEmitsSourceIndexProductionProfileAndRoundTrips()
@@ -2764,6 +3007,23 @@ int main(int argc, char* argv[])
             return 0;
         }
         if (argc == 3 &&
+            std::string_view(argv[1]) == "write-author-email-oracle") {
+            specforge::SampleLabelingDocument document = ProductionDocument();
+            document.labeling.canonical_metadata.authors = {
+                {.name = "SpecForge maintainer",
+                    .identifier = "https://example.invalid/maintainer",
+                    .email = "Maintainer@Example.INVALID"},
+                {.name = "验证者"}};
+            const specforge::SampleLabelingAsdfWriteResult write =
+                WriteDocument(argv[2], document);
+            if (!write.succeeded()) {
+                std::cerr << "production author-email oracle write failed: "
+                          << write.error.message << '\n';
+                return 1;
+            }
+            return 0;
+        }
+        if (argc == 3 &&
             std::string_view(argv[1]) == "write-explicit-roster-oracle") {
             const specforge::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], ProductionDocument());
@@ -2904,6 +3164,7 @@ int main(int argc, char* argv[])
         TestRejectsNdarrayMaskProfile();
         TestWriterRejectsRosterNulBeforeOutput();
         TestWriterRejectsInvalidUtf8BeforeOutput();
+        TestAuthorEmailValidationIsControlledBeforeOutputAndHydration();
         TestReaderRejectsInvalidUtf8InUnknownYamlBeforeHydration();
         TestYamlScalarMaterializationUsesResidentPreflight();
         TestExactReadDistinguishesTruncationFromIoFailure();

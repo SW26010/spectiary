@@ -101,6 +101,7 @@ struct SampleLabelingOrigin {
 struct SampleLabelingAuthor {
     std::string name;
     std::optional<std::string> identifier;
+    std::optional<std::string> email;
 
     [[nodiscard]] bool operator==(
         const SampleLabelingAuthor&) const = default;
