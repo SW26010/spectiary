@@ -258,21 +258,30 @@ SpectrumValueQuantity InferYQuantity(const std::filesystem::path& path)
     if (filename.ends_with("_flux.npy") || filename.ends_with("-flux.npy") || filename == "flux.npy") {
         return SpectrumValueQuantity::Flux;
     }
-    return SpectrumValueQuantity::NormalizedFlux;
+    return SpectrumValueQuantity::Unknown;
+}
+
+std::string XLabelForAxis(SpectrumAxisQuantity quantity, SpectrumAxisUnit unit)
+{
+    if (quantity == SpectrumAxisQuantity::Wavelength && unit == SpectrumAxisUnit::Angstrom) {
+        return "Wavelength (Å)";
+    }
+    if (quantity == SpectrumAxisQuantity::Pixel && unit == SpectrumAxisUnit::Pixel) {
+        return "Pixel Index";
+    }
+    return {};
 }
 
 std::string YLabelForQuantity(SpectrumValueQuantity quantity)
 {
     switch (quantity) {
     case SpectrumValueQuantity::Flux:
-        return "flux";
+        return "Flux";
     case SpectrumValueQuantity::NormalizedFlux:
-        return "normalized flux";
     case SpectrumValueQuantity::FeatureValue:
-        return "feature value";
     case SpectrumValueQuantity::Unknown:
     default:
-        return "value";
+        return "Value";
     }
 }
 
@@ -403,7 +412,7 @@ SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(
     snapshot->axis.x_unit = SpectrumAxisUnit::Angstrom;
     snapshot->axis.x_frame = SpectrumAxisFrame::Unknown;
     snapshot->axis.y_quantity = loaded.y_quantity;
-    snapshot->axis.x_label = "wavelength";
+    snapshot->axis.x_label = XLabelForAxis(snapshot->axis.x_quantity, snapshot->axis.x_unit);
     snapshot->axis.y_label = YLabelForQuantity(loaded.y_quantity);
 
     snapshot->capabilities.can_plot_current_spectrum = true;

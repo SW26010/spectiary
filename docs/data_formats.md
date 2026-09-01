@@ -80,7 +80,9 @@ wavelength_i = 10 ** loglam_i
 
 ## NPY 读取
 
-`*_X.npy` 或 `*_flux.npy` 才是主要光谱矩阵。二维数组按行读取，每一行是一条光谱。
+主要光谱矩阵命名不区分大小写，支持 `*_X.npy`、`*-X.npy`、裸名
+`X.npy`，以及 `*_flux.npy`、`*-flux.npy`、裸名 `flux.npy`。二维数组按行读取，
+每一行是一条光谱。
 
 读取时优先使用：
 
@@ -100,7 +102,7 @@ np.load(path, mmap_mode="r", allow_pickle=False)
 - `*_inverse.npy`
 - `*_known_mask.npy`
 
-`X.npy` 通常已经是样本级 z-score/SNV 后的模型输入，不是原始 flux。画 `X.npy` 时 y 轴应理解为 normalized flux / feature value，不要再自动归一化一次。若有 `flux.npy + ormask.npy`，后续可以提供“原始 flux”和“模型输入 X”两种视图。
+`X.npy` 通常已经是样本级 z-score/SNV 后的模型输入，不是原始 flux。画 `X.npy` 时不要再自动归一化一次；由于 NPY 本身不声明数值的物理语义，纵轴使用中性的 `Value` 标签。只有文件名不区分大小写地符合 `*_flux.npy`、`*-flux.npy` 或裸名 `flux.npy` 合同时才显示 `Flux`。若有 `flux.npy + ormask.npy`，后续可以提供“原始 flux”和“模型输入 X”两种视图。
 
 ## LAMOST DR10 / dr10_v1.0
 

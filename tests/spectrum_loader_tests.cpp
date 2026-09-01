@@ -1177,6 +1177,8 @@ void TestLoadsSelectedNpyRow()
     Require(first->current_spectrum.name == "alpha", "first row should use companion sample name");
     Require(first->axis.x_quantity == SpectrumAxisQuantity::Pixel, "short matrix should use pixel axis");
     Require(first->axis.y_quantity == SpectrumValueQuantity::FeatureValue, "X.npy should be labeled as feature data");
+    Require(first->axis.x_label == "Pixel Index", "short NPY matrix should display pixel index on the x axis");
+    Require(first->axis.y_label == "Value", "X.npy should use the neutral value label on the y axis");
     Require(
         HasDiagnosticCode(first, SpectrumDiagnosticCode::NonFiniteValuesFiltered),
         "filtered row should report non-finite filtering");
@@ -1187,6 +1189,59 @@ void TestLoadsSelectedNpyRow()
     Require(second->collection.can_move_previous, "second row should allow previous navigation");
     Require(second->current_spectrum.point_count == 3, "finite second row should keep all points");
     Require(second->current_spectrum.name == "beta", "second row should use companion sample name");
+}
+
+void TestAssignsNpyAxisLabels()
+{
+    constexpr std::size_t kWavelengthGridColumns = 3909;
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        ("specforge_loader_axis_labels_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directory(directory), "could not create NPY axis-label fixture directory");
+    const std::filesystem::path wavelength_path =
+        directory / "specforge_loader_axis_X.npy";
+    WriteNpy(
+        wavelength_path,
+        "<f8",
+        {1, kWavelengthGridColumns},
+        BytesFor(std::vector<double>(kWavelengthGridColumns, 1.0)));
+
+    const SpectrumSnapshotHandle wavelength =
+        specforge::LoadSpectrumSnapshotFromPath(wavelength_path, 0);
+    Require(wavelength->capabilities.can_plot_current_spectrum, "3909-column NPY should be plottable");
+    Require(
+        wavelength->axis.x_label == "Wavelength (Å)",
+        "3909-column NPY should display the Angstrom wavelength unit");
+    Require(wavelength->axis.y_label == "Value", "X.npy should display the neutral value label");
+
+    const std::array<std::filesystem::path, 3> flux_paths = {
+        directory / "specforge_loader_axis_flux.npy",
+        directory / "specforge_loader_axis-flux.npy",
+        directory / "flux.npy",
+    };
+    for (const std::filesystem::path& flux_path : flux_paths) {
+        WriteNpy(flux_path, "<f8", {1, 3}, BytesFor<double>({1.0, 2.0, 3.0}));
+
+        const SpectrumSnapshotHandle flux =
+            specforge::LoadSpectrumSnapshotFromPath(flux_path, 0);
+        Require(flux->axis.x_label == "Pixel Index", "short flux NPY should display pixel index");
+        Require(flux->axis.y_label == "Flux", "recognized flux NPY name should display flux");
+    }
+
+    const std::filesystem::path value_path =
+        directory / "specforge_loader_axis.npy";
+    WriteNpy(value_path, "<f8", {1, 3}, BytesFor<double>({1.0, 2.0, 3.0}));
+
+    const SpectrumSnapshotHandle value =
+        specforge::LoadSpectrumSnapshotFromPath(value_path, 0);
+    Require(
+        value->axis.y_quantity == SpectrumValueQuantity::Unknown,
+        "plain NPY should not claim flux or normalization semantics");
+    Require(value->axis.y_label == "Value", "plain NPY should display the neutral value label");
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
 }
 
 void TestLoadsNpySampleAnnotationContext()
@@ -1833,6 +1888,8 @@ void TestLoadsCsvSpectrum()
     Require(snapshot->current_spectrum.x_values->at(1) == 5001.0, "CSV wav column should take precedence over loglam");
     Require(snapshot->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "CSV should expose wavelength axis");
     Require(snapshot->axis.y_quantity == SpectrumValueQuantity::Flux, "CSV should expose flux values");
+    Require(snapshot->axis.x_label == "Wavelength (Å)", "CSV should display the Angstrom wavelength unit");
+    Require(snapshot->axis.y_label == "Flux", "CSV should display flux on the y axis");
     Require(MetadataValue(snapshot, "source_type") == "csv_spectrum", "CSV source type should come from domain");
     Require(MetadataValue(snapshot, "format") == "csv", "CSV format should come from domain");
     Require(
@@ -1858,6 +1915,8 @@ void TestLoadsFitsScalarTableSpectrum()
     Require(snapshot->current_spectrum.y_values->back() == 30.0, "FITS scalar table should retain the last flux value");
     Require(snapshot->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "FITS table should expose wavelength axis");
     Require(snapshot->axis.y_quantity == SpectrumValueQuantity::Flux, "FITS table should expose flux axis");
+    Require(snapshot->axis.x_label == "Wavelength (Å)", "FITS should display the Angstrom wavelength unit");
+    Require(snapshot->axis.y_label == "Flux", "FITS should display flux on the y axis");
     Require(MetadataValue(snapshot, "source_type") == "fits_spectrum", "FITS source type should come from domain");
     Require(MetadataValue(snapshot, "format") == "fits", "FITS format should come from domain");
     Require(MetadataValue(snapshot, "radial_velocity_km_s") == "-42.5", "FITS header RV should be retained");
@@ -3069,6 +3128,7 @@ int main()
     TestNpyTypedValueConversionPollsCancellation();
     TestFolderSortingPollsCancellation();
     TestLoadsSelectedNpyRow();
+    TestAssignsNpyAxisLabels();
     TestLoadsNpySampleAnnotationContext();
     TestPreservesNonCanonicalNpySampleNamesForNavigation();
     TestLoadsReadOnlyAnnotationDtypes();

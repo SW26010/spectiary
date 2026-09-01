@@ -68,8 +68,8 @@ SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot()
     snapshot->axis.x_unit = SpectrumAxisUnit::Angstrom;
     snapshot->axis.x_frame = SpectrumAxisFrame::Unknown;
     snapshot->axis.y_quantity = SpectrumValueQuantity::Flux;
-    snapshot->axis.x_label = "wavelength";
-    snapshot->axis.y_label = "flux";
+    snapshot->axis.x_label = "Wavelength (Å)";
+    snapshot->axis.y_label = "Flux";
 
     snapshot->capabilities.can_plot_current_spectrum = true;
     snapshot->capabilities.can_show_spectral_lines = true;

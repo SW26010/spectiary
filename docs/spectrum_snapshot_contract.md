@@ -64,6 +64,12 @@ Axis semantics are explicit:
 - `x.unit`: `Angstrom`, `Pixel`, or `Unknown`.
 - `x.frame`: `Rest`, `Observed`, or `Unknown`.
 
+Plot-visible axis labels use the normalized snapshot semantics: Angstrom
+wavelength is `Wavelength (Å)`, a generated sample-position axis is
+`Pixel Index`, explicitly identified flux is `Flux`, and other numeric values
+use the neutral label `Value`. A loader must not claim normalized flux from
+numeric values alone.
+
 Capabilities are read-only UI guidance derived by domain code from axis,
 metadata, and diagnostics. UI should not re-derive these rules itself.
 

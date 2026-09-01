@@ -60,6 +60,7 @@ SpectrumSnapshotHandle MakeErrorSnapshot(
     std::vector<SpectrumMetadataEntry> source_metadata = {});
 
 SpectrumValueQuantity InferYQuantity(const std::filesystem::path& path);
+std::string XLabelForAxis(SpectrumAxisQuantity quantity, SpectrumAxisUnit unit);
 std::string YLabelForQuantity(SpectrumValueQuantity quantity);
 
 struct FilterStats {

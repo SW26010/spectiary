@@ -1223,8 +1223,8 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             plot_size,
             plot_flags)) {
         plot_frame_presented = true;
-        const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
-        const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
+        const char* x_label = snapshot->axis.x_label.empty() ? nullptr : snapshot->axis.x_label.c_str();
+        const char* y_label = snapshot->axis.y_label.empty() ? nullptr : snapshot->axis.y_label.c_str();
         ImPlot::SetupAxis(ImAxis_X1, x_label, x_axis_flags);
         ImPlot::SetupAxis(ImAxis_Y1, y_label, y_axis_flags);
         ImPlot::SetupLegend(

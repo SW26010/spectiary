@@ -54,8 +54,8 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
         std::make_shared<const std::vector<double>>(std::move(x_values));
     snapshot->current_spectrum.y_values = std::move(y_values);
     snapshot->current_spectrum.point_count = snapshot->current_spectrum.x_values->size();
-    snapshot->axis.x_label = "wavelength";
-    snapshot->axis.y_label = "flux";
+    snapshot->axis.x_label = "Wavelength (Å)";
+    snapshot->axis.y_label = "Flux";
     snapshot->capabilities.can_plot_current_spectrum = true;
     return snapshot;
 }

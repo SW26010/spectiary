@@ -352,13 +352,12 @@ SpectrumSnapshotHandle LoadNpySnapshot(
         snapshot->axis.x_quantity = SpectrumAxisQuantity::Wavelength;
         snapshot->axis.x_unit = SpectrumAxisUnit::Angstrom;
         snapshot->axis.x_frame = SpectrumAxisFrame::Unknown;
-        snapshot->axis.x_label = "wavelength";
     } else {
         snapshot->axis.x_quantity = SpectrumAxisQuantity::Pixel;
         snapshot->axis.x_unit = SpectrumAxisUnit::Pixel;
         snapshot->axis.x_frame = SpectrumAxisFrame::Unknown;
-        snapshot->axis.x_label = "pixel";
     }
+    snapshot->axis.x_label = XLabelForAxis(snapshot->axis.x_quantity, snapshot->axis.x_unit);
 
     snapshot->capabilities.can_plot_current_spectrum = true;
     snapshot->capabilities.can_switch_spectrum = row.row_count > 1;
