@@ -1,0 +1,317 @@
+name: SpecForge repository verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: specforge-repository-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-and-static-release:
+    name: Debug broader and static Release verification
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      VERIFICATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/repository-core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Prepare run-scoped verification root
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          New-Item -ItemType Directory -Path $env:VERIFICATION_RUN_ROOT -Force | Out-Null
+
+      - name: Select runner vcpkg and MSVC toolchain
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
+            $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+            if ($null -ne $vcpkgCommand) {
+              $vcpkgRoot = Split-Path -Parent $vcpkgCommand.Source
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot) -or
+              -not (Test-Path -LiteralPath (Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
+          }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars = @(
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
+            throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the hosted runner.'
+          }
+          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Ninja/MSVC Debug
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\debug-build" `
+            -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug configure failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Build Debug repository targets
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Target all `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\debug-build" `
+            -TimeoutSec 1200
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug all-target build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Build ASDF production benchmark target
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Target specforge_asdf_labeling_production_benchmark `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\debug-build" `
+            -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "ASDF production benchmark build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run Debug fast and extended headless CTest presets
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ctestDirectory = Join-Path $env:VERIFICATION_RUN_ROOT 'debug-ctest'
+          New-Item -ItemType Directory -Path $ctestDirectory -Force | Out-Null
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-repository-debug-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
+          $env:SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY =
+            Join-Path $ctestDirectory 'asdf-mutation-failure'
+          $fastOutput = @(& ctest --preset fast 2>&1)
+          $fastExitCode = $LASTEXITCODE
+          $fastOutput | Tee-Object -FilePath (Join-Path $ctestDirectory 'fast.log')
+          if ($fastExitCode -ne 0) {
+            throw "Debug fast CTest preset failed with exit code $fastExitCode."
+          }
+          $extendedOutput = @(& ctest --preset extended 2>&1)
+          $extendedExitCode = $LASTEXITCODE
+          $extendedOutput | Tee-Object -FilePath (Join-Path $ctestDirectory 'extended.log')
+          if ($extendedExitCode -ne 0) {
+            throw "Debug extended CTest preset failed with exit code $extendedExitCode."
+          }
+
+      - name: Configure Ninja/MSVC static Release
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -Preset ninja-msvc-release-static `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\release-build" `
+            -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release configure failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Build static Release repository targets
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-release-static `
+            -Target all `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\release-build" `
+            -TimeoutSec 1500
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release all-target build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run static Release CTest verification
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $ctestDirectory = Join-Path $env:VERIFICATION_RUN_ROOT 'release-ctest'
+          New-Item -ItemType Directory -Path $ctestDirectory -Force | Out-Null
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-repository-release-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
+          $releaseOutput = @(
+            & ctest --test-dir build\ninja-msvc-release-static `
+              -L '^release$' `
+              --output-on-failure `
+              --no-tests=error `
+              --timeout 300 2>&1
+          )
+          $releaseExitCode = $LASTEXITCODE
+          $releaseOutput |
+            Tee-Object -FilePath (Join-Path $ctestDirectory 'release.log')
+          if ($releaseExitCode -ne 0) {
+            throw "Static Release CTest verification failed with exit code $releaseExitCode."
+          }
+
+      - name: Upload repository verification logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 5
+        with:
+          name: specforge-repository-core-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/repository-core/**
+
+  asdf-specialized:
+    name: ASDF pinned-oracle verification
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      VERIFICATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/asdf-specialized
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Prepare run-scoped verification root
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          New-Item -ItemType Directory -Path $env:VERIFICATION_RUN_ROOT -Force | Out-Null
+
+      - name: Select runner vcpkg and MSVC toolchain
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
+            $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+            if ($null -ne $vcpkgCommand) {
+              $vcpkgRoot = Split-Path -Parent $vcpkgCommand.Source
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot) -or
+              -not (Test-Path -LiteralPath (Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
+          }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars = @(
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
+            throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the hosted runner.'
+          }
+          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set up pinned ASDF oracle Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          check-latest: false
+
+      - name: Install pinned ASDF oracle
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          python -m pip install --disable-pip-version-check `
+            --target build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-python `
+            -r tools\asdf_labeling_spike\requirements.txt
+
+      - name: Configure and build ASDF oracle targets
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -Preset ninja-msvc-debug-asdf-labeling-spike `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\asdf-build" `
+            -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "ASDF oracle configure failed with exit code $LASTEXITCODE."
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-debug-asdf-labeling-spike `
+            -Target specforge_asdf_labeling_interoperability_targets `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:VERIFICATION_RUN_ROOT\asdf-build" `
+            -TimeoutSec 900
+          if ($LASTEXITCODE -ne 0) {
+            throw "ASDF oracle target build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run pinned ASDF oracle CTests
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ctestDirectory = Join-Path $env:VERIFICATION_RUN_ROOT 'ctest'
+          New-Item -ItemType Directory -Path $ctestDirectory -Force | Out-Null
+          $oracleOutput = @(
+            & ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
+              -L '^asdf-pinned-oracle$' `
+              --output-on-failure `
+              --no-tests=error `
+              --timeout 120 2>&1
+          )
+          $oracleExitCode = $LASTEXITCODE
+          $oracleOutput |
+            Tee-Object -FilePath (Join-Path $ctestDirectory 'asdf-pinned-oracle.log')
+          if ($oracleExitCode -ne 0) {
+            throw "Pinned ASDF oracle CTests failed with exit code $oracleExitCode."
+          }
+
+      - name: Collect final ASDF oracle evidence
+        if: ${{ always() }}
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          $destination = Join-Path $env:VERIFICATION_RUN_ROOT 'evidence'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          $evidence = @(
+            @{
+              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-results\interoperability.json'
+              Name = 'interoperability.json'
+            },
+            @{
+              Source = 'build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-hardening-results\checksum-interoperability.json'
+              Name = 'checksum-interoperability.json'
+            }
+          )
+          foreach ($entry in $evidence) {
+            if (Test-Path -LiteralPath $entry.Source -PathType Leaf) {
+              Copy-Item -LiteralPath $entry.Source `
+                -Destination (Join-Path $destination $entry.Name) -Force
+            }
+          }
+
+      - name: Upload ASDF oracle logs and evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 5
+        with:
+          name: specforge-repository-asdf-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/asdf-specialized/**

@@ -810,6 +810,27 @@ set_tests_properties(
         TIMEOUT 30
 )
 add_test(
+    NAME specforge_repository_verification_ci_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File
+            "${CMAKE_SOURCE_DIR}/tests/repository_verification_ci_contract_tests.ps1"
+        -Workflow
+            "${CMAKE_SOURCE_DIR}/.github/workflows/repository-verification.yml"
+        -AutomationWorkflow
+            "${CMAKE_SOURCE_DIR}/.github/workflows/automation.yml"
+        -PresetsFile
+            "${CMAKE_SOURCE_DIR}/CMakePresets.json"
+        -RootCMakeLists
+            "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+        -AsdfCMakeLists
+            "${CMAKE_SOURCE_DIR}/tools/asdf_labeling_spike/CMakeLists.txt"
+)
+set_tests_properties(
+    specforge_repository_verification_ci_contract_tests
+    PROPERTIES
+        TIMEOUT 30
+)
+add_test(
     NAME specforge_automation_launcher_integration_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_launcher_integration_tests.ps1"
@@ -1627,6 +1648,7 @@ set(SPECFORGE_FAST_TESTS
     specforge_automation_state_isolation_tests
     specforge_automation_samples_contract_tests
     specforge_automation_ci_contract_tests
+    specforge_repository_verification_ci_contract_tests
     specforge_on_demand_frame_capture_tests
     specforge_profile_recording_ui_state_tests
     specforge_top_bar_status_layout_tests
