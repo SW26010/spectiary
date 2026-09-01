@@ -1,6 +1,12 @@
 name: SpecForge automation
 
 on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
     inputs:
       run_real_gui:
@@ -20,7 +26,7 @@ jobs:
   native-headless:
     name: Native/headless automation gate
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       AUTOMATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/native-headless
     steps:
@@ -71,6 +77,9 @@ jobs:
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug configure failed with exit code $LASTEXITCODE."
+          }
 
       - name: Build native automation targets
         shell: pwsh
@@ -81,11 +90,45 @@ jobs:
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug all-target build failed with exit code $LASTEXITCODE."
+          }
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Target specforge_asdf_labeling_production_benchmark `
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug benchmark build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Configure Ninja/MSVC static Release
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -Preset ninja-msvc-release-static `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\release-build" `
+            -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release configure failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Build static Release native/headless targets
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-release-static `
+            -Target all `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\release-build" `
+            -TimeoutSec 1500
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release all-target build failed with exit code $LASTEXITCODE."
+          }
 
       - name: Run required native/headless CTest gate
         shell: pwsh
@@ -101,6 +144,27 @@ jobs:
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-debug `
             -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug native/headless CTest gate failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run required static Release CTest gate
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $releaseCTestTemp = Join-Path $env:RUNNER_TEMP 'specforge-release-ctest-temp'
+          New-Item -ItemType Directory -Path $releaseCTestTemp -Force | Out-Null
+          $env:TEMP = $releaseCTestTemp
+          $env:TMP = $releaseCTestTemp
+          $env:SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY = `
+            Join-Path $env:AUTOMATION_RUN_ROOT 'release-asdf-hardening\mutation-failure'
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
+            -Mode Headless `
+            -BuildDirectory build\ninja-msvc-release-static `
+            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest-release" -SuiteTimeoutSec 600 -TestTimeoutSec 180
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release native/headless CTest gate failed with exit code $LASTEXITCODE."
+          }
 
       - name: Set up pinned ASDF oracle Python
         uses: actions/setup-python@v6
@@ -126,12 +190,18 @@ jobs:
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
             -TimeoutSec 600
+          if ($LASTEXITCODE -ne 0) {
+            throw "ASDF interoperability configure failed with exit code $LASTEXITCODE."
+          }
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Preset ninja-msvc-debug-asdf-labeling-spike `
             -Target specforge_asdf_labeling_interoperability_targets `
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
             -TimeoutSec 900
+          if ($LASTEXITCODE -ne 0) {
+            throw "ASDF interoperability target build failed with exit code $LASTEXITCODE."
+          }
 
       - name: Run pinned ASDF 5.3.1 interoperability and checksum CTests
         shell: pwsh
@@ -140,6 +210,9 @@ jobs:
           ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
             -L '^asdf-pinned-oracle$' `
             --output-on-failure
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pinned ASDF CTest gate failed with exit code $LASTEXITCODE."
+          }
 
       - name: Collect final ASDF interoperability evidence
         if: ${{ always() }}

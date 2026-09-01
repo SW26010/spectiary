@@ -13,13 +13,22 @@
 - 两列波长/流量 `.csv` 光谱。
 - 一维 `.npy` 光谱数组。
 - 二维 `.npy` 光谱矩阵中的一行。
-- 可识别的单条 FITS table 光谱：LAMOST/SDSS table 路径。
+- 可识别的单条 FITS 光谱：SDSS/LAMOST 与 generic table/image 路径。
 
 打开 FITS 时，如果文件里找不到可识别的单条光谱结构，应提示“这是 catalog 或不支持的 FITS，不是单条光谱”，而不是把星表列误当成光谱曲线。
 
 当前 native loader 是同步 UI 路径，只面向单条光谱级别文件。为避免误开大型 catalog FITS 时卡 UI 或占用过多内存，FITS/FITS.GZ 在读取和解压前有大小上限；超过上限时应返回 domain error snapshot，而不是继续尝试整文件解析。
 
-当前 FITS reader 是窄口径 vertical slice，不做通用 FITS。后续如果继续扩张 FITS 支持，应先把实现从通用 loader 文件拆到独立 `fits_spectrum_loader` 边界，并优先评估 CFITSIO/CCfits，而不是继续堆手写 FITS 语义。
+当前只有一套 FITS 实现：`fits_file_reader` 用 CFITSIO 解析 FITS container，
+`fits_spectrum_loader` 在它之上识别 SpecForge 支持的光谱语义，通用
+`spectrum_loader` 只负责格式分派和统一 snapshot 边界。`.fits.gz` 先经过
+有压缩输入与解压输出上限的 transport 解压，再把内存中的 FITS 字节交给
+CFITSIO；没有第二套手写 reader 或 fallback。
+
+这仍不是通用 FITS 承诺。当前语义层继续支持已验证的 SDSS/LAMOST 与 generic
+image/table 单光谱结构；CFITSIO 能打开一个 container，不代表 SpecForge 能把
+它解释成光谱。网络 URL、FITS 写入和任意 catalog/table/image 解释都不支持，
+不能把底层库的能力直接提升为产品格式合同。
 
 ## CSV 读取
 
@@ -116,7 +125,11 @@ wavelength = 10 ** (COEFF0 + COEFF1 * pixel)
 
 这里 `COEFF1` 通常应为 `0.0001`。原始光谱可能不覆盖完整 3909 网格，首尾无覆盖位置在 raw flux/mask 里可能是 `NaN`。
 
-当前 native loader 仅在 header 明确提供 `COEFF0/COEFF1` 时把这种 image 结构作为受限 fallback 识别；这不是可靠 image FITS 或通用 FITS 支持承诺。不要用 `CRVAL1/CD1_1` 等 WCS 字段猜测 log10 wavelength，除非后续同时实现并验证 `CTYPE/DC-FLAG` 等语义。
+当前 native loader 仅在 header 明确提供 `COEFF0/COEFF1` 时走受限 image
+识别路径；table 与 image 都由同一个 CFITSIO reader 读取 container，再由同一个
+光谱语义层判断。这不是任意 image FITS 或通用 FITS 支持承诺。不要用
+`CRVAL1/CD1_1` 等 WCS 字段猜测 log10 wavelength，除非后续同时实现并验证
+`CTYPE/DC-FLAG` 等语义。
 
 FITS 读取需要把“观测波长轴”与“到目标静止系”分开。观测波长仍来自
 `COEFF0/COEFF1`、`WAVELENGTH` 或 `LOGLAM`，不要再做一次 FITS/WCS 波长校准。
@@ -196,7 +209,7 @@ SDSS 还有两个坑：
 打开 FITS 时建议按这个顺序：
 
 1. 找 table HDU：必须有 `flux`，并且有 `loglam` 或 `wavelength`。
-2. 找受限 image fallback：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时只保留 `ivar > 0` 的点；第 4 行存在时只保留 `ormask == 0` 的点；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
+2. 在同一 CFITSIO reader 结果中找受限 image 语义：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时只保留 `ivar > 0` 的点；第 4 行存在时只保留 `ormask == 0` 的点；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
 3. 读取可验证的目标 RV 或红移元数据，挡住无效 redshift，标记不可靠 redshift，并记录当前是否有可用的 `target_redshift`；不要使用 `HELIO_RV` 作为目标速度。
 4. 清理非有限 wavelength/flux、非正 wavelength，并按 wavelength 升序画。
 5. 如果找不到这些信息，提示“这是 catalog 或不支持的 FITS，不是单条光谱”。
@@ -255,4 +268,4 @@ status；这些概念不能从 output filename 或 ASDF container version 推断
 
 ## 一句话总结
 
-程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵，FITS 要先识别 HDU、波长列或受限 `COEFF0/COEFF1` fallback，`mask/ivar` 决定有效点，`X.npy` 是处理后的特征而不是原始流量；sample labeling canonical `.asdf` 则是带独立 SpecForge schema 版本的 task/source/roster/value 原子文档。
+程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵；FITS table/image 都先由唯一的 CFITSIO reader 解析 container，再由语义层识别波长列或受限 `COEFF0/COEFF1` image 路径，`mask/ivar` 决定有效点；`X.npy` 是处理后的特征而不是原始流量；sample labeling canonical `.asdf` 则是带独立 SpecForge schema 版本的 task/source/roster/value 原子文档。

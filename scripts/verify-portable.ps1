@@ -17,6 +17,8 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+. (Join-Path $PSScriptRoot 'lib\portable_pe_helpers.ps1')
+
 function Get-RequiredProperty {
     param(
         [Parameter(Mandatory = $true)] [psobject]$Object,
@@ -107,14 +109,35 @@ $expectedPackageEntries = @(
     'SpecForge.exe',
     'specforge_metadata.json'
 )
-$actualPackageEntries = @(
-    Get-ChildItem -LiteralPath $PackageRoot |
-        ForEach-Object { $_.Name }
-)
+$actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
+$actualPackageEntries = @($actualPackageItems | ForEach-Object { $_.Name })
 Assert-ExactEntries `
     -Expected $expectedPackageEntries `
     -Actual $actualPackageEntries `
     -Description 'Portable package root'
+
+$packageDataEntry = @(
+    $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
+)
+$packageExecutableEntry = @(
+    $actualPackageItems | Where-Object { $_.Name -ceq 'SpecForge.exe' }
+)
+$packageMetadataEntry = @(
+    $actualPackageItems |
+        Where-Object { $_.Name -ceq 'specforge_metadata.json' }
+)
+if ($packageDataEntry.Count -ne 1 -or
+    -not $packageDataEntry[0].PSIsContainer) {
+    throw 'Portable package root Data must be a directory.'
+}
+if ($packageExecutableEntry.Count -ne 1 -or
+    $packageExecutableEntry[0].PSIsContainer) {
+    throw 'Portable package root SpecForge.exe must be a file.'
+}
+if ($packageMetadataEntry.Count -ne 1 -or
+    $packageMetadataEntry[0].PSIsContainer) {
+    throw 'Portable package root specforge_metadata.json must be a file.'
+}
 
 $packageExecutable = Join-Path $PackageRoot 'SpecForge.exe'
 $packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
@@ -160,8 +183,18 @@ $cfitsioVersion = Get-RequiredProperty `
     -Description 'Portable build metadata'
 if ($cfitsioVersion -isnot [string] -or
     [string]::IsNullOrWhiteSpace($cfitsioVersion) -or
+    $cfitsioVersion -cne $cfitsioVersion.Trim() -or
     $cfitsioVersion -cnotmatch '^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$') {
-    throw 'Portable build metadata cfitsio must be a dotted numeric version.'
+    throw 'Portable build metadata cfitsio must be a non-empty, unpadded dotted numeric version.'
+}
+$configuration = Get-RequiredProperty `
+    -Object $build `
+    -Name 'configuration' `
+    -Description 'Portable build metadata'
+if ($configuration -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($configuration) -or
+    $configuration -cne $configuration.Trim()) {
+    throw 'Portable build metadata configuration must be a non-empty unpadded string.'
 }
 
 $deployment = Get-RequiredProperty `
@@ -199,6 +232,14 @@ if ($artifactSha256 -cne $buildExecutableHash) {
 if ($artifactSha256 -cne $packageExecutableHash) {
     throw "Portable metadata artifact sha256 '$artifactSha256' does not match packaged executable hash '$packageExecutableHash'."
 }
+if ($configuration -ceq 'Release') {
+    Assert-StaticCfitsioPeImports `
+        -ExecutablePath $BuildExecutable `
+        -Description 'Release build SpecForge.exe'
+    Assert-StaticCfitsioPeImports `
+        -ExecutablePath $packageExecutable `
+        -Description 'Portable Release SpecForge.exe'
+}
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -210,6 +251,14 @@ try {
         'specforge_metadata.json'
     )
     $actualZipEntries = @($archive.Entries.FullName)
+    $cfitsioDllEntries = @(
+        $actualZipEntries | Where-Object {
+            $_ -match '(?i)(?:^|/)[^/]*cfitsio[^/]*\.dll$'
+        }
+    )
+    if ($cfitsioDllEntries.Count -ne 0) {
+        throw "Portable ZIP must not contain a CFITSIO DLL: $($cfitsioDllEntries -join ', ')."
+    }
     Assert-ExactEntries `
         -Expected $expectedZipEntries `
         -Actual $actualZipEntries `

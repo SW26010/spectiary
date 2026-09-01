@@ -7,7 +7,7 @@
 状态栏中的 `ms/frame` 与 `FPS` 使用 ImGui `io.DeltaTime` 的最近有效应用/UI 帧时序样本（FPS 由该样本计算），并在首帧或 idle/minimized 间隔时保留最近有效样本；它不是显示器刷新率、合成器扫描输出率或各 viewport 的 `Present` FPS。空闲时不为刷新该数字强制出帧。
 默认启动仍有 small synthetic fixture 用于 smoke test；命令行源路径和 Files 面板 `Add file...` 支持通过 domain snapshot loader 打开 source。
 Files 面板 `Add folder...` 使用 Windows 原生目录选择器添加目录 source，目录本身仍交给 domain snapshot loader 处理。
-当前可绘制的真实数据包括 `.npy` 光谱矩阵、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱，以及第一层包含 CSV/FITS 文件的 folder collection；受限 image FITS fallback 不作为主支持承诺，catalog/unsupported FITS 由 domain 产出不可绘制的 diagnostic snapshot。
+当前可绘制的真实数据包括 `.npy` 光谱矩阵、简单波长/流量 `.csv`、可识别的单条 SDSS/LAMOST 与 generic FITS table/image 光谱，以及第一层包含 CSV/FITS 文件的 folder collection；受限 image 识别路径不是通用 FITS 支持承诺，catalog/unsupported FITS 由 domain 产出不可绘制的 diagnostic snapshot。
 Folder source 非递归加载第一层 CSV/FITS 文件，子文件夹、其它文件类型、CSV/FITS 混用都会写入 warning diagnostics。
 `.npy` loader 支持 1D 或行级 2D float32/float64 array，CSV/FITS loader 产出同一类 `SpectrumSnapshotHandle` 进入同一条 UI/plot 路径。
 3909 列矩阵使用固定 loglam wavelength grid，其他列数退回 pixel index 并写入 snapshot diagnostics。
@@ -23,7 +23,8 @@ session restore 并行准备后分别按提交顺序、保存顺序发布结果�
 - Windows 10/11 SDK。
 - CMake 3.24 或更新版本。
 - vcpkg。
-- Ninja，可选，仅用于 `ninja-msvc-debug` preset。
+- Ninja，可选，用于 `ninja-msvc-debug` 和发布前验证使用的
+  `ninja-msvc-release-static` preset。
 
 ## vcpkg
 
@@ -43,12 +44,18 @@ $env:VCPKG_ROOT
 
 - `imgui[docking-experimental,win32-binding,dx11-binding]`
 - `implot`
+- `cfitsio`（`default-features=false`）
 - `yaml-cpp`
 - `zlib`
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
 DirectX 11 来自 Windows SDK；`specforge_renderer` 封装 DX11/DXGI presentation，`specforge_native` 负责 Win32/DWM shell。
+FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
+`x64-windows`，允许 vcpkg 依赖以 DLL 形式存在；当前正式 Release preset
+统一继承 `x64-windows-static`，因此 CFITSIO 链入 `SpecForge.exe`，Portable
+包不携带 `cfitsio.dll`。这是当前 CFITSIO/Release 的具体选择，不是“所有依赖
+必须静态”的全局规则；依赖链接策略仍按组件和分发需求分别决定。
 `yaml-cpp` 用于 production ASDF sample-labeling 文档的受限 YAML metadata
 解析；`zlib` 用于该 codec 的固定压缩 profile，以及受限 `.fits.gz`
 单光谱读取路径。
@@ -132,6 +139,7 @@ Ninja configure check：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Preset ninja-msvc-release-static -Configure
 ```
 
 Visual Studio configure check：
@@ -146,15 +154,18 @@ Build native shell：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Preset ninja-msvc-release-static
 ```
 
 ### Ninja/MSVC 卡住排查
 
-`ninja-msvc-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
-里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
+`ninja-msvc-debug` 和 `ninja-msvc-release-static` preset 依赖 MSVC developer
+environment 与 vcpkg manifest mode。不要在普通 PowerShell 里裸跑 `ninja` 或
+直接执行对应的 `cmake --build --preset ...`；`cl.exe` 可能找不到标准库头，例如
+`cstddef`。
 
 在 Codex 或其它只允许写仓库目录的受限环境里，configure/build 需要用同一套 `vcvars64.bat` 命令形态并允许写
-workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可能写入
+workspace 外缓存。这两个 Ninja preset 的 configure 都会调用 vcpkg，并可能写入
 `$env:VCPKG_ROOT\buildtrees\0.vcpkg_dep_info.cmake`、`buildtrees/`、`packages/`、下载缓存或 MSVC
 工具链缓存；如果沙箱拦住这些 workspace 外写入，表现可能是 configure 失败或后续 build 看起来卡住。
 
@@ -191,6 +202,7 @@ Stop-Process -Id <cmakeId>,<ninjaId> -Force
 
 ```text
 build/ninja-msvc-debug/SpecForge.exe
+build/ninja-msvc-release-static/SpecForge.exe
 ```
 
 普通构建输出的 `specforge_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
@@ -233,10 +245,14 @@ Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
-目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_metadata.json` 和
-`Data\`，不要求 EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
+目录和 ZIP 根部只保留文件 `SpecForge.exe`、文件 `specforge_metadata.json` 和
+目录 `Data\`；根目录枚举包含隐藏项，不允许用隐藏文件绕过精确条目合同，也不要求
+EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt` 仍是可审查、可维护的唯一来源，
 构建时原样嵌入 EXE。
+当前 Release 验证还直接读取 `SpecForge.exe` 的普通与 delay-load PE import table，拒绝
+`cfitsio.dll` 以及因误开 CFITSIO 可选功能而出现的 curl/bzip2 runtime DLL；
+Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`specforge_native` 完成最终链接后，
 CMake 的 post-build finalizer tool 读取实际 `SpecForge.exe`，计算 SHA-256 和 UTC 完成时间，

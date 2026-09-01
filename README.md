@@ -79,11 +79,14 @@ SpecForge's user-facing data path is centered on astronomical FITS spectra, with
 
 | Source | Current support |
 | --- | --- |
-| LAMOST FITS | Recognized single-spectrum table files and supported vector-table cases |
-| SDSS FITS | Recognized SDSS-style table spectra and supported vector-table cases |
+| LAMOST FITS | Recognized single-spectrum table/image semantics and supported vector-table cases |
+| SDSS FITS | Recognized SDSS-style table/image semantics and supported vector-table cases |
+| Generic FITS | Restricted single-spectrum table/image semantics with explicit wavelength metadata |
 | Folder of spectra | Non-recursive browsing of supported first-level FITS sources |
 
-FITS is a broad ecosystem, so support is intentionally explicit rather than claiming that every FITS layout will work. Image-based FITS handling remains a narrow compatibility fallback and should **not** be read as generic FITS support.
+FITS is a broad ecosystem, so support is intentionally explicit rather than claiming that every FITS layout will work. A single CFITSIO reader parses both table and image containers; the spectrum semantics layer then recognizes only the restricted LAMOST, SDSS, and generic single-spectrum structures described by the format contract. Opening a container is not itself a promise that SpecForge can interpret it as a spectrum.
+
+For `.fits.gz`, SpecForge first performs bounded transport decompression and then gives the resulting FITS bytes to that same CFITSIO reader. FITS network URLs and FITS writing are not supported.
 
 SpecForge also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
 

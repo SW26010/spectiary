@@ -67,6 +67,8 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+. (Join-Path $RepoRoot 'scripts\lib\portable_pe_helpers.ps1')
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -321,13 +323,31 @@ function Assert-PortablePackage {
         'SpecForge.exe',
         'specforge_metadata.json'
     )
+    $actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
     $actualPackageEntries = @(
-        Get-ChildItem -LiteralPath $PackageRoot |
-            ForEach-Object { $_.Name } |
-            Sort-Object
+        $actualPackageItems | ForEach-Object { $_.Name } | Sort-Object
     )
     if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
         throw "$Description package root entries are wrong: $($actualPackageEntries -join ', ')."
+    }
+    $dataEntry = @(
+        $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
+    )
+    $executableEntry = @(
+        $actualPackageItems | Where-Object { $_.Name -ceq 'SpecForge.exe' }
+    )
+    $metadataEntry = @(
+        $actualPackageItems |
+            Where-Object { $_.Name -ceq 'specforge_metadata.json' }
+    )
+    if ($dataEntry.Count -ne 1 -or -not $dataEntry[0].PSIsContainer) {
+        throw "$Description package root Data must be a directory."
+    }
+    if ($executableEntry.Count -ne 1 -or $executableEntry[0].PSIsContainer) {
+        throw "$Description package root SpecForge.exe must be a file."
+    }
+    if ($metadataEntry.Count -ne 1 -or $metadataEntry[0].PSIsContainer) {
+        throw "$Description package root specforge_metadata.json must be a file."
     }
     $packagedExecutablePath = Join-Path $PackageRoot 'SpecForge.exe'
     Assert-FilesMatch `
@@ -383,6 +403,14 @@ function Assert-PortablePackage {
             'specforge_metadata.json'
         )
         $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
+        $cfitsioDllEntries = @(
+            $actualZipEntries | Where-Object {
+                $_ -match '(?i)(?:^|/)[^/]*cfitsio[^/]*\.dll$'
+            }
+        )
+        if ($cfitsioDllEntries.Count -ne 0) {
+            throw "$Description ZIP must not contain a CFITSIO DLL: $($cfitsioDllEntries -join ', ')."
+        }
         if (($actualZipEntries -join "`n") -cne (($expectedZipEntries | Sort-Object) -join "`n")) {
             throw "$Description ZIP entries are wrong: $($actualZipEntries -join ', ')."
         }
@@ -475,12 +503,18 @@ function Assert-ScriptFails {
     }
 }
 
-function Copy-ZipWithTamperedEntry {
+function Copy-ZipWithMutations {
     param(
         [Parameter(Mandatory = $true)] [string]$SourcePath,
         [Parameter(Mandatory = $true)] [string]$DestinationPath,
-        [Parameter(Mandatory = $true)] [string]$EntryName
+        [AllowEmptyString()] [string]$TamperedEntryName = '',
+        [AllowEmptyString()] [string]$AdditionalEntryName = ''
     )
+
+    if ([string]::IsNullOrEmpty($TamperedEntryName) -and
+        [string]::IsNullOrEmpty($AdditionalEntryName)) {
+        throw 'ZIP mutation fixture must tamper with or add an entry.'
+    }
 
     Add-Type -AssemblyName System.IO.Compression
     $sourceArchive = [IO.Compression.ZipFile]::OpenRead($SourcePath)
@@ -514,9 +548,9 @@ function Copy-ZipWithTamperedEntry {
                 $inputStream.Dispose()
             }
 
-            if ($sourceEntry.FullName -ceq $EntryName) {
+            if ($sourceEntry.FullName -ceq $TamperedEntryName) {
                 if ($entryBytes.Length -eq 0) {
-                    throw "Cannot tamper with empty ZIP entry '$EntryName'."
+                    throw "Cannot tamper with empty ZIP entry '$TamperedEntryName'."
                 }
                 $entryBytes[0] = [byte]($entryBytes[0] -bxor 1)
             }
@@ -530,6 +564,22 @@ function Copy-ZipWithTamperedEntry {
             }
             finally {
                 $outputStream.Dispose()
+            }
+        }
+        if (-not [string]::IsNullOrEmpty($AdditionalEntryName)) {
+            $additionalEntry = $destinationArchive.CreateEntry(
+                $AdditionalEntryName)
+            $additionalStream = $additionalEntry.Open()
+            try {
+                $additionalBytes = [Text.Encoding]::ASCII.GetBytes(
+                    'forbidden runtime dependency')
+                $additionalStream.Write(
+                    $additionalBytes,
+                    0,
+                    $additionalBytes.Length)
+            }
+            finally {
+                $additionalStream.Dispose()
             }
         }
     }
@@ -672,6 +722,12 @@ Assert-BuildToolchainContract `
     -Metadata $buildMetadata.build `
     -Expected $expectedToolchainMetadata `
     -Description 'Built executable metadata'
+$metadataCfitsioVersion = $buildMetadata.build.cfitsio
+if ($metadataCfitsioVersion -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($metadataCfitsioVersion) -or
+    $metadataCfitsioVersion -cne $metadataCfitsioVersion.Trim()) {
+    throw 'Built executable metadata cfitsio must be a non-empty unpadded string.'
+}
 $expectedBuildMetadata = [ordered]@{
     configuration = $Configuration
     dear_imgui = $DearImGuiVersion
@@ -689,6 +745,11 @@ foreach ($expectedProperty in $expectedBuildMetadata.GetEnumerator()) {
 if ($buildMetadata.product.name -cne 'SpecForge' -or
     $buildMetadata.product.version -cne $SpecForgeVersion) {
     throw "Built executable product metadata does not match SpecForge $SpecForgeVersion."
+}
+if ($Configuration -ceq 'Release') {
+    Assert-StaticCfitsioPeImports `
+        -ExecutablePath $resolvedBuiltExecutable `
+        -Description 'Release build SpecForge.exe'
 }
 
 $legalRoot = Join-Path $RepoRoot 'legal'
@@ -809,7 +870,7 @@ foreach ($expected in @(
     'Copyright (c) 2014-2026 Omar Cornut',
     "ImPlot $ImPlotVersion",
     'Copyright (c) 2020 Evan Pezent',
-    "CFITSIO $CfitsioVersion",
+    "CFITSIO $metadataCfitsioVersion",
     'Permission to freely use, copy, modify, and distribute this software',
     "yaml-cpp $YamlCppVersion",
     'Copyright (c) 2008-2015 Jesse Beder',
@@ -828,7 +889,7 @@ foreach ($expected in @(
 }
 Assert-NoticeSectionContains `
     -Text $notices `
-    -Heading "CFITSIO $CfitsioVersion" `
+    -Heading "CFITSIO $metadataCfitsioVersion" `
     -Expected @(
         'U.S. Government as represented by the Administrator',
         'Permission to freely use, copy, modify, and distribute this software',
@@ -1270,8 +1331,10 @@ try {
 
     $snapshotPackageRoot = Join-Path $testRoot 'package-script-snapshot'
     $snapshotPackageScriptsRoot = Join-Path $snapshotPackageRoot 'scripts'
+    $snapshotPackageScriptsLibRoot = Join-Path $snapshotPackageScriptsRoot 'lib'
     $snapshotPackageLegalRoot = Join-Path $snapshotPackageRoot 'legal'
     New-Item -ItemType Directory -Path $snapshotPackageScriptsRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $snapshotPackageScriptsLibRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $snapshotPackageLegalRoot -Force | Out-Null
     $snapshotPackageScriptPath = Join-Path `
         $snapshotPackageScriptsRoot `
@@ -1280,6 +1343,9 @@ try {
     Copy-Item `
         -LiteralPath $portableVerifierPath `
         -Destination (Join-Path $snapshotPackageScriptsRoot 'verify-portable.ps1')
+    Copy-Item `
+        -LiteralPath (Join-Path $RepoRoot 'scripts\lib\portable_pe_helpers.ps1') `
+        -Destination (Join-Path $snapshotPackageScriptsLibRoot 'portable_pe_helpers.ps1')
     Copy-Item `
         -LiteralPath $noticesPath `
         -Destination (Join-Path $snapshotPackageLegalRoot 'THIRD_PARTY_NOTICES.txt')
@@ -1419,6 +1485,69 @@ try {
     $verifiedPackageRoot = Join-Path $testDistRoot $verifiedPackage.PackageName
     $verifiedPackageZip = Join-Path $testDistRoot "$($verifiedPackage.PackageName).zip"
     $verifiedPackageMetadataPath = Join-Path $verifiedPackageRoot 'specforge_metadata.json'
+
+    $hiddenEntryPackageRoot = Join-Path $testRoot 'hidden-entry-package'
+    New-Item `
+        -ItemType Directory `
+        -Path (Join-Path $hiddenEntryPackageRoot 'Data') `
+        -Force |
+        Out-Null
+    Copy-Item `
+        -LiteralPath (Join-Path $verifiedPackageRoot 'SpecForge.exe') `
+        -Destination (Join-Path $hiddenEntryPackageRoot 'SpecForge.exe')
+    Copy-Item `
+        -LiteralPath $verifiedPackageMetadataPath `
+        -Destination (
+            Join-Path $hiddenEntryPackageRoot 'specforge_metadata.json')
+    $hiddenEntryPath = Join-Path `
+        $hiddenEntryPackageRoot `
+        'hidden-cfitsio.dll'
+    [IO.File]::WriteAllText($hiddenEntryPath, 'hidden')
+    $hiddenEntry = Get-Item -LiteralPath $hiddenEntryPath -Force
+    $hiddenEntry.Attributes =
+        $hiddenEntry.Attributes -bor [IO.FileAttributes]::Hidden
+    Assert-ScriptFails `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @(
+            '-BuildExecutable',
+            $resolvedBuiltExecutable,
+            '-PackageRoot',
+            $hiddenEntryPackageRoot,
+            '-ZipPath',
+            $verifiedPackageZip
+        ) `
+        -ExpectedMessage 'Portable package root entries are wrong' `
+        -Description 'Portable verifier rejects hidden extra package entries'
+
+    $wrongDataTypePackageRoot = Join-Path $testRoot 'wrong-data-type-package'
+    New-Item `
+        -ItemType Directory `
+        -Path $wrongDataTypePackageRoot `
+        -Force |
+        Out-Null
+    Copy-Item `
+        -LiteralPath (Join-Path $verifiedPackageRoot 'SpecForge.exe') `
+        -Destination (Join-Path $wrongDataTypePackageRoot 'SpecForge.exe')
+    Copy-Item `
+        -LiteralPath $verifiedPackageMetadataPath `
+        -Destination (
+            Join-Path $wrongDataTypePackageRoot 'specforge_metadata.json')
+    [IO.File]::WriteAllText(
+        (Join-Path $wrongDataTypePackageRoot 'Data'),
+        'not a directory')
+    Assert-ScriptFails `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @(
+            '-BuildExecutable',
+            $resolvedBuiltExecutable,
+            '-PackageRoot',
+            $wrongDataTypePackageRoot,
+            '-ZipPath',
+            $verifiedPackageZip
+        ) `
+        -ExpectedMessage 'Portable package root Data must be a directory' `
+        -Description 'Portable verifier rejects a Data file in place of the directory'
+
     $originalPackageMetadataBytes = [IO.File]::ReadAllBytes($verifiedPackageMetadataPath)
     try {
         $tamperedPackageMetadata =
@@ -1485,10 +1614,10 @@ try {
     $tamperedZipPath = Join-Path `
         $testDistRoot `
         "$($verifiedPackage.PackageName)-tampered-metadata.zip"
-    Copy-ZipWithTamperedEntry `
+    Copy-ZipWithMutations `
         -SourcePath $verifiedPackageZip `
         -DestinationPath $tamperedZipPath `
-        -EntryName 'specforge_metadata.json'
+        -TamperedEntryName 'specforge_metadata.json'
     Assert-ScriptFails `
         -ScriptPath $portableVerifierPath `
         -Arguments @(
@@ -1501,6 +1630,46 @@ try {
         ) `
         -ExpectedMessage 'Portable ZIP metadata ZIP entry' `
         -Description 'Published Portable ZIP metadata tamper is detected'
+
+    $tamperedExecutableZipPath = Join-Path `
+        $testDistRoot `
+        "$($verifiedPackage.PackageName)-tampered-executable.zip"
+    Copy-ZipWithMutations `
+        -SourcePath $verifiedPackageZip `
+        -DestinationPath $tamperedExecutableZipPath `
+        -TamperedEntryName 'SpecForge.exe'
+    Assert-ScriptFails `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @(
+            '-BuildExecutable',
+            $resolvedBuiltExecutable,
+            '-PackageRoot',
+            $verifiedPackageRoot,
+            '-ZipPath',
+            $tamperedExecutableZipPath
+        ) `
+        -ExpectedMessage 'Portable ZIP executable ZIP entry' `
+        -Description 'Published Portable ZIP executable tamper is detected'
+
+    $injectedCfitsioZipPath = Join-Path `
+        $testDistRoot `
+        "$($verifiedPackage.PackageName)-injected-cfitsio.zip"
+    Copy-ZipWithMutations `
+        -SourcePath $verifiedPackageZip `
+        -DestinationPath $injectedCfitsioZipPath `
+        -AdditionalEntryName 'cfitsio.dll'
+    Assert-ScriptFails `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @(
+            '-BuildExecutable',
+            $resolvedBuiltExecutable,
+            '-PackageRoot',
+            $verifiedPackageRoot,
+            '-ZipPath',
+            $injectedCfitsioZipPath
+        ) `
+        -ExpectedMessage 'Portable ZIP must not contain a CFITSIO DLL: cfitsio.dll' `
+        -Description 'Published Portable ZIP rejects an injected CFITSIO DLL'
 
     $originalPortableMetadataBytes = [IO.File]::ReadAllBytes(
         $verifiedPackageMetadataPath)
@@ -1533,33 +1702,46 @@ try {
             $originalPortableMetadataBytes)
     }
 
-    try {
-        $invalidPortableMetadata =
-            Get-Content -Raw -LiteralPath $verifiedPackageMetadataPath |
-            ConvertFrom-Json
-        $invalidPortableMetadata.build.cfitsio = '4.6.x'
-        [IO.File]::WriteAllText(
-            $verifiedPackageMetadataPath,
-            (($invalidPortableMetadata | ConvertTo-Json -Depth 10) +
-                [Environment]::NewLine),
-            (New-Object Text.UTF8Encoding($false)))
-        Assert-ScriptFails `
-            -ScriptPath $portableVerifierPath `
-            -Arguments @(
-                '-BuildExecutable',
-                $resolvedBuiltExecutable,
-                '-PackageRoot',
-                $verifiedPackageRoot,
-                '-ZipPath',
-                $verifiedPackageZip
-            ) `
-            -ExpectedMessage 'cfitsio must be a dotted numeric version' `
-            -Description 'Portable verifier rejects malformed CFITSIO version'
-    }
-    finally {
-        [IO.File]::WriteAllBytes(
-            $verifiedPackageMetadataPath,
-            $originalPortableMetadataBytes)
+    $invalidCfitsioVersions = @(
+        [pscustomobject]@{ Description = 'empty'; Value = '' },
+        [pscustomobject]@{ Description = 'blank'; Value = '   ' },
+        [pscustomobject]@{ Description = 'leading padding'; Value = ' 4.6.4' },
+        [pscustomobject]@{ Description = 'trailing padding'; Value = '4.6.4 ' },
+        [pscustomobject]@{ Description = 'non-numeric'; Value = '4.6.x' }
+    )
+    foreach ($invalidCfitsioVersion in $invalidCfitsioVersions) {
+        try {
+            $invalidPortableMetadata =
+                Get-Content -Raw -LiteralPath $verifiedPackageMetadataPath |
+                ConvertFrom-Json
+            $invalidPortableMetadata.build.cfitsio =
+                $invalidCfitsioVersion.Value
+            [IO.File]::WriteAllText(
+                $verifiedPackageMetadataPath,
+                (($invalidPortableMetadata | ConvertTo-Json -Depth 10) +
+                    [Environment]::NewLine),
+                (New-Object Text.UTF8Encoding($false)))
+            Assert-ScriptFails `
+                -ScriptPath $portableVerifierPath `
+                -Arguments @(
+                    '-BuildExecutable',
+                    $resolvedBuiltExecutable,
+                    '-PackageRoot',
+                    $verifiedPackageRoot,
+                    '-ZipPath',
+                    $verifiedPackageZip
+                ) `
+                -ExpectedMessage 'cfitsio must be a non-empty, unpadded dotted numeric version' `
+                -Description (
+                    'Portable verifier rejects ' +
+                    $invalidCfitsioVersion.Description +
+                    ' CFITSIO version metadata')
+        }
+        finally {
+            [IO.File]::WriteAllBytes(
+                $verifiedPackageMetadataPath,
+                $originalPortableMetadataBytes)
+        }
     }
 
     $invalidMetadataCases = @(

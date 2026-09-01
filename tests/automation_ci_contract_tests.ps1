@@ -89,22 +89,39 @@ foreach ($requiredText in @(
     Assert-True -Condition $workflowText.Contains($requiredText) -Message "Workflow must contain '$requiredText'."
 }
 
-foreach ($automaticTrigger in @('push:', 'pull_request:')) {
-    Assert-True -Condition (-not $workflowText.Contains($automaticTrigger)) -Message "Workflow must not contain automatic trigger '$automaticTrigger'."
+$triggerMatch = [regex]::Match(
+    $workflowText,
+    '(?ms)^on:\r?\n(?<body>.*?)(?=^[A-Za-z0-9_-]+:\r?\n|\z)')
+Assert-True `
+    -Condition $triggerMatch.Success `
+    -Message 'Workflow must define active triggers.'
+$triggerBody = $triggerMatch.Groups['body'].Value
+foreach ($automaticTrigger in @('push', 'pull_request')) {
+    Assert-True `
+        -Condition ($triggerBody -match (
+            '(?m)^  ' + [regex]::Escape($automaticTrigger) +
+            ':\r?\n    branches:\r?\n      - master\r?$')) `
+        -Message "Workflow must automatically run the required native/headless gate on $automaticTrigger for master."
 }
 
 $nativeBody = Get-JobBody -Text $workflowText -JobId 'native-headless'
-Assert-True -Condition ($nativeBody.Contains('runs-on: windows-latest') -and $nativeBody.Contains('timeout-minutes: 60')) -Message 'Native/headless job must use the hosted Windows runner and a 60-minute total budget.'
-Assert-ContainsInOrder -Text $nativeBody -Needles @('- name: Check out repository', '- name: Prepare run-scoped automation evidence root', '- name: Configure Ninja/MSVC Debug', '- name: Build native automation targets', '- name: Run required native/headless CTest gate', '- name: Upload headless logs and failure evidence') -Description 'Native/headless job steps'
+Assert-True -Condition ($nativeBody.Contains('runs-on: windows-latest') -and $nativeBody.Contains('timeout-minutes: 90') -and $nativeBody -notmatch '(?m)^    if:' -and $nativeBody -notmatch '(?m)^    continue-on-error:') -Message 'Native/headless job must be an unconditional hosted Windows gate with a 90-minute total budget.'
+Assert-ContainsInOrder -Text $nativeBody -Needles @('- name: Check out repository', '- name: Prepare run-scoped automation evidence root', '- name: Configure Ninja/MSVC Debug', '- name: Build native automation targets', '- name: Configure Ninja/MSVC static Release', '- name: Build static Release native/headless targets', '- name: Run required native/headless CTest gate', '- name: Run required static Release CTest gate', '- name: Upload headless logs and failure evidence') -Description 'Native/headless job steps'
 $nativeCheckout = Get-StepBody -JobBody $nativeBody -StepName 'Check out repository'
 $nativeConfigure = Get-StepBody -JobBody $nativeBody -StepName 'Configure Ninja/MSVC Debug'
 $nativeBuild = Get-StepBody -JobBody $nativeBody -StepName 'Build native automation targets'
+$releaseConfigure = Get-StepBody -JobBody $nativeBody -StepName 'Configure Ninja/MSVC static Release'
+$releaseBuild = Get-StepBody -JobBody $nativeBody -StepName 'Build static Release native/headless targets'
 $nativeGate = Get-StepBody -JobBody $nativeBody -StepName 'Run required native/headless CTest gate'
+$releaseGate = Get-StepBody -JobBody $nativeBody -StepName 'Run required static Release CTest gate'
 $nativeArtifacts = Get-StepBody -JobBody $nativeBody -StepName 'Upload headless logs and failure evidence'
 Assert-True -Condition $nativeCheckout.Contains('uses: actions/checkout@v4') -Message 'Native/headless job must check out its source before building.'
-Assert-True -Condition ($nativeConfigure.Contains('scripts\build-ninja-msvc-debug.ps1') -and $nativeConfigure.Contains('-Configure') -and $nativeConfigure.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\build"') -and $nativeConfigure.Contains('-TimeoutSec 600') -and $nativeConfigure.Contains('timeout-minutes: 10')) -Message 'Native/headless configure step must use the bounded repository wrapper and run-scoped logs.'
-Assert-True -Condition ($nativeBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and $nativeBuild.Contains('-Target all') -and $nativeBuild.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\build"') -and $nativeBuild.Contains('-TimeoutSec 1200') -and $nativeBuild.Contains('timeout-minutes: 20')) -Message 'Native/headless build step must use the bounded repository wrapper and run-scoped logs.'
-Assert-True -Condition ($nativeGate.Contains('scripts\run-automation-ci.ps1') -and $nativeGate.Contains('-Mode Headless') -and $nativeGate.Contains('-ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest"') -and $nativeGate.Contains('-SuiteTimeoutSec 300') -and $nativeGate.Contains('-TestTimeoutSec 120') -and $nativeGate.Contains('timeout-minutes: 10')) -Message 'Native/headless gate must select the ci-headless label with both suite and per-test budgets in a run-scoped artifact root.'
+Assert-True -Condition ($nativeConfigure.Contains('scripts\build-ninja-msvc-debug.ps1') -and $nativeConfigure.Contains('-Configure') -and $nativeConfigure.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\build"') -and $nativeConfigure.Contains('-TimeoutSec 600') -and $nativeConfigure.Contains('timeout-minutes: 10') -and $nativeConfigure.Contains('Debug configure failed with exit code')) -Message 'Native/headless Debug configure step must use the bounded repository wrapper, run-scoped logs, and immediate failure propagation.'
+Assert-True -Condition ($nativeBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and $nativeBuild.Contains('-Target all') -and $nativeBuild.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\build"') -and $nativeBuild.Contains('-TimeoutSec 1200') -and $nativeBuild.Contains('timeout-minutes: 20') -and $nativeBuild.Contains('Debug all-target build failed with exit code') -and $nativeBuild.Contains('Debug benchmark build failed with exit code')) -Message 'Native/headless Debug build step must build all required targets and propagate each command failure immediately.'
+Assert-True -Condition ($releaseConfigure.Contains('scripts\build-ninja-msvc-debug.ps1') -and $releaseConfigure.Contains('-Configure') -and $releaseConfigure.Contains('-Preset ninja-msvc-release-static') -and $releaseConfigure.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\release-build"') -and $releaseConfigure.Contains('Static Release configure failed with exit code')) -Message 'Automatic gate must configure the bounded Ninja/MSVC static Release preset and propagate failure immediately.'
+Assert-True -Condition ($releaseBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and $releaseBuild.Contains('-Preset ninja-msvc-release-static') -and $releaseBuild.Contains('-Target all') -and $releaseBuild.Contains('-LogDir "$env:AUTOMATION_RUN_ROOT\release-build"') -and $releaseBuild.Contains('Static Release all-target build failed with exit code')) -Message 'Automatic gate must completely build the static Release graph and propagate failure immediately.'
+Assert-True -Condition ($nativeGate.Contains('scripts\run-automation-ci.ps1') -and $nativeGate.Contains('-Mode Headless') -and $nativeGate.Contains('-BuildDirectory build\ninja-msvc-debug') -and $nativeGate.Contains('-ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest"') -and $nativeGate.Contains('-SuiteTimeoutSec 300') -and $nativeGate.Contains('-TestTimeoutSec 120') -and $nativeGate.Contains('timeout-minutes: 10') -and $nativeGate.Contains('Debug native/headless CTest gate failed with exit code')) -Message 'Native/headless Debug gate must select the ci-headless label with bounded execution and immediate failure propagation.'
+Assert-True -Condition ($releaseGate.Contains('scripts\run-automation-ci.ps1') -and $releaseGate.Contains('-Mode Headless') -and $releaseGate.Contains('-BuildDirectory build\ninja-msvc-release-static') -and $releaseGate.Contains('-ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest-release"') -and $releaseGate.Contains('-SuiteTimeoutSec 600') -and $releaseGate.Contains('-TestTimeoutSec 180') -and $releaseGate.Contains('timeout-minutes: 15') -and $releaseGate.Contains('Static Release native/headless CTest gate failed with exit code')) -Message 'Automatic static Release gate must execute the complete configured ci-headless graph with bounded execution and immediate failure propagation.'
 Assert-True -Condition ($nativeArtifacts.Contains('always()') -and $nativeArtifacts.Contains('ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/native-headless/**') -and -not $nativeArtifacts.Contains('Testing/Temporary') -and -not $nativeArtifacts.Contains('logs/build')) -Message 'Native/headless failure artifacts must upload only the current workflow run root.'
 $nativePrepare = Get-StepBody -JobBody $nativeBody -StepName 'Prepare run-scoped automation evidence root'
 Assert-True -Condition ($nativePrepare.Contains('AUTOMATION_RUN_ROOT') -and $nativePrepare.Contains('New-Item')) -Message 'Native/headless must create a dedicated run-scoped evidence root before build/test steps.'

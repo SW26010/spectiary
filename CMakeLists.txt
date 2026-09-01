@@ -1099,19 +1099,52 @@ add_test(
 set_tests_properties(
     specforge_release_artifacts_tests
     PROPERTIES
+        LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
+        TIMEOUT 180
 )
 add_test(
-    NAME specforge_release_workflow_contract_tests
+    NAME specforge_portable_pe_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-        -File "${CMAKE_SOURCE_DIR}/tests/release_workflow_contract_tests.ps1"
+        -File "${CMAKE_SOURCE_DIR}/tests/portable_pe_contract_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+        -BuildDirectory "${CMAKE_BINARY_DIR}"
+)
+set_tests_properties(
+    specforge_portable_pe_contract_tests
+    PROPERTIES
+        LABELS "release;ci-headless;required"
+        RUN_SERIAL TRUE
+        TIMEOUT 30
+)
+add_test(
+    NAME specforge_release_workflow_structure_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/release_workflow_structure_contract_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(
-    specforge_release_workflow_contract_tests
+    specforge_release_workflow_structure_contract_tests
     PROPERTIES
-        LABELS "release;required"
+        LABELS "release;ci-headless;required"
         TIMEOUT 30
+)
+add_test(
+    NAME specforge_release_configured_build_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/release_configured_build_contract_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+        -DebugBuildDirectory
+            "${CMAKE_SOURCE_DIR}/build/ninja-msvc-debug"
+        -ReleaseBuildDirectory
+            "${CMAKE_SOURCE_DIR}/build/ninja-msvc-release-static"
+)
+set_tests_properties(
+    specforge_release_configured_build_contract_tests
+    PROPERTIES
+        LABELS "release;ci-headless;required"
+        RUN_SERIAL TRUE
+        TIMEOUT 60
 )
 add_test(
     NAME specforge_application_icon_tests
@@ -1206,6 +1239,12 @@ target_compile_definitions(
     specforge_fits_file_reader_tests
     PRIVATE
         SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(
+    specforge_loader_tests
+    specforge_fits_file_reader_tests
+    PROPERTIES
+        LABELS "fits;release;ci-headless;required"
 )
 if(MSVC)
     target_link_options(

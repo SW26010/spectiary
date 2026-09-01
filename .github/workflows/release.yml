@@ -86,8 +86,66 @@ jobs:
 
           $binaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
           New-Item -ItemType Directory -Path $binaryCache -Force | Out-Null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars = @(
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
+            throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the hosted runner.'
+          }
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot" -Encoding utf8
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECFORGE_VCVARS_PATH=$vcvars" -Encoding utf8
+
+      - name: Verify static Release FITS loading
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-release-static `
+            -Configure `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -TimeoutSec 1200
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release configure failed with exit code $LASTEXITCODE."
+          }
+
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-release-static `
+            -Target specforge_fits_file_reader_tests `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -TimeoutSec 1200
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release FITS reader build failed with exit code $LASTEXITCODE."
+          }
+
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-release-static `
+            -Target specforge_loader_tests `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -TimeoutSec 1200
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release loader build failed with exit code $LASTEXITCODE."
+          }
+
+          ctest --test-dir build\ninja-msvc-release-static `
+            --output-on-failure `
+            --no-tests=error `
+            -R '^specforge_fits_file_reader_tests$'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release FITS reader test failed with exit code $LASTEXITCODE."
+          }
+
+          ctest --test-dir build\ninja-msvc-release-static `
+            --output-on-failure `
+            --no-tests=error `
+            -R '^specforge_loader_tests$'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Static Release loader test failed with exit code $LASTEXITCODE."
+          }
 
       - name: Build and verify portable package
         shell: pwsh

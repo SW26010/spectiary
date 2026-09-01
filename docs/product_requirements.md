@@ -7,7 +7,11 @@
 - `specforge_native` Windows executable target。
 - Win32 + DirectX 11 + Dear ImGui docking + ImPlot shell。
 - 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture、`.npy`、CSV 和 FITS loader 使用同一条 UI/plot 路径。
-- loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱。
+- loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`，以及由唯一 CFITSIO
+  reader 解析、语义层明确识别的 SDSS/LAMOST 与 generic 单光谱 table/image
+  结构。
+- `.fits.gz` 先经过压缩输入与解压输出均有上限的 transport 解压，再把 FITS
+  字节交给同一个 CFITSIO reader；不支持 FITS 网络 URL，也不支持 FITS 写入。
 - 已有第一版公开谱线表 `config/spectral_lines.public.tsv`，由 Spectral Lines 面板搜索和组织，并在主图中显示 line/band 参考 overlay；公开表不包含 subtype 组合、窗口预设或私有判据。
 - Release 可在运行时开启/停止 JSONL 性能诊断录制，用于解释输入、view update、draw、render/present 的基本链路；录制状态在普通和沉浸模式下均可见，磁盘写入与交互热路径隔离。
 
@@ -126,7 +130,8 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 
 范围：
 
-- 接入真实光谱输入：1D/2D `.npy`、简单 `.csv`、可识别的单条 FITS table 光谱。
+- 接入真实光谱输入：1D/2D `.npy`、简单 `.csv`、可识别的 SDSS/LAMOST 与
+  generic 单光谱 FITS table/image 结构。
 - 显示一条光谱，并支持在 2D `.npy` matrix 或多行 vector-table FITS 中切换上一条和下一条光谱。
 - 支持主图 pan 和 cursor-centered wheel zoom。
 - 输出 input、view update、draw、present timing 的 JSONL profile。
@@ -188,7 +193,9 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 ## 非目标
 
 - 当前阶段不做 catalog 管理、旧项目兼容层或泛化多后端框架。
-- 当前 loader 支持 `.npy`、简单 `.csv` 和可识别的单条 LAMOST/SDSS FITS table 光谱；受限 image fallback 不等于可靠 image FITS 或最终数据栈承诺。
+- 当前 loader 的唯一 CFITSIO reader 负责 table/image container，语义层只识别
+  受限的 SDSS/LAMOST 与 generic 单光谱结构；能打开 container 不代表能解释为
+  光谱，也不构成通用 FITS 或最终数据栈承诺。
 - 当前阶段不做性能目标证明。
 - 当前阶段不引入本地大数据。
 - 当前阶段不创建旧项目兼容层。

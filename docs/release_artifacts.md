@@ -28,6 +28,7 @@ finalization fields:
 | Location | Requirement |
 | --- | --- |
 | `schema_version` | Integer `5`. |
+| `build.cfitsio` | Current producers and Portable packages require the non-empty, unpadded CFITSIO package version parsed from the installed vcpkg SPDX metadata. The checked-in CFITSIO notice heading must carry the same version. Runtime readers retain compatibility with schema 5 sidecars produced before this field existed. |
 | `build.yaml_cpp` | Current producers write the non-empty, unpadded yaml-cpp package version. Runtime readers keep schema 5 sidecars created before this field was introduced compatible by treating an absent member as legacy provenance; a present but malformed member remains unavailable. |
 | `build.completed_at_utc` | A valid UTC timestamp in exactly `YYYY-MM-DDTHH:mm:ssZ` form. It has no fractional seconds or offset. |
 | `artifact.file` | Exactly `SpecForge.exe`. On Windows, the finalizer accepts this filename case-insensitively; another filename is rejected. |
@@ -39,12 +40,13 @@ numeric forms. `source_mode` is `working_tree` with a JSON `null`
 `source_revision`, or `head` with a full 40-character lowercase Git object ID.
 The executable architecture is `amd64`.
 
-The schema number stays at 5 for the yaml-cpp provenance addition because the
-runtime reader distinguishes legacy absence from malformed presence. New
-finalizer output and Portable packages are stricter: they must contain
-`build.yaml_cpp`, and the Portable dependency-notice heading must carry the
-same yaml-cpp version. Thus old schema 5 development sidecars remain readable
-without permitting a newly published package to omit or falsify the dependency.
+The schema number stays at 5 for the CFITSIO and yaml-cpp provenance additions
+because the runtime reader distinguishes legacy absence from malformed
+presence. New finalizer output and Portable packages are stricter: they must
+contain both fields, and each Portable dependency-notice heading must carry the
+same parsed package version. Thus old schema 5 development sidecars remain
+readable without permitting a newly published package to omit or falsify a
+dependency.
 
 `windows_sdk_version` may be JSON `null` for a development build when CMake
 does not expose an authoritative SDK selection. A formal Portable package must
@@ -125,14 +127,20 @@ Run the working-tree or isolated-`HEAD` entrypoint described in
    requirement;
 3. checks that `artifact.sha256` equals the hash of the build-directory EXE;
 4. copies `SpecForge.exe` and metadata to a package root containing only the
-   executable, metadata, and `Data/`;
+   executable file, metadata file, and `Data/` directory; exact enumeration
+   includes hidden entries and validates each entry type;
 5. adds `deployment.distribution: "portable"` and
    `deployment.storage_profile: "portable"` to the package metadata copy;
 6. checks the metadata digest against the packaged EXE;
 7. writes the ZIP and its lowercase SHA-256 sidecar; and
 8. invokes `scripts/verify-portable.ps1` to verify the ZIP entry set and check
    that the ZIP entries for the executable and metadata have the same SHA-256
-   digests as their package-root counterparts.
+   digests as their package-root counterparts. For a Release artifact, the
+   verifier also parses the ordinary and delay-load PE import tables and rejects
+   a CFITSIO runtime DLL or curl/bzip2 DLLs from accidentally enabled CFITSIO
+   features. The exact package
+   and ZIP entry sets independently forbid shipping `cfitsio.dll` beside the
+   executable.
 
 The three executable values below must be identical before a package is
 accepted:
