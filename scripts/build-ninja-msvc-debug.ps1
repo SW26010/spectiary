@@ -13,6 +13,101 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Resolve-SpecForgeVcvarsPath {
+    param(
+        [string]$ExplicitPath = '',
+        [string]$EnvironmentPath = $env:SPECFORGE_VCVARS_PATH,
+        [string]$VswherePath = '',
+        [string]$LegacyPath = ''
+    )
+
+    $diagnostics = [Collections.Generic.List[string]]::new()
+
+    foreach ($candidate in @(
+            @{
+                Name = 'explicit -VcvarsPath'
+                Path = $ExplicitPath
+            },
+            @{
+                Name = 'SPECFORGE_VCVARS_PATH'
+                Path = $EnvironmentPath
+            }
+        )) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidate.Path)) {
+            $diagnostics.Add("$($candidate.Name): not provided")
+            continue
+        }
+        if (Test-Path -LiteralPath $candidate.Path -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate.Path).Path
+        }
+        $diagnostics.Add(
+            "$($candidate.Name): not a file: $($candidate.Path)")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($VswherePath)) {
+        $programFilesX86 = ${env:ProgramFiles(x86)}
+        if (-not $programFilesX86) {
+            $programFilesX86 = 'C:\Program Files (x86)'
+        }
+        $VswherePath = Join-Path $programFilesX86 `
+            'Microsoft Visual Studio\Installer\vswhere.exe'
+    }
+
+    if (Test-Path -LiteralPath $VswherePath -PathType Leaf) {
+        try {
+            $vswhereOutput = @(
+                & $VswherePath `
+                    -latest `
+                    -products * `
+                    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                    -find 'VC\Auxiliary\Build\vcvars64.bat' 2>&1
+            )
+            $discoveredPaths = @(
+                $vswhereOutput |
+                    ForEach-Object { ([string]$_).Trim() } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            )
+            foreach ($discoveredPath in $discoveredPaths) {
+                if (Test-Path -LiteralPath $discoveredPath -PathType Leaf) {
+                    return (Resolve-Path -LiteralPath $discoveredPath).Path
+                }
+            }
+            $displayedOutput = if ($discoveredPaths.Count -eq 0) {
+                '<no output>'
+            }
+            else {
+                $discoveredPaths -join ', '
+            }
+            $diagnostics.Add(
+                "vswhere: no valid vcvars64.bat result: $displayedOutput")
+        }
+        catch {
+            $diagnostics.Add("vswhere failed: $($_.Exception.Message)")
+        }
+    }
+    else {
+        $diagnostics.Add("vswhere: not a file: $VswherePath")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($LegacyPath)) {
+        $programFilesX86 = ${env:ProgramFiles(x86)}
+        if (-not $programFilesX86) {
+            $programFilesX86 = 'C:\Program Files (x86)'
+        }
+        $LegacyPath = Join-Path $programFilesX86 `
+            'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+    }
+    if (Test-Path -LiteralPath $LegacyPath -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $LegacyPath).Path
+    }
+    $diagnostics.Add("legacy VS 2022 BuildTools: not a file: $LegacyPath")
+
+    throw (
+        'Unable to locate vcvars64.bat. Checked candidates in priority order: ' +
+        ($diagnostics -join '; ')
+    )
+}
+
 if ($AdditionalTarget.Count -gt 0) {
     if (-not $PSBoundParameters.ContainsKey('Target')) {
         throw "Unexpected positional arguments: $($AdditionalTarget -join ' '). Pass build targets with -Target."
@@ -295,18 +390,7 @@ function New-KillOnCloseJob {
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 
-if (-not $VcvarsPath) {
-    $programFilesX86 = ${env:ProgramFiles(x86)}
-    if (-not $programFilesX86) {
-        $programFilesX86 = 'C:\Program Files (x86)'
-    }
-
-    $VcvarsPath = Join-Path $programFilesX86 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
-}
-
-if (-not (Test-Path -LiteralPath $VcvarsPath)) {
-    throw "vcvars64.bat not found: $VcvarsPath"
-}
+$VcvarsPath = Resolve-SpecForgeVcvarsPath -ExplicitPath $VcvarsPath
 
 if (-not $LogDir) {
     $LogDir = Join-Path $repoRoot 'logs\build'
