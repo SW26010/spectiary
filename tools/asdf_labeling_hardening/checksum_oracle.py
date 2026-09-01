@@ -22,6 +22,7 @@ import numpy as np
 ASDF_VERSION = "5.3.1"
 FORMAT_KIND = "specforge.sample_labeling"
 SCHEMA_VERSION = "2.0.0"
+FIXTURE_BUILD_SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567"
 STANDARD_VERSION = "1.5.0"
 ZERO_CHECKSUM = bytes(16)
 
@@ -76,6 +77,10 @@ def _sha256(path: Path) -> str:
 
 def _production_tree(*, include_unknown: bool = False) -> dict[str, Any]:
     tree: dict[str, Any] = {
+        "specforge_build": {
+            "source_mode": "head",
+            "source_revision": FIXTURE_BUILD_SOURCE_REVISION,
+        },
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
         "source_collection": {
@@ -124,6 +129,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _semantic_summary(tree: Any) -> dict[str, Any]:
+    build_source = tree["specforge_build"]
     source = tree["source_collection"]
     roster = tree["sample_roster"]
     annotation = tree["annotation"]
@@ -133,6 +139,12 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
     return {
         "format_kind": str(tree["format_kind"]),
         "schema_version": str(tree["schema_version"]),
+        "build_source_mode": str(build_source["source_mode"]),
+        "build_source_revision": (
+            str(build_source["source_revision"])
+            if "source_revision" in build_source
+            else None
+        ),
         "source_kind": str(source["source_kind"]),
         "source_name": str(source["name"]),
         "source_identity": str(source["identity"]),
@@ -410,10 +422,17 @@ def _run_matrix(native: Path, work_dir: Path) -> dict[str, Any]:
     native_python_on = _python_read(
         native_zero_zlib, validate_checksums=True, work_dir=work_dir
     )
+    native_expected = dict(expected)
+    native_expected["build_source_mode"] = native_python_off["summary"][
+        "build_source_mode"
+    ]
+    native_expected["build_source_revision"] = native_python_off["summary"][
+        "build_source_revision"
+    ]
     for validation, result in (("disabled", native_python_off), ("enabled", native_python_on)):
         _require(result["succeeded"], f"Python checksum validation {validation} failed")
         _require(
-            result["summary"] == expected,
+            result["summary"] == native_expected,
             f"Python summary differs with validation {validation}",
         )
 
@@ -611,7 +630,7 @@ def _run_matrix(native: Path, work_dir: Path) -> dict[str, Any]:
                 native_read_result["semantic_matches_production_document"]
                 and native_python_off["summary"]
                 == native_python_on["summary"]
-                == expected
+                == native_expected
             ),
         },
         "python_writer_to_native": python_cases,

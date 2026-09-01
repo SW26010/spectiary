@@ -13,7 +13,47 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b9bb721f2c03af07d71a79d1aca7f5f941c2f447e94241dc04219091aa15d9f6"
+      "sha256": "9faae92c7d9ebf49b8c2b17efec77c6617aa868f6d9308f1802a8ffd554cec14"
+    },
+    {
+      "name": "invalid_build_source_mode",
+      "path": "invalid_build_source_mode.asdf",
+      "semantic_path": "invalid_build_source_mode.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "build source mode",
+      "sha256": "c0785d3d9e391b8bbf1664783025eff137ef7e1be4ac1d953dd98eb5a1065420"
+    },
+    {
+      "name": "invalid_head_missing_revision",
+      "path": "invalid_head_missing_revision.asdf",
+      "semantic_path": "invalid_head_missing_revision.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "build source revision",
+      "sha256": "ea5a9091eab9e4f7cd8427bcaee005bf2c155b494efb195ac417c614fdb02b0d"
+    },
+    {
+      "name": "invalid_working_tree_revision",
+      "path": "invalid_working_tree_revision.asdf",
+      "semantic_path": "invalid_working_tree_revision.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "build source revision",
+      "sha256": "2892dc1d2cc681628c70030b768d466694c34dd6ae0d849086e7eab434ef6f43"
+    },
+    {
+      "name": "invalid_working_tree_null_revision",
+      "path": "invalid_working_tree_null_revision.asdf",
+      "semantic_path": "invalid_working_tree_null_revision.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "build source revision",
+      "sha256": "b3ccace805b58fef7983aff5ec8b56b5e3c39b838409ae688ac4cfdcb55b1bba"
     },
     {
       "name": "unicode",
@@ -23,7 +63,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "bcba403b10af8b1ab2cf04c6fed2487b30920775d5394d63bccd2a27f113e6aa"
+      "sha256": "7540a7dd1367ca680b90ad86ae2c51e038ac34698a46e3b8630b1d44d158be38"
     },
     {
       "name": "folder_roster",
@@ -33,7 +73,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "2c07571741ee8d59ce5584f868a687c4d658c549cad7841acbdec91f8fe92b0e"
+      "sha256": "e29e77ae962a64579c1781458af2ed93834ffa4a479abd66d2c7e8e1a334ff08"
     },
     {
       "name": "npy_with_names",
@@ -43,7 +83,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "e8e18ae6c5e14cd6261575c2a268d4cc731fa80fe52458f873fc51155508fd3c"
+      "sha256": "d575f139c30413293ef22a8383ed5df73cfca5f0ad7b5679a13ed146cf2952a0"
     },
     {
       "name": "npy_source_index",
@@ -53,7 +93,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "137adf567247063ddc347949fdfb9a44ec8259c0aed2d8af019f476ef024a01b"
+      "sha256": "fb9dd1c2085b2c031e2c95fef3ec4bafacd3741fee13bced5066cf0d1c26e67a"
     },
     {
       "name": "mixed_unlabeled",
@@ -63,7 +103,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "c713882b3b9cca6bc7efbe4cfa3424c237fc90320813198a9ca7b54abc7314ca"
+      "sha256": "3d76c8cd0ef8d4b191480b97c9f4d2e218a298df66fbcba95055afc2b850f2e3"
     },
     {
       "name": "large_values",
@@ -73,7 +113,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b0849362450c86b7a24c969cc0d1289af6060a54f5f3b9431026c63d39731d1f"
+      "sha256": "c5c939e3887ed99f68a1e122424e73a467ac8bfc2d1aa13f6bd300a8f55db515"
     },
     {
       "name": "forward_unknown",
@@ -83,7 +123,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "8c55905aec1ae204619dcbddc1a1129eeb7e807c7c62715b60ec33d8eccb6a87"
+      "sha256": "20418f3a2e29c67c6daff17ebc0c6e3dd732e0e3489eeddb61deb3f8dbfe4f10"
     },
     {
       "name": "invalid_count",
@@ -93,7 +133,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "sample_count/value count",
-      "sha256": "b87586a2a3e421d71ca0b35afd76e158e9dccc356f4331c8f5c0a1a71ebafc5c"
+      "sha256": "2682bb90190d59505c670e12d547e6ae519692d9111dbf67845ac920bb13767d"
     },
     {
       "name": "invalid_duplicate_label",
@@ -103,7 +143,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label codes unique",
-      "sha256": "4b556253febefa8e39d717f8c3b31ca899daf140e52804258aabcf1a54baba9d"
+      "sha256": "41c960c3ad8155f2c129e726743e65afe888ef8110fda527316fdfe9e618da9d"
     },
     {
       "name": "invalid_sentinel_collision",
@@ -113,7 +153,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label code collides with unlabeled",
-      "sha256": "c8e311ca75cf1a55333c36082149b730427de017a45253e6f944ade6f6ac8fa0"
+      "sha256": "e61e544312e37ff914816beb079dbfd38ca212b255635c2d0944475308203d4e"
     },
     {
       "name": "invalid_undefined_value",
@@ -123,7 +163,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "values reference defined labels",
-      "sha256": "b14f74482059222d946a278a8e082d2a752e42d4815765c1586d3936513dba1c"
+      "sha256": "6a34691dad6e23ce60d684105f9e5a8789b547d603b7bf28447c1c2e2409b42d"
     },
     {
       "name": "promoted_unicode_origin",
@@ -133,7 +173,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "52dc7d5f4f6111c90063412f9e2e13e0a33c45de688c550596070a2d6c970200"
+      "sha256": "2aef8a901b79e8f17d76e52e0d6137a4e48bd11cb3f4a5b13489f93fe302a3cd"
     },
     {
       "name": "invalid_origin_dot",
@@ -143,7 +183,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "1c829d3c4b94c7cc925c00538647f309e1edafdf4222d2174259aee6634d16a4"
+      "sha256": "e1ba93dc0c8759d32883a47b43f95fa2ea55097d4f813660b0515121d4db8f43"
     },
     {
       "name": "invalid_origin_dotdot",
@@ -153,7 +193,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "c2ce3a36f21321e5bc15aba7f4a7370ece046dc1aba232b31587ee1bcf0e7c55"
+      "sha256": "ecdcbd4c4a52b8ba993c16fa189a9b0f6b93698f95eaa04f2b169d12e9f75e9d"
     },
     {
       "name": "invalid_origin_absolute",
@@ -163,7 +203,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "f4d51ea1906fc97b527df68a034305285953c57e02f1d62c70a4e0f3de837837"
+      "sha256": "d7a0f2cac27bbc6480348539317d129eccdecc9066747755cdaa991e9f2f8910"
     },
     {
       "name": "invalid_origin_forward_directory",
@@ -173,7 +213,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "9938ad785b70e70fbc1f6e4a193bcd7140d979ad3699ef29af2f0a3bf162224b"
+      "sha256": "cab979744bf9480017b29acf66d4f0a597bad785fba35cfbeac7f64d7bf9d15a"
     },
     {
       "name": "invalid_origin_backslash_directory",
@@ -183,7 +223,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "53a3ca25a597dab520644dd498a0b864b1506a5efb59391de5938a460621d6c8"
+      "sha256": "8c0b867216f03e6654bf30847272e9a746c63e3b5ff3abd9d2ebbf817a3699ca"
     },
     {
       "name": "invalid_origin_drive_prefix",
@@ -193,7 +233,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "7692795bd6196d596e11922dba7437e7a5bca2b1ae7c7f0700e3994f0d03f5e9"
+      "sha256": "7191b25b44d660bffa6bb4bc922be693c6245934a90e4a6cca6fd472bb77b043"
     },
     {
       "name": "profile_zlib",
@@ -203,7 +243,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "d3cd354aafe07d8c3b7c9c86ec0b14a45eb59f9e86726d0cd04b9602771de9cb"
+      "sha256": "2933973f9c9a6bd9328020b0dcdbb1acfc88431513ac06f87db2333e7abdc30e"
     },
     {
       "name": "profile_checksum",
@@ -213,7 +253,7 @@
       "semantically_valid": true,
       "native_profile_supported": false,
       "expected_error": "unsupported wire profile",
-      "sha256": "fc9289a89fd89a897655535a70737c100c8e609df060893846941fea5d5739f6"
+      "sha256": "a8300e6d22fd3908faf9d3b89d9272a00a8b97a07f578bc9b2b7068e461847a2"
     },
     {
       "name": "malformed_bad_magic",
@@ -243,7 +283,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "7d51ae805cbd34c6621b2055602d701c284d73665011eaf07545bdb250a1598f"
+      "sha256": "ba0d0ce601a84deeaa9ea72833970834fa0a774ede05c5f30c6905723454c412"
     },
     {
       "name": "malformed_zlib_payload",
@@ -253,7 +293,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "16d1a14c6c2209234783e0154ab4cb0b71772f08f2dbbb49ce290c299fbf4f99"
+      "sha256": "031d24232c96b827a8169a58566ec358b38dd1032d37c414f88bf37a0701e318"
     }
   ]
 }

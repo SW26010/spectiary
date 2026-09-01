@@ -491,6 +491,62 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
     }
 }
 
+void TestValidatorEnforcesBuildSourceIdentityInvariant()
+{
+    constexpr std::string_view revision =
+        "0123456789abcdef0123456789abcdef01234567";
+    specforge::SampleLabelingDocument document = ValidDocument();
+    document.build_source = {
+        .source_mode = "head",
+        .source_revision = std::string{revision}};
+    Require(
+        specforge::ValidateSampleLabelingDocument(document).valid(),
+        "head build source should require and accept one full lowercase revision");
+
+    document.build_source = {
+        .source_mode = "working_tree",
+        .source_revision = std::nullopt};
+    Require(
+        specforge::ValidateSampleLabelingDocument(document).valid(),
+        "working-tree build source should be valid without a revision");
+
+    document.build_source.source_mode = "archive";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                UnsupportedBuildSourceMode),
+        "unknown build source modes must be rejected");
+
+    document.build_source = {
+        .source_mode = "head",
+        .source_revision = std::nullopt};
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                MissingBuildSourceRevision),
+        "head build source must carry a revision");
+
+    document.build_source.source_revision = "0123456789abcdef";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                InvalidBuildSourceRevision),
+        "head build source revision must be the full lowercase object id");
+
+    document.build_source = {
+        .source_mode = "working_tree",
+        .source_revision = std::string{revision}};
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                UnexpectedBuildSourceRevision),
+        "working-tree build source must not carry a revision");
+}
+
 void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
@@ -794,6 +850,7 @@ int main()
         TestValidatorEnforcesSampleAlignmentAndRosterShape();
         TestValidatorEnforcesLabelAndUnlabeledInvariants();
         TestValidatorRejectsUnsupportedDocumentSemantics();
+        TestValidatorEnforcesBuildSourceIdentityInvariant();
         TestValidatorEnforcesSchemaTwoIdentityAndMetadata();
         TestValidatorRequiresPortableAnnotationOriginBasename();
         TestCanonicalProjectionRejectsUndefinedPendingCodes();

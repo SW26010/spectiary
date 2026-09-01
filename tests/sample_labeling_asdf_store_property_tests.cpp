@@ -591,10 +591,16 @@ void TestValuesRewriteOperation()
     const SampleLabelingAsdfStoreWriteResult retry =
         specforge::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot, intended);
+    const specforge::SampleLabelingDocumentBuildSource current_build =
+        specforge::CurrentSampleLabelingDocumentBuildSource();
     Require(retry.succeeded() && retry.roster_block_reused &&
-            DocumentsEqual(opened.snapshot->document(), intended),
+            DocumentsEqual(opened.snapshot->document(), intended) &&
+            opened.snapshot->document().build_source.source_mode ==
+                current_build.source_mode &&
+            opened.snapshot->document().build_source.source_revision ==
+                current_build.source_revision,
         retry.error.message.empty()
-            ? "values rewrite retry should advance the snapshot"
+            ? "values rewrite retry should advance the snapshot with the current producer build"
             : retry.error.message);
     RequireTargetMatches(path, intended,
         "values rewrite retry should publish matching values and timestamp to disk");

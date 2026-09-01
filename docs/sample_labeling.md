@@ -867,6 +867,7 @@ interchangeably:
 | Task name | User-authored UTF-8 display data stored at `labeling_task.name`. | Persistently editable. Changing it advances `modified_at` but does not change the task ID or any path. |
 | Output filename | The user-selected filesystem name of the canonical `.asdf` owner. | Independent of both task ID and task name. The dialog may suggest a sanitized filename from the task name, but the final name is not canonical metadata and later task renames do not rename it. |
 | SpecForge schema version | The semantic contract selected by the YAML `schema_version`. | Current writers emit exactly `2.0.0`; this is not an ASDF implementation version. |
+| SpecForge build source | Generation provenance stored in `specforge_build`. | A current writer or rewrite stamps its own compiled build identity. `head` requires one full 40-character lowercase hexadecimal revision; `working_tree` requires `source_revision` to be absent. |
 | ASDF file-format version | The container framing version in `#ASDF 1.0.0`. | Independently versioned by ASDF. It does not mean SpecForge schema 1.0. |
 | ASDF Standard version | The tag/schema vocabulary declared by `#ASDF_STANDARD 1.5.0`. | Independently versioned by ASDF. The `!core/asdf-1.1.0` root tag is likewise an ASDF core tag, not the SpecForge schema version. |
 
@@ -974,6 +975,9 @@ the ASDF container:
 asdf_library: !core/software-1.0.0
   name: SpecForge
   version: 0.8.0
+specforge_build:
+  source_mode: head
+  source_revision: "0123456789abcdef0123456789abcdef01234567"
 format_kind: "specforge.sample_labeling"
 schema_version: "2.0.0"
 source_collection:
@@ -1041,9 +1045,19 @@ sentinel. Schema 2.0 has no `annotation.name`; the canonical task name lives
 only at `labeling_task.name`, while `origin.annotation.name` is provenance for
 the promoted input artifact and is not a second task name.
 
+`asdf_library` identifies the producer as `SpecForge` version `0.8.0`.
+`specforge_build` records only the source state compiled into that producer:
+clean `head` builds include the complete revision, while `working_tree` builds
+omit `source_revision` entirely. The field is generation provenance rather
+than user-authored task content. Fresh writes, values-only rewrites, and full
+metadata rewrites all stamp the current binary's identity, so a rewrite does
+not retain the producer identity of the generation it replaces.
+
 Preserving rewrites start from a validated durable generation and retain
 unknown mapping entries in the existing YAML tree, including nested source,
-roster, annotation/descriptor, task, origin/annotation-origin, and label maps.
+roster, annotation/descriptor, task, origin/annotation-origin, build-source,
+and label maps. Known build-source fields are replaced with the current
+binary's identity while unknown entries inside that map are retained.
 Label-local entries are matched by stable label code. This is deliberately not
 a general forward-compatibility promise: SpecForge does not preserve arbitrary
 extra binary blocks, unknown sequence-item schemas, replaced known fields,

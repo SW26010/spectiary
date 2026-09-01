@@ -26,8 +26,12 @@ production persistence lifecycle.
    controller hydrates persisted canonical owners under their one-file output
    lease, retains the opened generation, and publishes value-only or full
    metadata generations through the store with write-ahead recovery and retry.
-5. The checked-in corpus contains 9 approved valid documents, 1 standard-valid
-   document outside the narrow wire profile, 4 ASDF-valid semantic violations,
+   Every produced generation carries the narrow build-source tuple compiled
+   into the writer: `head` plus a full lowercase 40-hex revision, or
+   `working_tree` with no revision. A production rewrite refreshes this tuple
+   even when it reuses the encoded roster block.
+5. The checked-in corpus contains 10 approved valid documents, 1 standard-valid
+   document outside the narrow wire profile, 14 ASDF-valid semantic violations,
    and 4 structurally malformed documents.
 6. The strictly scoped native codec is now the production component. `asdf-cxx`
    8.0.0 is not recommended without a substantially broader patch than its
@@ -82,6 +86,24 @@ semantic result. Semantic JSON companions deliberately compare the durable
 meaning, not Python or C++ codec object types. The production native codec test
 verifies every listed ASDF hash before using any fixture expectation, so ASDF
 byte drift is a required CTest failure.
+
+The production writer identity is represented at the root as:
+
+```yaml
+asdf_library: !core/software-1.0.0
+  name: SpecForge
+  version: 0.8.0
+specforge_build:
+  source_mode: head
+  source_revision: "0123456789abcdef0123456789abcdef01234567"
+format_kind: "specforge.sample_labeling"
+schema_version: "2.0.0"
+```
+
+The checked fixture corpus uses this deterministic `head` tuple except for the
+minimal fixture, which exercises `working_tree` with no revision; the official
+Python writer supplies its own `asdf_library` provenance. The production writer
+stamps its compiled current build identity instead.
 
 ## Approved sample roster representation
 
@@ -295,7 +317,8 @@ The second-round recommended v1 writer profile is intentionally narrow:
 - little-endian int32 values and little-endian UCS-4 roster strings;
 - label-only atomic rewrites rebuild canonical metadata with supported unknown
   mappings, preserve only the unchanged encoded roster block, and re-encode the
-  values block;
+  values block; known `specforge_build` fields are refreshed from the current
+  binary while unknown entries in that map are preserved;
 - a roster is eligible for durable verbatim reuse only when its zlib stream
   declares `FLEVEL=2`, the level-6 production class; other valid zlib levels
   remain compatibility-readable but cannot seed a durable rewrite;

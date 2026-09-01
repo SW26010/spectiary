@@ -6,6 +6,8 @@
 #include "domain/utf8.h"
 #include "domain/uuid_v4.h"
 
+#include "specforge/specforge_build_identity.h"
+
 #include <algorithm>
 #include <numeric>
 #include <string>
@@ -13,6 +15,18 @@
 #include <vector>
 
 namespace specforge {
+
+SampleLabelingDocumentBuildSource
+CurrentSampleLabelingDocumentBuildSource()
+{
+    SampleLabelingDocumentBuildSource source{
+        .source_mode = build_info::kBuildSourceMode};
+    if (source.source_mode == kSampleLabelingDocumentHeadBuildSource) {
+        source.source_revision = build_info::kBuildSourceRevision;
+    }
+    return source;
+}
+
 namespace {
 
 struct ValidationComplete final {
@@ -310,6 +324,44 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
             result,
             fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedSchemaVersion);
+    }
+
+    if (document.build_source.source_mode ==
+        kSampleLabelingDocumentWorkingTreeBuildSource) {
+        if (document.build_source.source_revision) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::
+                    UnexpectedBuildSourceRevision);
+        }
+    } else if (document.build_source.source_mode ==
+               kSampleLabelingDocumentHeadBuildSource) {
+        if (!document.build_source.source_revision) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::
+                    MissingBuildSourceRevision);
+        } else if (document.build_source.source_revision->size() != 40U ||
+                   !std::ranges::all_of(
+                       *document.build_source.source_revision,
+                       [](char character) {
+                           return (character >= '0' && character <= '9') ||
+                               (character >= 'a' && character <= 'f');
+                       })) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::
+                    InvalidBuildSourceRevision);
+        }
+    } else {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::
+                UnsupportedBuildSourceMode);
     }
 
     if (!HasNonWhitespaceText(document.source.base_identity)) {

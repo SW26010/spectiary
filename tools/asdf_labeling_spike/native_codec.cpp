@@ -20,6 +20,8 @@ namespace {
 
 constexpr std::string_view kFormatKind = "specforge.sample_labeling";
 constexpr std::string_view kSchemaVersion = "2.0.0";
+constexpr std::string_view kFixtureBuildSourceRevision =
+    "0123456789abcdef0123456789abcdef01234567";
 constexpr std::uint64_t kMaximumSampleCount = 100'000'000;
 constexpr std::size_t kMaximumAuthorCount = 10'000;
 constexpr std::array<unsigned char, 4> kBlockMagic{0xd3, 'B', 'L', 'K'};
@@ -585,6 +587,18 @@ void ValidateDocument(const LabelingDocument& document)
     if (document.format_kind != kFormatKind || document.schema_version != kSchemaVersion) {
         throw CodecError("unsupported SpecForge labeling identity/version");
     }
+    const bool valid_head_revision = document.build_source_revision &&
+        document.build_source_revision->size() == 40U &&
+        std::ranges::all_of(*document.build_source_revision, [](char character) {
+            return (character >= '0' && character <= '9') ||
+                (character >= 'a' && character <= 'f');
+        });
+    if ((document.build_source_mode == "head" && !valid_head_revision) ||
+        (document.build_source_mode == "working_tree" && document.build_source_revision) ||
+        (document.build_source_mode != "head" &&
+            document.build_source_mode != "working_tree")) {
+        throw CodecError("invalid SpecForge build source identity");
+    }
     if (document.sample_count > kMaximumSampleCount ||
         document.sample_count != document.values.size()) {
         throw CodecError("sample_count/value count invariant failed");
@@ -742,6 +756,18 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
     LabelingDocument document;
     document.format_kind = RequiredScalar<std::string>(root, "format_kind");
     document.schema_version = RequiredScalar<std::string>(root, "schema_version");
+    const YAML::Node build_source = RequiredNode(root, "specforge_build");
+    if (!build_source.IsMap()) {
+        throw CodecError("specforge_build must be a map");
+    }
+    document.build_source_mode =
+        RequiredScalar<std::string>(build_source, "source_mode");
+    if (const YAML::Node revision = build_source["source_revision"]) {
+        if (!revision.IsScalar()) {
+            throw CodecError("specforge_build.source_revision must be scalar");
+        }
+        document.build_source_revision = revision.as<std::string>();
+    }
     const YAML::Node source = RequiredNode(root, "source_collection");
     document.source_kind = RequiredScalar<std::string>(source, "source_kind");
     document.source_name = RequiredScalar<std::string>(source, "name");
@@ -1104,7 +1130,13 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
              << "%YAML 1.1\n"
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
-             << "asdf_library: !core/software-1.0.0 {name: SpecForge ASDF labeling spike, version: 0.1.0}\n"
+             << "asdf_library: !core/software-1.0.0 {name: SpecForge, version: 0.8.0}\n"
+             << "specforge_build:\n"
+             << "  source_mode: " << QuoteYaml(document.build_source_mode) << "\n";
+    if (document.build_source_revision) {
+        metadata << "  source_revision: " << QuoteYaml(*document.build_source_revision) << "\n";
+    }
+    metadata
              << "format_kind: " << QuoteYaml(document.format_kind) << "\n"
              << "schema_version: " << QuoteYaml(document.schema_version) << "\n"
              << "source_collection:\n"
@@ -1214,6 +1246,15 @@ std::string SemanticJson(const LabelingDocument& document)
     out << '{'
         << "\"format_kind\":" << QuoteJson(document.format_kind) << ','
         << "\"schema_version\":" << QuoteJson(document.schema_version) << ','
+        << "\"build_source_mode\":" << QuoteJson(document.build_source_mode) << ','
+        << "\"build_source_revision\":";
+    if (document.build_source_revision) {
+        out << QuoteJson(*document.build_source_revision);
+    }
+    else {
+        out << "null";
+    }
+    out << ','
         << "\"source_kind\":" << QuoteJson(document.source_kind) << ','
         << "\"source_name\":" << QuoteJson(document.source_name) << ','
         << "\"source_identity\":" << QuoteJson(document.source_identity) << ','
@@ -1297,6 +1338,8 @@ LabelingDocument NativeFixture()
     LabelingDocument document;
     document.format_kind = std::string(kFormatKind);
     document.schema_version = std::string(kSchemaVersion);
+    document.build_source_mode = "head";
+    document.build_source_revision = std::string(kFixtureBuildSourceRevision);
     document.source_kind = "folder";
     document.source_name = "Native fixture";
     document.source_identity = "source:native-fixture";

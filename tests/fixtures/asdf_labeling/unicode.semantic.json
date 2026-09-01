@@ -1,6 +1,8 @@
 {
   "format_kind": "specforge.sample_labeling",
   "schema_version": "2.0.0",
+  "build_source_mode": "head",
+  "build_source_revision": "0123456789abcdef0123456789abcdef01234567",
   "source_kind": "folder",
   "source_name": "巡天样本",
   "source_identity": "source:unicode",

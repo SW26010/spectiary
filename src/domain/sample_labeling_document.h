@@ -30,7 +30,19 @@ inline constexpr std::string_view kSampleLabelingDocumentExplicitNamesRoster =
     "explicit_names";
 inline constexpr std::string_view kSampleLabelingDocumentSourceIndexRoster =
     "source_index";
+inline constexpr std::string_view kSampleLabelingDocumentWorkingTreeBuildSource =
+    "working_tree";
+inline constexpr std::string_view kSampleLabelingDocumentHeadBuildSource =
+    "head";
 inline constexpr std::int32_t kSampleLabelingDocumentUnlabeledValue = -1;
+
+struct SampleLabelingDocumentBuildSource {
+    std::string source_mode;
+    std::optional<std::string> source_revision;
+};
+
+[[nodiscard]] SampleLabelingDocumentBuildSource
+CurrentSampleLabelingDocumentBuildSource();
 
 struct SampleLabelingDocumentRoster {
     std::string identity_kind =
@@ -89,14 +101,16 @@ struct SampleLabelingDocumentTask {
     std::vector<SampleLabelingDocumentLabel> labels;
 };
 
-// Canonical, user-owned labeling data only.  Session, navigation, output-path,
-// pending-write, save-state, and recovery fields remain owned by
-// SampleLabelingTask and its controller/cache lifecycle.
+// Canonical labeling data plus producer-generation provenance. Session,
+// navigation, output-path, pending-write, save-state, and recovery fields
+// remain owned by SampleLabelingTask and its controller/cache lifecycle.
 struct SampleLabelingDocument {
     std::string format_kind =
         std::string{kSampleLabelingDocumentFormatKind};
     std::string schema_version =
         std::string{kSampleLabelingDocumentSchemaVersion};
+    SampleLabelingDocumentBuildSource build_source =
+        CurrentSampleLabelingDocumentBuildSource();
     SampleLabelingDocumentSource source;
     SampleLabelingDocumentAnnotation annotation;
     SampleLabelingDocumentTask labeling;
@@ -105,6 +119,10 @@ struct SampleLabelingDocument {
 enum class SampleLabelingDocumentValidationIssueKind {
     UnsupportedFormatKind,
     UnsupportedSchemaVersion,
+    UnsupportedBuildSourceMode,
+    MissingBuildSourceRevision,
+    UnexpectedBuildSourceRevision,
+    InvalidBuildSourceRevision,
     MissingSourceBaseIdentity,
     MissingSourceKind,
     MissingSourceName,

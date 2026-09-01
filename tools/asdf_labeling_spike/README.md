@@ -20,7 +20,10 @@ document: task IDs are
 lowercase UUID v4 values; task timestamps use fixed millisecond UTC text; task
 origin, optional description, and optional authors round-trip through the Python
 and native readers/writers; empty authors remain absent, and `annotation.name`
-is rejected. Every annotation declares the fixed schema-2 alignment contract
+is rejected. The corpus exercises a deterministic `head` build source with a
+full 40-character lowercase hexadecimal revision and `working_tree` with the
+revision absent; production generations use the build identity compiled into
+their writer. Every annotation declares the fixed schema-2 alignment contract
 `mode: by_index` against `target: sample_roster`; alignment-less or differently
 aligned schema-2 documents are rejected. Promoted annotation provenance names must be portable basenames:
 `.`/`..`, path separators, and ASCII drive prefixes are rejected by both

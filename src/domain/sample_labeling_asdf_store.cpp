@@ -5,6 +5,7 @@
 #include <exception>
 #include <ios>
 #include <new>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -747,10 +748,14 @@ RewriteSampleLabelingAsdfValuesAtomically(
     SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& replacement) noexcept
 {
+    static_assert(std::is_nothrow_move_assignable_v<
+        SampleLabelingDocumentBuildSource>);
     try {
         std::vector<std::int32_t> published_values(
             replacement.annotation.values.begin(),
             replacement.annotation.values.end());
+        SampleLabelingDocumentBuildSource published_build_source =
+            CurrentSampleLabelingDocumentBuildSource();
         const CanonicalTimestamp published_modified_at =
             replacement.labeling.canonical_metadata.modified_at;
         SampleLabelingAsdfDurableBase refreshed_durable_base;
@@ -761,6 +766,8 @@ RewriteSampleLabelingAsdfValuesAtomically(
                 ValuesBeforeReplaceCheckpoint(),
                 &refreshed_durable_base);
         if (result.succeeded()) {
+            snapshot.document_->build_source =
+                std::move(published_build_source);
             snapshot.document_->annotation.values =
                 std::move(published_values);
             snapshot.document_->labeling.canonical_metadata.modified_at =

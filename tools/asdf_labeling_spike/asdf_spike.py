@@ -28,6 +28,7 @@ REFERENCE_STANDARD_VERSION = "1.5.0"
 UNLABELED = -1
 CREATED_AT = "2026-08-30T08:00:00.000Z"
 MODIFIED_AT = "2026-08-30T08:00:00.000Z"
+FIXTURE_BUILD_SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567"
 UUID_V4_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
@@ -116,6 +117,8 @@ def _tree(
     origin: dict[str, Any] | None = None,
     description: str | None = None,
     authors: list[dict[str, Any]] | None = None,
+    build_source_mode: str = "head",
+    build_source_revision: str | None = FIXTURE_BUILD_SOURCE_REVISION,
     roster_representation: str = "string_ndarray",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -137,6 +140,7 @@ def _tree(
     tree: dict[str, Any] = {
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
+        "specforge_build": {"source_mode": build_source_mode},
         "source_collection": {
             "identity": f"source:{source_fingerprint.removeprefix('sha256:')}",
             "source_kind": source_kind,
@@ -160,6 +164,8 @@ def _tree(
             "labels": labels,
         },
     }
+    if build_source_revision is not None:
+        tree["specforge_build"]["source_revision"] = build_source_revision
     if description is not None:
         tree["labeling_task"]["description"] = description
     if authors:
@@ -209,6 +215,17 @@ def _author_summary(author: Any) -> dict[str, Any]:
 
 
 def _semantic_summary(tree: Any) -> dict[str, Any]:
+    build_source = tree["specforge_build"]
+    if not isinstance(build_source, dict):
+        raise TypeError("specforge_build must be a mapping")
+    build_source_mode = build_source["source_mode"]
+    if not isinstance(build_source_mode, str):
+        raise TypeError("specforge_build.source_mode must be a string")
+    build_source_revision = (
+        build_source["source_revision"]
+        if "source_revision" in build_source
+        else None
+    )
     source = tree["source_collection"]
     roster = tree["sample_roster"]
     annotation = tree["annotation"]
@@ -226,6 +243,8 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "format_kind": str(tree["format_kind"]),
         "schema_version": str(tree["schema_version"]),
+        "build_source_mode": build_source_mode,
+        "build_source_revision": build_source_revision,
         "source_kind": str(source["source_kind"]),
         "source_name": str(source["name"]),
         "source_identity": str(source["identity"]),
@@ -275,6 +294,10 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
 
 def _semantic_errors(tree: Any) -> list[str]:
     errors: list[str] = []
+    build_source = tree.get("specforge_build") if isinstance(tree, dict) else None
+    revision_present = (
+        isinstance(build_source, dict) and "source_revision" in build_source
+    )
     try:
         summary = _semantic_summary(tree)
     except Exception as exc:  # fixtures intentionally exercise malformed trees
@@ -284,6 +307,21 @@ def _semantic_errors(tree: Any) -> list[str]:
         errors.append("format_kind")
     if summary["schema_version"] != SCHEMA_VERSION:
         errors.append("schema_version")
+    revision = summary["build_source_revision"]
+    revision_type_valid = not revision_present or isinstance(revision, str)
+    if not revision_type_valid:
+        errors.append("build source revision")
+    if summary["build_source_mode"] == "working_tree":
+        if revision_present and revision_type_valid:
+            errors.append("build source revision")
+    elif summary["build_source_mode"] == "head":
+        if revision_type_valid and (
+            not revision_present
+            or re.fullmatch(r"[0-9a-f]{40}", revision) is None
+        ):
+            errors.append("build source revision")
+    else:
+        errors.append("build source mode")
     if summary["values_dtype"] != "int32" or len(summary["values_shape"]) != 1:
         errors.append("values dtype/shape")
     if summary["sample_count"] != len(summary["values"]):
@@ -403,6 +441,9 @@ def _fixture_cases() -> list[dict[str, Any]]:
     forward_unknown["labeling_task"]["labels"][0]["future_label"] = {
         "token": "label-survives"
     }
+    forward_unknown["specforge_build"]["future_build"] = {
+        "token": "build-survives"
+    }
     return [
         {
             "name": "minimal",
@@ -416,6 +457,79 @@ def _fixture_cases() -> list[dict[str, Any]]:
                 task_id="minimal-task",
                 task_name="Minimal",
                 labels=[{"code": 0, "name": "Target", "shortcut": "t"}],
+                build_source_mode="working_tree",
+                build_source_revision=None,
+            ),
+        },
+        {
+            "name": "invalid_build_source_mode",
+            "valid": False,
+            "expected_error": "build source mode",
+            "tree": _tree(
+                source_kind="npy",
+                source_name="invalid-build-mode.npy",
+                source_fingerprint="sha256:invalid-build-mode",
+                values=[UNLABELED],
+                names=None,
+                task_id="invalid-build-mode",
+                task_name="Invalid build mode",
+                labels=[{"code": 0, "name": "Target", "shortcut": "t"}],
+                build_source_mode="archive",
+                build_source_revision=None,
+            ),
+        },
+        {
+            "name": "invalid_head_missing_revision",
+            "valid": False,
+            "expected_error": "build source revision",
+            "tree": _tree(
+                source_kind="npy",
+                source_name="head-missing-revision.npy",
+                source_fingerprint="sha256:head-missing-revision",
+                values=[UNLABELED],
+                names=None,
+                task_id="head-missing-revision",
+                task_name="Head missing revision",
+                labels=[{"code": 0, "name": "Target", "shortcut": "t"}],
+                build_source_mode="head",
+                build_source_revision=None,
+            ),
+        },
+        {
+            "name": "invalid_working_tree_revision",
+            "valid": False,
+            "expected_error": "build source revision",
+            "tree": _tree(
+                source_kind="npy",
+                source_name="working-tree-revision.npy",
+                source_fingerprint="sha256:working-tree-revision",
+                values=[UNLABELED],
+                names=None,
+                task_id="working-tree-revision",
+                task_name="Working tree revision",
+                labels=[{"code": 0, "name": "Target", "shortcut": "t"}],
+                build_source_mode="working_tree",
+                build_source_revision=FIXTURE_BUILD_SOURCE_REVISION,
+            ),
+        },
+        {
+            "name": "invalid_working_tree_null_revision",
+            "valid": False,
+            "expected_error": "build source revision",
+            "tree": _tree(
+                source_kind="npy",
+                source_name="working-tree-null-revision.npy",
+                source_fingerprint="sha256:working-tree-null-revision",
+                values=[UNLABELED],
+                names=None,
+                task_id="working-tree-null-revision",
+                task_name="Working tree null revision",
+                labels=[{"code": 0, "name": "Target", "shortcut": "t"}],
+                build_source_mode="working_tree",
+                build_source_revision=None,
+            ),
+            "mutate": lambda tree: tree["specforge_build"].__setitem__(
+                "source_revision", None
             ),
         },
         {
@@ -1064,6 +1178,10 @@ def _json_document(names: list[str], values: list[int]) -> dict[str, Any]:
     return {
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
+        "specforge_build": {
+            "source_mode": "head",
+            "source_revision": FIXTURE_BUILD_SOURCE_REVISION,
+        },
         "source_collection": {
             "identity": "source:benchmark",
             "source_kind": "folder",
@@ -1126,6 +1244,16 @@ def _second_round_hydration(
         if compression == "zlib":
             payload = zlib.decompress(payload)
         document = json.loads(payload.decode("utf-8"))
+        build_source = document.get("specforge_build")
+        if (
+            not isinstance(build_source, dict)
+            or build_source.get("source_mode") != "head"
+            or build_source.get("source_revision")
+            != FIXTURE_BUILD_SOURCE_REVISION
+        ):
+            raise RuntimeError(
+                "JSON benchmark hydration rejected build source identity"
+            )
         annotation = document["annotation"]
         roster = document["sample_roster"]
         alignment = annotation.get("alignment")
@@ -1549,6 +1677,8 @@ def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
     return {
         "format_kind": "specforge.sample_labeling",
         "schema_version": "2.0.0",
+        "build_source_mode": "head",
+        "build_source_revision": FIXTURE_BUILD_SOURCE_REVISION,
         "source_kind": "folder",
         "source_name": "巡天样本",
         "source_identity": "sha256-v1:production-source",
@@ -1599,6 +1729,20 @@ def _production_author_email_semantic_summary() -> dict[str, Any]:
         },
         {"name": "验证者", "identifier": None},
     ]
+    return summary
+
+
+def _build_source_fields(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "build_source_mode": summary["build_source_mode"],
+        "build_source_revision": summary["build_source_revision"],
+    }
+
+
+def _with_build_source(
+    summary: dict[str, Any], build_source: dict[str, Any]
+) -> dict[str, Any]:
+    summary.update(build_source)
     return summary
 
 
@@ -1706,6 +1850,10 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         expected_yaml_specials = _production_source_index_semantic_summary(
             [-1, 0, 1], _yaml_special_character_matrix()
         )
+        production_build_source = _build_source_fields(
+            production_yaml_specials_summary
+        )
+        expected_yaml_specials.update(production_build_source)
         if (
             production_yaml_specials_errors
             or production_yaml_specials_summary != expected_yaml_specials
@@ -1748,7 +1896,10 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         if (
             production_author_email_errors
             or production_author_email_summary
-            != _production_author_email_semantic_summary()
+            != _with_build_source(
+                _production_author_email_semantic_summary(),
+                production_build_source,
+            )
         ):
             raise RuntimeError(
                 "official ASDF oracle rejected or changed optional author email"
@@ -1786,6 +1937,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         expected_production_explicit = _production_explicit_semantic_summary(
             [-1, 0, 1]
         )
+        expected_production_explicit.update(production_build_source)
         if (
             production_explicit_errors
             or production_explicit_summary != expected_production_explicit
@@ -1826,6 +1978,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         expected_production_rewrite = _production_explicit_semantic_summary(
             [0, 0, 1]
         )
+        expected_production_rewrite.update(production_build_source)
         if (
             production_rewrite_errors
             or production_rewrite_summary != expected_production_rewrite
@@ -1883,7 +2036,10 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         if (
             production_source_index_errors
             or production_source_index_summary
-            != _production_source_index_semantic_summary([-1, 0, 1])
+            != _with_build_source(
+                _production_source_index_semantic_summary([-1, 0, 1]),
+                production_build_source,
+            )
         ):
             raise RuntimeError(
                 "official ASDF oracle rejected or changed the production "
@@ -1979,7 +2135,10 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         if (
             production_source_index_rewrite_errors
             or production_source_index_rewrite_summary
-            != _production_source_index_semantic_summary([1, 0, 1])
+            != _with_build_source(
+                _production_source_index_semantic_summary([1, 0, 1]),
+                production_build_source,
+            )
         ):
             raise RuntimeError(
                 "official ASDF oracle rejected or changed the production "
@@ -2068,6 +2227,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
         expected_forward["task_name"] = "Forward metadata edited"
         expected_forward["labels"][0]["name"] = "Edited Galaxy"
         expected_forward["labels"][0]["shortcut"] = "1"
+        expected_forward.update(production_build_source)
         if (
             forward_errors
             or forward_summary != expected_forward
@@ -2136,6 +2296,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
                 )
             )
             expected_origin["values"][0] = 0
+            expected_origin.update(production_build_source)
             if production_origin_errors or production_origin_summary != expected_origin:
                 raise RuntimeError(
                     "official ASDF oracle rejected or changed the Python-origin "

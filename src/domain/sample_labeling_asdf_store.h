@@ -83,9 +83,9 @@ private:
 
     std::filesystem::path path_;
     // The open generation owns one stable document object. Value-only
-    // publications replace its values vector and modified_at while an explicit
-    // roster is never copied on the autosave path. Public handles remain
-    // read-only and observe the advanced generation.
+    // publications refresh producer build identity, values, and modified_at
+    // while an explicit roster is never copied on the autosave path. Public
+    // handles remain read-only and observe the advanced generation.
     std::shared_ptr<SampleLabelingDocument> document_;
     SampleLabelingAsdfDurableBase durable_base_;
 

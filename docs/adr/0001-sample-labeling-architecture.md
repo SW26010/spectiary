@@ -51,6 +51,7 @@ The canonical document keeps these concepts independent:
 | Task name | Persistently editable UTF-8 canonical metadata. It must contain non-whitespace text, is neither trimmed nor normalized, and is not an identity. |
 | Output filename | User-selected shell/filesystem state. A sanitized task-name suggestion is presentation policy only; selecting or later renaming a file does not change task identity or task name. |
 | SpecForge schema version | Exactly `schema_version: 2.0.0` for current documents. |
+| SpecForge build source | Required `specforge_build` generation provenance. `head` requires a full 40-character lowercase hexadecimal `source_revision`; `working_tree` requires the revision to be absent. |
 | Annotation alignment | Required `annotation.alignment` declaration with exactly `mode: by_index` and `target: sample_roster`; values follow roster/source index order. |
 | ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not SpecForge schema versions. |
 
@@ -72,6 +73,15 @@ parser. The digest is not computed from decoded labels, a sidecar, a path, or a
 source-collection fingerprint. Readers may preserve a syntactically valid
 future origin token unchanged, but current writers cannot introduce one and
 preserving rewrites cannot alter origin or `created_at`.
+
+The ASDF producer declaration is exactly `asdf_library.name: SpecForge` with
+version `0.8.0`. The adjacent `specforge_build` map is deliberately narrow and
+comes only from the generated build-identity header: no runtime Git query,
+release sidecar, compiler, SDK, dependency inventory, executable hash, or
+completion timestamp participates. It identifies the producer of the current
+durable generation, so fresh writes and both values-only and full metadata
+rewrites stamp the current binary rather than preserving the replaced file's
+build identity.
 
 `description` and `authors` are optional canonical fields without current UI.
 Unset values stay absent; the supported author model contains required `name`

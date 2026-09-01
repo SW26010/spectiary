@@ -184,6 +184,12 @@ specforge::JsonValue SemanticSummary(
     return specforge::JsonObjectValue({
         {"format_kind", specforge::JsonStringValue(document.format_kind)},
         {"schema_version", specforge::JsonStringValue(document.schema_version)},
+        {"build_source_mode", specforge::JsonStringValue(
+             document.build_source.source_mode)},
+        {"build_source_revision", document.build_source.source_revision
+             ? specforge::JsonStringValue(
+                   *document.build_source.source_revision)
+             : specforge::JsonNullValue()},
         {"source_kind", specforge::JsonStringValue(document.source.kind)},
         {"source_name", specforge::JsonStringValue(document.source.name)},
         {"source_identity", specforge::JsonStringValue(document.source.base_identity)},
@@ -502,6 +508,31 @@ specforge::SampleLabelingDocument ProductionDocument(bool explicit_roster = true
     return document;
 }
 
+std::string BuildSourceYaml(
+    std::string_view source_mode,
+    std::optional<std::string_view> source_revision)
+{
+    std::string yaml = "specforge_build:\n  source_mode: \"";
+    yaml.append(source_mode);
+    yaml.append("\"\n");
+    if (source_revision) {
+        yaml.append("  source_revision: \"");
+        yaml.append(*source_revision);
+        yaml.append("\"\n");
+    }
+    return yaml;
+}
+
+std::string CurrentBuildSourceYaml()
+{
+    const specforge::SampleLabelingDocumentBuildSource current =
+        specforge::CurrentSampleLabelingDocumentBuildSource();
+    return BuildSourceYaml(current.source_mode,
+        current.source_revision
+            ? std::optional<std::string_view>{*current.source_revision}
+            : std::nullopt);
+}
+
 void AppendUtf8ForTest(std::string& output, std::uint32_t codepoint)
 {
     if (codepoint <= 0x7fU) {
@@ -610,10 +641,12 @@ int RunReadProductionChecksumOracle(const std::filesystem::path& path)
 {
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(path);
+    specforge::SampleLabelingDocument expected = ProductionDocument();
+    if (read.succeeded()) {
+        expected.build_source = read.document->build_source;
+    }
     const bool semantic_matches = read.succeeded() &&
-        JsonEquals(
-            SemanticSummary(*read.document),
-            SemanticSummary(ProductionDocument()));
+        JsonEquals(SemanticSummary(*read.document), SemanticSummary(expected));
     std::cout << '{';
     std::cout << "\"succeeded\":" << (read.succeeded() ? "true" : "false")
               << ',';
@@ -682,6 +715,7 @@ void WriteYamlAliasAmplificationFixture(
              << "--- !core/asdf-1.1.0\n"
              << "format_kind: \"specforge.sample_labeling\"\n"
              << "schema_version: \"2.0.0\"\n"
+             << CurrentBuildSourceYaml()
              << "source_collection:\n"
              << "  identity: \"source:yaml-alias-budget\"\n"
              << "  source_kind: \"npy\"\n"
@@ -1100,6 +1134,140 @@ void TestSchemaTwoRequiresFixedAnnotationAlignment()
         std::error_code cleanup_error;
         std::filesystem::remove(path, cleanup_error);
     }
+}
+
+void TestReaderEnforcesBuildSourceIdentity()
+{
+    constexpr std::string_view revision =
+        "0123456789abcdef0123456789abcdef01234567";
+    struct BuildCase {
+        std::string_view name;
+        std::string yaml;
+        bool valid = false;
+        std::string_view expected_mode;
+        std::optional<std::string_view> expected_revision;
+    };
+    const std::array cases{
+        BuildCase{"head", BuildSourceYaml("head", revision), true,
+            "head", revision},
+        BuildCase{"working-tree",
+            BuildSourceYaml("working_tree", std::nullopt), true,
+            "working_tree", std::nullopt},
+        BuildCase{"invalid-mode",
+            BuildSourceYaml("archive", std::nullopt)},
+        BuildCase{"head-missing-revision",
+            BuildSourceYaml("head", std::nullopt)},
+        BuildCase{"working-tree-with-revision",
+            BuildSourceYaml("working_tree", revision)},
+    };
+
+    for (const BuildCase& test_case : cases) {
+        const std::filesystem::path path =
+            TempPath("_build_" + std::string(test_case.name) + ".asdf");
+        Require(
+            WriteDocument(path, ProductionDocument()).succeeded(),
+            "build-source reader fixture should start valid");
+        std::vector<unsigned char> bytes = ReadAllBytes(path);
+        ReplaceTextOnce(bytes, CurrentBuildSourceYaml(), test_case.yaml);
+        WriteAllBytes(path, bytes);
+
+        const specforge::SampleLabelingAsdfReadResult read =
+            specforge::ReadSampleLabelingAsdfDocument(path);
+        if (test_case.valid) {
+            Require(
+                read.succeeded() &&
+                    read.document->build_source.source_mode ==
+                        test_case.expected_mode &&
+                    read.document->build_source.source_revision ==
+                        (test_case.expected_revision
+                            ? std::optional<std::string>{
+                                  *test_case.expected_revision}
+                            : std::nullopt),
+                "reader should preserve a valid build source tuple");
+        } else {
+            Require(
+                !read.succeeded() &&
+                    read.error.kind ==
+                        specforge::SampleLabelingAsdfErrorKind::
+                            SemanticValidationFailed,
+                "reader should return a controlled semantic error for an invalid build source tuple");
+        }
+
+        std::error_code cleanup_error;
+        std::filesystem::remove(path, cleanup_error);
+    }
+}
+
+void TestRewritesRefreshBuildSourceIdentity()
+{
+    constexpr std::string_view old_revision =
+        "0123456789abcdef0123456789abcdef01234567";
+    const specforge::SampleLabelingDocumentBuildSource current =
+        specforge::CurrentSampleLabelingDocumentBuildSource();
+    const std::string old_build = current.source_mode == "working_tree"
+        ? BuildSourceYaml("head", old_revision)
+        : BuildSourceYaml("working_tree", std::nullopt);
+    const std::filesystem::path input_path =
+        TempPath("_old_build_generation.asdf");
+    const std::filesystem::path values_path =
+        TempPath("_current_build_values.asdf");
+    const std::filesystem::path metadata_path =
+        TempPath("_current_build_metadata.asdf");
+    Require(
+        WriteDocument(input_path, ProductionDocument()).succeeded(),
+        "old-build rewrite fixture should start valid");
+    std::vector<unsigned char> bytes = ReadAllBytes(input_path);
+    ReplaceTextOnce(bytes, CurrentBuildSourceYaml(), old_build);
+    WriteAllBytes(input_path, bytes);
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(opened.succeeded() && opened.durable_base,
+        "old-build generation should provide a rewrite base");
+    Require(
+        opened.document->build_source.source_mode != current.source_mode,
+        "rewrite fixture should represent a different producer build");
+
+    specforge::SampleLabelingDocument values_edited = *opened.document;
+    values_edited.annotation.values = {0, 0, 1};
+    std::ofstream values_output(
+        values_path, std::ios::binary | std::ios::trunc);
+    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
+        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            *opened.durable_base, values_output, values_edited);
+    values_output.close();
+    const specforge::SampleLabelingAsdfReadResult values_read =
+        specforge::ReadSampleLabelingAsdfDocument(values_path);
+    Require(
+        values_rewrite.succeeded() && values_read.succeeded() &&
+            values_read.document->build_source.source_mode ==
+                current.source_mode &&
+            values_read.document->build_source.source_revision ==
+                current.source_revision,
+        "values rewrite must stamp the current producer build identity");
+
+    specforge::SampleLabelingDocument metadata_edited = *opened.document;
+    metadata_edited.labeling.name = "Current-build metadata generation";
+    std::ofstream metadata_output(
+        metadata_path, std::ios::binary | std::ios::trunc);
+    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *opened.durable_base, metadata_output, metadata_edited);
+    metadata_output.close();
+    const specforge::SampleLabelingAsdfReadResult metadata_read =
+        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    Require(
+        metadata_rewrite.succeeded() && metadata_read.succeeded() &&
+            metadata_read.document->build_source.source_mode ==
+                current.source_mode &&
+            metadata_read.document->build_source.source_revision ==
+                current.source_revision,
+        "metadata rewrite must stamp the current producer build identity");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(input_path, cleanup_error);
+    std::filesystem::remove(values_path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
 }
 
 void TestRejectsMalformedCorruptAndUnsupportedInputs()
@@ -1808,6 +1976,12 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
             "    mode: \"by_index\"\n"
             "    target: \"sample_roster\"\n") != std::string::npos,
         "writer should explicitly declare by-index alignment against the sample roster");
+    const specforge::SampleLabelingDocumentBuildSource current_build =
+        specforge::CurrentSampleLabelingDocumentBuildSource();
+    Require(
+        text.find(CurrentBuildSourceYaml() + "format_kind:") !=
+            std::string::npos,
+        "writer should emit only the narrow current build source tuple before the schema identity");
     Require(
         text.find(
             "asdf_library: !core/software-1.0.0 {name: SpecForge, version: "
@@ -1834,6 +2008,12 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(path);
     Require(read.succeeded(), "production writer output should be readable");
+    Require(
+        read.document->build_source.source_mode ==
+                current_build.source_mode &&
+            read.document->build_source.source_revision ==
+                current_build.source_revision,
+        "writer/read round-trip should expose the current build source identity");
     Require(
         read.durable_base && read.durable_base->valid(),
         "fixed production profile should produce a durable rewrite base");
@@ -2192,6 +2372,8 @@ void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
         opened.succeeded() && opened.durable_base,
         "forward-unknown fixture should expose a durable block-reuse base");
     specforge::SampleLabelingDocument replacement = *opened.document;
+    replacement.build_source =
+        specforge::CurrentSampleLabelingDocumentBuildSource();
     replacement.annotation.values = {1, 0};
     replacement.labeling.canonical_metadata.modified_at =
         *specforge::ParseCanonicalTimestamp(
@@ -2255,6 +2437,7 @@ void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
     Require(
         before_raw.tree_end != after_raw.tree_end &&
             ContainsText(after, "future_vendor") &&
+            ContainsText(after, "build-survives") &&
             ContainsText(after, "future_task") &&
             ContainsText(after, "future_origin") &&
             ContainsText(after, "future_label") &&
@@ -2265,7 +2448,7 @@ void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
                     after_raw.blocks[0].offset,
                     after_raw.blocks[1].offset,
                 },
-        "timestamped values rewrite must rebuild metadata, retain supported unknown mappings, drop input padding, and emit a recomputed block index");
+        "timestamped values rewrite must rebuild metadata, retain root/build/task unknown mappings, drop input padding, and emit a recomputed block index");
 
     const specforge::SampleLabelingAsdfReadResult reopened =
         specforge::ReadSampleLabelingAsdfDocument(output_path);
@@ -2461,6 +2644,11 @@ void TestMetadataRewritePreservesForwardUnknownFields()
 
     std::vector<unsigned char> bytes = ReadAllBytes(input_path);
     ReplaceTextOnce(bytes,
+        "\nspecforge_build:\n  source_mode: ",
+        "\nspecforge_build:\n"
+        "  future_build: \"build-survives\"\n"
+        "  source_mode: ");
+    ReplaceTextOnce(bytes,
         "\nschema_version: ",
         "\nfuture_root:\n"
         "  string_token: \"true\"\n"
@@ -2547,6 +2735,7 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         reinterpret_cast<const char*>(rewritten_bytes.data()),
         rewritten_bytes.size());
     for (const std::string_view token : {
+             "build-survives",
              "source-survives",
              "roster-survives",
              "annotation-survives",
@@ -3226,6 +3415,7 @@ int main(int argc, char* argv[])
         TestRejectsManifestSemanticViolationsWithControlledErrors();
         TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName();
         TestSchemaTwoRequiresFixedAnnotationAlignment();
+        TestReaderEnforcesBuildSourceIdentity();
         TestRejectsMalformedCorruptAndUnsupportedInputs();
         TestRejectsNdarrayMaskProfile();
         TestWriterRejectsRosterNulBeforeOutput();
@@ -3243,6 +3433,7 @@ int main(int argc, char* argv[])
         TestReaderEnforcesCombinedResidentMemoryBudget();
         TestSharedProfilePreflightBoundaryMatrix();
         TestWriterEmitsFixedProductionProfileAndRoundTrips();
+        TestRewritesRefreshBuildSourceIdentity();
         TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent();
         TestWriterEmitsSourceIndexProductionProfileAndRoundTrips();
         TestLabelRewriteReusesRosterBlockVerbatim();

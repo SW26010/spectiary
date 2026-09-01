@@ -36,6 +36,8 @@ struct Author {
 struct LabelingDocument {
     std::string format_kind;
     std::string schema_version;
+    std::string build_source_mode;
+    std::optional<std::string> build_source_revision;
     std::string source_kind;
     std::string source_name;
     std::string source_identity;
