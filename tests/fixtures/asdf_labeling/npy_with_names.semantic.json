@@ -13,6 +13,8 @@
     "spec-0003"
   ],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "ad2019d6-9937-4473-b40a-fcef8ab0e918",

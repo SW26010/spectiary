@@ -147,6 +147,7 @@ def _tree(
         "sample_roster": roster,
         "annotation": {
             "kind": "categorical_integer",
+            "alignment": {"mode": "by_index", "target": "sample_roster"},
             "values": array,
             "missing": {"semantic": "unlabeled", "value": UNLABELED},
         },
@@ -211,6 +212,15 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
     source = tree["source_collection"]
     roster = tree["sample_roster"]
     annotation = tree["annotation"]
+    alignment = annotation["alignment"]
+    if not isinstance(alignment, dict):
+        raise TypeError("annotation alignment must be a mapping")
+    alignment_mode = alignment["mode"]
+    alignment_target = alignment["target"]
+    if not isinstance(alignment_mode, str) or not isinstance(
+        alignment_target, str
+    ):
+        raise TypeError("annotation alignment fields must be strings")
     task = tree["labeling_task"]
     values = _values(annotation["values"])
     summary: dict[str, Any] = {
@@ -224,6 +234,8 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
         "roster_identity_kind": str(roster["identity_kind"]),
         "sample_names": _names(roster["names"]) if "names" in roster else [],
         "annotation_kind": str(annotation["kind"]),
+        "alignment_mode": alignment_mode,
+        "alignment_target": alignment_target,
         "missing_semantic": str(annotation["missing"]["semantic"]),
         "missing_value": int(annotation["missing"]["value"]),
         "task_id": str(task["id"]),
@@ -285,6 +297,10 @@ def _semantic_errors(tree: Any) -> list[str]:
         errors.append("roster identity kind")
     if summary["annotation_kind"] != "categorical_integer":
         errors.append("annotation kind")
+    if summary["alignment_mode"] != "by_index":
+        errors.append("annotation alignment mode")
+    if summary["alignment_target"] != "sample_roster":
+        errors.append("annotation alignment target")
     if "name" in tree["annotation"]:
         errors.append("annotation.name is not in SpecForge sample-labeling schema 2.0.0")
     if not UUID_V4_PATTERN.fullmatch(summary["task_id"]):
@@ -1062,6 +1078,7 @@ def _json_document(names: list[str], values: list[int]) -> dict[str, Any]:
         "annotation": {
             "kind": "categorical_integer",
             "name": "Benchmark",
+            "alignment": {"mode": "by_index", "target": "sample_roster"},
             "values": values,
             "values_dtype": "int32",
             "values_shape": [len(values)],
@@ -1111,6 +1128,15 @@ def _second_round_hydration(
         document = json.loads(payload.decode("utf-8"))
         annotation = document["annotation"]
         roster = document["sample_roster"]
+        alignment = annotation.get("alignment")
+        if (
+            not isinstance(alignment, dict)
+            or alignment.get("mode") != "by_index"
+            or alignment.get("target") != "sample_roster"
+        ):
+            raise RuntimeError(
+                "JSON benchmark hydration rejected annotation alignment"
+            )
         if (
             len(annotation["values"]) != count
             or len(roster["names"]) != count
@@ -1531,6 +1557,8 @@ def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
         "roster_identity_kind": "explicit_names",
         "sample_names": ["alpha.fits", "星系-β.fits", "échelle-γ.fits"],
         "annotation_kind": "categorical_integer",
+        "alignment_mode": "by_index",
+        "alignment_target": "sample_roster",
         "missing_semantic": "unlabeled",
         "missing_value": -1,
         "task_id": "00000000-0000-4000-8000-000000000001",

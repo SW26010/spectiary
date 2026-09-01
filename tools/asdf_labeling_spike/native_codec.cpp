@@ -605,8 +605,10 @@ void ValidateDocument(const LabelingDocument& document)
         throw CodecError("unsupported roster identity kind");
     }
     if (document.annotation_kind != "categorical_integer" ||
+        document.alignment_mode != "by_index" ||
+        document.alignment_target != "sample_roster" ||
         document.missing_semantic != "unlabeled" || document.missing_value != kUnlabeled) {
-        throw CodecError("unsupported annotation or missing semantics");
+        throw CodecError("unsupported annotation alignment or missing semantics");
     }
     std::set<std::int32_t> codes;
     std::set<std::string> shortcuts;
@@ -822,6 +824,12 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
 
     const YAML::Node annotation = RequiredNode(root, "annotation");
     document.annotation_kind = RequiredScalar<std::string>(annotation, "kind");
+    const YAML::Node alignment = RequiredNode(annotation, "alignment");
+    if (!alignment.IsMap()) {
+        throw CodecError("annotation alignment must be a map");
+    }
+    document.alignment_mode = RequiredScalar<std::string>(alignment, "mode");
+    document.alignment_target = RequiredScalar<std::string>(alignment, "target");
     if (annotation["name"]) {
         throw CodecError("annotation.name is not part of schema 2.0");
     }
@@ -1116,6 +1124,9 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
     }
     metadata << "annotation:\n"
              << "  kind: " << QuoteYaml(document.annotation_kind) << "\n"
+             << "  alignment:\n"
+             << "    mode: " << QuoteYaml(document.alignment_mode) << "\n"
+             << "    target: " << QuoteYaml(document.alignment_target) << "\n"
              << "  values: !core/ndarray-1.0.0\n"
              << "    source: " << values_source << "\n"
              << "    datatype: int32\n"
@@ -1212,6 +1223,8 @@ std::string SemanticJson(const LabelingDocument& document)
         << "\"sample_names\":";
     WriteStringArray(out, document.sample_names);
     out << ",\"annotation_kind\":" << QuoteJson(document.annotation_kind)
+        << ",\"alignment_mode\":" << QuoteJson(document.alignment_mode)
+        << ",\"alignment_target\":" << QuoteJson(document.alignment_target)
         << ",\"missing_semantic\":" << QuoteJson(document.missing_semantic)
         << ",\"missing_value\":" << document.missing_value
         << ",\"task_id\":" << QuoteJson(document.task_id)
@@ -1292,6 +1305,8 @@ LabelingDocument NativeFixture()
     document.roster_identity_kind = "explicit_names";
     document.sample_names = {"alpha.fits", "星系-β.fits", "gamma.fits"};
     document.annotation_kind = "categorical_integer";
+    document.alignment_mode = "by_index";
+    document.alignment_target = "sample_roster";
     document.missing_semantic = "unlabeled";
     document.missing_value = kUnlabeled;
     document.task_id = "00000000-0000-4000-8000-000000000002";

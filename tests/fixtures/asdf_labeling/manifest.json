@@ -13,7 +13,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "0576824a6d50bb29c26a4b4287e9db67493081c01efd4e217590ac87ac936b29"
+      "sha256": "b9bb721f2c03af07d71a79d1aca7f5f941c2f447e94241dc04219091aa15d9f6"
     },
     {
       "name": "unicode",
@@ -23,7 +23,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "434e6c98dd61d44c956e072ed7916467060f82e6d65b6eb94af95beff53d31e9"
+      "sha256": "bcba403b10af8b1ab2cf04c6fed2487b30920775d5394d63bccd2a27f113e6aa"
     },
     {
       "name": "folder_roster",
@@ -33,7 +33,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "f894b205bdb54a22a757928580e4c6699c8ea49e1dc261180fde0012a8162b73"
+      "sha256": "2c07571741ee8d59ce5584f868a687c4d658c549cad7841acbdec91f8fe92b0e"
     },
     {
       "name": "npy_with_names",
@@ -43,7 +43,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "3e3424bb906c5df93b39e65ee0af8c4f7c3f613b0cf249280d152c3c7f4751ba"
+      "sha256": "e8e18ae6c5e14cd6261575c2a268d4cc731fa80fe52458f873fc51155508fd3c"
     },
     {
       "name": "npy_source_index",
@@ -53,7 +53,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "b0520a1fd9f17869707ae905ce9ffd264468632a2a61b7d48bdfc002faecc6f1"
+      "sha256": "137adf567247063ddc347949fdfb9a44ec8259c0aed2d8af019f476ef024a01b"
     },
     {
       "name": "mixed_unlabeled",
@@ -63,7 +63,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "af64b200d03456f2d72e0d2f694151216314475d9a12c7f2abc5f2fe518b83c3"
+      "sha256": "c713882b3b9cca6bc7efbe4cfa3424c237fc90320813198a9ca7b54abc7314ca"
     },
     {
       "name": "large_values",
@@ -73,7 +73,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "3b8ac3898e4715fa94128c2b2749bc2f6f728bb41219dc26692cf7093cf4af1a"
+      "sha256": "b0849362450c86b7a24c969cc0d1289af6060a54f5f3b9431026c63d39731d1f"
     },
     {
       "name": "forward_unknown",
@@ -83,7 +83,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "44f887fc532289c9485d379444ce1b830110e892ddf7390e2b747b2a7d0011e1"
+      "sha256": "8c55905aec1ae204619dcbddc1a1129eeb7e807c7c62715b60ec33d8eccb6a87"
     },
     {
       "name": "invalid_count",
@@ -93,7 +93,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "sample_count/value count",
-      "sha256": "2e1adf46f962a6beb382c8ea8219f0818526890a91142b91e32cb99f026930c0"
+      "sha256": "b87586a2a3e421d71ca0b35afd76e158e9dccc356f4331c8f5c0a1a71ebafc5c"
     },
     {
       "name": "invalid_duplicate_label",
@@ -103,7 +103,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label codes unique",
-      "sha256": "1ec5aa17ede07b82e85f2d6b8ae6c017d3a0b21884d36d7f69bac21918d25d13"
+      "sha256": "4b556253febefa8e39d717f8c3b31ca899daf140e52804258aabcf1a54baba9d"
     },
     {
       "name": "invalid_sentinel_collision",
@@ -113,7 +113,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "label code collides with unlabeled",
-      "sha256": "8078fb6ba3b785a2aa957130cf95806cb02668c91ac53aa855073c7631887d72"
+      "sha256": "c8e311ca75cf1a55333c36082149b730427de017a45253e6f944ade6f6ac8fa0"
     },
     {
       "name": "invalid_undefined_value",
@@ -123,7 +123,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "values reference defined labels",
-      "sha256": "29d2a79562bfc4d24ffd515d194f3584529076ed47c6c5ff606c836dd0a32acf"
+      "sha256": "b14f74482059222d946a278a8e082d2a752e42d4815765c1586d3936513dba1c"
     },
     {
       "name": "promoted_unicode_origin",
@@ -133,7 +133,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "e98200b415cee705c440d592f2742fb6b70e8b3229462e84d114fb46fc074413"
+      "sha256": "52dc7d5f4f6111c90063412f9e2e13e0a33c45de688c550596070a2d6c970200"
     },
     {
       "name": "invalid_origin_dot",
@@ -143,7 +143,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "20bcd88b2491f7adce34fce6fa19636e76e97b913400ffcbfe9152056a23312e"
+      "sha256": "1c829d3c4b94c7cc925c00538647f309e1edafdf4222d2174259aee6634d16a4"
     },
     {
       "name": "invalid_origin_dotdot",
@@ -153,7 +153,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "16e572163a0771f635e33b143aa601f5904457121a9a2f961d0825ce0ef6cd95"
+      "sha256": "c2ce3a36f21321e5bc15aba7f4a7370ece046dc1aba232b31587ee1bcf0e7c55"
     },
     {
       "name": "invalid_origin_absolute",
@@ -163,7 +163,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "4e958a275e8e22f45e4cc75f5afbf5f66807aaf343fee682bf83d986b95e5702"
+      "sha256": "f4d51ea1906fc97b527df68a034305285953c57e02f1d62c70a4e0f3de837837"
     },
     {
       "name": "invalid_origin_forward_directory",
@@ -173,7 +173,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "14f6c8da619bb8370ccedcec2e3653481c29f2be12b60a7a8abc247bd832197f"
+      "sha256": "9938ad785b70e70fbc1f6e4a193bcd7140d979ad3699ef29af2f0a3bf162224b"
     },
     {
       "name": "invalid_origin_backslash_directory",
@@ -183,7 +183,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "f999489bee5ce80340b50f1ca33cd8a5cf68745e2784884ace655f400b4111dd"
+      "sha256": "53a3ca25a597dab520644dd498a0b864b1506a5efb59391de5938a460621d6c8"
     },
     {
       "name": "invalid_origin_drive_prefix",
@@ -193,7 +193,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "origin annotation name",
-      "sha256": "99cf7984b69e224b8e124178d958e5e9cbd7bf8b9d29a954fe1e2edd643b0c06"
+      "sha256": "7692795bd6196d596e11922dba7437e7a5bca2b1ae7c7f0700e3994f0d03f5e9"
     },
     {
       "name": "profile_zlib",
@@ -203,7 +203,7 @@
       "semantically_valid": true,
       "native_profile_supported": true,
       "expected_error": "",
-      "sha256": "72e9a2272ce2e1714a6d280b52e37ea625c1acf1688cb364f0abb32e61dd06a1"
+      "sha256": "d3cd354aafe07d8c3b7c9c86ec0b14a45eb59f9e86726d0cd04b9602771de9cb"
     },
     {
       "name": "profile_checksum",
@@ -213,7 +213,7 @@
       "semantically_valid": true,
       "native_profile_supported": false,
       "expected_error": "unsupported wire profile",
-      "sha256": "ef264a92d909af653a3230133cb5e857953be951a25ffcbb2bc01e3fd548d2ad"
+      "sha256": "fc9289a89fd89a897655535a70737c100c8e609df060893846941fea5d5739f6"
     },
     {
       "name": "malformed_bad_magic",
@@ -243,7 +243,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "6f699fadf69ee4f66f1a710b785bfced145a7e561c1ce4a8fdf3e3143cc3d8af"
+      "sha256": "7d51ae805cbd34c6621b2055602d701c284d73665011eaf07545bdb250a1598f"
     },
     {
       "name": "malformed_zlib_payload",
@@ -253,7 +253,7 @@
       "semantically_valid": false,
       "native_profile_supported": false,
       "expected_error": "structural",
-      "sha256": "08b3ac41ee7dcde6f9a76952d110589821523a0c833fcd1e16e642b615c46c3a"
+      "sha256": "16d1a14c6c2209234783e0154ab4cb0b71772f08f2dbbb49ce290c299fbf4f99"
     }
   ]
 }

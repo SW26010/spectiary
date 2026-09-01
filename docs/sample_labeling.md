@@ -991,6 +991,9 @@ sample_roster:
     shape: [2]
 annotation:
   kind: "categorical_integer"
+  alignment:
+    mode: "by_index"
+    target: "sample_roster"
   values: !core/ndarray-1.0.0
     source: 1
     datatype: int32
@@ -1027,8 +1030,13 @@ labeling_task:
 
 For `sample_roster.identity_kind: source_index`, `sample_roster.names` is
 absent and the values ndarray uses block source `0`. In both roster forms the
-values contract is one-dimensional little-endian signed `int32`, its length is
-exactly `source_collection.sample_count`, and `-1` is the reserved unlabeled
+required `annotation.alignment` map is exactly `mode: by_index` and
+`target: sample_roster`: `values[i]` belongs to `sample_roster.names[i]` for an
+explicit roster and to source index `i` for a source-index roster. Missing
+alignment fields, non-string values, or any other mode/target are semantic
+errors; schema 2.0 has no compatibility path for an alignment-less document.
+The values contract is one-dimensional little-endian signed `int32`, its length
+is exactly `source_collection.sample_count`, and `-1` is the reserved unlabeled
 sentinel. Schema 2.0 has no `annotation.name`; the canonical task name lives
 only at `labeling_task.name`, while `origin.annotation.name` is provenance for
 the promoted input artifact and is not a second task name.

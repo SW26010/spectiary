@@ -86,6 +86,10 @@ std::optional<SampleLabelingAsdfStoreError> PreservationIdentityError(
         original.source.roster.sample_names ==
             replacement.source.roster.sample_names &&
         original.annotation.kind == replacement.annotation.kind &&
+        original.annotation.alignment.mode ==
+            replacement.annotation.alignment.mode &&
+        original.annotation.alignment.target ==
+            replacement.annotation.alignment.target &&
         original.labeling.id == replacement.labeling.id &&
         original.labeling.canonical_metadata.created_at ==
             replacement.labeling.canonical_metadata.created_at &&
@@ -136,6 +140,10 @@ std::optional<SampleLabelingAsdfStoreError> ValuesRewriteIdentityError(
         original.source.roster.sample_names ==
             replacement.source.roster.sample_names &&
         original.annotation.kind == replacement.annotation.kind &&
+        original.annotation.alignment.mode ==
+            replacement.annotation.alignment.mode &&
+        original.annotation.alignment.target ==
+            replacement.annotation.alignment.target &&
         original.annotation.missing.semantic ==
             replacement.annotation.missing.semantic &&
         original.annotation.missing.value ==
@@ -173,6 +181,10 @@ bool KnownDocumentGenerationMatches(
         expected.source.roster.sample_names !=
             actual.source.roster.sample_names ||
         expected.annotation.kind != actual.annotation.kind ||
+        expected.annotation.alignment.mode !=
+            actual.annotation.alignment.mode ||
+        expected.annotation.alignment.target !=
+            actual.annotation.alignment.target ||
         expected.annotation.missing.semantic !=
             actual.annotation.missing.semantic ||
         expected.annotation.missing.value !=

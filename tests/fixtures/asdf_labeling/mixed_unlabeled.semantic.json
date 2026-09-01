@@ -16,6 +16,8 @@
     "sample-5.fits"
   ],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "24ca0054-92db-442b-83c0-9e78b9f8f2cb",

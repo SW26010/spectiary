@@ -413,6 +413,22 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
             fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedAnnotationKind);
     }
+    if (document.annotation.alignment.mode !=
+        kSampleLabelingDocumentByIndexAlignmentMode) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::
+                UnsupportedAnnotationAlignmentMode);
+    }
+    if (document.annotation.alignment.target !=
+        kSampleLabelingDocumentSampleRosterAlignmentTarget) {
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::
+                UnsupportedAnnotationAlignmentTarget);
+    }
     if (document.annotation.missing.semantic !=
         kSampleLabelingDocumentUnlabeledSemantic) {
         AddIssue(

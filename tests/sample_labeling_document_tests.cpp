@@ -185,8 +185,17 @@ void TestBuildSeparatesCanonicalDocumentFromTaskSessionState()
     Require(
         document.source.roster.identity_kind ==
                 specforge::kSampleLabelingDocumentExplicitNamesRoster &&
-            document.source.roster.sample_names[1] == "类星体β",
-        "builder should preserve the canonical Unicode source roster");
+            document.source.roster.sample_names[0] == "星系一" &&
+            document.source.roster.sample_names[1] == "类星体β" &&
+            document.source.roster.sample_names[2] == "échelle-γ" &&
+            document.annotation.alignment.mode ==
+                specforge::kSampleLabelingDocumentByIndexAlignmentMode &&
+            document.annotation.alignment.target ==
+                specforge::
+                    kSampleLabelingDocumentSampleRosterAlignmentTarget &&
+            document.annotation.values ==
+                std::vector<std::int32_t>({0, -1, 1}),
+        "explicit-names values[i] should align with sample_roster.names[i]");
     Require(
         document.annotation.values == std::vector<std::int32_t>({0, -1, 1}),
         "builder should copy only canonical annotation values");
@@ -290,8 +299,15 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
     Require(
         document.source.roster.identity_kind ==
                 specforge::kSampleLabelingDocumentSourceIndexRoster &&
-            document.source.roster.sample_names.empty(),
-        "unnamed sources should declare source-index identity without a redundant index array");
+            document.source.roster.sample_names.empty() &&
+            document.annotation.alignment.mode ==
+                specforge::kSampleLabelingDocumentByIndexAlignmentMode &&
+            document.annotation.alignment.target ==
+                specforge::
+                    kSampleLabelingDocumentSampleRosterAlignmentTarget &&
+            document.annotation.values[0] == -1 &&
+            document.annotation.values[1] == 0,
+        "source-index values[i] should align with source index i without a redundant index array");
     Require(
         specforge::ValidateSampleLabelingDocument(document).valid(),
         "source-index roster should be semantically valid");
@@ -383,6 +399,24 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
             index_result,
             specforge::SampleLabelingDocumentValidationIssueKind::SourceIndexRosterHasNames),
         "source-index rosters must not carry materialized names");
+
+    document = ValidDocument();
+    document.annotation.alignment.mode = "by_key";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                UnsupportedAnnotationAlignmentMode),
+        "schema 2.0 must reject alignment modes other than by_index");
+
+    document = ValidDocument();
+    document.annotation.alignment.target = "source_collection";
+    Require(
+        HasIssue(
+            specforge::ValidateSampleLabelingDocument(document),
+            specforge::SampleLabelingDocumentValidationIssueKind::
+                UnsupportedAnnotationAlignmentTarget),
+        "schema 2.0 must reject alignment targets other than sample_roster");
 }
 
 void TestValidatorEnforcesLabelAndUnlabeledInvariants()

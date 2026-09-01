@@ -21,6 +21,10 @@ inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
 inline constexpr std::string_view kSampleLabelingDocumentSchemaVersion = "2.0.0";
 inline constexpr std::string_view kSampleLabelingDocumentCategoricalIntegerKind =
     "categorical_integer";
+inline constexpr std::string_view kSampleLabelingDocumentByIndexAlignmentMode =
+    "by_index";
+inline constexpr std::string_view kSampleLabelingDocumentSampleRosterAlignmentTarget =
+    "sample_roster";
 inline constexpr std::string_view kSampleLabelingDocumentUnlabeledSemantic = "unlabeled";
 inline constexpr std::string_view kSampleLabelingDocumentExplicitNamesRoster =
     "explicit_names";
@@ -52,9 +56,19 @@ struct SampleLabelingDocumentMissingValue {
     std::int32_t value = kSampleLabelingDocumentUnlabeledValue;
 };
 
+// Schema 2.0 has exactly one alignment contract. This self-description is not
+// an extensible runtime alignment strategy.
+struct SampleLabelingDocumentAlignment {
+    std::string mode =
+        std::string{kSampleLabelingDocumentByIndexAlignmentMode};
+    std::string target =
+        std::string{kSampleLabelingDocumentSampleRosterAlignmentTarget};
+};
+
 struct SampleLabelingDocumentAnnotation {
     std::string kind =
         std::string{kSampleLabelingDocumentCategoricalIntegerKind};
+    SampleLabelingDocumentAlignment alignment;
     SampleLabelingDocumentMissingValue missing;
     // The element type and vector shape are the canonical int32/[sample_count]
     // value contract.  A codec may represent this as a typed ndarray without
@@ -101,6 +115,8 @@ enum class SampleLabelingDocumentValidationIssueKind {
     EmptySampleName,
     DuplicateSampleName,
     UnsupportedAnnotationKind,
+    UnsupportedAnnotationAlignmentMode,
+    UnsupportedAnnotationAlignmentTarget,
     UnsupportedMissingSemantic,
     InvalidUnlabeledValue,
     AnnotationSampleCountMismatch,

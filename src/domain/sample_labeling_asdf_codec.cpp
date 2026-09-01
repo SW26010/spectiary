@@ -116,6 +116,8 @@ void AppendIdentityDigestField(StableSha256& digest,
         AppendIdentityDigestField(digest, sample_name);
     }
     AppendIdentityDigestField(digest, document.annotation.kind);
+    AppendIdentityDigestField(digest, document.annotation.alignment.mode);
+    AppendIdentityDigestField(digest, document.annotation.alignment.target);
     AppendIdentityDigestField(digest, document.labeling.id);
     const SampleLabelingTaskCanonicalMetadata& metadata =
         document.labeling.canonical_metadata;
@@ -1105,6 +1107,43 @@ template <typename Value>
     return node.Scalar();
 }
 
+[[nodiscard]] std::string RequiredAlignmentStringScalar(
+    const YAML::Node& alignment,
+    std::string_view key,
+    CanonicalMaterializationBudget& materialization_budget)
+{
+    const YAML::Node node = alignment[std::string(key)];
+    if (!node.IsDefined() || !IsYamlStringScalar(node)) {
+        Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+            "annotation alignment field must be a string: " +
+                std::string(key));
+    }
+    materialization_budget.AccountString(node.Scalar().size());
+    return node.Scalar();
+}
+
+void ParseAnnotationAlignment(const YAML::Node& annotation,
+    SampleLabelingDocumentAlignment& parsed_alignment,
+    CanonicalMaterializationBudget& materialization_budget)
+{
+    const YAML::Node alignment = annotation["alignment"];
+    if (!alignment.IsDefined() || !alignment.IsMap()) {
+        Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+            "annotation.alignment must be a map");
+    }
+    parsed_alignment.mode = RequiredAlignmentStringScalar(
+        alignment, "mode", materialization_budget);
+    parsed_alignment.target = RequiredAlignmentStringScalar(
+        alignment, "target", materialization_budget);
+    if (parsed_alignment.mode !=
+            kSampleLabelingDocumentByIndexAlignmentMode ||
+        parsed_alignment.target !=
+            kSampleLabelingDocumentSampleRosterAlignmentTarget) {
+        Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+            "annotation alignment must be by_index against sample_roster");
+    }
+}
+
 [[nodiscard]] bool HasProfileTag(const YAML::Node& node,
     std::string_view expected)
 {
@@ -1296,6 +1335,9 @@ struct ProfilePreflight {
         parsed.document.annotation.kind =
             RequiredScalar<std::string>(
                 annotation, "kind", &materialization_budget);
+        ParseAnnotationAlignment(annotation,
+            parsed.document.annotation.alignment,
+            materialization_budget);
         if (annotation["name"]) {
             Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
                 "annotation.name is not a schema 2.0 field");
@@ -1716,6 +1758,10 @@ void ValidateDocumentText(const SampleLabelingDocument& document)
         }
     }
     RequireUtf8(document.annotation.kind, "annotation.kind");
+    RequireUtf8(
+        document.annotation.alignment.mode, "annotation.alignment.mode");
+    RequireUtf8(
+        document.annotation.alignment.target, "annotation.alignment.target");
     RequireUtf8(
         document.annotation.missing.semantic, "annotation.missing.semantic");
     RequireUtf8(document.labeling.id, "labeling_task.id");
@@ -2159,6 +2205,10 @@ void EmitMetadata(std::ostream& metadata,
     }
     metadata << "annotation:\n  kind: ";
     WriteQuotedYaml(metadata, document.annotation.kind);
+    metadata << "\n  alignment:\n    mode: ";
+    WriteQuotedYaml(metadata, document.annotation.alignment.mode);
+    metadata << "\n    target: ";
+    WriteQuotedYaml(metadata, document.annotation.alignment.target);
     metadata << "\n  values: !core/ndarray-1.0.0\n"
              << "    source: " << values_source << "\n"
              << "    datatype: int32\n"
@@ -2499,6 +2549,9 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     YAML::Node annotation = MapNodeOrNew(root, "annotation");
     SetYamlString(annotation, "kind", document.annotation.kind);
     annotation.remove("name");
+    YAML::Node alignment = MapNodeOrNew(annotation, "alignment");
+    SetYamlString(alignment, "mode", document.annotation.alignment.mode);
+    SetYamlString(alignment, "target", document.annotation.alignment.target);
     YAML::Node values = MapNodeOrNew(annotation, "values");
     SetCanonicalArrayDescriptor(values,
         explicit_roster ? 1U : 0U,
@@ -2616,6 +2669,8 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     account(document.source.fingerprint);
     account(document.source.roster.identity_kind);
     account(document.annotation.kind);
+    account(document.annotation.alignment.mode);
+    account(document.annotation.alignment.target);
     account(document.annotation.missing.semantic);
     account(document.labeling.id);
     account(document.labeling.name);

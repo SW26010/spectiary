@@ -20,7 +20,9 @@ document: task IDs are
 lowercase UUID v4 values; task timestamps use fixed millisecond UTC text; task
 origin, optional description, and optional authors round-trip through the Python
 and native readers/writers; empty authors remain absent, and `annotation.name`
-is rejected. Promoted annotation provenance names must be portable basenames:
+is rejected. Every annotation declares the fixed schema-2 alignment contract
+`mode: by_index` against `target: sample_roster`; alignment-less or differently
+aligned schema-2 documents are rejected. Promoted annotation provenance names must be portable basenames:
 `.`/`..`, path separators, and ASCII drive prefixes are rejected by both
 oracles. The native reader
 also enforces real calendar dates, origin shape/format, and exact optional

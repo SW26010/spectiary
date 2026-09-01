@@ -194,6 +194,10 @@ specforge::JsonValue SemanticSummary(
              document.source.roster.identity_kind)},
         {"sample_names", std::move(sample_names)},
         {"annotation_kind", specforge::JsonStringValue(document.annotation.kind)},
+        {"alignment_mode", specforge::JsonStringValue(
+             document.annotation.alignment.mode)},
+        {"alignment_target", specforge::JsonStringValue(
+             document.annotation.alignment.target)},
         {"missing_semantic", specforge::JsonStringValue(
              document.annotation.missing.semantic)},
         {"missing_value", specforge::JsonIntegerValue(
@@ -688,6 +692,9 @@ void WriteYamlAliasAmplificationFixture(
              << "  identity_kind: \"source_index\"\n"
              << "annotation:\n"
              << "  kind: \"categorical_integer\"\n"
+             << "  alignment:\n"
+             << "    mode: \"by_index\"\n"
+             << "    target: \"sample_roster\"\n"
              << "  values: !core/ndarray-1.0.0\n"
              << "    source: 0\n"
              << "    datatype: int32\n"
@@ -1041,6 +1048,58 @@ void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
     std::error_code cleanup_error;
     std::filesystem::remove(legacy_schema_path, cleanup_error);
     std::filesystem::remove(reserved_name_path, cleanup_error);
+}
+
+void TestSchemaTwoRequiresFixedAnnotationAlignment()
+{
+    constexpr std::string_view canonical_alignment =
+        "  alignment:\n"
+        "    mode: \"by_index\"\n"
+        "    target: \"sample_roster\"\n";
+    struct AlignmentCase {
+        std::string_view name;
+        std::string_view replacement;
+    };
+    constexpr std::array cases{
+        AlignmentCase{"missing-alignment", ""},
+        AlignmentCase{"alignment-wrong-type", "  alignment: []\n"},
+        AlignmentCase{"missing-mode",
+            "  alignment:\n    target: \"sample_roster\"\n"},
+        AlignmentCase{"missing-target",
+            "  alignment:\n    mode: \"by_index\"\n"},
+        AlignmentCase{"mode-wrong-type",
+            "  alignment:\n    mode: 123\n    target: \"sample_roster\"\n"},
+        AlignmentCase{"target-wrong-type",
+            "  alignment:\n    mode: \"by_index\"\n    target: true\n"},
+        AlignmentCase{"unknown-mode",
+            "  alignment:\n    mode: \"by_key\"\n    target: \"sample_roster\"\n"},
+        AlignmentCase{"unknown-target",
+            "  alignment:\n    mode: \"by_index\"\n    target: \"source_collection\"\n"},
+    };
+
+    for (const AlignmentCase& test_case : cases) {
+        const std::filesystem::path path =
+            TempPath("_" + std::string(test_case.name) + ".asdf");
+        Require(
+            WriteDocument(path, ProductionDocument()).succeeded(),
+            "alignment rejection fixture should start from a valid schema 2 document");
+        std::vector<unsigned char> bytes = ReadAllBytes(path);
+        ReplaceTextOnce(bytes, canonical_alignment, test_case.replacement);
+        WriteAllBytes(path, bytes);
+
+        const specforge::SampleLabelingAsdfReadResult read =
+            specforge::ReadSampleLabelingAsdfDocument(path);
+        Require(
+            !read.succeeded() &&
+                read.error.kind ==
+                    specforge::SampleLabelingAsdfErrorKind::
+                        SemanticValidationFailed,
+            std::string("invalid annotation alignment should return a controlled semantic error: ") +
+                std::string(test_case.name));
+
+        std::error_code cleanup_error;
+        std::filesystem::remove(path, cleanup_error);
+    }
 }
 
 void TestRejectsMalformedCorruptAndUnsupportedInputs()
@@ -1743,6 +1802,12 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
             text.find("datatype: int32") != std::string::npos &&
             text.find("byteorder: little") != std::string::npos,
         "writer should pin core tags, UCS-4/int32 arrays, and little endian");
+    Require(
+        text.find(
+            "  alignment:\n"
+            "    mode: \"by_index\"\n"
+            "    target: \"sample_roster\"\n") != std::string::npos,
+        "writer should explicitly declare by-index alignment against the sample roster");
     Require(
         text.find(
             "asdf_library: !core/software-1.0.0 {name: SpecForge, version: "
@@ -3160,6 +3225,7 @@ int main(int argc, char* argv[])
         TestReadsApprovedPythonFixtures();
         TestRejectsManifestSemanticViolationsWithControlledErrors();
         TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName();
+        TestSchemaTwoRequiresFixedAnnotationAlignment();
         TestRejectsMalformedCorruptAndUnsupportedInputs();
         TestRejectsNdarrayMaskProfile();
         TestWriterRejectsRosterNulBeforeOutput();

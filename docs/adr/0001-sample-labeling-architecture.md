@@ -51,6 +51,7 @@ The canonical document keeps these concepts independent:
 | Task name | Persistently editable UTF-8 canonical metadata. It must contain non-whitespace text, is neither trimmed nor normalized, and is not an identity. |
 | Output filename | User-selected shell/filesystem state. A sanitized task-name suggestion is presentation policy only; selecting or later renaming a file does not change task identity or task name. |
 | SpecForge schema version | Exactly `schema_version: 2.0.0` for current documents. |
+| Annotation alignment | Required `annotation.alignment` declaration with exactly `mode: by_index` and `target: sample_roster`; values follow roster/source index order. |
 | ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not SpecForge schema versions. |
 
 Canonical time is a millisecond-resolution strong time point in the runtime and
@@ -78,6 +79,13 @@ plus optional `identifier` and optional `email`. Every present author field is
 non-whitespace UTF-8 text. Email is preserved exactly as user-supplied contact
 metadata; it is not parsed as an RFC address, normalized, or inferred from Git,
 the operating system, or other machine-local state.
+
+Schema 2.0 explicitly declares its only annotation alignment contract. For an
+`explicit_names` roster, `values[i]` labels `names[i]`; for a `source_index`
+roster, `values[i]` labels source index `i`. Readers reject a missing or
+ill-typed alignment map and any mode/target other than `by_index` and
+`sample_roster`. This is a fixed self-description field, not an extensible
+`by_id`/`by_key` alignment subsystem.
 
 Full and values-only rewrites must start from the validated durable generation
 of the same source, roster, annotation, and task. The preservation contract is

@@ -12,6 +12,8 @@
     "future-b"
   ],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "69172623-7fee-4a76-881c-d0f8c4758df2",

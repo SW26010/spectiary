@@ -13,6 +13,8 @@
     "charlie.csv"
   ],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "7e0f2781-f52c-47be-8eb2-b5a71ba9846a",

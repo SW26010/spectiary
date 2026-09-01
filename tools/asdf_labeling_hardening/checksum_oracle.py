@@ -94,6 +94,7 @@ def _production_tree(*, include_unknown: bool = False) -> dict[str, Any]:
         },
         "annotation": {
             "kind": "categorical_integer",
+            "alignment": {"mode": "by_index", "target": "sample_roster"},
             "values": np.asarray([-1, 0, 1], dtype=np.int32),
             "missing": {"semantic": "unlabeled", "value": -1},
         },
@@ -140,6 +141,8 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
         "roster_identity_kind": str(roster["identity_kind"]),
         "sample_names": _string_list(roster["names"]),
         "annotation_kind": str(annotation["kind"]),
+        "alignment_mode": str(annotation["alignment"]["mode"]),
+        "alignment_target": str(annotation["alignment"]["target"]),
         "missing_semantic": str(annotation["missing"]["semantic"]),
         "missing_value": int(annotation["missing"]["value"]),
         "task_id": str(task["id"]),

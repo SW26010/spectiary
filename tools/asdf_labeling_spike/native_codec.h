@@ -44,6 +44,8 @@ struct LabelingDocument {
     std::string roster_identity_kind;
     std::vector<std::string> sample_names;
     std::string annotation_kind;
+    std::string alignment_mode;
+    std::string alignment_target;
     std::string missing_semantic;
     std::int32_t missing_value = kUnlabeled;
     std::string task_id;

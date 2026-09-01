@@ -249,6 +249,9 @@ the same cycle:
 ```yaml
 annotation:
   kind: categorical_integer
+  alignment:
+    mode: by_index
+    target: sample_roster
   values: !core/ndarray-1.0.0
     source: 1
     datatype: int32

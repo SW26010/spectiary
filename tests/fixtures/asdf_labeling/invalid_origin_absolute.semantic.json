@@ -9,6 +9,8 @@
   "roster_identity_kind": "source_index",
   "sample_names": [],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "25b2e410-2a1a-4734-b4e6-eea9c3f4cdcc",

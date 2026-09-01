@@ -13,6 +13,8 @@
     "gamma.fits"
   ],
   "annotation_kind": "categorical_integer",
+  "alignment_mode": "by_index",
+  "alignment_target": "sample_roster",
   "missing_semantic": "unlabeled",
   "missing_value": -1,
   "task_id": "97ad8f83-f84a-4b9d-9a87-6351540c5829",
