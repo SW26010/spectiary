@@ -155,7 +155,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-release-static `
-            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest-release" -SuiteTimeoutSec 600 -TestTimeoutSec 180
+            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest-release" -SuiteTimeoutSec 600 -TestTimeoutSec 300
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release native/headless CTest gate failed with exit code $LASTEXITCODE."
           }

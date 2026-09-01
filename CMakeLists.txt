@@ -1109,7 +1109,11 @@ set_tests_properties(
     PROPERTIES
         LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
-        TIMEOUT 180
+        # Hosted Windows runners pay substantial startup cost for the many
+        # isolated PowerShell validation cases in this test. Keep the test
+        # bounded, but leave enough margin over the observed 180-second CI
+        # timeout; the enclosing Release suite still has a 600-second budget.
+        TIMEOUT 300
 )
 add_test(
     NAME specforge_portable_pe_contract_tests
