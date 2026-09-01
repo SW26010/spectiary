@@ -152,5 +152,44 @@
       "name": "ninja-msvc-release-static-asdf-labeling-hardening",
       "configurePreset": "ninja-msvc-release-static-asdf-labeling-hardening"
     }
+  ],
+  "testPresets": [
+    {
+      "name": "fast",
+      "displayName": "Fast developer tests",
+      "description": "Run the deterministic developer feedback suite.",
+      "configurePreset": "ninja-msvc-debug",
+      "filter": {
+        "include": {
+          "label": "^fast$"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "extended",
+      "displayName": "Extended developer tests",
+      "description": "Run the broader headless developer verification suite.",
+      "configurePreset": "ninja-msvc-debug",
+      "filter": {
+        "include": {
+          "label": "^extended$"
+        },
+        "exclude": {
+          "label": "^(real-gui|gui-integration|release|periodic|asdf-pinned-oracle)$"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
   ]
 }

@@ -587,6 +587,13 @@ add_custom_target(specforge_metadata
 
 enable_testing()
 
+function(specforge_set_test_tier test_name tier)
+    if(NOT tier STREQUAL "fast" AND NOT tier STREQUAL "extended")
+        message(FATAL_ERROR "Unknown CTest tier '${tier}' for ${test_name}")
+    endif()
+    set_property(TEST "${test_name}" APPEND PROPERTY LABELS "${tier}")
+endfunction()
+
 if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
     add_subdirectory(tools/asdf_labeling_spike)
 endif()
@@ -1589,4 +1596,126 @@ specforge_add_test(
     specforge_spectral_lines_panel_controller_tests
     tests/spectral_lines_panel_controller_tests.cpp
     specforge_sessions
+)
+
+add_test(
+    NAME specforge_ctest_tier_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/ctest_tier_contract_tests.ps1"
+        -BuildDirectory "${CMAKE_BINARY_DIR}"
+        -PresetsFile "${CMAKE_SOURCE_DIR}/CMakePresets.json"
+        -SourceDirectory "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(
+    specforge_ctest_tier_contract_tests
+    PROPERTIES
+        TIMEOUT 30
+)
+
+# Keep the developer feedback model intentionally small: every root test must
+# belong to exactly one of these two explicit lists. The contract test validates
+# the configured CTest model so a new unclassified test fails visibly.
+set(SPECFORGE_FAST_TESTS
+    specforge_sdr_swap_chain_tests
+    specforge_win32_application_icon_tests
+    specforge_local_user_state_tests
+    specforge_portable_runtime_state_tests
+    specforge_render_wake_scheduler_tests
+    specforge_imgui_layout_persistence_tests
+    specforge_automation_control_tests
+    specforge_automation_panel_command_coordinator_tests
+    specforge_automation_state_isolation_tests
+    specforge_automation_samples_contract_tests
+    specforge_automation_ci_contract_tests
+    specforge_on_demand_frame_capture_tests
+    specforge_profile_recording_ui_state_tests
+    specforge_top_bar_status_layout_tests
+    specforge_top_bar_status_hover_tests
+    specforge_profile_sink_tests
+    specforge_profile_settings_tests
+    specforge_navigation_latency_trace_tests
+    specforge_source_load_latency_trace_tests
+    specforge_metadata_tests
+    specforge_metadata_finalizer_tests
+    specforge_atomic_file_tests
+    specforge_embedded_legal_documents_tests
+    specforge_build_ninja_msvc_debug_watchdog_tests
+    specforge_runtime_resource_workload_tests
+    specforge_runtime_resource_stability_runner_tests
+    specforge_panel_session_render_architecture_tests
+    specforge_production_target_dependency_architecture_tests
+    specforge_imgui_viewport_policy_architecture_tests
+    specforge_win32_compositor_clock_tests
+    specforge_win32_message_wait_tests
+    specforge_win32_process_launcher_tests
+    specforge_loader_tests
+    specforge_fits_file_reader_tests
+    specforge_source_open_resolution_tests
+    specforge_sample_navigation_controller_tests
+    specforge_sample_navigation_sequence_tests
+    specforge_sample_workflow_shortcut_tests
+    specforge_sample_labeling_filename_tests
+    specforge_source_collection_panel_tests
+    specforge_panel_session_interaction_tests
+    specforge_sample_workflow_rules_tests
+    specforge_sample_name_autocomplete_tests
+    specforge_sample_label_export_tests
+    specforge_sample_annotation_csv_tests
+    specforge_csv_record_codec_tests
+    specforge_labeling_primitives_tests
+    specforge_sample_labeling_document_tests
+    specforge_sample_labeling_asdf_codec_tests
+    specforge_sample_labeling_asdf_store_tests
+    specforge_sample_labeling_asdf_mutation_tests
+    specforge_source_collection_session_tests
+    specforge_source_collection_load_queue_tests
+    specforge_source_collection_preparation_tests
+    specforge_source_collection_activation_transaction_tests
+    specforge_spectrum_smoothing_tests
+    specforge_plot_touchpad_gesture_tests
+    specforge_series_color_tests
+    specforge_spectral_line_label_layout_tests
+    specforge_scientific_label_tests
+    specforge_application_settings_tests
+    specforge_native_window_title_tests
+    specforge_ui_font_glyph_ranges_tests
+    specforge_ui_text_tests
+    specforge_ui_scale_settings_tests
+    specforge_theme_tests
+    specforge_ui_scale_runtime_architecture_tests
+    specforge_native_window_title_architecture_tests
+    specforge_spectrum_view_session_tests
+    specforge_spectral_line_catalog_tests
+    specforge_spectral_line_user_state_tests
+    specforge_ctest_tier_contract_tests
+)
+set(SPECFORGE_EXTENDED_TESTS
+    specforge_automation_launcher_integration_tests
+    specforge_imgui_viewport_ownership_integration_tests
+    specforge_automation_samples_tests
+    specforge_multi_instance_labeling_smoke_tests
+    specforge_runtime_resource_stability
+    specforge_metadata_build_regression_tests
+    specforge_release_artifacts_tests
+    specforge_portable_pe_contract_tests
+    specforge_release_workflow_structure_contract_tests
+    specforge_release_configured_build_contract_tests
+    specforge_application_icon_tests
+    specforge_head_snapshot_build_tests
+    specforge_settings_panel_tests
+    specforge_analyze_profile_tests
+    specforge_analyze_navigation_profile_tests
+    specforge_analyze_source_load_profile_tests
+    specforge_sample_labeling_filter_tests
+    specforge_sample_labeling_asdf_store_property_tests
+    specforge_shell_source_load_activation_tests
+    specforge_spectral_lines_panel_controller_tests
+)
+set_property(
+    TEST ${SPECFORGE_FAST_TESTS}
+    APPEND PROPERTY LABELS fast
+)
+set_property(
+    TEST ${SPECFORGE_EXTENDED_TESTS}
+    APPEND PROPERTY LABELS extended
 )
