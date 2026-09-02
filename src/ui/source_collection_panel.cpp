@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <limits>
 #include <optional>
 #include <string>
@@ -29,6 +30,34 @@ constexpr const char* kSampleNavigationSourceInput =
     "##SampleNavigationSample";
 constexpr const char* kSampleNavigationSequenceInput =
     "##SampleNavigationSequence";
+
+template <typename... Args>
+std::string FormatUiText(
+    UiLanguage language,
+    UiTextId text_id,
+    Args... args)
+{
+    const std::string_view format =
+        UiText(language, text_id);
+    const int required = std::snprintf(
+        nullptr,
+        0,
+        format.data(),
+        args...);
+    if (required <= 0) {
+        return std::string(format);
+    }
+
+    std::string result(
+        static_cast<std::size_t>(required),
+        '\0');
+    (void)std::snprintf(
+        result.data(),
+        result.size() + 1,
+        format.data(),
+        args...);
+    return result;
+}
 
 struct NavigationNumberInputCharacterCapture {
     std::string value;
@@ -1533,6 +1562,7 @@ void SourceCollectionPanelUi::SyncAnnotationDiagnosticSource(
     }
     annotation_diagnostic_source_identity_ =
         source_identity;
+    pending_missing_local_annotation_removal_.reset();
     dismissed_annotation_diagnostic_keys_.clear();
     annotation_import_prior_diagnostic_keys_.clear();
 }
@@ -1544,6 +1574,8 @@ void SourceCollectionPanelUi::RenderAnnotations(
     const SourceCollectionPathPicker& choose_annotation_file)
 {
     annotation_add_file_rect_.reset();
+    annotation_remove_rects_.clear();
+    missing_local_annotation_remove_confirm_rect_.reset();
     annotation_diagnostic_dismiss_rects_.clear();
     const SourceCollectionSessionView& session_view =
         interaction.View();
@@ -1646,12 +1678,28 @@ void SourceCollectionPanelUi::RenderAnnotations(
         }
     }
 
+    const std::string remove_missing_local_popup =
+        StableUiLabel(
+            language,
+            UiTextId::DeleteLabelingTaskQuestion,
+            "SpecForgeRemoveMissingLocalLabelingTask");
+
     if (navigation.current_annotations.empty()) {
+        pending_missing_local_annotation_removal_.reset();
+        if (ImGui::BeginPopupModal(
+                remove_missing_local_popup.c_str(),
+                nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
         RenderDisabledText(
             UiText(language, UiTextId::NoReadOnlyAnnotations));
         ImGui::End();
         return;
     }
+
+    bool open_missing_local_popup = false;
 
     if (ImGui::BeginTable(
             "sample_annotations",
@@ -1796,11 +1844,29 @@ void SourceCollectionPanelUi::RenderAnnotations(
             if (annotation.can_remove_annotation) {
                 const ImRect remove_cell =
                     ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                annotation_remove_rects_.push_back({
+                    remove_cell.Min.x,
+                    remove_cell.Min.y,
+                    remove_cell.Max.x,
+                    remove_cell.Max.y});
                 if (TrashIconButton(
                         "remove_annotation",
                         remove_cell,
                         language)) {
-                    annotation_to_remove = annotation.path;
+                    if (annotation.relationship ==
+                            SampleAnnotationWorkflowRelationship::
+                                LocalLabelingTask &&
+                        annotation.output_missing) {
+                        pending_missing_local_annotation_removal_ =
+                            MissingLocalAnnotationRemoval{
+                                .path = annotation.path,
+                                .name = annotation.name,
+                                .source_identity = source_identity,
+                            };
+                        open_missing_local_popup = true;
+                    } else {
+                        annotation_to_remove = annotation.path;
+                    }
                 }
             }
             ImGui::PopID();
@@ -1821,6 +1887,87 @@ void SourceCollectionPanelUi::RenderAnnotations(
                     std::move(annotation_to_rename->first),
                     std::move(annotation_to_rename->second)));
         }
+    }
+
+    if (open_missing_local_popup) {
+        ImGui::OpenPopup(
+            remove_missing_local_popup.c_str());
+    }
+
+    if (ImGui::BeginPopupModal(
+            remove_missing_local_popup.c_str(),
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (pending_missing_local_annotation_removal_) {
+            const std::string message = FormatUiText(
+                language,
+                UiTextId::DeleteLocalTaskMessage,
+                pending_missing_local_annotation_removal_->name.c_str());
+            ImGui::TextWrapped("%s", message.c_str());
+
+            const std::string confirm_label = StableUiLabel(
+                language,
+                UiTextId::DeleteTask,
+                "SpecForgeConfirmRemoveMissingLocalLabelingTask");
+            const bool confirmed = ImGui::Button(
+                confirm_label.c_str());
+            const ImVec2 confirm_min = ImGui::GetItemRectMin();
+            const ImVec2 confirm_max = ImGui::GetItemRectMax();
+            missing_local_annotation_remove_confirm_rect_ = {
+                confirm_min.x,
+                confirm_min.y,
+                confirm_max.x,
+                confirm_max.y};
+
+            ImGui::SameLine();
+            const std::string cancel_label = StableUiLabel(
+                language,
+                UiTextId::Cancel,
+                "SpecForgeCancelRemoveMissingLocalLabelingTask");
+            const bool canceled = ImGui::Button(
+                cancel_label.c_str());
+
+            if (confirmed) {
+                const MissingLocalAnnotationRemoval pending =
+                    *pending_missing_local_annotation_removal_;
+                const SourceCollectionSessionView& latest =
+                    interaction.View();
+                const bool still_removable =
+                    ActiveAnnotationSourceIdentity(latest) ==
+                        pending.source_identity &&
+                    std::any_of(
+                        latest.navigation.current_annotations.begin(),
+                        latest.navigation.current_annotations.end(),
+                        [&pending](
+                            const SourceCollectionAnnotationValueView&
+                                annotation) {
+                            return annotation.path == pending.path &&
+                                annotation.relationship ==
+                                    SampleAnnotationWorkflowRelationship::
+                                        LocalLabelingTask &&
+                                annotation.output_missing &&
+                                annotation.can_remove_annotation;
+                        });
+                if (still_removable) {
+                    (void)interaction.Submit(
+                        EditSourceCollection(
+                            SourceCollectionIntent::
+                                RemoveReadOnlyAnnotationResult(
+                                    pending.path)));
+                }
+                pending_missing_local_annotation_removal_.reset();
+                ImGui::CloseCurrentPopup();
+            } else if (canceled) {
+                pending_missing_local_annotation_removal_.reset();
+                ImGui::CloseCurrentPopup();
+            }
+        } else {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(
+                   remove_missing_local_popup.c_str())) {
+        pending_missing_local_annotation_removal_.reset();
     }
 
     ImGui::End();

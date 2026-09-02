@@ -4430,7 +4430,8 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
             owner.output_missing &&
             !owner.missing &&
             owner.display_text.empty() &&
-            owner.can_activate_labeling &&
+            !owner.can_activate_labeling &&
+            owner.can_remove_annotation == !corrupt_owner &&
             !owner.can_filter_samples,
         "the unavailable canonical row must expose owner identity and missing-output state without projecting structural values");
     Require(
@@ -4451,6 +4452,49 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
                                 AnnotationIgnored;
             }),
         "the unavailable canonical row should retain its controlled attachment failure diagnostic");
+    if (!corrupt_owner) {
+        const specforge::SourceCollectionSessionResult abandoned =
+            Submit(
+                restored,
+                RemoveReadOnlyAnnotation(output_path));
+        Require(
+            abandoned.action.workflow_changed &&
+                restored.View().labeling.task_ids.empty() &&
+                restored.View().navigation.current_annotations.empty() &&
+                std::none_of(
+                    restored.View().navigation
+                        .annotation_diagnostics.begin(),
+                    restored.View().navigation
+                        .annotation_diagnostics.end(),
+                    [&output_path](
+                        const specforge::
+                            SourceCollectionManifestDiagnostic&
+                                diagnostic) {
+                        return diagnostic.path == output_path &&
+                            diagnostic.kind ==
+                                specforge::
+                                    SourceCollectionManifestDiagnosticKind::
+                                        AnnotationIgnored;
+                    }),
+            "removing a missing local owner row should abandon its task record and clear both the ghost annotation and its warning without requiring relink");
+        const specforge::SampleLabelingStateCacheLoadResult
+            abandoned_cache =
+                specforge::LoadSampleLabelingStateCache(
+                    labeling_cache,
+                    {},
+                    specforge::SampleLabelingStateCacheLoadPolicy::
+                        AllowPersistentOutputsWithoutResultHydration);
+        const auto abandoned_source =
+            abandoned_cache.cache.sources.find(
+                restored.View().labeling.source_identity);
+        Require(
+            abandoned_cache.issue_kind ==
+                    specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+                abandoned_source !=
+                    abandoned_cache.cache.sources.end() &&
+                abandoned_source->second.tasks.empty(),
+            "abandoning a missing owner should durably tombstone the local task record");
+    }
 }
 
 void TestUnavailableCanonicalOwnersRemainVisibleAfterRestart()
@@ -4542,6 +4586,12 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_quality_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_quality_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_quality_workflow.json");
     specforge::SampleLabelSet label_set;
     label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
     label_set.labels.push_back(specforge::SampleLabelDefinition{9, "good", 'g'});
@@ -4553,7 +4603,20 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         label_set,
         true);
     std::vector<std::size_t> loaded_indices;
-    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "local annotation task fixture should reload its source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(source_path, 3, spectrum_index);
+        },
+        {},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
@@ -4585,6 +4648,8 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "activated annotation should be shown as a local labeling task");
+    const std::string labeling_filter_source_id =
+        "labeling:" + session.View().labeling.task_id;
 
     result = Submit(session, RemoveReadOnlyAnnotation(annotation_path));
     Require(!result.action.workflow_changed, "removing an annotation should not delete the local task");
@@ -4594,6 +4659,84 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "remaining row should come from the local task record");
     Require(session.View().labeling.has_active_task, "removing an annotation should not remove the active local task");
+
+    Require(
+        Submit(session, DeactivateActiveLabelingTask())
+            .action.workflow_changed,
+        "the synthetic local task should pause before its output is removed externally");
+    Require(
+        Submit(
+            session,
+            AddSampleFilterSource(
+                labeling_filter_source_id))
+            .action.workflow_changed,
+        "the synthetic local task should be selectable as a filter source");
+    (void)Submit(
+        session,
+        SetFilterValueSelected(
+            labeling_filter_source_id,
+            "9",
+            true));
+    Require(
+        session.View().navigation.filter_active &&
+            session.View().navigation.filtered_sample_count == 1,
+        "the labeling filter should narrow the sequence before the task becomes missing");
+
+    std::error_code remove_error;
+    Require(
+        std::filesystem::remove(
+            annotation_path,
+            remove_error) &&
+            !remove_error,
+        "the local task fixture should simulate external output removal");
+
+    result = Submit(
+        session,
+        RemoveReadOnlyAnnotation(annotation_path));
+    const specforge::SourceCollectionSessionView abandoned_view =
+        session.View();
+    Require(
+        result.action.workflow_changed &&
+            abandoned_view.labeling.task_ids.empty() &&
+            abandoned_view.navigation.current_annotations.empty() &&
+            abandoned_view.filter.sources.empty() &&
+            !abandoned_view.navigation.filter_active &&
+            abandoned_view.navigation.filtered_sample_count == 3,
+        "abandoning a synthetic missing task should clear its labeling filter and immediately restore the unfiltered sequence");
+
+    Require(
+        session.FlushStateCaches(),
+        "abandoning the synthetic missing task should persist its workflow cleanup");
+    const specforge::SampleWorkflowStateCacheLoadResult workflow =
+        specforge::LoadSampleWorkflowStateCache(
+            workflow_cache);
+    const auto workflow_source =
+        workflow.cache.sources_by_identity.find(
+            abandoned_view.labeling.source_identity);
+    Require(
+        workflow.warning.empty() &&
+            (workflow_source ==
+                 workflow.cache.sources_by_identity.end() ||
+             (std::find(
+                  workflow_source->second
+                      .selected_filter_source_ids.begin(),
+                  workflow_source->second
+                      .selected_filter_source_ids.end(),
+                  labeling_filter_source_id) ==
+                  workflow_source->second
+                      .selected_filter_source_ids.end() &&
+              std::none_of(
+                  workflow_source->second
+                      .filter_conditions.begin(),
+                  workflow_source->second
+                      .filter_conditions.end(),
+                  [&labeling_filter_source_id](
+                      const specforge::SampleFilterCondition&
+                          condition) {
+                      return condition.source_id ==
+                          labeling_filter_source_id;
+                  }))),
+        "the persisted workflow should not retain a ghost labeling filter after task abandonment");
 }
 
 void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
@@ -4992,8 +5135,12 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path =
         UniqueTempPath("_standalone.asdf");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_standalone_navigation.json");
     const std::filesystem::path labeling_cache =
         UniqueTempPath("_standalone_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_standalone_workflow.json");
     TouchFile(source_path);
     std::vector<std::size_t> loaded_indices;
     PreparedSession session(
@@ -5007,9 +5154,9 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             return MakeSnapshot(source_path, 3, spectrum_index);
         },
         {},
-        UniqueTempPath("_standalone_navigation.json"),
+        navigation_cache,
         labeling_cache,
-        UniqueTempPath("_standalone_workflow.json"));
+        workflow_cache);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const specforge::SpectrumSnapshotHandle snapshot =
@@ -5188,6 +5335,326 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable,
         "an adopted task should retain its canonical edit ownership lease");
+
+    Require(
+        Submit(
+            session,
+            DeactivateActiveLabelingTask())
+            .action.workflow_changed,
+        "the canonical owner should pause before its output disappears");
+    std::error_code remove_error;
+    const bool removed_original_owner =
+        std::filesystem::remove(
+            annotation_path,
+            remove_error);
+    Require(
+        removed_original_owner && !remove_error,
+        "the original canonical owner fixture should be deleted externally");
+
+    const specforge::SourceCollectionSessionResult recovered_conflict =
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(
+                conflicting_path));
+    const specforge::SourceCollectionSessionView recovered_view =
+        session.View();
+    const auto recovered_owner = std::find_if(
+        recovered_view.navigation.current_annotations.begin(),
+        recovered_view.navigation.current_annotations.end(),
+        [&conflicting_path](
+            const specforge::SourceCollectionAnnotationValueView&
+                annotation) {
+            return annotation.path == conflicting_path;
+        });
+    Require(
+        recovered_conflict.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::None &&
+            recovered_view.labeling.has_active_task &&
+            recovered_view.labeling.output_path ==
+                conflicting_path &&
+            recovered_view.labeling.task_ids.size() == 1 &&
+            recovered_owner !=
+                recovered_view.navigation.current_annotations.end() &&
+            recovered_owner->relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    LocalLabelingTask &&
+            std::none_of(
+                recovered_view.navigation.current_annotations.begin(),
+                recovered_view.navigation.current_annotations.end(),
+                [&annotation_path](
+                    const specforge::
+                        SourceCollectionAnnotationValueView& annotation) {
+                    return annotation.path == annotation_path;
+                }) &&
+            std::none_of(
+                recovered_view.navigation.annotation_diagnostics.begin(),
+                recovered_view.navigation.annotation_diagnostics.end(),
+                [&annotation_path, &conflicting_path](
+                    const specforge::
+                        SourceCollectionManifestDiagnostic& diagnostic) {
+                    return diagnostic.kind ==
+                            specforge::
+                                SourceCollectionManifestDiagnosticKind::
+                                    AnnotationIgnored &&
+                        (diagnostic.path == annotation_path ||
+                         diagnostic.path == conflicting_path);
+                }),
+        "after owner A disappears, activating attached same-id B should adopt B as the unique local owner and safely retire A");
+
+    Require(
+        Submit(
+            session,
+            DeactivateActiveLabelingTask())
+            .action.workflow_changed,
+        "the recovered owner should pause before its output is moved");
+    Require(
+        session.FlushStateCaches(),
+        "the recovered owner attachment should flush before the moved-path restart");
+    const std::filesystem::path moved_path =
+        UniqueTempPath("_standalone_moved.asdf");
+    std::error_code move_error;
+    std::filesystem::rename(
+        conflicting_path,
+        moved_path,
+        move_error);
+    Require(
+        !move_error,
+        "canonical owner fixture should move to its replacement path");
+
+    std::vector<std::size_t> relinking_loads;
+    PreparedSession relinking(
+        [&relinking_loads, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "moved owner relink should reload its source");
+            relinking_loads.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                3,
+                spectrum_index);
+        },
+        {},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    (void)relinking.Open(
+        source_path,
+        0,
+        {conflicting_path});
+    Require(
+        std::any_of(
+            relinking.View().navigation
+                .annotation_diagnostics.begin(),
+            relinking.View().navigation
+                .annotation_diagnostics.end(),
+            [&conflicting_path](
+                const specforge::
+                    SourceCollectionManifestDiagnostic& diagnostic) {
+                return diagnostic.path == conflicting_path &&
+                    diagnostic.kind ==
+                        specforge::
+                            SourceCollectionManifestDiagnosticKind::
+                                AnnotationIgnored;
+            }),
+        "the moved-path restart should expose the old attachment warning before relink");
+    const specforge::SourceCollectionSessionResult imported =
+        Submit(
+            relinking,
+            AddReadOnlyAnnotation(moved_path));
+    Require(
+        imported.loaded,
+        "the moved canonical owner should attach as an imported annotation");
+    const specforge::SourceCollectionSessionView imported_view =
+        relinking.View();
+    const auto moved_annotation = std::find_if(
+        imported_view.navigation.current_annotations.begin(),
+        imported_view.navigation.current_annotations.end(),
+        [&moved_path](
+            const specforge::SourceCollectionAnnotationValueView&
+                annotation) {
+            return annotation.path == moved_path;
+        });
+    Require(
+        !imported_view.labeling.has_active_task &&
+            imported_view.labeling.task_ids.size() == 1 &&
+            moved_annotation !=
+                imported_view.navigation.current_annotations.end() &&
+            moved_annotation->relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    LocalLabelingTask &&
+            moved_annotation->can_activate_labeling &&
+            std::none_of(
+                imported_view.navigation.current_annotations.begin(),
+                imported_view.navigation.current_annotations.end(),
+                [&annotation_path, &conflicting_path](
+                    const specforge::SourceCollectionAnnotationValueView&
+                        annotation) {
+                    return annotation.path == annotation_path ||
+                        annotation.path == conflicting_path;
+                }) &&
+            std::none_of(
+                imported_view.navigation
+                    .annotation_diagnostics.begin(),
+                imported_view.navigation
+                    .annotation_diagnostics.end(),
+                [&annotation_path, &conflicting_path, &moved_path](
+                    const specforge::
+                        SourceCollectionManifestDiagnostic&
+                            diagnostic) {
+                    return diagnostic.kind ==
+                            specforge::
+                                SourceCollectionManifestDiagnosticKind::
+                                    AnnotationIgnored &&
+                        (diagnostic.path == annotation_path ||
+                         diagnostic.path == conflicting_path ||
+                         diagnostic.path == moved_path);
+                }),
+        "importing a moved same-id ASDF should immediately merge it into the missing local owner and clear the stale attachment warning");
+
+    Require(
+        relinking.FlushStateCaches(),
+        "the automatically relinked owner should flush before restart verification");
+    {
+        std::vector<std::size_t> restarted_loads;
+        PreparedSession restarted(
+            [&restarted_loads, source_path](
+                const std::filesystem::path& path,
+                std::size_t spectrum_index) {
+                Require(
+                    path == source_path,
+                    "relinked owner restart should reload its source");
+                restarted_loads.push_back(spectrum_index);
+                return MakeSnapshot(
+                    source_path,
+                    3,
+                    spectrum_index);
+            },
+            {},
+            navigation_cache,
+            labeling_cache,
+            workflow_cache);
+        (void)restarted.Open(
+            source_path,
+            0,
+            {moved_path});
+        const specforge::SourceCollectionSessionView restarted_view =
+            restarted.View();
+        const std::size_t restarted_local_count =
+            static_cast<std::size_t>(std::count_if(
+                restarted_view.navigation.current_annotations.begin(),
+                restarted_view.navigation.current_annotations.end(),
+                [](const specforge::
+                       SourceCollectionAnnotationValueView& annotation) {
+                    return annotation.relationship ==
+                        specforge::
+                            SampleAnnotationWorkflowRelationship::
+                                LocalLabelingTask;
+                }));
+        const auto restarted_owner = std::find_if(
+            restarted_view.navigation.current_annotations.begin(),
+            restarted_view.navigation.current_annotations.end(),
+            [&moved_path](
+                const specforge::SourceCollectionAnnotationValueView&
+                    annotation) {
+                return annotation.path == moved_path;
+            });
+        Require(
+            restarted_local_count == 1 &&
+                restarted_owner !=
+                    restarted_view.navigation.current_annotations.end() &&
+                restarted_owner->relationship ==
+                    specforge::
+                        SampleAnnotationWorkflowRelationship::
+                            LocalLabelingTask &&
+                restarted_owner->can_activate_labeling &&
+                std::none_of(
+                    restarted_view.navigation.current_annotations.begin(),
+                    restarted_view.navigation.current_annotations.end(),
+                    [&annotation_path, &conflicting_path](
+                        const specforge::
+                            SourceCollectionAnnotationValueView&
+                                annotation) {
+                        return annotation.path == annotation_path ||
+                            annotation.path == conflicting_path;
+                    }),
+            "after restart the replacement path should remain the unique activatable local owner and the old path should stay retired");
+
+        const specforge::SourceCollectionSessionResult
+            restarted_activation =
+                Submit(
+                    restarted,
+                    ActivateLabelingTaskFromAnnotation(
+                        moved_path));
+        Require(
+            restarted_activation.labeling_issue ==
+                    specforge::SampleLabelingOperationResult::
+                        Issue::None &&
+                restarted.View().labeling.has_active_task &&
+                restarted.View().labeling.output_path ==
+                    moved_path,
+            "the restarted replacement owner should activate directly without an external-annotation warning");
+        (void)Submit(
+            restarted,
+            DeactivateActiveLabelingTask());
+    }
+
+    const specforge::SourceCollectionSessionResult relinked =
+        Submit(
+            relinking,
+            ActivateLabelingTaskFromAnnotation(moved_path));
+    const specforge::SourceCollectionSessionView relinked_view =
+        relinking.View();
+    Require(
+        relinked.action.workflow_changed &&
+            relinked.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::None &&
+            relinked_view.labeling.has_active_task &&
+            relinked_view.labeling.task_id ==
+                "33333333-3333-4333-8333-333333333333" &&
+            relinked_view.labeling.output_path == moved_path &&
+            relinked_view.labeling.task_ids.size() == 1,
+        "the automatically relinked local owner should activate directly without external-annotation conversion");
+    Require(
+        std::none_of(
+            relinked_view.navigation.current_annotations.begin(),
+            relinked_view.navigation.current_annotations.end(),
+            [&annotation_path, &conflicting_path](
+                const specforge::SourceCollectionAnnotationValueView&
+                    annotation) {
+                return annotation.path == annotation_path ||
+                    annotation.path == conflicting_path;
+            }),
+        "successful relink should retire the missing old-path attachment row");
+
+    const specforge::SampleLabelingStateCacheLoadResult relinked_cache =
+        specforge::LoadSampleLabelingStateCache(
+            labeling_cache,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const auto relinked_source =
+        relinked_cache.cache.sources.find(identity.id);
+    Require(
+        relinked_cache.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+            relinked_source != relinked_cache.cache.sources.end() &&
+            relinked_source->second.tasks.size() == 1 &&
+            relinked_source->second.tasks.front().output_path ==
+                moved_path,
+        "automatic relink should durably replace the missing owner path");
+
+    const specforge::SourceCollectionSessionResult deleted =
+        Submit(
+            relinking,
+            DeleteActiveLabelingTask());
+    Require(
+        deleted.action.workflow_changed &&
+            !relinking.View().labeling.has_active_task &&
+            relinking.View().labeling.task_ids.empty() &&
+            std::filesystem::exists(moved_path),
+        "the relinked task should be deletable without deleting its ASDF result");
 }
 
 void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()

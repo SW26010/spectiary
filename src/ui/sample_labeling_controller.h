@@ -237,6 +237,12 @@ public:
     [[nodiscard]] SampleLabelingOperationResult AdoptCanonicalAsdfTask(
         std::string expected_task_id,
         std::filesystem::path output_path);
+    // Reconnects an existing canonical owner whose recorded ASDF path is
+    // confirmed missing. The replacement document is fully validated before
+    // the owner path changes, and the task remains inactive.
+    [[nodiscard]] SampleLabelingOperationResult RelinkCanonicalAsdfTask(
+        std::string expected_task_id,
+        std::filesystem::path output_path);
     [[nodiscard]] SampleLabelingOperationResult ActivateTask(std::string_view task_id);
     // Recover a temporary draft identified by a recovery projection. The
     // source identity is part of the command so a stale projection cannot
@@ -251,6 +257,12 @@ public:
     // only after the commit succeeds. The current temporary task may use the
     // existing active-task deletion path.
     [[nodiscard]] SampleLabelingOperationResult DeleteTemporaryTask(
+        std::string_view source_identity,
+        std::string_view task_id);
+    // Deletes an identified local task without requiring its external owner
+    // artifact to be opened. This is the abandonment path for a missing
+    // formal owner; pending or failed output saves remain protected.
+    [[nodiscard]] SampleLabelingOperationResult DeleteTask(
         std::string_view source_identity,
         std::string_view task_id);
     [[nodiscard]] SampleLabelingOperationResult UpsertActiveLabel(SampleLabelDefinition label);
@@ -511,6 +523,12 @@ private:
             std::string_view task_id,
             TaskActivationExpectation expectation,
             bool allow_pending_task_recovery = false);
+    [[nodiscard]] SampleLabelingOperationResult
+        ConnectCanonicalAsdfTask(
+            std::string expected_task_id,
+            std::filesystem::path output_path,
+            bool allow_new_adoption,
+            bool activate_task);
     [[nodiscard]] TaskCreationPreparation
         PrepareTaskCreation(
             std::string_view source_identity,

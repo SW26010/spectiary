@@ -213,6 +213,29 @@ bool OutputPathMatches(const std::filesystem::path& left, const std::filesystem:
         right.lexically_normal();
 }
 
+enum class PathProbeResult {
+    Exists,
+    Missing,
+    Error,
+};
+
+PathProbeResult ProbePath(
+    const std::filesystem::path& path)
+{
+    if (path.empty()) {
+        return PathProbeResult::Error;
+    }
+    std::error_code error;
+    const bool exists =
+        std::filesystem::exists(path, error);
+    if (error) {
+        return PathProbeResult::Error;
+    }
+    return exists
+        ? PathProbeResult::Exists
+        : PathProbeResult::Missing;
+}
+
 std::string TaskIdentityEditLeaseKey(
     std::string_view source_identity,
     std::string_view task_id)
@@ -1979,6 +2002,32 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
     std::string expected_task_id,
     std::filesystem::path output_path)
 {
+    return ConnectCanonicalAsdfTask(
+        std::move(expected_task_id),
+        std::move(output_path),
+        true,
+        true);
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::RelinkCanonicalAsdfTask(
+    std::string expected_task_id,
+    std::filesystem::path output_path)
+{
+    return ConnectCanonicalAsdfTask(
+        std::move(expected_task_id),
+        std::move(output_path),
+        false,
+        false);
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::ConnectCanonicalAsdfTask(
+    std::string expected_task_id,
+    std::filesystem::path output_path,
+    bool allow_new_adoption,
+    bool activate_task)
+{
     SourceState* state = ActiveSource();
     if (state == nullptr ||
         !active_source_identity_ ||
@@ -2006,6 +2055,12 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
                     *task.output_path,
                     output_path);
         });
+    const bool relinking_missing_owner =
+        id_match != state->tasks.end() &&
+        output_match == state->tasks.end() &&
+        id_match->output_path &&
+        id_match->output_format ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     if (id_match != state->tasks.end() ||
         output_match != state->tasks.end()) {
         if (id_match != state->tasks.end() &&
@@ -2013,29 +2068,63 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
             id_match->output_format ==
                 SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf) {
-            return ActivateTask(expected_task_id);
+            if (activate_task) {
+                return ActivateTask(expected_task_id);
+            }
+            SampleLabelingOperationResult result =
+                RejectOperation();
+            result.accepted = true;
+            return result;
         }
+        if (!relinking_missing_owner) {
+            return RejectEditTargetChanged();
+        }
+        if (ProbePath(*id_match->output_path) !=
+            PathProbeResult::Missing) {
+            // A same-id document at another path is a copy/conflict while the
+            // established owner still exists. Automatic relink is reserved
+            // for a confirmed missing owner.
+            return RejectEditTargetChanged();
+        }
+    }
+    if (!relinking_missing_owner && !allow_new_adoption) {
         return RejectEditTargetChanged();
     }
 
     const SampleLabelingTask* current_active_task =
         ActiveTask();
-    if (current_active_task != nullptr &&
+    if (relinking_missing_owner &&
+        current_active_task != nullptr &&
+        current_active_task->task_id == expected_task_id) {
+        // The active owner retains its identity and artifact leases. Pause it
+        // before reconnecting so this path cannot acquire a second lease set
+        // for the same task identity.
+        return RejectEditTargetChanged();
+    }
+    if (activate_task &&
+        current_active_task != nullptr &&
         !CanDeleteTask(*current_active_task)) {
         return RejectOperation();
     }
 
-    SampleLabelingTask local_state =
-        CreateSampleLabelingTask(
-            expected_task_id,
-            expected_task_id,
-            state->sample_count);
+    SampleLabelingTask local_state = relinking_missing_owner
+        ? *id_match
+        : CreateSampleLabelingTask(
+              expected_task_id,
+              expected_task_id,
+              state->sample_count);
+    const std::optional<std::filesystem::path> previous_output_path =
+        relinking_missing_owner
+        ? local_state.output_path
+        : std::nullopt;
     local_state.output_path = output_path;
     local_state.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    MarkSampleLabelTaskPersisted(
-        local_state,
-        SampleLabelSaveStateKind::AutosavedToOutput);
+    if (!relinking_missing_owner) {
+        MarkSampleLabelTaskPersisted(
+            local_state,
+            SampleLabelSaveStateKind::AutosavedToOutput);
+    }
 
     TaskEditLeaseSet leases;
     leases.task_identity_key =
@@ -2058,10 +2147,30 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
             std::move(task_lease.component);
     }
 
+    std::vector<std::string> output_lease_keys =
+        OutputEditLeaseKeys(local_state);
+    if (previous_output_path) {
+        SampleLabelingTask previous_owner = local_state;
+        previous_owner.output_path = *previous_output_path;
+        std::vector<std::string> previous_keys =
+            OutputEditLeaseKeys(previous_owner);
+        output_lease_keys.insert(
+            output_lease_keys.end(),
+            previous_keys.begin(),
+            previous_keys.end());
+        std::sort(
+            output_lease_keys.begin(),
+            output_lease_keys.end());
+        output_lease_keys.erase(
+            std::unique(
+                output_lease_keys.begin(),
+                output_lease_keys.end()),
+            output_lease_keys.end());
+    }
     ExclusiveFileLeaseAcquireResult output_lease =
-        TryAttachOutputLease(
+        TryAttachArtifactLeases(
             leases,
-            local_state);
+            std::move(output_lease_keys));
     if (output_lease.status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         return RejectLeaseAcquireStatus(
@@ -2101,15 +2210,36 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
                         SampleLabelingOutputArtifactFormat::
                             CanonicalAsdf ||
                     latest_id_match->values.size() !=
-                        state->sample_count ||
-                    !OutputPathMatches(
-                        *latest_id_match->output_path,
-                        output_path)) {
+                        state->sample_count) {
                     return RejectEditTargetChanged();
                 }
                 local_state = *latest_id_match;
+                if (!OutputPathMatches(
+                        *latest_id_match->output_path,
+                        output_path)) {
+                    if (!relinking_missing_owner ||
+                        !previous_output_path ||
+                        !OutputPathMatches(
+                            *latest_id_match->output_path,
+                            *previous_output_path)) {
+                        return RejectEditTargetChanged();
+                    }
+                    if (ProbePath(
+                            *latest_id_match->output_path) !=
+                        PathProbeResult::Missing) {
+                        return RejectEditTargetChanged();
+                    }
+                    local_state.output_path = output_path;
+                }
                 expected_absent = false;
+            } else if (relinking_missing_owner) {
+                // Another editor deleted the local record before this editor
+                // obtained the identity lease; never resurrect it as an
+                // apparently new adoption.
+                return RejectEditTargetChanged();
             }
+        } else if (relinking_missing_owner) {
+            return RejectEditTargetChanged();
         }
         if (HasSampleLabelingOutputPathConflict(
                 latest.cache,
@@ -2131,26 +2261,45 @@ SampleLabelingController::AdoptCanonicalAsdfTask(
         return RejectEditTargetChanged();
     }
 
-    state->tasks.push_back(std::move(*hydrated));
-    state->active_task_id =
-        state->tasks.back().task_id;
+    SampleLabelingTask* connected_task = nullptr;
+    if (relinking_missing_owner) {
+        *id_match = std::move(*hydrated);
+        connected_task = &*id_match;
+    } else {
+        state->tasks.push_back(std::move(*hydrated));
+        connected_task = &state->tasks.back();
+    }
+    if (!activate_task) {
+        static_cast<void>(
+            DowngradeCanonicalSampleLabelingTaskToStructural(
+                *connected_task));
+    } else {
+        state->active_task_id = connected_task->task_id;
+    }
     MarkTaskUpsert(
         *active_source_identity_,
         *state,
-        state->tasks.back(),
+        *connected_task,
         expected_absent);
-    MarkActiveTaskSelection(
-        *active_source_identity_,
-        *state);
+    if (activate_task) {
+        MarkActiveTaskSelection(
+            *active_source_identity_,
+            *state);
+    }
     SampleLabelingOperationResult result =
         CompleteMutation(
-            &state->tasks.back(),
+            connected_task,
             PersistencePolicy::FlushStateSave,
             TaskProjectionEffect::Changed);
-    TransitionActiveTaskLeases(
-        std::move(leases),
-        std::move(asdf_snapshot),
-        result.state_saved);
+    if (activate_task) {
+        TransitionActiveTaskLeases(
+            std::move(leases),
+            std::move(asdf_snapshot),
+            result.state_saved);
+    } else if (!result.state_saved) {
+        deferred_task_leases_.push_back(
+            std::move(leases));
+    }
     return result;
 }
 
@@ -2310,6 +2459,201 @@ SampleLabelingController::DeleteTemporaryTask(
     if (!result.state_saved) {
         deferred_task_leases_.push_back(
             std::move(preparation.leases));
+    }
+    return result;
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::DeleteTask(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    const std::string owned_task_id{task_id};
+    if (source_identity.empty() ||
+        owned_task_id.empty() ||
+        !active_source_identity_ ||
+        *active_source_identity_ != source_identity) {
+        return RejectEditTargetChanged();
+    }
+
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return RejectEditTargetChanged();
+    }
+    auto match = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [&owned_task_id](const SampleLabelingTask& task) {
+            return task.task_id == owned_task_id;
+        });
+    if (match == state->tasks.end()) {
+        return RejectEditTargetChanged();
+    }
+    if (!match->output_path ||
+        ProbePath(*match->output_path) !=
+            PathProbeResult::Missing) {
+        return RejectEditTargetChanged();
+    }
+    if (state->active_task_id &&
+        *state->active_task_id == owned_task_id) {
+        if (!state_cache_path_.empty()) {
+            const SampleLabelingStateCacheLoadResult latest =
+                LoadSampleLabelingStateCache(
+                    state_cache_path_,
+                    {},
+                    SampleLabelingStateCacheLoadPolicy::
+                        AllowPersistentOutputsWithoutResultHydration);
+            const auto latest_source =
+                latest.cache.sources.find(
+                    std::string(source_identity));
+            if (latest.issue_kind !=
+                    SampleLabelingStateCacheLoadIssueKind::None ||
+                latest_source == latest.cache.sources.end() ||
+                latest_source->second.sample_count !=
+                    state->sample_count) {
+                return RejectEditTargetChanged();
+            }
+            const auto latest_task = std::find_if(
+                latest_source->second.tasks.begin(),
+                latest_source->second.tasks.end(),
+                [&owned_task_id](
+                    const SampleLabelingTask& task) {
+                    return task.task_id == owned_task_id;
+                });
+            if (latest_task ==
+                    latest_source->second.tasks.end() ||
+                !CanDeleteTask(*latest_task) ||
+                !latest_task->output_path ||
+                OutputEditLeaseKeys(*latest_task) !=
+                    OutputEditLeaseKeys(*match) ||
+                ProbePath(*latest_task->output_path) !=
+                    PathProbeResult::Missing) {
+                return RejectEditTargetChanged();
+            }
+        }
+        return DeleteActiveTask();
+    }
+    if (!CanDeleteTask(*match)) {
+        return RejectOperation();
+    }
+
+    TaskEditLeaseSet leases;
+    leases.task_identity_key =
+        TaskIdentityEditLeaseKey(
+            source_identity,
+            owned_task_id);
+    if (leases.task_identity_key.empty()) {
+        return RejectOperation();
+    }
+    if (!state_cache_path_.empty()) {
+        TaskEditLeaseAcquireResult task_lease =
+            TryAcquireTaskEditLease(
+                leases.task_identity_key);
+        if (task_lease.status !=
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            if (task_lease.status ==
+                ExclusiveFileLeaseAcquireStatus::Unavailable) {
+                NoteTaskLeaseUnavailable(
+                    source_identity,
+                    owned_task_id);
+            }
+            return RejectLeaseAcquireStatus(
+                task_lease.status);
+        }
+        leases.task_identity =
+            std::move(task_lease.component);
+    }
+    const ExclusiveFileLeaseAcquireResult output_lease =
+        TryAttachOutputLease(
+            leases,
+            *match);
+    if (output_lease.status !=
+        ExclusiveFileLeaseAcquireStatus::Acquired) {
+        return RejectLeaseAcquireStatus(
+            output_lease.status);
+    }
+
+    if (!state_cache_path_.empty()) {
+        SampleLabelingStateCacheLoadResult latest =
+            LoadSampleLabelingStateCache(
+                state_cache_path_,
+                {},
+                SampleLabelingStateCacheLoadPolicy::
+                    AllowPersistentOutputsWithoutResultHydration);
+        if (latest.issue_kind !=
+            SampleLabelingStateCacheLoadIssueKind::None) {
+            return RejectEditTargetChanged();
+        }
+        const auto latest_source = latest.cache.sources.find(
+            std::string(source_identity));
+        if (latest_source == latest.cache.sources.end()) {
+            state->tasks.erase(match);
+            BumpActiveSourceTasksGeneration();
+            Touch();
+            SampleLabelingOperationResult result =
+                RejectEditTargetChanged();
+            result.task_projection_changed = true;
+            return result;
+        }
+        if (latest_source->second.sample_count !=
+            state->sample_count) {
+            return RejectEditTargetChanged();
+        }
+        const auto latest_task = std::find_if(
+            latest_source->second.tasks.begin(),
+            latest_source->second.tasks.end(),
+            [&owned_task_id](const SampleLabelingTask& task) {
+                return task.task_id == owned_task_id;
+            });
+        if (latest_task ==
+            latest_source->second.tasks.end()) {
+            state->tasks.erase(match);
+            BumpActiveSourceTasksGeneration();
+            Touch();
+            SampleLabelingOperationResult result =
+                RejectEditTargetChanged();
+            result.task_projection_changed = true;
+            return result;
+        }
+        if (OutputEditLeaseKeys(*latest_task) !=
+                leases.output_artifact_keys ||
+            !CanDeleteTask(*latest_task) ||
+            !latest_task->output_path ||
+            ProbePath(*latest_task->output_path) !=
+                PathProbeResult::Missing) {
+            return RejectEditTargetChanged();
+        }
+        *match = *latest_task;
+    }
+
+    if (!match->output_path ||
+        ProbePath(*match->output_path) !=
+            PathProbeResult::Missing) {
+        return RejectEditTargetChanged();
+    }
+
+    const TaskProjectionEffect projection_effect =
+        match->output_path
+        ? TaskProjectionEffect::Changed
+        : TaskProjectionEffect::Unchanged;
+    state->tasks.erase(match);
+    ClearRecoveryTaskTrust(
+        source_identity,
+        owned_task_id);
+    lease_unavailable_task_targets_.erase(
+        leases.task_identity_key);
+    MarkTaskTombstone(
+        source_identity,
+        *state,
+        owned_task_id);
+    SampleLabelingOperationResult result =
+        CompleteMutation(
+            nullptr,
+            PersistencePolicy::FlushStateSave,
+            projection_effect);
+    if (!result.state_saved) {
+        deferred_task_leases_.push_back(
+            std::move(leases));
     }
     return result;
 }
@@ -4472,6 +4816,40 @@ SampleLabelingController::PrepareTaskActivation(
         return preparation;
     }
 
+    const SampleLabelingTask* pending_overlay =
+        deferred == deferred_task_leases_.end()
+        ? nullptr
+        : PendingTaskUpsert(
+              source_identity,
+              known_task.task_id);
+    bool pending_canonical_owner_switch = false;
+    if (pending_overlay != nullptr &&
+        OutputEditLeaseKeys(*pending_overlay) !=
+            OutputEditLeaseKeys(*structural_task)) {
+        pending_canonical_owner_switch =
+            structural_task->output_path &&
+            pending_overlay->output_path &&
+            known_task.output_path &&
+            structural_task->output_format ==
+                SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            pending_overlay->output_format ==
+                SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            pending_overlay->values.size() == sample_count &&
+            OutputPathMatches(
+                *pending_overlay->output_path,
+                *known_task.output_path) &&
+            !OutputPathMatches(
+                *pending_overlay->output_path,
+                *structural_task->output_path);
+        if (!pending_canonical_owner_switch) {
+            preparation.error =
+                "labeling task identity changed while acquiring its edit lease";
+            return preparation;
+        }
+    }
+
     if (!preparation.reuses_active_temporary_slot) {
         ExclusiveFileLeaseAcquireResult temporary_slot_lease =
             TryAttachTemporarySlotLease(
@@ -4489,10 +4867,63 @@ SampleLabelingController::PrepareTaskActivation(
         }
     }
 
-    ExclusiveFileLeaseAcquireResult output_lease =
-        TryAttachOutputLease(
+    ExclusiveFileLeaseAcquireResult output_lease;
+    if (pending_canonical_owner_switch) {
+        std::vector<std::string> output_keys =
+            OutputEditLeaseKeys(*structural_task);
+        const std::vector<std::string> pending_output_keys =
+            OutputEditLeaseKeys(*pending_overlay);
+        output_keys.insert(
+            output_keys.end(),
+            pending_output_keys.begin(),
+            pending_output_keys.end());
+        std::sort(
+            output_keys.begin(),
+            output_keys.end());
+        output_keys.erase(
+            std::unique(
+                output_keys.begin(),
+                output_keys.end()),
+            output_keys.end());
+        const bool union_leases_held =
+            std::all_of(
+                output_keys.begin(),
+                output_keys.end(),
+                [this, working_leases](
+                    const std::string& output_key) {
+                    const auto held = std::find(
+                        working_leases->output_artifact_keys.begin(),
+                        working_leases->output_artifact_keys.end(),
+                        output_key);
+                    if (held ==
+                        working_leases->output_artifact_keys.end()) {
+                        return false;
+                    }
+                    const std::size_t index =
+                        static_cast<std::size_t>(
+                            std::distance(
+                                working_leases
+                                    ->output_artifact_keys.begin(),
+                                held));
+                    return state_cache_path_.empty() ||
+                        (index < working_leases
+                                     ->output_artifacts.size() &&
+                         working_leases
+                             ->output_artifacts[index]
+                             .Held());
+                });
+        if (!union_leases_held) {
+            preparation.error =
+                "pending labeling owner switch lost an artifact lease";
+            return preparation;
+        }
+        output_lease.status =
+            ExclusiveFileLeaseAcquireStatus::Acquired;
+    } else {
+        output_lease = TryAttachOutputLease(
             *working_leases,
             *structural_task);
+    }
     if (output_lease.status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         preparation.lease_status =
@@ -4503,22 +4934,18 @@ SampleLabelingController::PrepareTaskActivation(
     }
 
     if (structural_task->output_format ==
-        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
         const SampleLabelingTask* overlay_task =
             &*structural_task;
-        if (deferred != deferred_task_leases_.end()) {
-            if (const SampleLabelingTask* pending =
-                    PendingTaskUpsert(
-                        source_identity,
-                        known_task.task_id)) {
-                if (OutputEditLeaseKeys(*pending) !=
+        if (pending_overlay != nullptr) {
+            if (!pending_canonical_owner_switch &&
+                OutputEditLeaseKeys(*pending_overlay) !=
                     OutputEditLeaseKeys(*structural_task)) {
-                    preparation.error =
-                        "labeling task identity changed while acquiring its edit lease";
-                    return preparation;
-                }
-                overlay_task = pending;
+                preparation.error =
+                    "labeling task identity changed while acquiring its edit lease";
+                return preparation;
             }
+            overlay_task = pending_overlay;
         }
         preparation.task = HydrateCanonicalAsdfTask(
             *overlay_task,
@@ -5336,6 +5763,15 @@ void SampleLabelingController::ReleaseUnneededActiveLeaseComponents()
     if (active_task->output_path) {
         active_task_leases_.temporary_slot.Reset();
         active_task_leases_.temporary_slot_key.clear();
+        // A failed owner-switch cache commit deliberately retains both the
+        // durable old path and the pending replacement path. Once the cache
+        // commit succeeds, converge to the exact artifact identities of the
+        // now-durable owner; TryAttachOutputLease keeps the existing union
+        // intact if an unexpected replacement identity cannot be acquired.
+        static_cast<void>(
+            TryAttachOutputLease(
+                active_task_leases_,
+                *active_task));
     } else {
         active_task_leases_.output_artifacts.clear();
         active_task_leases_.output_artifact_keys.clear();

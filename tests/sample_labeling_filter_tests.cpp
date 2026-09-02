@@ -96,6 +96,11 @@ const std::vector<specforge::SampleLabelingTask>* ActiveSourceTasks(
     return controller.View().active_source_tasks;
 }
 
+specforge::ExclusiveFileLeaseAcquireResult
+TryAcquireCurrentStableArtifactLease(
+    const std::filesystem::path& cache_path,
+    const std::filesystem::path& output_path);
+
 void ActivateCanonicalTestSource(
     specforge::SampleLabelingController& controller,
     std::string source_identity,
@@ -1508,6 +1513,347 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
     Require(
         ActiveTask(takeover) != nullptr,
         "failed canonical source revalidation without a pending recovery patch must immediately release the owner lease");
+}
+
+void TestPendingCanonicalRelinkActivationRetainsBothOwnerLeases()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_pending_canonical_relink");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path old_path =
+        directory / "quality-old.asdf";
+    const std::filesystem::path new_path =
+        directory / "quality-moved.asdf";
+    const std::string task_id =
+        "00000000-0000-4000-8000-000000000006";
+
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            old_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "pending relink fixture should publish its original canonical owner");
+    SaveCanonicalOwnerCache(
+        cache_path,
+        old_path);
+
+    specforge::SampleLabelingController controller(
+        cache_path);
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(controller) != nullptr &&
+            controller.DeactivateActiveTask().state_saved,
+        "pending relink fixture should begin with a durably paused canonical owner");
+
+    std::error_code move_error;
+    std::filesystem::rename(
+        old_path,
+        new_path,
+        move_error);
+    Require(
+        !move_error,
+        "pending relink fixture should move the canonical owner");
+
+    specforge::ExclusiveFileLeaseAcquireResult commit_lock =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        commit_lock.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "pending relink fixture should hold the cache commit lock");
+
+    const specforge::SampleLabelingOperationResult relinked =
+        controller.RelinkCanonicalAsdfTask(
+            task_id,
+            new_path);
+    const specforge::SampleLabelingTask* pending_owner =
+        ActiveSourceTask(
+            controller,
+            task_id);
+    Require(
+        relinked.accepted &&
+            relinked.changed &&
+            relinked.state_save_attempted &&
+            !relinked.state_saved &&
+            pending_owner != nullptr &&
+            pending_owner->output_path == new_path &&
+            ActiveTask(controller) == nullptr,
+        "a blocked relink flush should retain the moved owner as an inactive pending overlay");
+
+    const specforge::SampleLabelingOperationResult activated =
+        controller.ActivateTask(task_id);
+    Require(
+        activated.accepted &&
+            activated.state_save_attempted &&
+            !activated.state_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->output_path == new_path,
+        "immediate activation should hydrate the pending relink instead of rejecting the durable old path");
+
+    specforge::ExclusiveFileLeaseAcquireResult old_owner_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            old_path);
+    specforge::ExclusiveFileLeaseAcquireResult new_owner_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            new_path);
+    Require(
+        old_owner_lease.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Unavailable &&
+            new_owner_lease.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Unavailable,
+        "pending relink activation must continuously retain both old and replacement owner leases");
+
+    commit_lock.lease.Reset();
+    (void)RunMaintenanceUntilIdle(controller);
+    const specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const specforge::SampleLabelingTask* persisted =
+        FindTask(
+            cache.cache,
+            "canonical-source",
+            task_id);
+    Require(
+        cache.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::
+                    None &&
+            persisted != nullptr &&
+            persisted->output_path == new_path,
+        "pending relink activation should converge by persisting the replacement owner path");
+
+    old_owner_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            old_path);
+    new_owner_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            new_path);
+    Require(
+        old_owner_lease.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Acquired &&
+            new_owner_lease.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Unavailable,
+        "after maintenance persists the relink, the old owner lease should be reusable while the active replacement remains protected");
+}
+
+void TestInactiveCanonicalRelinkIgnoresUnrelatedPendingActiveTask()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_relink_with_unrelated_pending_task");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path old_path =
+        directory / "quality-old.asdf";
+    const std::filesystem::path new_path =
+        directory / "quality-moved.asdf";
+    const std::filesystem::path unrelated_path =
+        directory / "unrelated.asdf";
+    const std::string owner_task_id =
+        "00000000-0000-4000-8000-000000000006";
+
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            old_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "unrelated-pending relink fixture should publish its original owner");
+    SaveCanonicalOwnerCache(
+        cache_path,
+        old_path);
+
+    specforge::SampleLabelingController controller(
+        cache_path);
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(controller) != nullptr &&
+            controller.DeactivateActiveTask().state_saved,
+        "unrelated-pending relink fixture should pause its original owner");
+    Require(
+        controller.CreateTask("Unrelated task").accepted &&
+            controller.UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    5,
+                    "accepted",
+                    'a'})
+                .changed &&
+            controller.SaveActiveTemporaryTaskToOutput(
+                unrelated_path)
+                .output_saved,
+        "unrelated-pending relink fixture should create another active canonical owner");
+    const std::string unrelated_task_id =
+        ActiveTask(controller) == nullptr
+        ? std::string{}
+        : ActiveTask(controller)->task_id;
+
+    std::error_code move_error;
+    std::filesystem::rename(
+        old_path,
+        new_path,
+        move_error);
+    Require(
+        !move_error,
+        "unrelated-pending relink fixture should move the inactive owner");
+
+    specforge::ExclusiveFileLeaseAcquireResult commit_lock =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        commit_lock.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "unrelated-pending relink fixture should hold the cache commit lock");
+    const specforge::SampleLabelingWriteOperationResult pending_write =
+        controller.AssignLabel(0, 5);
+    Require(
+        pending_write.write.changed &&
+            !pending_write.operation.state_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->save_state.kind ==
+                specforge::SampleLabelSaveStateKind::Pending,
+        "the unrelated active task should retain a pending output mutation");
+
+    const specforge::SampleLabelingOperationResult relinked =
+        controller.RelinkCanonicalAsdfTask(
+            owner_task_id,
+            new_path);
+    const specforge::SampleLabelingTask* relinked_owner =
+        ActiveSourceTask(
+            controller,
+            owner_task_id);
+    Require(
+        relinked.accepted &&
+            relinked.changed &&
+            !relinked.state_saved &&
+            relinked_owner != nullptr &&
+            relinked_owner->output_path == new_path &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id ==
+                unrelated_task_id &&
+            ActiveTask(controller)->save_state.kind ==
+                specforge::SampleLabelSaveStateKind::Pending,
+        "an inactive relink should not be blocked or switch away from an unrelated pending active task");
+
+    commit_lock.lease.Reset();
+}
+
+void TestMissingOwnerDeletionRevalidatesLatestDurablePath()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_missing_owner_delete_revalidation");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path stale_missing_path =
+        directory / "stale-missing.asdf";
+    const std::filesystem::path replacement_path =
+        directory / "replacement.asdf";
+    const std::string task_id =
+        "00000000-0000-4000-8000-000000000006";
+    const specforge::SampleLabelingDocument document =
+        CanonicalOwnerDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            stale_missing_path,
+            document)
+            .succeeded() &&
+            specforge::WriteSampleLabelingAsdfDocumentAtomically(
+                replacement_path,
+                document)
+                .succeeded(),
+        "delete revalidation fixture should publish both canonical generations");
+    SaveCanonicalOwnerCache(
+        cache_path,
+        stale_missing_path);
+
+    specforge::SampleLabelingController controller(
+        cache_path);
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(controller) != nullptr &&
+            controller.DeactivateActiveTask().state_saved,
+        "delete revalidation fixture should pause its original owner");
+    std::error_code remove_error;
+    Require(
+        std::filesystem::remove(
+            stale_missing_path,
+            remove_error) &&
+            !remove_error,
+        "delete revalidation fixture should make the local projection missing");
+
+    specforge::SampleLabelingStateCacheLoadResult latest =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const auto latest_source =
+        latest.cache.sources.find(
+            "canonical-source");
+    specforge::SampleLabelingTask* latest_task =
+        latest_source == latest.cache.sources.end() ||
+            latest_source->second.tasks.empty()
+        ? nullptr
+        : &latest_source->second.tasks.front();
+    Require(
+        latest.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::
+                    None &&
+            latest_task != nullptr,
+        "delete revalidation fixture should reload its durable task");
+    latest_task->output_path = replacement_path;
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            latest.cache),
+        "delete revalidation fixture should publish the replacement durable owner");
+
+    const specforge::SampleLabelingOperationResult deleted =
+        controller.DeleteTask(
+            "canonical-source",
+            task_id);
+    const specforge::SampleLabelingStateCacheLoadResult verified =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const specforge::SampleLabelingTask* verified_task =
+        FindTask(
+            verified.cache,
+            "canonical-source",
+            task_id);
+    Require(
+        !deleted.accepted &&
+            deleted.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            verified_task != nullptr &&
+            verified_task->output_path == replacement_path,
+        "missing-owner deletion must fail closed when the leased durable record has regained an existing owner path");
 }
 
 void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
@@ -11831,6 +12177,9 @@ int main(int argc, char* argv[])
         TestSampleLabelingOutputFormatMigrationAndRoundTrip();
         TestInterruptedInitialCanonicalPublicationRestoresTemporaryDraft();
         TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay();
+        TestPendingCanonicalRelinkActivationRetainsBothOwnerLeases();
+        TestInactiveCanonicalRelinkIgnoresUnrelatedPendingActiveTask();
+        TestMissingOwnerDeletionRevalidatesLatestDurablePath();
         TestCanonicalAsdfValueFailureRetainsOverlayAndRetries();
         TestCanonicalAsdfMetadataMutationsPublishFullGenerations();
         TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration();

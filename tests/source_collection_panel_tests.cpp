@@ -71,6 +71,20 @@ struct SourceCollectionPanelUiTestAccess {
     {
         return panel.annotation_diagnostic_dismiss_rects_;
     }
+
+    [[nodiscard]] static const std::vector<std::array<float, 4>>&
+    AnnotationRemoveRects(
+        const SourceCollectionPanelUi& panel)
+    {
+        return panel.annotation_remove_rects_;
+    }
+
+    [[nodiscard]] static const std::optional<std::array<float, 4>>&
+    MissingLocalAnnotationRemoveConfirmRect(
+        const SourceCollectionPanelUi& panel)
+    {
+        return panel.missing_local_annotation_remove_confirm_rect_;
+    }
 };
 
 }  // namespace specforge
@@ -375,6 +389,109 @@ void TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup()
     Require(
         !observation.popup_open,
         "annotation import failure should remain inline rather than opening a modal");
+}
+
+void TestMissingLocalAnnotationRemovalRequiresConfirmation()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    const std::filesystem::path missing_path =
+        std::filesystem::path{"moved-away-labels.asdf"};
+    fixture.view.navigation.current_annotations.push_back({
+        .name = "Quality review",
+        .path = missing_path,
+        .relationship = specforge::
+            SampleAnnotationWorkflowRelationship::
+                LocalLabelingTask,
+        .output_missing = true,
+        .can_remove_annotation = true,
+        .labeling_owner_format = specforge::
+            SampleLabelingOutputArtifactFormat::
+                CanonicalAsdf,
+    });
+
+    (void)fixture.RenderFrame();
+    const auto& remove_rects =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationRemoveRects(fixture.panel);
+    Require(
+        remove_rects.size() == 1,
+        "a removable missing local task should expose one remove action");
+    const std::array<float, 4> remove_rect =
+        remove_rects.front();
+    ClickAnnotationPanelRect(fixture, remove_rect);
+
+    const AnnotationPanelFrameObservation warning =
+        fixture.RenderFrame();
+    Require(
+        fixture.submit_count == 0 &&
+            warning.popup_open &&
+            warning.logged_text.find(
+                "Delete local task \"Quality review\"") !=
+                std::string::npos &&
+            warning.logged_text.find(
+                "Output files are not deleted.") !=
+                std::string::npos,
+        "the first remove click should show an explicit warning without abandoning the task");
+
+    const auto confirm_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            MissingLocalAnnotationRemoveConfirmRect(
+                fixture.panel);
+    Require(
+        confirm_rect.has_value(),
+        "the missing-local warning should expose a confirmation action");
+    ClickAnnotationPanelRect(fixture, *confirm_rect);
+    Require(
+        fixture.submit_count == 1,
+        "confirming the warning should submit the missing local task removal exactly once");
+}
+
+void TestSourceSwitchDismissesMissingLocalRemovalWarning()
+{
+    ScopedImGuiContext context;
+    AnnotationPanelFixture fixture;
+    fixture.view.navigation.current_annotations.push_back({
+        .name = "Old source review",
+        .path = "old-source-labels.asdf",
+        .relationship = specforge::
+            SampleAnnotationWorkflowRelationship::
+                LocalLabelingTask,
+        .output_missing = true,
+        .can_remove_annotation = true,
+        .labeling_owner_format = specforge::
+            SampleLabelingOutputArtifactFormat::
+                CanonicalAsdf,
+    });
+
+    (void)fixture.RenderFrame();
+    const auto& remove_rects =
+        specforge::SourceCollectionPanelUiTestAccess::
+            AnnotationRemoveRects(fixture.panel);
+    Require(
+        remove_rects.size() == 1,
+        "the old source should expose its missing-task remove action");
+    const std::array<float, 4> remove_rect =
+        remove_rects.front();
+    ClickAnnotationPanelRect(
+        fixture,
+        remove_rect);
+    Require(
+        fixture.RenderFrame().popup_open,
+        "the old source removal warning should be open before switching sources");
+
+    fixture.view.labeling.source_identity = "source-b";
+    fixture.snapshot->source.path = "source-b.npy";
+    fixture.view.navigation.current_annotations.clear();
+    const AnnotationPanelFrameObservation switched =
+        fixture.RenderFrame();
+    Require(
+        fixture.submit_count == 0 &&
+            !switched.popup_open &&
+            switched.logged_text.find(
+                "Old source review") ==
+                std::string::npos,
+        "switching sources should dismiss the stale missing-task warning without submitting its deletion");
 }
 
 void TestAnnotationImportFailureDismissalTracksExactDetail()
@@ -2333,6 +2450,8 @@ int main()
 {
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
     TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup();
+    TestMissingLocalAnnotationRemovalRequiresConfirmation();
+    TestSourceSwitchDismissesMissingLocalRemovalWarning();
     TestAnnotationImportFailureDismissalTracksExactDetail();
     TestReimportSameAnnotationClearsDismissalForNewFailure();
     TestAnnotationDismissalsResetAcrossSourceSwitch();

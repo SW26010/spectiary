@@ -127,13 +127,27 @@ std::string LowerAscii(std::string value)
     return value;
 }
 
-bool PathExists(const std::filesystem::path& path)
+enum class PathProbeResult {
+    Exists,
+    Missing,
+    Error,
+};
+
+PathProbeResult ProbePath(
+    const std::filesystem::path& path)
 {
     if (path.empty()) {
-        return false;
+        return PathProbeResult::Error;
     }
     std::error_code error;
-    return std::filesystem::exists(path, error) && !error;
+    const bool exists =
+        std::filesystem::exists(path, error);
+    if (error) {
+        return PathProbeResult::Error;
+    }
+    return exists
+        ? PathProbeResult::Exists
+        : PathProbeResult::Missing;
 }
 
 bool ShouldRememberLabelingPosition(SampleNavigationRequestKind kind)
@@ -273,14 +287,30 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
                 LegacyNpyWithSidecar;
     }
     if (local_task != nullptr && local_task->output_path) {
-        view.output_missing = !PathExists(*local_task->output_path);
+        const PathProbeResult output_probe =
+            ProbePath(*local_task->output_path);
+        view.output_missing =
+            output_probe ==
+                PathProbeResult::Missing;
         if (local_task->output_format ==
             SampleLabelingOutputArtifactFormat::
                 LegacyNpyWithSidecar) {
-            view.metadata_missing = !PathExists(
-                SampleAnnotationIoAdapter::
-                    MetadataPathForResult(
-                        *local_task->output_path));
+            view.metadata_missing =
+                ProbePath(
+                    SampleAnnotationIoAdapter::
+                        MetadataPathForResult(
+                            *local_task->output_path)) ==
+                PathProbeResult::Missing;
+        }
+        if (view.output_missing &&
+            local_task->save_state.kind !=
+                SampleLabelSaveStateKind::Pending &&
+            local_task->save_state.kind !=
+                SampleLabelSaveStateKind::Failed) {
+            view.can_remove_annotation = true;
+        }
+        if (view.output_missing) {
+            view.can_activate_labeling = false;
         }
     }
     return view;
@@ -313,19 +343,34 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_remove_annotation = false;
     view.labeling_owner_format = task.output_format;
     if (task.output_path) {
+        const PathProbeResult output_probe =
+            ProbePath(*task.output_path);
         view.output_missing =
             (task.output_format ==
                  SampleLabelingOutputArtifactFormat::
                      CanonicalAsdf &&
              !task.values_are_authoritative) ||
-            !PathExists(*task.output_path);
+            output_probe ==
+                PathProbeResult::Missing;
         if (task.output_format ==
             SampleLabelingOutputArtifactFormat::
                 LegacyNpyWithSidecar) {
-            view.metadata_missing = !PathExists(
-                SampleAnnotationIoAdapter::
-                    MetadataPathForResult(
-                        *task.output_path));
+            view.metadata_missing =
+                ProbePath(
+                    SampleAnnotationIoAdapter::
+                        MetadataPathForResult(
+                            *task.output_path)) ==
+                PathProbeResult::Missing;
+        }
+        if (output_probe == PathProbeResult::Missing &&
+            task.save_state.kind !=
+                SampleLabelSaveStateKind::Pending &&
+            task.save_state.kind !=
+                SampleLabelSaveStateKind::Failed) {
+            view.can_remove_annotation = true;
+        }
+        if (view.output_missing) {
+            view.can_activate_labeling = false;
         }
     }
     return view;
@@ -1298,6 +1343,101 @@ SampleWorkflowCoordinator::AddReadOnlyAnnotationToActiveSource(
         context_after->diagnostics.size() !=
             diagnostic_count_before;
     if (outcome.loaded) {
+        std::optional<std::filesystem::path>
+            missing_owner_path;
+        std::string missing_owner_task_id;
+        const SampleAnnotationResult* imported_annotation =
+            context_after == nullptr
+            ? nullptr
+            : FindSampleWorkflowAnnotationByPath(
+                  *context_after,
+                  path);
+        const std::vector<SampleLabelingTask>* tasks =
+            labeling_.View().active_source_tasks;
+        if (imported_annotation != nullptr &&
+            imported_annotation->labeling_document &&
+            tasks != nullptr) {
+            const std::string& imported_task_id =
+                imported_annotation->labeling_document
+                    ->labeling.id;
+            const auto missing_owner = std::find_if(
+                tasks->begin(),
+                tasks->end(),
+                [&imported_task_id, &path](
+                    const SampleLabelingTask& task) {
+                    return task.task_id == imported_task_id &&
+                        task.output_path &&
+                        task.output_format ==
+                            SampleLabelingOutputArtifactFormat::
+                                CanonicalAsdf &&
+                        !SampleWorkflowPathsReferToSameFile(
+                            *task.output_path,
+                            path) &&
+                        ProbePath(*task.output_path) ==
+                            PathProbeResult::Missing;
+                });
+            if (missing_owner != tasks->end()) {
+                missing_owner_path =
+                    *missing_owner->output_path;
+                missing_owner_task_id =
+                    missing_owner->task_id;
+            }
+        }
+
+        if (missing_owner_path) {
+            const SampleLabelingOperationResult relink =
+                labeling_.RelinkCanonicalAsdfTask(
+                    missing_owner_task_id,
+                    path);
+            ApplyLabelingLeaseIssue(outcome, relink);
+            if (relink.accepted) {
+                std::optional<std::string> removed_source_id;
+                if (const SourceCollectionManifest* active_context =
+                        navigation_.active_context()) {
+                    if (const SampleAnnotationResult* previous =
+                            FindSampleWorkflowAnnotationByPath(
+                                *active_context,
+                                *missing_owner_path)) {
+                        removed_source_id =
+                            BuildAnnotationFilterSourceId(
+                                *previous);
+                    }
+                }
+                const bool removed_old_attachment =
+                    navigation_.RemoveReadOnlyAnnotationFromActiveSource(
+                        *missing_owner_path);
+                const bool removed_old_diagnostic =
+                    navigation_.
+                        RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+                            *missing_owner_path);
+                if (removed_source_id) {
+                    (void)workflow_sources_.RemoveFilterSource(
+                        *removed_source_id);
+                    (void)workflow_sources_.RemoveSampleSortSource(
+                        *removed_source_id);
+                }
+                if (removed_old_attachment) {
+                    MarkActiveWorkflowStateDirty();
+                    outcome.action.annotation_roster_changed = true;
+                }
+                outcome.changed =
+                    outcome.changed ||
+                    relink.changed ||
+                    relink.task_projection_changed ||
+                    removed_old_attachment;
+                outcome.invalidate_view =
+                    outcome.invalidate_view ||
+                    relink.changed ||
+                    relink.task_projection_changed ||
+                    removed_old_attachment ||
+                    removed_old_diagnostic;
+            }
+        }
+        outcome.invalidate_view =
+            navigation_.
+                RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+                    path) ||
+            outcome.invalidate_view;
         ApplyNavigationInputEffects(
             outcome,
             ReconcileNavigationInputs(
@@ -1312,6 +1452,53 @@ SampleWorkflowCoordinator::RemoveReadOnlyAnnotationFromActiveSource(
     const std::filesystem::path& path)
 {
     SampleWorkflowTransitionOutcome outcome;
+    const std::vector<SampleLabelingTask>* tasks =
+        labeling_.View().active_source_tasks;
+    const SampleLabelingTask* missing_local_task =
+        tasks == nullptr
+        ? nullptr
+        : [&]() -> const SampleLabelingTask* {
+              const auto match = std::find_if(
+                  tasks->begin(),
+                  tasks->end(),
+                  [&path](const SampleLabelingTask& task) {
+                      return task.output_path &&
+                          SampleWorkflowPathsReferToSameFile(
+                              *task.output_path,
+                              path) &&
+                          ProbePath(*task.output_path) ==
+                              PathProbeResult::Missing;
+                  });
+              return match == tasks->end()
+                  ? nullptr
+                  : &*match;
+          }();
+    const std::string removed_labeling_source_id =
+        missing_local_task == nullptr
+        ? std::string{}
+        : BuildLabelingFilterSourceId(*missing_local_task);
+    bool deleted_missing_local_task = false;
+    if (missing_local_task != nullptr) {
+        const std::optional<SourceCollectionIdentity> identity =
+            navigation_.active_source_identity();
+        if (!identity) {
+            return outcome;
+        }
+        const SampleLabelingOperationResult deleted =
+            labeling_.DeleteTask(
+                identity->id,
+                missing_local_task->task_id);
+        ApplyLabelingLeaseIssue(outcome, deleted);
+        if (!deleted.changed &&
+            !deleted.task_projection_changed) {
+            return outcome;
+        }
+        outcome.changed = true;
+        outcome.invalidate_view = true;
+        outcome.action.workflow_changed = true;
+        deleted_missing_local_task = true;
+        ClearLabelUndoHistory();
+    }
     std::optional<std::string> removed_source_id;
     if (const SourceCollectionManifest* context = navigation_.active_context()) {
         if (const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, path)) {
@@ -1319,10 +1506,24 @@ SampleWorkflowCoordinator::RemoveReadOnlyAnnotationFromActiveSource(
         }
     }
     const bool removed_annotation = navigation_.RemoveReadOnlyAnnotationFromActiveSource(path);
-    if (!removed_annotation) {
+    const bool removed_diagnostic =
+        navigation_.
+            RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+                path);
+    if (!deleted_missing_local_task && !removed_annotation) {
+        outcome.invalidate_view =
+            outcome.invalidate_view ||
+            removed_diagnostic;
         return outcome;
     }
+    outcome.invalidate_view =
+        outcome.invalidate_view ||
+        removed_diagnostic;
 
+    if (!removed_labeling_source_id.empty()) {
+        (void)workflow_sources_.RemoveFilterSource(
+            removed_labeling_source_id);
+    }
     if (removed_source_id) {
         (void)workflow_sources_.RemoveFilterSource(*removed_source_id);
         (void)workflow_sources_.RemoveSampleSortSource(*removed_source_id);
@@ -1564,12 +1765,33 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     if (plan.kind == SampleAnnotationLabelingActivationKind::None) {
         return outcome;
     }
+    const std::filesystem::path target_annotation_path =
+        annotation->path;
     if (plan.kind ==
             SampleAnnotationLabelingActivationKind::
                 ActivateExistingTask &&
         active_task != nullptr &&
         active_task->task_id == plan.task_id) {
         return outcome;
+    }
+    std::optional<std::filesystem::path> previous_owner_path;
+    if (plan.kind ==
+            SampleAnnotationLabelingActivationKind::
+                AdoptCanonicalAsdfTask &&
+        active_source_tasks != nullptr) {
+        const auto existing_owner = std::find_if(
+            active_source_tasks->begin(),
+            active_source_tasks->end(),
+            [&plan](const SampleLabelingTask& task) {
+                return task.task_id == plan.task_id;
+            });
+        if (existing_owner != active_source_tasks->end() &&
+            existing_owner->output_path &&
+            !SampleWorkflowPathsReferToSameFile(
+                *existing_owner->output_path,
+                target_annotation_path)) {
+            previous_owner_path = *existing_owner->output_path;
+        }
     }
     if (plan.kind ==
             SampleAnnotationLabelingActivationKind::
@@ -1583,23 +1805,68 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
                         AdoptCanonicalAsdfTask
             ? labeling_.AdoptCanonicalAsdfTask(
                   plan.task_id,
-                  annotation->path)
+                  target_annotation_path)
             : labeling_.ActivateTask(plan.task_id);
         ApplyLabelingLeaseIssue(outcome, activation);
+        bool previous_owner_attachment_removed = false;
+        bool attachment_diagnostic_removed = false;
+        if (activation.accepted && previous_owner_path) {
+            std::optional<std::string> removed_source_id;
+            if (const SourceCollectionManifest* active_context =
+                    navigation_.active_context()) {
+                if (const SampleAnnotationResult* previous_annotation =
+                        FindSampleWorkflowAnnotationByPath(
+                            *active_context,
+                            *previous_owner_path)) {
+                    removed_source_id =
+                        BuildAnnotationFilterSourceId(
+                            *previous_annotation);
+                }
+            }
+            previous_owner_attachment_removed =
+                navigation_.RemoveReadOnlyAnnotationFromActiveSource(
+                    *previous_owner_path);
+            attachment_diagnostic_removed =
+                navigation_.
+                    RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+                        *previous_owner_path) ||
+                attachment_diagnostic_removed;
+            if (previous_owner_attachment_removed) {
+                if (removed_source_id) {
+                    (void)workflow_sources_.RemoveFilterSource(
+                        *removed_source_id);
+                    (void)workflow_sources_.RemoveSampleSortSource(
+                        *removed_source_id);
+                }
+                MarkActiveWorkflowStateDirty();
+                outcome.action.annotation_roster_changed = true;
+            }
+        }
         const bool attachment_refreshed =
             activation.accepted &&
             SynchronizeActiveCanonicalAsdfAttachment(
                 &outcome.action);
+        if (activation.accepted) {
+            attachment_diagnostic_removed =
+                navigation_.
+                    RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+                        target_annotation_path) ||
+                attachment_diagnostic_removed;
+        }
         if (activation.accepted ||
             activation.task_projection_changed) {
             outcome.changed =
                 outcome.changed ||
                 activation.task_projection_changed ||
-                attachment_refreshed;
+                attachment_refreshed ||
+                previous_owner_attachment_removed ||
+                attachment_diagnostic_removed;
             outcome.invalidate_view =
                 outcome.invalidate_view ||
                 activation.task_projection_changed ||
-                attachment_refreshed;
+                attachment_refreshed ||
+                previous_owner_attachment_removed ||
+                attachment_diagnostic_removed;
             ClearLabelUndoHistory();
             ApplyNavigationInputEffects(
                 outcome,
@@ -1617,7 +1884,7 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         std::move(plan.task_name),
         std::move(plan.label_set),
         std::move(plan.values),
-        annotation->path,
+        target_annotation_path,
         plan.metadata_clean,
         std::move(plan.origin));
     ApplyLabelingLeaseIssue(outcome, create_result);
@@ -1638,7 +1905,8 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     }
     ClearLabelUndoHistory();
     if (!plan.metadata_clean && create_result.output_saved) {
-        (void)navigation_.AddReadOnlyAnnotationToActiveSource(annotation->path);
+        (void)navigation_.AddReadOnlyAnnotationToActiveSource(
+            target_annotation_path);
     }
     ApplyNavigationInputEffects(
         outcome,

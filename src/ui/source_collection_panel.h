@@ -99,6 +99,12 @@ private:
         bool reload_deactivate_pending = false;
     };
 
+    struct MissingLocalAnnotationRemoval {
+        std::filesystem::path path;
+        std::string name;
+        std::string source_identity;
+    };
+
     using NavigationRequestFactory =
         SampleNavigationRequest (*)(std::size_t);
 
@@ -171,6 +177,12 @@ private:
         dismissed_annotation_diagnostic_keys_;
     std::optional<std::array<float, 4>>
         annotation_add_file_rect_;
+    std::vector<std::array<float, 4>>
+        annotation_remove_rects_;
+    std::optional<std::array<float, 4>>
+        missing_local_annotation_remove_confirm_rect_;
+    std::optional<MissingLocalAnnotationRemoval>
+        pending_missing_local_annotation_removal_;
     std::vector<std::array<float, 4>>
         annotation_diagnostic_dismiss_rects_;
     std::vector<std::string>

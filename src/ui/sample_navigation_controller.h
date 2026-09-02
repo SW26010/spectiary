@@ -127,6 +127,8 @@ public:
         SampleAnnotationResult annotation,
         bool* attachment_added = nullptr);
     [[nodiscard]] bool RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path);
+    [[nodiscard]] bool RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+        const std::filesystem::path& path);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSourceKey(

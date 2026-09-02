@@ -647,6 +647,41 @@ bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const 
     return true;
 }
 
+bool SampleNavigationController::
+RemoveAnnotationAttachmentDiagnosticsFromActiveSource(
+    const std::filesystem::path& path)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || path.empty()) {
+        return false;
+    }
+
+    const auto previous_size =
+        session->manifest.diagnostics.size();
+    session->manifest.diagnostics.erase(
+        std::remove_if(
+            session->manifest.diagnostics.begin(),
+            session->manifest.diagnostics.end(),
+            [&path](
+                const SourceCollectionManifestDiagnostic&
+                    diagnostic) {
+                return diagnostic.kind ==
+                        SourceCollectionManifestDiagnosticKind::
+                            AnnotationIgnored &&
+                    PathsReferToSameFile(
+                        diagnostic.path,
+                        path);
+            }),
+        session->manifest.diagnostics.end());
+    if (session->manifest.diagnostics.size() ==
+        previous_size) {
+        return false;
+    }
+
+    ++active_context_generation_;
+    return true;
+}
+
 bool SampleNavigationController::RestoreReadOnlyAnnotationsForActiveSource(
     const std::vector<std::filesystem::path>& paths)
 {
