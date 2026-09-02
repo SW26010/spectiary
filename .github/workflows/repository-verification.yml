@@ -184,7 +184,7 @@ jobs:
   asdf-specialized:
     name: ASDF pinned-oracle verification
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       VERIFICATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/asdf-specialized
     steps:
@@ -240,19 +240,24 @@ jobs:
             --target build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-python `
             -r tools\asdf_labeling_spike\requirements.txt
 
-      - name: Configure and build ASDF oracle targets
+      - name: Configure ASDF oracle tree
         shell: pwsh
-        timeout-minutes: 20
+        timeout-minutes: 25
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Configure `
             -Preset ninja-msvc-debug-asdf-labeling-spike `
             -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
             -LogDir "$env:VERIFICATION_RUN_ROOT\asdf-build" `
-            -TimeoutSec 600
+            -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
             throw "ASDF oracle configure failed with exit code $LASTEXITCODE."
           }
+
+      - name: Build ASDF oracle targets
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Preset ninja-msvc-debug-asdf-labeling-spike `
             -Target specforge_asdf_labeling_interoperability_targets `
