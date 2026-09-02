@@ -893,6 +893,7 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
         .context_reuse_proof = proof,
     };
     std::atomic_int decoder_calls = 0;
+    std::atomic_int notifications = 0;
     specforge::SourceCollectionLoadQueue queue =
         specforge::MakeSourceCollectionLoadQueueForTesting(
             Dependencies(
@@ -903,6 +904,9 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
                     ++decoder_calls;
                     return MakeSnapshot(source, index);
                 }));
+    queue.RegisterCompletionReadyCallback([&notifications]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
 
     Require(
         queue.ArmRuntimeResourceCancellationCheckpoint(),
@@ -920,7 +924,11 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
         WaitUntil([&queue]() {
             return queue.ActivitySnapshot()
                 .runtime_resource_cancellation_checkpoint_waiting;
-        }),
+        }) &&
+            WaitUntil([&notifications]() {
+                return notifications.load(
+                           std::memory_order_relaxed) == 1;
+            }),
         "the fast resident request should stop at the deterministic cancellation checkpoint");
 
     Require(
@@ -1142,7 +1150,11 @@ void TestRetirementRunsOnWorker()
     std::promise<std::thread::id> destroyed_promise;
     std::future<std::thread::id> destroyed = destroyed_promise.get_future();
     const std::thread::id caller = std::this_thread::get_id();
+    std::atomic_int notifications = 0;
     specforge::SourceCollectionLoadQueue queue;
+    queue.RegisterCompletionReadyCallback([&notifications]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
     queue.RetireResource(std::make_shared<DestructionProbe>(&destroyed_promise));
     Require(
         destroyed.wait_for(2s) == std::future_status::ready,
@@ -1156,6 +1168,11 @@ void TestRetirementRunsOnWorker()
                    activity.retired_resource_count == 1;
         }),
         "activity snapshot should become retirement-idle after destruction");
+    Require(
+        WaitUntil([&notifications]() {
+            return notifications.load(std::memory_order_relaxed) == 1;
+        }),
+        "background resource retirement should wake the UI after becoming idle");
 }
 
 }  // namespace

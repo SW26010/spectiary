@@ -1377,7 +1377,11 @@ try {
         -Destination $fixtureExecutable
     $buildRoot =
         Split-Path -Parent $resolvedExecutable
-    foreach ($runtimeFile in @('zd.dll', 'yaml-cppd.dll')) {
+    foreach ($runtimeFile in @(
+            'cfitsio.dll',
+            'pthreadVC3d.dll',
+            'zd.dll',
+            'yaml-cppd.dll')) {
         $runtimeDll = Join-Path $buildRoot $runtimeFile
         if (Test-Path -LiteralPath $runtimeDll -PathType Leaf) {
             Copy-Item `

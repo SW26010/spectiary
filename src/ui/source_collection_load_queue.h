@@ -91,11 +91,13 @@ public:
     [[nodiscard]] bool
     ArmRuntimeResourceCancellationCheckpoint();
 
-    // The callback runs on the publishing thread after the queue mutex has
-    // been released. It is invoked only when the published completion queue
-    // transitions from empty to non-empty. Unregister waits for an already
-    // running callback so its captured notification target can be destroyed
-    // safely after this method returns.
+    // The callback runs off the UI thread after the queue mutex has been
+    // released. It is invoked when the published completion queue transitions
+    // from empty to non-empty, when the runtime-resource cancellation
+    // checkpoint becomes observable, and after a batch of background
+    // resources has finished retiring. Unregister waits for an already running
+    // callback so its captured notification target can be destroyed safely
+    // after this method returns.
     void RegisterCompletionReadyCallback(CompletionReadyCallback callback);
     void UnregisterCompletionReadyCallback();
 

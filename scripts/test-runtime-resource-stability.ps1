@@ -599,13 +599,13 @@ function Invoke-RuntimeResourceEvidenceAnalysis {
 
     $presentationFailures =
         [System.Collections.Generic.List[string]]::new()
-    $cyclePresentations = if (
-        $null -ne $FinalStatus.PSObject.Properties[
+    $cyclePresentations = @()
+    if ($null -ne $FinalStatus.PSObject.Properties[
             'measured_cycle_presentations']) {
-        @($FinalStatus.measured_cycle_presentations)
-    }
-    else {
-        @()
+        foreach ($presentation in
+                 @($FinalStatus.measured_cycle_presentations)) {
+            $cyclePresentations += ,$presentation
+        }
     }
     if ($ExpectedSourcePaths.Count -ne
         $ExpectedSourceCount) {

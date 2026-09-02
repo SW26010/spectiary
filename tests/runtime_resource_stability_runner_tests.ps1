@@ -447,6 +447,30 @@ Assert-True `
         $measuredPresentationCheck.status -eq 'FAIL') `
     -Message 'Warmup/global Present activity must not hide one missing measured-cycle stress/baseline Present pair.'
 
+$emptyMeasuredPresentationStatus =
+    $status.PSObject.Copy()
+$emptyMeasuredPresentationStatus.measured_cycle_presentations = @()
+$emptyMeasuredPresentation =
+    Invoke-RuntimeResourceEvidenceAnalysis `
+        -Samples (New-SampleSet) `
+        -FinalStatus $emptyMeasuredPresentationStatus `
+        -ProfileEvidence $profile `
+        -ProcessExitCode 2 `
+        -ExpectedSourceCount 2 `
+        -ExpectedSourcePaths $expectedSourcePaths `
+        -ExpectedWarmupCycles 2 `
+        -ExpectedMeasuredCycles 8 `
+        -Thresholds $thresholds
+$emptyMeasuredPresentationCheck =
+    $emptyMeasuredPresentation.checks |
+        Where-Object name -eq `
+            'measured_cycle_presentations'
+Assert-True `
+    -Condition (
+        $emptyMeasuredPresentation.result -eq 'FAIL' -and
+        $emptyMeasuredPresentationCheck.status -eq 'FAIL') `
+    -Message 'An early workload failure with no measured Present records must produce a failed analysis instead of a secondary Count exception.'
+
 $missingGraphicsStatus = $status.PSObject.Copy()
 $missingGraphicsStatus.graphics = [pscustomobject]@{
     requested = $true

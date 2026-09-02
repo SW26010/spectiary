@@ -763,9 +763,13 @@ private:
         }
         if (task
                 .wait_at_runtime_resource_cancellation_checkpoint) {
+            {
+                std::lock_guard lock(mutex_);
+                runtime_resource_cancellation_checkpoint_waiting_ =
+                    true;
+            }
+            NotifyCompletionReady();
             std::unique_lock lock(mutex_);
-            runtime_resource_cancellation_checkpoint_waiting_ =
-                true;
             (void)runtime_resource_cancellation_condition_.wait(
                 lock,
                 stop_token,
@@ -854,6 +858,9 @@ private:
                     prepared_count + resource_count;
                 retired_prepared_count_ += prepared_count;
                 retired_resource_count_ += resource_count;
+            }
+            if (resource_count > 0) {
+                NotifyCompletionReady();
             }
             if (stop_token.stop_requested()) {
                 return;

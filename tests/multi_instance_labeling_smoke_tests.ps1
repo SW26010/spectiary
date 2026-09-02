@@ -1079,7 +1079,11 @@ function Get-PortableApp {
     $destinationExecutable = Join-Path $Destination 'SpecForge.exe'
     Copy-Item -LiteralPath $ResolvedExecutable -Destination $destinationExecutable
     $buildRoot = Split-Path -Parent $ResolvedExecutable
-    foreach ($runtimeFile in @('zd.dll', 'yaml-cppd.dll')) {
+    foreach ($runtimeFile in @(
+            'cfitsio.dll',
+            'pthreadVC3d.dll',
+            'zd.dll',
+            'yaml-cppd.dll')) {
         $source = Join-Path $buildRoot $runtimeFile
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $Destination $runtimeFile)
