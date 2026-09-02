@@ -39,10 +39,29 @@ performance estimate:
 The measured local total fell by 301.62s (97.3%). The old pinned ASDF setup
 and oracle pass could not run in this local environment and is excluded from
 the before total, so the comparison understates the removed workflow scope.
-Issue #81's hosted baseline remains the clean-run reference: the earlier broad
-job spent about 43 minutes in Debug + static Release configure/build/test work
-before failing. A later manual hosted run can compare those same phase
-boundaries without changing the workflow's manual-only policy.
+
+The clean GitHub-hosted Windows comparison was completed with manual workflow
+dispatches. The successful broad-scope
+[before run 33486495510](https://github.com/SW26010/SpecForge/actions/runs/33486495510/job/99787686232)
+still configured Debug, static Release, and the pinned ASDF tree; built the two
+`all` targets plus the specialized ASDF targets; and ran both `ci-headless`
+suites plus the pinned ASDF oracle. The post-merge
+[after run 33573250819](https://github.com/SW26010/SpecForge/actions/runs/33573250819/job/100071558764)
+configured only Debug, built `specforge_automation_headless_targets`, and ran
+the five-test `automation-headless` selector:
+
+| Hosted phase | Before ownership split | After ownership split |
+| --- | ---: | ---: |
+| Configure | 558.70s | 300.70s |
+| Build | 1034.80s | 294.40s |
+| CTest | 372.71s | 5.32s |
+| Total job wall time | 2076.21s (34m 36.21s) | 635.54s (10m 35.54s) |
+
+The hosted total fell by 1440.67s (69.4%). Configure and build values sum the
+wrapper-reported elapsed times for every tree/target owned by each version of
+the workflow; CTest sums the reported suite totals. Total job wall time is the
+interval from the first to the last timestamp in each GitHub job log and also
+includes checkout, runner setup, evidence preparation, and artifact handling.
 
 ## Manual execution policy
 

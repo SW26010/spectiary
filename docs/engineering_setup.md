@@ -172,6 +172,12 @@ ctest --preset fast
 ctest --preset extended
 ```
 
+2026-09-02 合并后的代表性 GitHub-hosted Windows/MSVC/Ninja 验证在
+[repository verification run 33573199441](https://github.com/SW26010/SpecForge/actions/runs/33573199441/job/100071400948)
+中通过同一正式入口运行了 `ctest --preset fast`：74/74 项测试通过，
+`Total Test time (real) = 54.18 sec`。该结果满足低于 1 分钟的受控耗时门槛，
+但尚未达到约 30 秒的首选预算。
+
 `extended` 会运行较慢的 headless 测试，但不会代替需要专门环境或目的的验证。验证入口分工如下：
 
 | 入口 | 用途 | 选择边界 |
