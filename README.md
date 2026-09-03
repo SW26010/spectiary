@@ -4,12 +4,14 @@
 
 <h1 align="center">SpecForge</h1>
 
-[![Build](https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg)](https://github.com/SW26010/SpecForge/actions/workflows/automation.yml)
-[![Release](https://img.shields.io/github/v/release/SW26010/SpecForge?label=Release)](https://github.com/SW26010/SpecForge/releases)
-![C++](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus)
-![Dear ImGui](https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE)
-![ImPlot](https://img.shields.io/badge/ImPlot-Plotting-8A2BE2)
-![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D4?logo=windows11)
+<p align="center">
+  <a href="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml"><img src="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="SpecForge automation status"></a>
+  <a href="https://github.com/SW26010/SpecForge/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/Release-v0.9.0-2ea44f?logo=github&amp;logoColor=white" alt="Latest release: v0.9.0"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus" alt="C++20">
+  <img src="https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE" alt="Dear ImGui with docking">
+  <img src="https://img.shields.io/badge/ImPlot-Plotting-8A2BE2" alt="ImPlot">
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D4?logo=windows11" alt="Windows 10 and 11">
+</p>
 
 <p align="center">
   <strong>Lightweight. Fast. Fluid.</strong><br>
