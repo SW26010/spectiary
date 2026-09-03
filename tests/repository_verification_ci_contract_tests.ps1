@@ -357,7 +357,7 @@ $asdfBody = Get-JobBody -Text $workflowText -JobId 'asdf-specialized'
 Assert-True `
     -Condition (
         $asdfBody.Contains('runs-on: windows-latest') -and
-        $asdfBody.Contains('timeout-minutes: 35') -and
+        $asdfBody.Contains('timeout-minutes: 60') -and
         $asdfBody.Contains('VERIFICATION_RUN_ROOT:') -and
         -not $asdfBody.Contains('scripts\run-automation-ci.ps1') -and
         -not $asdfBody.Contains("-L '^ci-headless$'")
@@ -371,7 +371,8 @@ Assert-ContainsInOrder `
         '- name: Select runner vcpkg and MSVC toolchain',
         '- name: Set up pinned ASDF oracle Python',
         '- name: Install pinned ASDF oracle',
-        '- name: Configure and build ASDF oracle targets',
+        '- name: Configure ASDF oracle tree',
+        '- name: Build ASDF oracle targets',
         '- name: Run pinned ASDF oracle CTests',
         '- name: Collect final ASDF oracle evidence',
         '- name: Upload ASDF oracle logs and evidence'
@@ -387,9 +388,12 @@ $asdfPython = Get-StepBody `
 $asdfInstall = Get-StepBody `
     -JobBody $asdfBody `
     -StepName 'Install pinned ASDF oracle'
+$asdfConfigure = Get-StepBody `
+    -JobBody $asdfBody `
+    -StepName 'Configure ASDF oracle tree'
 $asdfBuild = Get-StepBody `
     -JobBody $asdfBody `
-    -StepName 'Configure and build ASDF oracle targets'
+    -StepName 'Build ASDF oracle targets'
 $asdfTests = Get-StepBody `
     -JobBody $asdfBody `
     -StepName 'Run pinned ASDF oracle CTests'
@@ -415,15 +419,29 @@ Assert-True `
     -Message 'ASDF owner must provision its pinned hosted oracle environment.'
 Assert-True `
     -Condition (
+        $asdfConfigure.Contains('scripts\build-ninja-msvc-debug.ps1') -and
+        $asdfConfigure.Contains('-Configure') -and
+        $asdfConfigure.Contains('-Preset ninja-msvc-debug-asdf-labeling-spike') -and
+        $asdfConfigure.Contains('-TimeoutSec 1200') -and
+        [regex]::IsMatch(
+            $asdfConfigure,
+            '(?m)^\s*timeout-minutes:\s*25\s*$') -and
+        $asdfConfigure.Contains('ASDF oracle configure failed')
+    ) `
+    -Message 'ASDF owner must configure its dedicated tree with aligned bounded deadlines.'
+Assert-True `
+    -Condition (
         $asdfBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and
-        $asdfBuild.Contains('-Configure') -and
         $asdfBuild.Contains('-Preset ninja-msvc-debug-asdf-labeling-spike') -and
         $asdfBuild.Contains(
             '-Target specforge_asdf_labeling_interoperability_targets') -and
-        $asdfBuild.Contains('ASDF oracle configure failed') -and
+        $asdfBuild.Contains('-TimeoutSec 900') -and
+        [regex]::IsMatch(
+            $asdfBuild,
+            '(?m)^\s*timeout-minutes:\s*20\s*$') -and
         $asdfBuild.Contains('ASDF oracle target build failed')
     ) `
-    -Message 'ASDF owner must configure and build the dedicated target closure.'
+    -Message 'ASDF owner must build the dedicated target closure with aligned bounded deadlines.'
 Assert-True `
     -Condition (
         $asdfTests.Contains('build\ninja-msvc-debug-asdf-labeling-spike') -and
