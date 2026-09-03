@@ -9,10 +9,23 @@ function Invoke-GitCapture {
         [string[]]$Arguments
     )
 
-    $output = @(& git -C $repoRoot @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) {
+    # Windows PowerShell surfaces native stderr as NativeCommandError records
+    # when it is redirected. Git writes successful fetch/push progress there,
+    # so temporarily keep those records capturable and decide success solely
+    # from the native exit code.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& git -C $repoRoot @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
         $detail = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
-        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE.`n$detail"
+        throw "git $($Arguments -join ' ') failed with exit code $exitCode.`n$detail"
     }
     return @($output | ForEach-Object { [string]$_ })
 }
