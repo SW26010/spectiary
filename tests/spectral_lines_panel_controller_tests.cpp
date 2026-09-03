@@ -115,18 +115,30 @@ std::filesystem::path TestCachePath(std::string_view test_name)
 
 void RemoveTestCache(const std::filesystem::path& path)
 {
+#if defined(_WIN32)
+    constexpr wchar_t kTemporarySuffix[] = L".tmp";
+    constexpr wchar_t kTemporaryPrefixSuffix[] = L".tmp.";
+#else
+    constexpr char kTemporarySuffix[] = ".tmp";
+    constexpr char kTemporaryPrefixSuffix[] = ".tmp.";
+#endif
+
     std::error_code error;
     std::filesystem::remove(path, error);
-    std::filesystem::remove(path.string() + ".tmp", error);
+    std::filesystem::path temporary_path = path;
+    temporary_path += kTemporarySuffix;
+    std::filesystem::remove(temporary_path, error);
     std::filesystem::remove(
         specforge::CatalogUserStateCacheCommitLeasePath(path),
         error);
     const std::filesystem::path parent = path.parent_path();
-    const std::string temporary_prefix = path.filename().string() + ".tmp.";
+    std::filesystem::path::string_type temporary_prefix =
+        path.filename().native();
+    temporary_prefix += kTemporaryPrefixSuffix;
     for (std::filesystem::directory_iterator iterator(parent, error);
          !error && iterator != std::filesystem::directory_iterator();
          iterator.increment(error)) {
-        if (iterator->path().filename().string().starts_with(temporary_prefix)) {
+        if (iterator->path().filename().native().starts_with(temporary_prefix)) {
             std::error_code remove_error;
             std::filesystem::remove(iterator->path(), remove_error);
         }
@@ -159,6 +171,38 @@ void TestCatalogCommitLeasePathPreservesNativePath()
         lease_path.parent_path() == path.parent_path() &&
             lease_path.filename().native() == expected_filename,
         "catalog commit lease path must append its suffix without narrowing the native path");
+}
+
+void TestCacheCleanupIgnoresUnrelatedUnicodeEntries()
+{
+#if defined(_WIN32)
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("specforge_catalog_cleanup_unicode_" +
+         std::to_string(GetCurrentProcessId()));
+    const std::filesystem::path unrelated_path =
+        root / L"unrelated-\U0001f52d";
+    const std::filesystem::path cache_path = root / "state.json";
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    error.clear();
+    std::filesystem::create_directories(unrelated_path, error);
+    Require(!error, "could not create the unrelated Unicode test entry");
+
+    try {
+        RemoveTestCache(cache_path);
+        Require(
+            std::filesystem::exists(unrelated_path, error) && !error,
+            "cache cleanup must ignore unrelated Unicode entries");
+    } catch (...) {
+        std::filesystem::remove_all(root, error);
+        throw;
+    }
+
+    std::filesystem::remove_all(root, error);
+    Require(!error, "could not remove the Unicode cleanup test directory");
+#endif
 }
 
 std::filesystem::path MultiProcessCachePath()
@@ -3607,6 +3651,7 @@ int main(int argc, char* argv[])
     }
     try {
         TestCatalogCommitLeasePathPreservesNativePath();
+        TestCacheCleanupIgnoresUnrelatedUnicodeEntries();
         TestForeignIdentitiesAreRejectedWithoutPersistence();
         TestPlotViewProjectsOnlyPlotOverlayState();
         TestLineAndBandColorsAreIndependentStableAndPersistent();
