@@ -553,12 +553,30 @@ void TestTypedCommandResultProtocol()
     Require(saved.find(R"("status":"output_saved")") != std::string::npos &&
             saved.find(R"("current_spectrum_after":{"present":true,"index":1,"name":"next"})") != std::string::npos,
         "successful output persistence and present spectrum must serialize explicitly");
+    const std::pair<AutomationPersistenceResult, std::string_view> persistence_cases[] = {
+        {{}, "unchanged"},
+        {{true, false, false, false, false, false}, "state_save_scheduled"},
+        {{true, true, true, false, false, false}, "state_saved"},
+        {{true, true, true, true, false, false}, "output_save_failed"},
+        {{true, true, true, true, false, true}, "output_retry_scheduled"},
+        {{true, true, true, true, true, false}, "output_saved"},
+    };
+    for (const auto& [facts, status] : persistence_cases) {
+        assignment.persistence = facts;
+        Require(SerializeAutomationCommandResultBody(assignment).find(
+            "\"status\":\"" + std::string(status) + '"') != std::string::npos,
+            "each persistence outcome must preserve its established wire status");
+    }
     Require(SerializeAutomationCommandResultBody(AutomationFrameCaptureResult{"frame.png", 7, 800, 600}) ==
             R"("result":{"path":"frame.png","format":"png","scope":"main_viewport","frame_index":7,"width":800,"height":600})",
         "capture protocol constants and dimensions must retain their wire shape");
     Require(SerializeAutomationCommandResultBody(AutomationProfileStartResult{"trace.jsonl"}) ==
             R"("result":{"status":"recording","path":"trace.jsonl"})",
         "profile start must retain recording status");
+    Require(SerializeAutomationCommandResultBody(AutomationProfileStopResult{
+                "trace.jsonl", ProfileSink::StopReason::None, 3}) ==
+            R"("result":{"status":"succeeded","path":"trace.jsonl","stop_reason":"none","dropped_events":3})",
+        "profile stop serializer must preserve supplied facts; terminal policy chooses success separately");
     Require(SerializeAutomationCommandResultBody(AutomationCancellationResult{"cancel", "a\nb"}) ==
             R"("error":{"code":"cancel","message":"a\nb"})",
         "cancellation must escape structured error facts");
@@ -1892,9 +1910,8 @@ void TestSingleClientQueueAndLifecycle()
     Require(
         commands.size() == 1,
         "duplicate request must not enter the UI queue");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{}");
+    fixture.server.CompleteState(
+        commands.front(), specforge::AutomationStateSnapshot{});
     Require(
         ReceiveParsed(client).status ==
             "completed",
@@ -2431,13 +2448,9 @@ void TestOversizedTerminalResponseIsBounded()
     Require(
         commands.size() == 1,
         "oversized response fixture should dequeue state.get");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{\"source\":{\"path\":\"" +
-            std::string(
-                specforge::kAutomationMaxMessageBytes,
-                'x') +
-            "\"}}");
+    specforge::AutomationStateSnapshot oversized_state;
+    oversized_state.shell.current_source_path = std::string(specforge::kAutomationMaxMessageBytes, 'x');
+    fixture.server.CompleteState(commands.front(), oversized_state);
 
     const auto bounded = ReceiveParsed(client);
     Require(
@@ -2459,9 +2472,8 @@ void TestOversizedTerminalResponseIsBounded()
     Require(
         commands.size() == 1,
         "the post-oversize request should still reach the UI queue");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{}");
+    fixture.server.CompleteState(
+        commands.front(), specforge::AutomationStateSnapshot{});
     const auto completed = ReceiveParsed(client);
     Require(
         completed.request_id ==
@@ -2511,7 +2523,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "setting.set should enter the synchronized mutation claim");
         setting_fixture.server.Complete(
             setting_commands.front(),
-            "\"result\":{}");
+            specforge::AutomationCommandResult{});
         Require(
             ReceiveParsed(setting_client).status ==
                 "completed",
@@ -2556,7 +2568,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "panel.set should enter the synchronized mutation claim");
         panel_fixture.server.Complete(
             panel_commands.front(),
-            "\"result\":{}");
+            specforge::AutomationCommandResult{});
         Require(
             ReceiveParsed(panel_client).status ==
                 "completed",
@@ -2644,7 +2656,7 @@ void TestExecutionClaimsAndQuitBarrier()
 
     fixture.server.Complete(
         *label,
-        "\"result\":{}");
+        specforge::AutomationCommandResult{});
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
             specforge::AutomationNamedPipeServer::
@@ -2985,7 +2997,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     completed_command,
-                    "\"result\":{}",
+                    specforge::AutomationCommandResult{},
                     []() {
                         return S_OK;
                     });
@@ -3007,7 +3019,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     failed_command,
-                    "\"result\":{}",
+                    specforge::AutomationCommandResult{},
                     []() {
                         return HRESULT_FROM_WIN32(
                             ERROR_FILE_EXISTS);
@@ -3073,7 +3085,7 @@ void TestFrameCaptureFinalizationLease()
                 lease_first_fixture.server
                     .TryFinalizeFrameCapture(
                         lease_first_commands.front(),
-                        "\"result\":{}",
+                        specforge::AutomationCommandResult{},
                         [&]() {
                             ++publish_count;
                             publish_entered = true;
@@ -3184,7 +3196,7 @@ void TestFrameCaptureFinalizationLease()
         finalization =
             fixture.server.TryFinalizeFrameCapture(
                 commands.front(),
-                "\"result\":{}",
+                specforge::AutomationCommandResult{},
                 [&]() {
                     publish_called = true;
                     return S_OK;

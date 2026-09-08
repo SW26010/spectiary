@@ -1,11 +1,9 @@
 #include "app/automation_panel_command_coordinator.h"
 
-#include "app/local_user_state_json.h"
 #include "automation/automation_protocol.h"
 
 #include <algorithm>
 #include <ranges>
-#include <sstream>
 
 namespace specforge {
 
@@ -49,37 +47,12 @@ namespace {
     return static_cast<std::size_t>(panel);
 }
 
-[[nodiscard]] std::string JsonString(std::string_view value)
-{
-    return "\"" + JsonEscape(value) + "\"";
-}
-
-[[nodiscard]] const char* JsonBool(bool value) noexcept
-{
-    return value ? "true" : "false";
-}
-
-[[nodiscard]] std::string PanelResult(
-    std::string_view name,
-    bool visible,
+[[nodiscard]] AutomationPanelResult PanelResult(
+    std::string_view name, bool visible,
     std::optional<bool> changed = std::nullopt,
     std::optional<std::uint64_t> frame_index = std::nullopt)
 {
-    std::ostringstream body;
-    body << "\"result\":{\"name\":"
-         << JsonString(name)
-         << ",\"visible\":"
-         << JsonBool(visible);
-    if (changed.has_value()) {
-        body << ",\"changed\":"
-             << JsonBool(*changed);
-    }
-    if (frame_index.has_value()) {
-        body << ",\"frame_index\":"
-             << *frame_index;
-    }
-    body << '}';
-    return body.str();
+    return {std::string(name), visible, changed, frame_index};
 }
 
 }  // namespace

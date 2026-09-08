@@ -1,7 +1,6 @@
 #include "app/specforge_app.h"
 
 #include "app/initial_source.h"
-#include "app/local_user_state_json.h"
 #include "app/native_window_title.h"
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
@@ -40,7 +39,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT mes
 
 namespace specforge {
 
-std::string JsonString(std::string_view value);
 
 namespace {
 
@@ -1671,25 +1669,13 @@ void SpecForgeApp::CaptureRequestedFrame()
             automation_finalization;
     bool automation_finalization_attempted = false;
     AutomationQueuedCommand capture_command;
-    std::string capture_body;
+    AutomationCommandResult capture_result;
     if (requested_output &&
         automation_capture_command_) {
         capture_command =
             automation_capture_command_->command;
-        std::ostringstream body;
-        body << "\"result\":{"
-             << "\"path\":"
-             << JsonString(PathToUtf8(output_path))
-             << ",\"format\":\"png\""
-             << ",\"scope\":\"main_viewport\""
-             << ",\"frame_index\":"
-             << frame_index_
-             << ",\"width\":"
-             << window_.client_width()
-             << ",\"height\":"
-             << window_.client_height()
-             << '}';
-        capture_body = body.str();
+        capture_result = AutomationFrameCaptureResult{
+            PathToUtf8(output_path), frame_index_, window_.client_width(), window_.client_height()};
     }
     const HRESULT result =
         renderer_.CaptureFrameToPng(
@@ -1698,7 +1684,7 @@ void SpecForgeApp::CaptureRequestedFrame()
             ? D3D11FrameCaptureFinalizer{
                   [this,
                    capture_command,
-                   capture_body,
+                   capture_result,
                    &automation_finalization,
                    &automation_finalization_attempted](
                       const std::function<HRESULT()>&
@@ -1709,7 +1695,7 @@ void SpecForgeApp::CaptureRequestedFrame()
                           automation_server_
                               ->TryFinalizeFrameCapture(
                                   capture_command,
-                                  capture_body,
+                                  capture_result,
                               publish);
                       return automation_finalization
                           .result;
@@ -1919,48 +1905,18 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
     profile_.RequestStopAfterFrame();
 }
 
-std::string JsonString(std::string_view value)
-{
-    return "\"" + JsonEscape(value) + "\"";
-}
-
-const char* JsonBool(bool value)
-{
-    return value ? "true" : "false";
-}
-
-std::string AutomationStringSettingResult(
-    std::string_view name,
-    std::string_view value,
+AutomationSettingResult AutomationStringSettingResult(
+    std::string_view name, std::string_view value,
     std::optional<bool> changed = std::nullopt)
 {
-    std::ostringstream body;
-    body << "\"result\":{\"name\":"
-         << JsonString(name)
-         << ",\"value\":" << JsonString(value);
-    if (changed.has_value()) {
-        body << ",\"changed\":"
-             << JsonBool(*changed);
-    }
-    body << '}';
-    return body.str();
+    return {std::string(name), std::string(value), changed};
 }
 
-std::string AutomationIntegerSettingResult(
-    std::string_view name,
-    int value,
+AutomationSettingResult AutomationIntegerSettingResult(
+    std::string_view name, int value,
     std::optional<bool> changed = std::nullopt)
 {
-    std::ostringstream body;
-    body << "\"result\":{\"name\":"
-         << JsonString(name)
-         << ",\"value\":" << value;
-    if (changed.has_value()) {
-        body << ",\"changed\":"
-             << JsonBool(*changed);
-    }
-    body << '}';
-    return body.str();
+    return {std::string(name), value, changed};
 }
 
 std::pair<std::string_view, std::string_view>
@@ -2383,32 +2339,32 @@ void SpecForgeApp::ServiceAutomationSettingSet(
     ApplyPendingApplicationSettings(
         "automation_setting_changed");
 
-    std::string body;
+    AutomationCommandResult result_payload;
     if (setting == SupportedSetting::Language) {
         const UiLanguage current =
             ui_.ui_language();
-        body = AutomationStringSettingResult(
+        result_payload = AutomationStringSettingResult(
             parameters->name,
             UiLanguageSettingValue(current),
             current != previous_language);
     } else if (setting == SupportedSetting::UiScale) {
         const int current =
             ui_.ui_scale_percentage();
-        body = AutomationIntegerSettingResult(
+        result_payload = AutomationIntegerSettingResult(
             parameters->name,
             current,
             current != previous_scale);
     } else {
         const ThemeSelection current =
             ui_.theme_selection();
-        body = AutomationStringSettingResult(
+        result_payload = AutomationStringSettingResult(
             parameters->name,
             ThemeSelectionStableValue(current),
             current != previous_theme);
     }
     automation_server_->Complete(
         command,
-        body);
+        result_payload);
 }
 
 void SpecForgeApp::ServiceAutomationPanelGet(
@@ -2483,9 +2439,9 @@ SpecForgeApp::AutomationPanelCoordinatorCallbacks()
         },
         .complete = [this](
                         const AutomationQueuedCommand& command,
-                        std::string_view body_members) {
+                        const AutomationCommandResult& result) {
             if (automation_server_) {
-                automation_server_->Complete(command, body_members);
+                automation_server_->Complete(command, result);
             }
         },
         .fail = [this](
@@ -2899,15 +2855,8 @@ void SpecForgeApp::ServiceAutomationProfileStart(
         return;
     }
 
-    std::ostringstream body;
-    body << "\"result\":{"
-         << "\"status\":\"recording\""
-         << ",\"path\":"
-         << JsonString(PathToUtf8(profile_.path()))
-         << '}';
-    automation_server_->Complete(
-        command,
-        body.str());
+    automation_server_->Complete(command,
+        AutomationProfileStartResult{PathToUtf8(profile_.path())});
     render_wake_scheduler_.RequestFrame();
 }
 
@@ -3079,28 +3028,9 @@ void SpecForgeApp::PollAutomationBusinessOperations()
                     return false;
                 }
                 if (outcome.state == State::Succeeded) {
-                    std::ostringstream body;
-                    body << "\"result\":{"
-                         << "\"source\":{"
-                         << "\"id\":"
-                         << JsonString(
-                                outcome.source_id)
-                         << ",\"path\":"
-                         << JsonString(
-                                PathToUtf8(
-                                    outcome.source_path))
-                         << ",\"spectrum_count\":"
-                         << outcome.spectrum_count
-                         << "},\"current_spectrum\":{"
-                         << "\"index\":"
-                         << outcome.spectrum_index
-                         << ",\"name\":"
-                         << JsonString(
-                                outcome.spectrum_name)
-                         << "}}";
-                    automation_server_->Complete(
-                        pending.command,
-                        body.str());
+                    automation_server_->Complete(pending.command,
+                        AutomationSourceOpenResult{outcome.source_id, PathToUtf8(outcome.source_path),
+                            outcome.spectrum_count, {outcome.spectrum_index, outcome.spectrum_name}});
                 } else if (
                     outcome.state == State::Failed) {
                     automation_server_->Fail(
@@ -3159,21 +3089,9 @@ void SpecForgeApp::PollAutomationBusinessOperations()
                     pending.source_id &&
                 presented.spectrum_index ==
                     pending.target_index) {
-                std::ostringstream body;
-                body << "\"result\":{"
-                     << "\"source_id\":"
-                     << JsonString(pending.source_id)
-                     << ",\"spectrum\":{"
-                     << "\"index\":"
-                     << view.spectrum.index
-                     << ",\"name\":"
-                     << JsonString(view.spectrum.name)
-                     << "},\"changed\":"
-                     << JsonBool(pending.changed)
-                     << '}';
-                automation_server_->Complete(
-                    pending.command,
-                    body.str());
+                automation_server_->Complete(pending.command,
+                    AutomationSpectrumGotoResult{pending.source_id,
+                        {view.spectrum.index, view.spectrum.name}, pending.changed});
                 automation_goto_command_.reset();
             } else if (
                 shell_idle &&
@@ -3268,82 +3186,17 @@ void SpecForgeApp::PollAutomationBusinessOperations()
                            view.spectrum.index)))) {
                     const auto& assignment =
                         *pending.assignment;
-                    std::string_view persistence =
-                        assignment.output_save_attempted
-                        ? (assignment.output_saved
-                               ? "output_saved"
-                           : assignment
-                                     .output_retry_scheduled
-                               ? "output_retry_scheduled"
-                               : "output_save_failed")
-                        : assignment.state_saved
-                        ? "state_saved"
-                        : assignment
-                                  .state_save_scheduled
-                        ? "state_save_scheduled"
-                        : "unchanged";
-                    std::ostringstream body;
-                    body << "\"result\":{"
-                         << "\"assignment\":{"
-                         << "\"source_id\":"
-                         << JsonString(
-                                assignment.source_id)
-                         << ",\"task_id\":"
-                         << JsonString(
-                                assignment.task_id)
-                         << ",\"spectrum\":{"
-                         << "\"index\":"
-                         << assignment.spectrum.index
-                         << ",\"name\":"
-                         << JsonString(
-                                assignment.spectrum.name)
-                         << "},\"previous_code\":"
-                         << assignment.previous_code
-                         << ",\"new_code\":"
-                         << assignment.new_code
-                         << ",\"changed\":"
-                         << JsonBool(
-                                assignment.changed)
-                         << "},\"persistence\":{"
-                         << "\"status\":"
-                         << JsonString(persistence)
-                         << ",\"state_save_scheduled\":"
-                         << JsonBool(
-                                assignment
-                                    .state_save_scheduled)
-                         << ",\"state_save_attempted\":"
-                         << JsonBool(
-                                assignment
-                                    .state_save_attempted)
-                         << ",\"state_saved\":"
-                         << JsonBool(
-                                assignment.state_saved)
-                         << ",\"output_save_attempted\":"
-                         << JsonBool(
-                                assignment
-                                    .output_save_attempted)
-                         << ",\"output_saved\":"
-                         << JsonBool(
-                                assignment.output_saved)
-                         << ",\"output_retry_scheduled\":"
-                         << JsonBool(
-                                assignment
-                                    .output_retry_scheduled)
-                         << "},\"current_spectrum_after\":{"
-                         << "\"present\":"
-                         << JsonBool(
-                                view.spectrum.present);
-                    if (view.spectrum.present) {
-                        body << ",\"index\":"
-                             << view.spectrum.index
-                             << ",\"name\":"
-                             << JsonString(
-                                    view.spectrum.name);
-                    }
-                    body << "}}";
-                    automation_server_->Complete(
-                        pending.command,
-                        body.str());
+                    automation_server_->Complete(pending.command,
+                        AutomationLabelAssignResult{
+                            assignment.source_id, assignment.task_id,
+                            {assignment.spectrum.index, assignment.spectrum.name},
+                            assignment.previous_code, assignment.new_code, assignment.changed,
+                            {assignment.state_save_scheduled, assignment.state_save_attempted,
+                                assignment.state_saved, assignment.output_save_attempted,
+                                assignment.output_saved, assignment.output_retry_scheduled},
+                            view.spectrum.present
+                                ? std::optional<AutomationResultSpectrum>{{view.spectrum.index, view.spectrum.name}}
+                                : std::nullopt});
                 }
             }
             if (!automation_server_->IsRequestActive(
@@ -3470,10 +3323,7 @@ void SpecForgeApp::ServiceAutomation()
                     command.request_id)) {
                 break;
             }
-            automation_server_->Complete(
-                command,
-                SerializeAutomationStateBody(
-                    AutomationState()));
+            automation_server_->CompleteState(command, AutomationState());
             break;
         case AutomationCommandKind::WaitIdle:
             if (!automation_server_->IsRequestActive(

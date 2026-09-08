@@ -40,7 +40,7 @@ public:
         std::function<bool(const AutomationQueuedCommand&)> try_claim_execution;
         std::function<PanelVisibilityState()> current_visibility;
         std::function<ApplyResult(ApplicationPanel, bool)> apply_visibility;
-        std::function<void(const AutomationQueuedCommand&, std::string_view)>
+        std::function<void(const AutomationQueuedCommand&, const AutomationCommandResult&)>
             complete;
         std::function<void(
             const AutomationQueuedCommand&,

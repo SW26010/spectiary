@@ -157,6 +157,10 @@ struct AutomationServerMessageParseResult {
 [[nodiscard]] AutomationServerMessageParseResult
 ParseAutomationServerMessage(std::string_view json);
 
+struct AutomationStateSnapshot;
+[[nodiscard]] std::string SerializeAutomationStateBody(
+    const AutomationStateSnapshot& state);
+
 // Computed command facts. Wire field names and optional-member rules belong
 // to the protocol serializer, never to application command coordinators.
 struct AutomationSettingResult {

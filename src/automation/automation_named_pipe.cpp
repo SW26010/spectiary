@@ -1,6 +1,6 @@
 #include "automation/automation_named_pipe.h"
+#include "automation/automation_state.h"
 
-#include "app/local_user_state_json.h"
 #include "automation/automation_protocol.h"
 
 #include <Windows.h>
@@ -386,6 +386,27 @@ AutomationNamedPipeServer::queue_snapshot() const
 }
 
 void AutomationNamedPipeServer::Complete(
+    const AutomationQueuedCommand& command, const AutomationCommandResult& result)
+{
+    CompleteSerializedBody(command, SerializeAutomationCommandResultBody(result));
+}
+
+AutomationNamedPipeServer::FrameCaptureFinalizationResult
+AutomationNamedPipeServer::TryFinalizeFrameCapture(
+    const AutomationQueuedCommand& command, const AutomationCommandResult& result,
+    const FrameCapturePublishCallback& publish)
+{
+    return FinalizeSerializedFrameCapture(command,
+        SerializeAutomationCommandResultBody(result), publish);
+}
+
+void AutomationNamedPipeServer::CompleteState(
+    const AutomationQueuedCommand& command, const AutomationStateSnapshot& state)
+{
+    CompleteSerializedBody(command, SerializeAutomationStateBody(state));
+}
+
+void AutomationNamedPipeServer::CompleteSerializedBody(
     const AutomationQueuedCommand& command,
     std::string_view body_members)
 {
@@ -486,7 +507,7 @@ AutomationNamedPipeServer::TryBeginAppQuit(
 
 AutomationNamedPipeServer::
     FrameCaptureFinalizationResult
-AutomationNamedPipeServer::TryFinalizeFrameCapture(
+AutomationNamedPipeServer::FinalizeSerializedFrameCapture(
     const AutomationQueuedCommand& command,
     std::string_view body_members,
     const FrameCapturePublishCallback& publish)
@@ -1040,11 +1061,8 @@ void AutomationNamedPipeServer::CancelOutstandingLocked(
                     iterator->first,
                     iterator->second.command,
                     "canceled",
-                    "\"error\":{\"code\":\"" +
-                        JsonEscape(cancellation_code) +
-                        "\",\"message\":\"" +
-                        JsonEscape(cancellation_message) +
-                        "\"}"),
+                    AutomationCommandResult{AutomationCancellationResult{
+                        std::string(cancellation_code), std::string(cancellation_message)}}),
                 iterator->first,
                 AutomationCommandName(
                     iterator->second.command));
