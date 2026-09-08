@@ -16,6 +16,7 @@
 namespace specforge {
 
 struct SourceCollectionPreparationAdapters;
+struct SourceCollectionLoadQueueExecutionOptions;
 struct SourceCollectionLoadQueueTestAccess;
 
 struct SourceCollectionLoadCompletion {
@@ -71,7 +72,8 @@ public:
     SourceCollectionLoadQueue(const SourceCollectionLoadQueue&) = delete;
     SourceCollectionLoadQueue& operator=(const SourceCollectionLoadQueue&) = delete;
 
-    // Every request runs on its own jthread.
+    // Foreground preparation uses at most four workers, each draining queued
+    // requests before exiting. Completion ordering is independent of execution.
     [[nodiscard]] std::uint64_t Enqueue(SourceCollectionLoadRequest request);
     // A single speculative request may use this unordered, below-normal
     // priority lane. It can never hold a later foreground completion behind
@@ -108,7 +110,8 @@ public:
 
 private:
     explicit SourceCollectionLoadQueue(
-        SourceCollectionPreparationAdapters adapters);
+        SourceCollectionPreparationAdapters adapters,
+        SourceCollectionLoadQueueExecutionOptions options);
 
     friend struct SourceCollectionLoadQueueTestAccess;
 

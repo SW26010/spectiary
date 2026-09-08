@@ -12,8 +12,11 @@ Folder source 非递归加载第一层 CSV/FITS 文件，子文件夹、其它�
 `.npy` loader 支持 1D 或行级 2D float32/float64 array，CSV/FITS loader 产出同一类 `SpectrumSnapshotHandle` 进入同一条 UI/plot 路径。
 3909 列矩阵使用固定 loglam wavelength grid，其他列数退回 pixel index 并写入 snapshot diagnostics。
 辅助数组如 `*_label.npy`、`*_index.npy`、`*_ormask.npy` 和 `*_known_mask.npy` 不作为光谱打开。
-不同 source collection 的后台加载各自使用独立 `std::jthread` 并行执行；单个 task 独立取消，普通打开和批量
-session restore 并行准备后分别按提交顺序、保存顺序发布结果。被 UI 拒收或替换的大对象由专用后台 reclaimer 释放。
+Source collection 的前台准备采用有界并发：上限为 `hardware_concurrency` 限制在 1–4 之间（未知时取 1）。
+worker 使用 `std::jthread`，完成当前请求后继续处理排队请求，队列空时退出；大批量 session restore 不会按来源数创建线程。
+普通打开和批量恢复仍分别按提交顺序、保存顺序发布结果；排队和执行中的 task 都可以独立取消。
+单条 speculative prefetch 使用独立的低优先级通道，因此不会占满前台 worker 或阻塞前台结果发布。
+被 UI 拒收或替换的大对象仍由专用后台 reclaimer 释放。此上限是保守策略，并非真实数据上的最优并发结论。
 当前仍不从 shell 或竖切片得出真实数据性能结论。
 
 ## 必需工具
