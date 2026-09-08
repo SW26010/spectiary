@@ -15,6 +15,12 @@ document fields. Annotation I/O belongs behind a domain or service boundary; UI
 code consumes loaded annotation results and save state rather than parsing
 dtype, shape, ASDF blocks, or file-write capabilities.
 
+The runtime task groups local navigation preferences in `SampleLabelingSessionState`,
+output ownership/write tracking in `SampleLabelingPersistenceState`, and derived
+counts in `SampleLabelingStatistics`. The cache codec explicitly maps these local
+groups to the existing schema; neither the ASDF document nor cache wire layout
+changes because of this C++ decomposition.
+
 `SampleLabelingController` is the single mutable owner of active tasks, drafts,
 output-save state, retry scheduling, and the labeling state cache. Callers
 receive a borrowed read-only view with a revision and submit atomic domain

@@ -6028,10 +6028,10 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
         "maintenance topology fixture should load its task");
     pending_source->second.active_task_id.reset();
     pending_source->second.tasks[0]
-        .pending_sample_indices.insert(0);
-    pending_source->second.tasks[0].save_state.kind =
+        .persistence.pending_sample_indices.insert(0);
+    pending_source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
-    pending_source->second.tasks[0].save_state.pending_count = 1;
+    pending_source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
         specforge::SaveSampleLabelingStateCache(
             labeling_cache,

@@ -32,7 +32,7 @@ constexpr auto kSynchronousCommitLockWait = 2s;
 
 bool HasPendingOutputSave(const SampleLabelingTask& task)
 {
-    return !task.pending_sample_indices.empty() || task.metadata_save_pending;
+    return !task.persistence.pending_sample_indices.empty() || task.persistence.metadata_save_pending;
 }
 
 bool IsCanonicalAsdfOutputPath(
@@ -165,19 +165,19 @@ bool PromotionArtifactMatchesPlannedGeneration(
 
 bool ShouldRetryOutputSave(const SampleLabelingTask& task)
 {
-    if (!task.output_path || !HasPendingOutputSave(task)) {
+    if (!task.persistence.output_path || !HasPendingOutputSave(task)) {
         return false;
     }
-    switch (task.output_format) {
+    switch (task.persistence.output_format) {
     case SampleLabelingOutputArtifactFormat::
         LegacyNpyWithSidecar:
         return false; // Retain recovery state until explicit ASDF migration.
     case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
-        return (task.metadata_save_pending ||
-                !task.pending_sample_indices.empty()) &&
-            (task.save_state.kind ==
+        return (task.persistence.metadata_save_pending ||
+                !task.persistence.pending_sample_indices.empty()) &&
+            (task.persistence.save_state.kind ==
                  SampleLabelSaveStateKind::Pending ||
-             task.save_state.kind ==
+             task.persistence.save_state.kind ==
                  SampleLabelSaveStateKind::Failed);
     case SampleLabelingOutputArtifactFormat::None:
         return false;
@@ -277,13 +277,13 @@ std::vector<std::string> OutputEditLeaseKeys(
     const SampleLabelingTask& task,
     bool resolve_physical_paths = true)
 {
-    if (!task.output_path) {
+    if (!task.persistence.output_path) {
         return {};
     }
     return OutputEditLeaseKeys(
         SampleAnnotationArtifactIdentities(
-            *task.output_path,
-            task.output_format,
+            *task.persistence.output_path,
+            task.persistence.output_format,
             resolve_physical_paths));
 }
 
@@ -319,7 +319,7 @@ bool HasManagedOutputArtifactConflict(
     for (const auto& [source_identity, state] : sources) {
         (void)source_identity;
         for (const SampleLabelingTask& task : state.tasks) {
-            if (!task.output_path) {
+            if (!task.persistence.output_path) {
                 continue;
             }
             const std::vector<std::string> managed =
@@ -361,26 +361,26 @@ bool SameTaskProjection(
         left.task_name == right.task_name &&
         left.canonical_metadata == right.canonical_metadata &&
         labels_match && left.values == right.values &&
-        left.auto_advance == right.auto_advance &&
-        left.skip_labeled_on_advance ==
-            right.skip_labeled_on_advance &&
-        left.remembered_position ==
-            right.remembered_position &&
-        left.output_path == right.output_path &&
-        left.output_format == right.output_format &&
+        left.session.auto_advance == right.session.auto_advance &&
+        left.session.skip_labeled_on_advance ==
+            right.session.skip_labeled_on_advance &&
+        left.session.remembered_position ==
+            right.session.remembered_position &&
+        left.persistence.output_path == right.persistence.output_path &&
+        left.persistence.output_format == right.persistence.output_format &&
         left.values_are_authoritative ==
             right.values_are_authoritative &&
-        left.pending_sample_indices ==
-            right.pending_sample_indices &&
-        left.metadata_save_pending ==
-            right.metadata_save_pending &&
-        left.save_state.kind == right.save_state.kind &&
-        left.save_state.pending_count ==
-            right.save_state.pending_count &&
-        left.save_state.message_kind ==
-            right.save_state.message_kind &&
-        left.save_state.message ==
-            right.save_state.message;
+        left.persistence.pending_sample_indices ==
+            right.persistence.pending_sample_indices &&
+        left.persistence.metadata_save_pending ==
+            right.persistence.metadata_save_pending &&
+        left.persistence.save_state.kind == right.persistence.save_state.kind &&
+        left.persistence.save_state.pending_count ==
+            right.persistence.save_state.pending_count &&
+        left.persistence.save_state.message_kind ==
+            right.persistence.save_state.message_kind &&
+        left.persistence.save_state.message ==
+            right.persistence.save_state.message;
 }
 
 bool SameSourceTaskProjection(
@@ -508,11 +508,11 @@ BuildCanonicalDocumentReplacement(
 
 bool CanDeleteTask(const SampleLabelingTask& task)
 {
-    if (!task.output_path) {
+    if (!task.persistence.output_path) {
         return true;
     }
-    return task.save_state.kind != SampleLabelSaveStateKind::Pending &&
-           task.save_state.kind != SampleLabelSaveStateKind::Failed;
+    return task.persistence.save_state.kind != SampleLabelSaveStateKind::Pending &&
+           task.persistence.save_state.kind != SampleLabelSaveStateKind::Failed;
 }
 
 bool RecoverySnapshotTrusted(
@@ -1291,14 +1291,14 @@ SampleLabelingRecoveryView SampleLabelingController::RecoveryView() const
     std::size_t temporary_task_count = 0;
     for (const SampleLabelingTask& task : state->tasks) {
         ++task_id_counts[task.task_id];
-        if (!task.output_path) {
+        if (!task.persistence.output_path) {
             ++temporary_task_count;
         }
     }
 
     view.temporary_drafts.reserve(temporary_task_count);
     for (const SampleLabelingTask& task : state->tasks) {
-        if (task.output_path) {
+        if (task.persistence.output_path) {
             continue;
         }
 
@@ -1386,7 +1386,7 @@ SampleLabelingTask* SampleLabelingController::TemporaryTask()
         return nullptr;
     }
     const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [](const auto& task) {
-        return !task.output_path;
+        return !task.persistence.output_path;
     });
     return match == state->tasks.end() ? nullptr : &*match;
 }
@@ -1398,7 +1398,7 @@ const SampleLabelingTask* SampleLabelingController::TemporaryTask() const
         return nullptr;
     }
     const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [](const auto& task) {
-        return !task.output_path;
+        return !task.persistence.output_path;
     });
     return match == state->tasks.end() ? nullptr : &*match;
 }
@@ -1427,12 +1427,12 @@ SampleLabelingController::
     const SampleLabelingTask* task = ActiveTask();
     if (task == nullptr ||
         !task->values_are_authoritative ||
-        task->output_format !=
+        task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
-        !task->output_path ||
+        !task->persistence.output_path ||
         !active_asdf_snapshot_ ||
         !OutputPathMatches(
-            *task->output_path,
+            *task->persistence.output_path,
             active_asdf_snapshot_->path()) ||
         active_asdf_snapshot_->document().labeling.id !=
             task->task_id) {
@@ -1856,22 +1856,22 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
         state->tasks.begin(),
         state->tasks.end(),
         [&output_path](const SampleLabelingTask& task) {
-            return task.output_path &&
+            return task.persistence.output_path &&
                 OutputPathMatches(
-                    *task.output_path,
+                    *task.persistence.output_path,
                     output_path);
         });
     const bool relinking_missing_owner =
         id_match != state->tasks.end() &&
         output_match == state->tasks.end() &&
-        id_match->output_path &&
-        id_match->output_format ==
+        id_match->persistence.output_path &&
+        id_match->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     if (id_match != state->tasks.end() ||
         output_match != state->tasks.end()) {
         if (id_match != state->tasks.end() &&
             output_match == id_match &&
-            id_match->output_format ==
+            id_match->persistence.output_format ==
                 SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf) {
             if (activate_task) {
@@ -1885,7 +1885,7 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
         if (!relinking_missing_owner) {
             return RejectEditTargetChanged();
         }
-        if (ProbePath(*id_match->output_path) !=
+        if (ProbePath(*id_match->persistence.output_path) !=
             PathProbeResult::Missing) {
             // A same-id document at another path is a copy/conflict while the
             // established owner still exists. Automatic relink is reserved
@@ -1921,10 +1921,10 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
               state->sample_count);
     const std::optional<std::filesystem::path> previous_output_path =
         relinking_missing_owner
-        ? local_state.output_path
+        ? local_state.persistence.output_path
         : std::nullopt;
-    local_state.output_path = output_path;
-    local_state.output_format =
+    local_state.persistence.output_path = output_path;
+    local_state.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     if (!relinking_missing_owner) {
         MarkSampleLabelTaskPersisted(
@@ -1957,7 +1957,7 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
         OutputEditLeaseKeys(local_state);
     if (previous_output_path) {
         SampleLabelingTask previous_owner = local_state;
-        previous_owner.output_path = *previous_output_path;
+        previous_owner.persistence.output_path = *previous_output_path;
         std::vector<std::string> previous_keys =
             OutputEditLeaseKeys(previous_owner);
         output_lease_keys.insert(
@@ -2011,8 +2011,8 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
                 });
             if (latest_id_match !=
                 latest_source->second.tasks.end()) {
-                if (!latest_id_match->output_path ||
-                    latest_id_match->output_format !=
+                if (!latest_id_match->persistence.output_path ||
+                    latest_id_match->persistence.output_format !=
                         SampleLabelingOutputArtifactFormat::
                             CanonicalAsdf ||
                     latest_id_match->values.size() !=
@@ -2021,21 +2021,21 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
                 }
                 local_state = *latest_id_match;
                 if (!OutputPathMatches(
-                        *latest_id_match->output_path,
+                        *latest_id_match->persistence.output_path,
                         output_path)) {
                     if (!relinking_missing_owner ||
                         !previous_output_path ||
                         !OutputPathMatches(
-                            *latest_id_match->output_path,
+                            *latest_id_match->persistence.output_path,
                             *previous_output_path)) {
                         return RejectEditTargetChanged();
                     }
                     if (ProbePath(
-                            *latest_id_match->output_path) !=
+                            *latest_id_match->persistence.output_path) !=
                         PathProbeResult::Missing) {
                         return RejectEditTargetChanged();
                     }
-                    local_state.output_path = output_path;
+                    local_state.persistence.output_path = output_path;
                 }
                 expected_absent = false;
             } else if (relinking_missing_owner) {
@@ -2168,7 +2168,7 @@ SampleLabelingController::DeleteTemporaryTask(
         [&owned_task_id](const SampleLabelingTask& task) {
             return task.task_id == owned_task_id;
         });
-    if (match == state->tasks.end() || match->output_path) {
+    if (match == state->tasks.end() || match->persistence.output_path) {
         return RejectEditTargetChanged();
     }
 
@@ -2233,7 +2233,7 @@ SampleLabelingController::DeleteTemporaryTask(
     }
 
     const bool latest_task_is_formal =
-        preparation.task->output_path.has_value();
+        preparation.task->persistence.output_path.has_value();
     const bool task_projection_changed =
         !SameTaskProjection(
             *match,
@@ -2295,8 +2295,8 @@ SampleLabelingController::DeleteTask(
     if (match == state->tasks.end()) {
         return RejectEditTargetChanged();
     }
-    if (!match->output_path ||
-        ProbePath(*match->output_path) !=
+    if (!match->persistence.output_path ||
+        ProbePath(*match->persistence.output_path) !=
             PathProbeResult::Missing) {
         return RejectEditTargetChanged();
     }
@@ -2329,10 +2329,10 @@ SampleLabelingController::DeleteTask(
             if (latest_task ==
                     latest_source->second.tasks.end() ||
                 !CanDeleteTask(*latest_task) ||
-                !latest_task->output_path ||
+                !latest_task->persistence.output_path ||
                 OutputEditLeaseKeys(*latest_task) !=
                     OutputEditLeaseKeys(*match) ||
-                ProbePath(*latest_task->output_path) !=
+                ProbePath(*latest_task->persistence.output_path) !=
                     PathProbeResult::Missing) {
                 return RejectEditTargetChanged();
             }
@@ -2424,22 +2424,22 @@ SampleLabelingController::DeleteTask(
         if (OutputEditLeaseKeys(*latest_task) !=
                 leases.output_artifact_keys ||
             !CanDeleteTask(*latest_task) ||
-            !latest_task->output_path ||
-            ProbePath(*latest_task->output_path) !=
+            !latest_task->persistence.output_path ||
+            ProbePath(*latest_task->persistence.output_path) !=
                 PathProbeResult::Missing) {
             return RejectEditTargetChanged();
         }
         *match = *latest_task;
     }
 
-    if (!match->output_path ||
-        ProbePath(*match->output_path) !=
+    if (!match->persistence.output_path ||
+        ProbePath(*match->persistence.output_path) !=
             PathProbeResult::Missing) {
         return RejectEditTargetChanged();
     }
 
     const TaskProjectionEffect projection_effect =
-        match->output_path
+        match->persistence.output_path
         ? TaskProjectionEffect::Changed
         : TaskProjectionEffect::Unchanged;
     state->tasks.erase(match);
@@ -2482,7 +2482,7 @@ SampleLabelingController::ActivateTaskWithExpectation(
         return RejectOperation();
     }
     if (expectation == TaskActivationExpectation::TemporaryTask &&
-        match->output_path) {
+        match->persistence.output_path) {
         return RejectEditTargetChanged();
     }
     if (state->active_task_id && *state->active_task_id == match->task_id) {
@@ -2556,7 +2556,7 @@ SampleLabelingController::ActivateTaskWithExpectation(
         match->task_id);
     if (expectation ==
             TaskActivationExpectation::TemporaryTask &&
-        match->output_path) {
+        match->persistence.output_path) {
         if (task_projection_changed) {
             BumpActiveSourceTasksGeneration();
         }
@@ -2591,7 +2591,7 @@ SampleLabelingController::ActivateTaskWithExpectation(
 SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task != nullptr && task->output_format ==
+    if (task != nullptr && task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         return RejectOperation();
     }
@@ -2604,7 +2604,7 @@ SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(Sample
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
-        task->output_path
+        task->persistence.output_path
             ? TaskProjectionEffect::Changed
             : TaskProjectionEffect::Unchanged);
 }
@@ -2615,7 +2615,7 @@ SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
     bool allow_used_code_change)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task != nullptr && task->output_format ==
+    if (task != nullptr && task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         return RejectOperation();
     }
@@ -2629,7 +2629,7 @@ SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
-        task->output_path
+        task->persistence.output_path
             ? TaskProjectionEffect::Changed
             : TaskProjectionEffect::Unchanged);
 }
@@ -2637,7 +2637,7 @@ SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
 SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int code)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task != nullptr && task->output_format ==
+    if (task != nullptr && task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         return RejectOperation();
     }
@@ -2650,7 +2650,7 @@ SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int co
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
-        task->output_path
+        task->persistence.output_path
             ? TaskProjectionEffect::Changed
             : TaskProjectionEffect::Unchanged);
 }
@@ -2660,7 +2660,7 @@ SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(
     std::string task_name)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task != nullptr && task->output_format ==
+    if (task != nullptr && task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         return RejectOperation();
     }
@@ -2682,7 +2682,7 @@ SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(
     return CompleteMutation(
         task,
         PersistencePolicy::PersistOutputIfSelected,
-        task->output_path
+        task->persistence.output_path
             ? TaskProjectionEffect::Changed
             : TaskProjectionEffect::Unchanged);
 }
@@ -2690,12 +2690,12 @@ SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(
 SampleLabelingOperationResult SampleLabelingController::SetActiveAutoAdvance(bool enabled)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || task->auto_advance == enabled) {
+    if (task == nullptr || task->session.auto_advance == enabled) {
         SampleLabelingOperationResult result = RejectOperation();
         result.accepted = task != nullptr;
         return result;
     }
-    task->auto_advance = enabled;
+    task->session.auto_advance = enabled;
     return CompleteMutation(
         task,
         PersistencePolicy::FlushStateSave,
@@ -2705,12 +2705,12 @@ SampleLabelingOperationResult SampleLabelingController::SetActiveAutoAdvance(boo
 SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAdvance(bool enabled)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || task->skip_labeled_on_advance == enabled) {
+    if (task == nullptr || task->session.skip_labeled_on_advance == enabled) {
         SampleLabelingOperationResult result = RejectOperation();
         result.accepted = task != nullptr;
         return result;
     }
-    task->skip_labeled_on_advance = enabled;
+    task->session.skip_labeled_on_advance = enabled;
     return CompleteMutation(
         task,
         PersistencePolicy::FlushStateSave,
@@ -2722,20 +2722,20 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
 {
     SampleLabelingTask* task = ActiveTask();
     SourceState* state = ActiveSource();
-    if (task == nullptr || state == nullptr || task->output_path ||
+    if (task == nullptr || state == nullptr || task->persistence.output_path ||
         output_path.empty() ||
         !IsCanonicalAsdfOutputPath(output_path)) {
         return RejectOperation();
     }
 
     const auto conflict = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& existing) {
-        return existing.task_id != task->task_id && existing.output_path &&
-               OutputPathMatches(*existing.output_path, output_path);
+        return existing.task_id != task->task_id && existing.persistence.output_path &&
+               OutputPathMatches(*existing.persistence.output_path, output_path);
     });
     if (conflict != state->tasks.end()) {
-        task->save_state.message_kind =
+        task->persistence.save_state.message_kind =
             SampleLabelSaveMessageKind::OutputPathAlreadyUsed;
-        task->save_state.message.clear();
+        task->persistence.save_state.message.clear();
         SampleLabelingOperationResult result =
             CompleteMutation(
                 task,
@@ -2746,17 +2746,17 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     }
 
     SampleLabelingTask candidate = *task;
-    candidate.output_path = std::move(output_path);
-    candidate.output_format =
+    candidate.persistence.output_path = std::move(output_path);
+    candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    candidate.initial_publication_pending = true;
+    candidate.persistence.initial_publication_pending = true;
     candidate.values_are_authoritative = true;
     for (std::size_t index = 0;
          index < candidate.values.size();
          ++index) {
         if (candidate.values[index] !=
             kUnlabeledSampleLabelCode) {
-            candidate.pending_sample_indices.insert(index);
+            candidate.persistence.pending_sample_indices.insert(index);
         }
     }
     MarkSampleLabelTaskMetadataPending(candidate);
@@ -2776,9 +2776,9 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         return RejectEditTargetChanged();
     }
     if (*latest_output_conflict) {
-        task->save_state.message_kind =
+        task->persistence.save_state.message_kind =
             SampleLabelSaveMessageKind::OutputPathAlreadyUsed;
-        task->save_state.message.clear();
+        task->persistence.save_state.message.clear();
         SampleLabelingOperationResult result =
             CompleteMutation(
                 task,
@@ -2831,28 +2831,28 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     };
     const auto mark_persistence_failure =
         [&candidate, &publication](SampleLabelingTask& destination) {
-            destination.save_state.kind =
+            destination.persistence.save_state.kind =
                 SampleLabelSaveStateKind::Failed;
-            destination.save_state.pending_count =
-                candidate.save_state.pending_count;
-            if (candidate.save_state.message_kind !=
+            destination.persistence.save_state.pending_count =
+                candidate.persistence.save_state.pending_count;
+            if (candidate.persistence.save_state.message_kind !=
                 SampleLabelSaveMessageKind::None) {
-                destination.save_state.message_kind =
-                    candidate.save_state.message_kind;
+                destination.persistence.save_state.message_kind =
+                    candidate.persistence.save_state.message_kind;
             } else {
-                destination.save_state.message_kind =
+                destination.persistence.save_state.message_kind =
                     publication.message.empty()
                     ? SampleLabelSaveMessageKind::OutputSaveFailed
                     : SampleLabelSaveMessageKind::SystemDetail;
             }
-            if (destination.save_state.message_kind ==
+            if (destination.persistence.save_state.message_kind ==
                 SampleLabelSaveMessageKind::SystemDetail) {
-                destination.save_state.message =
-                    !candidate.save_state.message.empty()
-                    ? candidate.save_state.message
+                destination.persistence.save_state.message =
+                    !candidate.persistence.save_state.message.empty()
+                    ? candidate.persistence.save_state.message
                     : publication.message;
             } else {
-                destination.save_state.message.clear();
+                destination.persistence.save_state.message.clear();
             }
         };
 
@@ -2941,15 +2941,15 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     if (task == nullptr || state == nullptr ||
         !active_source_identity_ ||
         !active_source_descriptor_ ||
-        !task->output_path ||
-        task->output_format !=
+        !task->persistence.output_path ||
+        task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::
                 LegacyNpyWithSidecar ||
         !task->values_are_authoritative ||
         output_path.empty() ||
         !IsCanonicalAsdfOutputPath(output_path) ||
         OutputPathMatches(
-            *task->output_path,
+            *task->persistence.output_path,
             output_path) ||
         active_source_descriptor_->base_identity !=
             *active_source_identity_ ||
@@ -2967,9 +2967,9 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
         [task, &output_path](
             const SampleLabelingTask& existing) {
             return existing.task_id != task->task_id &&
-                existing.output_path &&
+                existing.persistence.output_path &&
                 OutputPathMatches(
-                    *existing.output_path,
+                    *existing.persistence.output_path,
                     output_path);
         });
     if (local_conflict != state->tasks.end()) {
@@ -2977,10 +2977,10 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     }
 
     SampleLabelingTask candidate = *task;
-    candidate.output_path = std::move(output_path);
-    candidate.output_format =
+    candidate.persistence.output_path = std::move(output_path);
+    candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    candidate.initial_publication_pending = false;
+    candidate.persistence.initial_publication_pending = false;
     candidate.values_are_authoritative = true;
 
     TaskEditLeaseSet candidate_output_leases;
@@ -3354,7 +3354,7 @@ SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
 
     const SampleLabelingTask* active_task = ActiveTask();
     const TaskProjectionEffect projection_effect =
-        active_task != nullptr && active_task->output_path
+        active_task != nullptr && active_task->persistence.output_path
         ? TaskProjectionEffect::Changed
         : TaskProjectionEffect::Unchanged;
     const std::string task_id = *state->active_task_id;
@@ -3389,12 +3389,12 @@ SampleLabelingOperationResult SampleLabelingController::RememberActivePosition(s
     if (task == nullptr || sample_index >= task->values.size()) {
         return RejectOperation();
     }
-    if (task->remembered_position && *task->remembered_position == sample_index) {
+    if (task->session.remembered_position && *task->session.remembered_position == sample_index) {
         SampleLabelingOperationResult result = RejectOperation();
         result.accepted = true;
         return result;
     }
-    task->remembered_position = sample_index;
+    task->session.remembered_position = sample_index;
     return CompleteMutation(
         task,
         PersistencePolicy::ScheduleStateSave,
@@ -3514,7 +3514,7 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
         persistence == PersistencePolicy::
             PersistOutputIfSelectedInteractive;
     if (requests_output_persistence &&
-        task != nullptr && task->output_path) {
+        task != nullptr && task->persistence.output_path) {
         const bool wait_for_commit_lock =
             persistence == PersistencePolicy::PersistOutputIfSelected;
         // Interactive shortcut writes use a zero-wait checkpoint attempt;
@@ -3594,7 +3594,7 @@ SampleLabelingController::PersistTaskOutput(
         asdf_snapshot)
 {
     TaskOutputPersistenceAttempt attempt;
-    switch (task.output_format) {
+    switch (task.persistence.output_format) {
     case SampleLabelingOutputArtifactFormat::
         LegacyNpyWithSidecar:
         // Legacy state is a read-only migration source, never a save target.
@@ -3640,8 +3640,8 @@ SampleLabelingController::PersistCanonicalTaskOutput(
         asdf_snapshot)
 {
     SampleLabelOutputPublicationResult result;
-    if (!task.metadata_save_pending &&
-        task.pending_sample_indices.empty()) {
+    if (!task.persistence.metadata_save_pending &&
+        task.persistence.pending_sample_indices.empty()) {
         return result;
     }
 
@@ -3655,12 +3655,12 @@ SampleLabelingController::PersistCanonicalTaskOutput(
             task,
             result.message);
     };
-    if (!task.output_path ||
+    if (!task.persistence.output_path ||
         !task.values_are_authoritative ||
         asdf_snapshot == nullptr ||
         !*asdf_snapshot ||
         !OutputPathMatches(
-            *task.output_path,
+            *task.persistence.output_path,
             (*asdf_snapshot)->path()) ||
         (*asdf_snapshot)->document().labeling.id !=
             task.task_id ||
@@ -3703,7 +3703,7 @@ SampleLabelingController::PersistCanonicalTaskOutput(
         return result;
     }
 
-    if (task.metadata_save_pending) {
+    if (task.persistence.metadata_save_pending) {
         SampleLabelingAsdfStoreGenerationWriteResult generation =
             canonical_document_publisher_(
                 snapshot,
@@ -3764,8 +3764,8 @@ SampleLabelingController::PublishCanonicalTaskCreation(
             publication.message);
     };
 
-    if (!task.output_path ||
-        task.output_format !=
+    if (!task.persistence.output_path ||
+        task.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         !task.values_are_authoritative ||
         asdf_snapshot == nullptr ||
@@ -3793,7 +3793,7 @@ SampleLabelingController::PublishCanonicalTaskCreation(
 
     SampleLabelingAsdfStoreGenerationWriteResult generation =
         canonical_creation_publisher_(
-            *task.output_path,
+            *task.persistence.output_path,
             document,
             *active_source_descriptor_);
     publication.artifacts_replaced =
@@ -3995,7 +3995,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
     int code)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || task->output_format ==
+    if (task == nullptr || task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         SampleLabelingWriteOperationResult result;
         result.operation = RejectOperation();
@@ -4010,7 +4010,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
                 task,
                 PersistencePolicy::
                     PersistOutputIfSelectedInteractive,
-                task->output_path
+                task->persistence.output_path
                     ? TaskProjectionEffect::Changed
                     : TaskProjectionEffect::Unchanged);
     } else {
@@ -4023,7 +4023,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
 SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::size_t sample_index)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || task->output_format ==
+    if (task == nullptr || task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         SampleLabelingWriteOperationResult result;
         result.operation = RejectOperation();
@@ -4038,7 +4038,7 @@ SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::siz
                 task,
                 PersistencePolicy::
                     PersistOutputIfSelectedInteractive,
-                task->output_path
+                task->persistence.output_path
                     ? TaskProjectionEffect::Changed
                     : TaskProjectionEffect::Unchanged);
     } else {
@@ -4127,7 +4127,7 @@ SampleLabelingController::TryRetryOutputSaves()
                     *active_state->active_task_id;
             });
         if (active != active_state->tasks.end() &&
-            active->initial_publication_pending) {
+            active->persistence.initial_publication_pending) {
             active_initial_publication =
                 std::pair{
                     *active_source_identity_,
@@ -4163,10 +4163,10 @@ SampleLabelingController::TryRetryOutputSaves()
         }
         if (source != sources_.end() &&
             recovered != nullptr &&
-            !recovered->output_path &&
-            recovered->output_format ==
+            !recovered->persistence.output_path &&
+            recovered->persistence.output_format ==
                 SampleLabelingOutputArtifactFormat::None &&
-            !recovered->initial_publication_pending) {
+            !recovered->persistence.initial_publication_pending) {
             MarkTaskUpsert(
                 source->first,
                 source->second,
@@ -4195,7 +4195,7 @@ SampleLabelingController::TryRetryOutputSaves()
             // the current source's descriptor or keep the global scheduler
             // retrying that guaranteed mismatch. Source activation re-arms
             // pending owners after installing their descriptor.
-            if (task.output_format ==
+            if (task.persistence.output_format ==
                     SampleLabelingOutputArtifactFormat::
                         CanonicalAsdf &&
                 (!active_source_identity_ ||
@@ -4218,7 +4218,7 @@ SampleLabelingController::TryRetryOutputSaves()
             TaskActivationPreparation preparation;
             if (!is_active_task) {
                 const bool recovering_initial_publication =
-                    task.initial_publication_pending;
+                    task.persistence.initial_publication_pending;
                 preparation = PrepareTaskActivation(
                     identity,
                     task,
@@ -4263,10 +4263,10 @@ SampleLabelingController::TryRetryOutputSaves()
                 }
                 if (!ShouldRetryOutputSave(task)) {
                     if (recovering_initial_publication &&
-                        !task.output_path &&
-                        task.output_format ==
+                        !task.persistence.output_path &&
+                        task.persistence.output_format ==
                             SampleLabelingOutputArtifactFormat::None &&
-                        !task.initial_publication_pending) {
+                        !task.persistence.initial_publication_pending) {
                         MarkTaskUpsert(
                             identity,
                             state,
@@ -4299,7 +4299,7 @@ SampleLabelingController::TryRetryOutputSaves()
                 result.all_succeeded;
             result.canonical_output_published =
                 result.canonical_output_published ||
-                (task.output_format ==
+                (task.persistence.output_format ==
                      SampleLabelingOutputArtifactFormat::
                          CanonicalAsdf &&
                  attempt.publication.published);
@@ -4341,8 +4341,8 @@ SampleLabelingController::HydrateCanonicalAsdfTask(
     std::optional<SampleLabelingAsdfOpenSnapshot>* snapshot,
     std::string* error_message) const
 {
-    if (!cached_task.output_path ||
-        cached_task.output_format !=
+    if (!cached_task.persistence.output_path ||
+        cached_task.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
         if (error_message != nullptr) {
             *error_message =
@@ -4363,7 +4363,7 @@ SampleLabelingController::HydrateCanonicalAsdfTask(
 
     SampleLabelingAsdfStoreOpenResult opened =
         OpenSampleLabelingAsdfDocumentStore(
-            *cached_task.output_path,
+            *cached_task.persistence.output_path,
             SampleLabelingCompatibilityView(
                 *active_source_descriptor_));
     if (!opened.succeeded()) {
@@ -4430,12 +4430,12 @@ SampleLabelingController::PrepareTaskActivation(
         TemporarySlotEditLeaseKey(source_identity);
     const bool can_reuse_active_temporary_slot =
         reuse_active_temporary_slot &&
-        !known_task.output_path &&
+        !known_task.persistence.output_path &&
         !state_cache_path_.empty() &&
         active_source_identity_ &&
         *active_source_identity_ == source_identity &&
         active_task != nullptr &&
-        !active_task->output_path &&
+        !active_task->persistence.output_path &&
         active_task_leases_.temporary_slot_key ==
             temporary_slot_key &&
         active_task_leases_.temporary_slot.Held();
@@ -4486,7 +4486,7 @@ SampleLabelingController::PrepareTaskActivation(
                 source_identity,
                 known_task.task_id);
         if (pending == nullptr ||
-            pending->output_path ||
+            pending->persistence.output_path ||
             pending->values.size() != sample_count) {
             return false;
         }
@@ -4559,7 +4559,7 @@ SampleLabelingController::PrepareTaskActivation(
             preparation.error = output_lease.error;
             return preparation;
         }
-        if (known_task.output_format ==
+        if (known_task.persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
             preparation.task = HydrateCanonicalAsdfTask(
                 known_task,
@@ -4635,22 +4635,22 @@ SampleLabelingController::PrepareTaskActivation(
         OutputEditLeaseKeys(*pending_overlay) !=
             OutputEditLeaseKeys(*structural_task)) {
         pending_canonical_owner_switch =
-            structural_task->output_path &&
-            pending_overlay->output_path &&
-            known_task.output_path &&
-            structural_task->output_format ==
+            structural_task->persistence.output_path &&
+            pending_overlay->persistence.output_path &&
+            known_task.persistence.output_path &&
+            structural_task->persistence.output_format ==
                 SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
-            pending_overlay->output_format ==
+            pending_overlay->persistence.output_format ==
                 SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             pending_overlay->values.size() == sample_count &&
             OutputPathMatches(
-                *pending_overlay->output_path,
-                *known_task.output_path) &&
+                *pending_overlay->persistence.output_path,
+                *known_task.persistence.output_path) &&
             !OutputPathMatches(
-                *pending_overlay->output_path,
-                *structural_task->output_path);
+                *pending_overlay->persistence.output_path,
+                *structural_task->persistence.output_path);
         if (!pending_canonical_owner_switch) {
             preparation.error =
                 "labeling task identity changed while acquiring its edit lease";
@@ -4741,7 +4741,7 @@ SampleLabelingController::PrepareTaskActivation(
         return preparation;
     }
 
-    if (structural_task->output_format ==
+    if (structural_task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
         const SampleLabelingTask* overlay_task =
             &*structural_task;
@@ -4770,7 +4770,7 @@ SampleLabelingController::PrepareTaskActivation(
 
     // Temporary drafts carry their complete values in the structural cache;
     // avoid a second full-cache pass when no external result needs hydration.
-    if (!structural_task->output_path) {
+    if (!structural_task->persistence.output_path) {
         preparation.task = *structural_task;
         if (deferred != deferred_task_leases_.end()) {
             if (const SampleLabelingTask* pending =
@@ -4778,7 +4778,7 @@ SampleLabelingController::PrepareTaskActivation(
                         source_identity,
                         known_task.task_id);
                 pending != nullptr &&
-                !pending->output_path) {
+                !pending->persistence.output_path) {
                 preparation.task = *pending;
             }
         }
@@ -4965,7 +4965,7 @@ SampleLabelingController::PrepareTaskCreation(
                     latest_tasks->begin(),
                     latest_tasks->end(),
                     [](const SampleLabelingTask& task) {
-                        return !task.output_path;
+                        return !task.persistence.output_path;
                     })) {
                 preparation.error =
                     "labeling source already has a temporary task";
@@ -5068,7 +5068,7 @@ SampleLabelingController::PrepareTaskCreation(
                     verified_source->second.tasks.begin(),
                     verified_source->second.tasks.end(),
                     [](const SampleLabelingTask& task) {
-                        return !task.output_path;
+                        return !task.persistence.output_path;
                     })) {
                 preparation.error =
                     "labeling source gained a temporary task while creating a task";
@@ -5149,7 +5149,7 @@ SampleLabelingController::TryAttachTemporarySlotLease(
     const SampleLabelingTask& task) const
 {
     ExclusiveFileLeaseAcquireResult result;
-    if (task.output_path) {
+    if (task.persistence.output_path) {
         leases.temporary_slot.Reset();
         leases.temporary_slot_key.clear();
         result.status =
@@ -5224,7 +5224,7 @@ SampleLabelingController::TryAttachOutputLease(
         }
         std::sort(output_keys.begin(), output_keys.end());
     }
-    if (!task.output_path) {
+    if (!task.persistence.output_path) {
         leases.output_artifacts.clear();
         leases.output_artifact_keys.clear();
         result.status =
@@ -5354,7 +5354,7 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
             task,
             false);
     const bool required_output_leases_held =
-        !task.output_path ||
+        !task.persistence.output_path ||
         (!required_output_keys.empty() &&
          std::all_of(
              required_output_keys.begin(),
@@ -5384,13 +5384,13 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
                           .Held());
               }));
     bool canonical_generation_matches =
-        task.output_format !=
+        task.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    if (!canonical_generation_matches && task.output_path &&
+    if (!canonical_generation_matches && task.persistence.output_path &&
         active_asdf_snapshot_ && active_source_descriptor_ &&
         OutputPathMatches(
             active_asdf_snapshot_->path(),
-            *task.output_path) &&
+            *task.persistence.output_path) &&
         active_asdf_snapshot_->document().labeling.id ==
             task.task_id) {
         canonical_generation_matches =
@@ -5416,7 +5416,7 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
             canonical_generation_matches &&
             (state_cache_path_.empty() ||
              active_task_leases_.task_identity.Held()) &&
-           (task.output_path ||
+           (task.persistence.output_path ||
             (active_task_leases_.temporary_slot_key ==
                  TemporarySlotEditLeaseKey(
                      source_identity) &&
@@ -5508,12 +5508,12 @@ bool SampleLabelingController::
                 document.labeling.id;
         });
     if (task == source->second.tasks.end() ||
-        task->output_format !=
+        task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
-        !task->output_path ||
+        !task->persistence.output_path ||
         !OutputPathMatches(
             active_asdf_snapshot_->path(),
-            *task->output_path) ||
+            *task->persistence.output_path) ||
         !task->values_are_authoritative) {
         return false;
     }
@@ -5568,7 +5568,7 @@ void SampleLabelingController::ReleaseUnneededActiveLeaseComponents()
     if (active_task == nullptr) {
         return;
     }
-    if (active_task->output_path) {
+    if (active_task->persistence.output_path) {
         active_task_leases_.temporary_slot.Reset();
         active_task_leases_.temporary_slot_key.clear();
         // A failed owner-switch cache commit deliberately retains both the
@@ -5688,7 +5688,7 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         return true;
     }
     const bool canonical_generation_requires_reopen =
-        active->output_format ==
+        active->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
         (!active_asdf_snapshot_ ||
          (active_source_descriptor_ &&
@@ -5971,7 +5971,7 @@ std::optional<bool>
 SampleLabelingController::LatestCacheHasOutputConflict(
     const SampleLabelingTask& candidate) const
 {
-    if (!candidate.output_path ||
+    if (!candidate.persistence.output_path ||
         !active_source_identity_) {
         return false;
     }
@@ -6017,29 +6017,29 @@ bool SampleLabelingController::TrySaveStateCache(
 {
     EnsureStateCacheLoaded();
     const auto normalize_saved_task = [](SampleLabelingTask& task) {
-        if (!task.output_path) {
-            task.pending_sample_indices.clear();
-            task.metadata_save_pending = false;
-            task.save_state.pending_count = 0;
-            if (task.save_state.kind != SampleLabelSaveStateKind::Failed) {
-                task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
-                if (task.save_state.message_kind ==
+        if (!task.persistence.output_path) {
+            task.persistence.pending_sample_indices.clear();
+            task.persistence.metadata_save_pending = false;
+            task.persistence.save_state.pending_count = 0;
+            if (task.persistence.save_state.kind != SampleLabelSaveStateKind::Failed) {
+                task.persistence.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
+                if (task.persistence.save_state.message_kind ==
                     SampleLabelSaveMessageKind::None) {
-                    task.save_state.message.clear();
+                    task.persistence.save_state.message.clear();
                 }
             }
             return;
         }
-        task.save_state.pending_count = task.pending_sample_indices.size();
+        task.persistence.save_state.pending_count = task.persistence.pending_sample_indices.size();
         if (!HasPendingOutputSave(task) &&
-            task.save_state.kind != SampleLabelSaveStateKind::Failed) {
+            task.persistence.save_state.kind != SampleLabelSaveStateKind::Failed) {
             MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
         } else if (HasPendingOutputSave(task) &&
-                   task.save_state.kind != SampleLabelSaveStateKind::Failed) {
-            task.save_state.kind = SampleLabelSaveStateKind::Pending;
-            task.save_state.message_kind =
+                   task.persistence.save_state.kind != SampleLabelSaveStateKind::Failed) {
+            task.persistence.save_state.kind = SampleLabelSaveStateKind::Pending;
+            task.persistence.save_state.message_kind =
                 SampleLabelSaveMessageKind::None;
-            task.save_state.message.clear();
+            task.persistence.save_state.message.clear();
         }
     };
     const auto normalize_saved_states = [&normalize_saved_task](

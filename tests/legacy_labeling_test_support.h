@@ -9,17 +9,17 @@ namespace specforge::test_support {
 
 inline void SelectLegacyFixtureOutputPath(SampleLabelingTask& task, std::filesystem::path output_path)
 {
-    task.output_path = std::move(output_path);
-    task.output_format =
+    task.persistence.output_path = std::move(output_path);
+    task.persistence.output_format =
         SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    task.initial_publication_pending = false;
-    task.pending_sample_indices.clear();
-    task.metadata_save_pending = true;
+    task.persistence.initial_publication_pending = false;
+    task.persistence.pending_sample_indices.clear();
+    task.persistence.metadata_save_pending = true;
 
     std::string ignored_error;
     const std::optional<LoadedSampleLabelResult> output =
         SampleAnnotationIoAdapter{}.LoadLabelResult(
-            *task.output_path,
+            *task.persistence.output_path,
             task.values.size(),
             {},
             &ignored_error);
@@ -27,13 +27,13 @@ inline void SelectLegacyFixtureOutputPath(SampleLabelingTask& task, std::filesys
         const int base_value =
             output ? output->values[index] : kUnlabeledSampleLabelCode;
         if (task.values[index] != base_value) {
-            task.pending_sample_indices.insert(index);
+            task.persistence.pending_sample_indices.insert(index);
         }
     }
-    task.save_state.pending_count = task.pending_sample_indices.size();
-    task.save_state.kind = SampleLabelSaveStateKind::Pending;
-    task.save_state.message_kind = SampleLabelSaveMessageKind::None;
-    task.save_state.message.clear();
+    task.persistence.save_state.pending_count = task.persistence.pending_sample_indices.size();
+    task.persistence.save_state.kind = SampleLabelSaveStateKind::Pending;
+    task.persistence.save_state.message_kind = SampleLabelSaveMessageKind::None;
+    task.persistence.save_state.message.clear();
 }
 
 
@@ -44,10 +44,10 @@ PublishLegacyFixture(
     const SampleLabelResultMetadataSource* source = nullptr)
 {
     SampleLabelOutputPublicationResult result;
-    if (!task.output_path) {
+    if (!task.persistence.output_path) {
         return result;
     }
-    if (task.output_format !=
+    if (task.persistence.output_format !=
         SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
         result.message =
             "labeling output format is not owned by the legacy NPY writer";
@@ -57,7 +57,7 @@ PublishLegacyFixture(
 
     result.attempted = true;
     const SampleLabelResultWriteOutcome write =
-        LegacyFixtureIo{}.SaveLabelResult(*task.output_path, task, source);
+        LegacyFixtureIo{}.SaveLabelResult(*task.persistence.output_path, task, source);
     result.artifacts_replaced = write.array_saved;
     if (!write.array_saved) {
         result.retryable = true;
@@ -74,8 +74,8 @@ PublishLegacyFixture(
         return result;
     }
 
-    task.pending_sample_indices.clear();
-    task.metadata_save_pending = true;
+    task.persistence.pending_sample_indices.clear();
+    task.persistence.metadata_save_pending = true;
 
     result.published = write.metadata_saved;
     if (write.metadata_saved) {

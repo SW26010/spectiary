@@ -287,7 +287,7 @@ bool RejectLabelingStateOutputPaths(
          cache.sources) {
         (void)source_id;
         for (const auto& task : source.tasks) {
-            if (!task.output_path) {
+            if (!task.persistence.output_path) {
                 continue;
             }
             error_message =

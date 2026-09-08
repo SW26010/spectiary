@@ -31,37 +31,37 @@ concept HasContextFingerprint = requires(T value) {
 
 template <typename T>
 concept HasAutoAdvance = requires(T value) {
-    value.auto_advance;
+    value.session.auto_advance;
 };
 
 template <typename T>
 concept HasSkipLabeledOnAdvance = requires(T value) {
-    value.skip_labeled_on_advance;
+    value.session.skip_labeled_on_advance;
 };
 
 template <typename T>
 concept HasRememberedPosition = requires(T value) {
-    value.remembered_position;
+    value.session.remembered_position;
 };
 
 template <typename T>
 concept HasPendingSampleIndices = requires(T value) {
-    value.pending_sample_indices;
+    value.persistence.pending_sample_indices;
 };
 
 template <typename T>
 concept HasMetadataSavePending = requires(T value) {
-    value.metadata_save_pending;
+    value.persistence.metadata_save_pending;
 };
 
 template <typename T>
 concept HasSaveState = requires(T value) {
-    value.save_state;
+    value.persistence.save_state;
 };
 
 template <typename T>
 concept HasOutputPath = requires(T value) {
-    value.output_path;
+    value.persistence.output_path;
 };
 
 template <typename T>
@@ -81,12 +81,12 @@ concept HasValueCount = requires(T value) {
 
 template <typename T>
 concept HasLabelUsageCounts = requires(T value) {
-    value.label_usage_counts;
+    value.statistics.label_usage_counts;
 };
 
 template <typename T>
 concept HasLabeledCount = requires(T value) {
-    value.labeled_count;
+    value.statistics.labeled_count;
 };
 
 template <typename T>
@@ -156,15 +156,15 @@ specforge::SampleLabelingDocument ValidDocument()
         specforge::UpsertSampleLabel(task.label_set, {1, "Quasar", 'q'}),
         "second label fixture should be valid");
     task.values = {0, specforge::kUnlabeledSampleLabelCode, 1};
-    task.auto_advance = true;
-    task.skip_labeled_on_advance = true;
-    task.remembered_position = 2;
-    task.output_path = "ignored-session-output.npy";
-    task.output_format =
+    task.session.auto_advance = true;
+    task.session.skip_labeled_on_advance = true;
+    task.session.remembered_position = 2;
+    task.persistence.output_path = "ignored-session-output.npy";
+    task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    task.pending_sample_indices = {1};
-    task.metadata_save_pending = true;
-    task.save_state.kind = specforge::SampleLabelSaveStateKind::Pending;
+    task.persistence.pending_sample_indices = {1};
+    task.persistence.metadata_save_pending = true;
+    task.persistence.save_state.kind = specforge::SampleLabelSaveStateKind::Pending;
 
     return specforge::test_support::BuildSampleLabelingDocument(
         "npy",
@@ -727,14 +727,14 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
             document.labeling.id,
             "local state",
             document.annotation.values.size());
-    local_state.output_path = "canonical-owner.asdf";
-    local_state.output_format =
+    local_state.persistence.output_path = "canonical-owner.asdf";
+    local_state.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     local_state.canonical_metadata =
         document.labeling.canonical_metadata;
     local_state.values[1] = 42;
-    local_state.pending_sample_indices.insert(1);
+    local_state.persistence.pending_sample_indices.insert(1);
 
     Require(
         !specforge::ProjectSampleLabelingDocumentTask(
@@ -742,7 +742,7 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
             local_state),
         "a pending code removed from canonical labels must fail projection instead of creating an undefined task value");
 
-    local_state.metadata_save_pending = true;
+    local_state.persistence.metadata_save_pending = true;
     local_state.task_name = "Locally edited metadata";
     local_state.label_set.labels = {
         {0, "Galaxy", 'g'},
@@ -771,8 +771,8 @@ void TestCanonicalProjectionUsesOneMetadataAuthority()
             "stale cache name",
             document.annotation.values.size(),
             document.labeling.canonical_metadata);
-    local_state.output_path = "canonical-owner.asdf";
-    local_state.output_format =
+    local_state.persistence.output_path = "canonical-owner.asdf";
+    local_state.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
 
     local_state.canonical_metadata.description =
@@ -789,7 +789,7 @@ void TestCanonicalProjectionUsesOneMetadataAuthority()
                 document.labeling.canonical_metadata,
         "without a pending overlay, the durable canonical document must be the sole metadata authority");
 
-    local_state.pending_sample_indices.insert(1);
+    local_state.persistence.pending_sample_indices.insert(1);
     local_state.values[1] = 0;
     local_state.canonical_metadata.created_at =
         *specforge::ParseCanonicalTimestamp(

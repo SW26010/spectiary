@@ -3801,9 +3801,9 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
             "55555555-5555-4555-8555-555555555555",
             "Formal task",
             3);
-    formal_task.output_path =
+    formal_task.persistence.output_path =
         UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
-    formal_task.output_format =
+    formal_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingSourceState source_state;
     source_state.sample_count = 3;
@@ -5019,8 +5019,8 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
             "66666666-6666-4666-8666-666666666666",
             "Local task",
             2);
-    local_task.output_path = annotation_path;
-    local_task.output_format =
+    local_task.persistence.output_path = annotation_path;
+    local_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     local_task.values = {5, -1};
 
@@ -5248,8 +5248,8 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             source->second.tasks.size() == 1 &&
             source->second.tasks[0].task_id ==
                 "33333333-3333-4333-8333-333333333333" &&
-            source->second.tasks[0].output_path == annotation_path &&
-            source->second.tasks[0].output_format ==
+            source->second.tasks[0].persistence.output_path == annotation_path &&
+            source->second.tasks[0].persistence.output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             !source->second.tasks[0]
@@ -5644,7 +5644,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
             relinked_source != relinked_cache.cache.sources.end() &&
             relinked_source->second.tasks.size() == 1 &&
-            relinked_source->second.tasks.front().output_path ==
+            relinked_source->second.tasks.front().persistence.output_path ==
                 moved_path,
         "automatic relink should durably replace the missing owner path");
 
@@ -5816,12 +5816,12 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         {99, "stale cache label", 's'},
     };
     cached.values[1] = 9;
-    cached.pending_sample_indices.insert(1);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.persistence.pending_sample_indices.insert(1);
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    cached.save_state.kind =
+    cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
 
     specforge::SampleLabelingSourceState source_state;
@@ -6323,8 +6323,8 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
             "33333333-3333-4333-8333-333333333333",
             "structural cache owner",
             3);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     specforge::SampleLabelingSourceState source_state;
@@ -6498,12 +6498,12 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     cached.canonical_metadata =
         document.labeling.canonical_metadata;
     cached.values[1] = 9;
-    cached.pending_sample_indices.insert(1);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.persistence.pending_sample_indices.insert(1);
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    cached.save_state.kind =
+    cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
 
     specforge::SampleLabelingSourceState source_state;
@@ -11274,7 +11274,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             return task.task_id == fixture.draft_task_id;
         });
     Require(
-        draft != source->second.tasks.end() && draft->output_path,
+        draft != source->second.tasks.end() && draft->persistence.output_path,
         "navigation refresh fixture should find its formalized draft");
     const specforge::SampleLabelingAsdfReadResult draft_document =
         specforge::ReadSampleLabelingAsdfDocument(
@@ -11289,8 +11289,8 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         draft_document.document->annotation.values.end());
     draft->values_are_authoritative = true;
     specforge::RebuildSampleLabelingTaskStatistics(*draft);
-    draft->output_path.reset();
-    draft->output_format =
+    draft->persistence.output_path.reset();
+    draft->persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::None;
     Require(
         specforge::SaveSampleLabelingStateCache(
@@ -11624,10 +11624,10 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
             source->second.tasks.size() == 1,
         "retry projection fixture should load its task");
     source->second.active_task_id.reset();
-    source->second.tasks[0].pending_sample_indices.insert(0);
-    source->second.tasks[0].save_state.kind =
+    source->second.tasks[0].persistence.pending_sample_indices.insert(0);
+    source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
-    source->second.tasks[0].save_state.pending_count = 1;
+    source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
         specforge::SaveSampleLabelingStateCache(
             fixture.labeling_cache,

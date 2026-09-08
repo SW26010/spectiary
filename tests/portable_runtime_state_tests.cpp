@@ -331,9 +331,9 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
     const specforge::SampleLabelingTask& restored_task =
         source->second.tasks.front();
     Require(
-        restored_task.output_path &&
-            *restored_task.output_path == output_path &&
-            restored_task.output_format ==
+        restored_task.persistence.output_path &&
+            *restored_task.persistence.output_path == output_path &&
+            restored_task.persistence.output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::
                     LegacyNpyWithSidecar,
         "package-relative output and its legacy owner should restore together");

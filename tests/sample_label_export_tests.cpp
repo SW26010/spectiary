@@ -176,12 +176,12 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
             specforge::AssignSampleLabel(task, 2, 6).accepted &&
             specforge::AssignSampleLabel(task, 3, 7).accepted,
         "folder CSV fixture should assign canonical rows");
-    task.output_path = "owner.asdf";
-    task.output_format =
+    task.persistence.output_path = "owner.asdf";
+    task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    task.remembered_position = 2;
-    task.metadata_save_pending = true;
+    task.session.remembered_position = 2;
+    task.persistence.metadata_save_pending = true;
     const specforge::SampleLabelingTask before = task;
 
     const specforge::SampleLabelingCanonicalSourceDescriptor source{
@@ -233,18 +233,18 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
         "folder CSV should preserve canonical filename order and stable label encoding");
     Require(
         task.task_id == before.task_id &&
-            task.output_path == before.output_path &&
-            task.output_format == before.output_format &&
+            task.persistence.output_path == before.persistence.output_path &&
+            task.persistence.output_format == before.persistence.output_format &&
             task.values == before.values &&
-            task.remembered_position ==
-                before.remembered_position &&
-            task.pending_sample_indices ==
-                before.pending_sample_indices &&
-            task.metadata_save_pending ==
-                before.metadata_save_pending &&
-            task.save_state.kind == before.save_state.kind &&
-            task.save_state.pending_count ==
-                before.save_state.pending_count,
+            task.session.remembered_position ==
+                before.session.remembered_position &&
+            task.persistence.pending_sample_indices ==
+                before.persistence.pending_sample_indices &&
+            task.persistence.metadata_save_pending ==
+                before.persistence.metadata_save_pending &&
+            task.persistence.save_state.kind == before.persistence.save_state.kind &&
+            task.persistence.save_state.pending_count ==
+                before.persistence.save_state.pending_count,
         "CSV export should not mutate task owner, save state, pending overlay, or remembered sample");
 
     std::ofstream(path, std::ios::binary | std::ios::trunc)

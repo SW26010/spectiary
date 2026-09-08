@@ -280,10 +280,10 @@ int WriteLabelingSeedFixture(
             {7, "rejected", 'r'})) {
         return 4;
     }
-    task.auto_advance = true;
+    task.session.auto_advance = true;
     if (output_path) {
-        task.output_path = *output_path;
-        task.output_format =
+        task.persistence.output_path = *output_path;
+        task.persistence.output_format =
             specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
         if (HasArgument(
                 argc,
@@ -303,7 +303,7 @@ int WriteLabelingSeedFixture(
             if (!write_outcome.succeeded()) {
                 return 5;
             }
-            task.save_state.kind =
+            task.persistence.save_state.kind =
                 specforge::SampleLabelSaveStateKind::AutosavedToOutput;
         }
     }
@@ -540,8 +540,8 @@ int VerifyLabelingStateFixture(
     }
     std::optional<specforge::SampleLabelingTask> projected;
     const specforge::SampleLabelingTask* effective = &*task;
-    if (task->output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
-        const auto document = specforge::ReadSampleLabelingAsdfDocument(*task->output_path);
+    if (task->persistence.output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        const auto document = specforge::ReadSampleLabelingAsdfDocument(*task->persistence.output_path);
         if (!document.succeeded()) return 6;
         projected = specforge::ProjectSampleLabelingDocumentTask(*document.document, *task);
         if (!projected) return 6;
@@ -629,9 +629,9 @@ int wmain(int argc, wchar_t** argv)
                     kPersistentLabelingTaskId,
                     "Persistent",
                     2U);
-    persistent_task.output_path =
+    persistent_task.persistence.output_path =
         forbidden_output;
-    persistent_task.output_format =
+    persistent_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingSourceState
         persistent_source;

@@ -120,15 +120,15 @@ struct SampleLabelingTaskCanonicalMetadata {
         const SampleLabelingTaskCanonicalMetadata&) const = default;
 };
 
-struct SampleLabelingTask {
-    std::string task_id;
-    std::string task_name;
-    SampleLabelingTaskCanonicalMetadata canonical_metadata;
-    SampleLabelSet label_set;
-    std::vector<int> values;
+// Local workflow preferences, never part of the canonical labeling document.
+struct SampleLabelingSessionState {
     bool auto_advance = false;
     bool skip_labeled_on_advance = false;
     std::optional<std::size_t> remembered_position;
+};
+
+// Local output ownership, write-ahead recovery and save presentation.
+struct SampleLabelingPersistenceState {
     // Formal output ownership is explicit state. A path is present exactly
     // when the format is not None; callers must not infer it from a suffix.
     std::optional<std::filesystem::path> output_path;
@@ -138,17 +138,30 @@ struct SampleLabelingTask {
     // its first canonical owner. A cache reader rolls this phase back to a
     // real temporary draft if the process exits before publication completes.
     bool initial_publication_pending = false;
-    // Runtime projection provenance; never serialized. Canonical ASDF cache
-    // records carry only sparse local state, so their placeholder values are
-    // not data-bearing until projected over the canonical document.
-    bool values_are_authoritative = true;
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;
+};
+
+struct SampleLabelingStatistics {
     // Derived, non-persisted presentation statistics. Mutations maintain these
     // incrementally; cache ingestion rebuilds them off the UI thread.
     std::unordered_map<int, std::size_t> label_usage_counts;
     std::size_t labeled_count = 0;
+};
+
+struct SampleLabelingTask {
+    std::string task_id;
+    std::string task_name;
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    SampleLabelSet label_set;
+    std::vector<int> values;
+    SampleLabelingSessionState session;
+    SampleLabelingPersistenceState persistence;
+    SampleLabelingStatistics statistics;
+    // Transitional projection marker; replaced by distinct value states in
+    // the next stage of the content/cache boundary refactor.
+    bool values_are_authoritative = true;
 };
 
 struct SampleLabelWriteResult {

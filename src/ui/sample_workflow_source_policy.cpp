@@ -125,10 +125,10 @@ bool AttachedCanonicalDocumentIsAuthoritative(
     return annotation != nullptr &&
         annotation->labeling_document &&
         local_task != nullptr &&
-        local_task->output_format ==
+        local_task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
         !local_task->values_are_authoritative &&
-        !local_task->metadata_save_pending;
+        !local_task->persistence.metadata_save_pending;
 }
 
 const SampleLabelingTask* EffectiveLoadedOwnerProjection(
@@ -139,7 +139,7 @@ const SampleLabelingTask* EffectiveLoadedOwnerProjection(
 {
     if (local_task == nullptr ||
         !annotation.labeling_document ||
-        local_task->output_format !=
+        local_task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         local_task->values_are_authoritative) {
         return local_task;
@@ -287,7 +287,7 @@ const SampleLabelingTask* FindLocalTaskByOutputPath(
         return nullptr;
     }
     const auto match = std::find_if(tasks->begin(), tasks->end(), [&path](const SampleLabelingTask& task) {
-        return task.output_path && SampleWorkflowPathsReferToSameFile(*task.output_path, path);
+        return task.persistence.output_path && SampleWorkflowPathsReferToSameFile(*task.persistence.output_path, path);
     });
     return match == tasks->end() ? nullptr : &*match;
 }
@@ -424,7 +424,7 @@ bool SampleWorkflowSourcePolicy::RenameAnnotationDisplayName(
     }
 
     const std::string key = AnnotationDisplayNameKeyFromPath(
-        local_task != nullptr && local_task->output_path ? *local_task->output_path : path);
+        local_task != nullptr && local_task->persistence.output_path ? *local_task->persistence.output_path : path);
     if (key.empty()) {
         return false;
     }
@@ -461,7 +461,7 @@ std::string SampleWorkflowSourcePolicy::AnnotationDisplayName(
     const SampleLabelingTask* local_task) const
 {
     const std::string key = AnnotationDisplayNameKeyFromPath(
-        local_task != nullptr && local_task->output_path ? *local_task->output_path : annotation.path);
+        local_task != nullptr && local_task->persistence.output_path ? *local_task->persistence.output_path : annotation.path);
     const auto override = annotation_display_names_.find(key);
     if (override != annotation_display_names_.end()) {
         return override->second;
@@ -477,7 +477,7 @@ std::string SampleWorkflowSourcePolicy::AnnotationDisplayName(
 std::string SampleWorkflowSourcePolicy::LocalTaskAnnotationDisplayName(
     const SampleLabelingTask& task) const
 {
-    const std::string key = task.output_path ? AnnotationDisplayNameKeyFromPath(*task.output_path) : std::string{};
+    const std::string key = task.persistence.output_path ? AnnotationDisplayNameKeyFromPath(*task.persistence.output_path) : std::string{};
     const auto override = annotation_display_names_.find(key);
     if (override != annotation_display_names_.end()) {
         return override->second;
@@ -1010,7 +1010,7 @@ std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterS
                 cancellation_checkpoint();
             }
             const SampleLabelingTask& task = (*context.labeling_tasks)[task_index];
-            if (!task.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
+            if (!task.persistence.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
                 continue;
             }
             const std::string source_id = BuildLabelingFilterSourceId(task);
@@ -1121,7 +1121,7 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
                         cancellation_checkpoint();
                     }
                     const SampleLabelingTask& task = (*context.labeling_tasks)[task_index];
-                    if (!task.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
+                    if (!task.persistence.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
                         continue;
                     }
                     SampleFilterSource source = BuildLabelingFilterSource(task, cancellation_checkpoint);
@@ -1131,7 +1131,7 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
                     emitted_labeling_source_ids.insert(source.id);
                     source.name = LocalTaskAnnotationDisplayName(task);
                     SourceCollectionFilterSourceView source_view =
-                        BuildFilterSourceView(source, filters_, *task.output_path);
+                        BuildFilterSourceView(source, filters_, *task.persistence.output_path);
                     if (IsSelectedFilterSource(source.id)) {
                         view.sources.push_back(std::move(source_view));
                     } else {
