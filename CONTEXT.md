@@ -111,7 +111,9 @@ view
 
 **Temporary sample labeling task**:
 The single output-free sample labeling task retained for one source collection.
-An ordinary manual draft uses the default name `Temporary labeling task`; an
+An ordinary manual draft uses the default name `Temporary labeling task`, or
+the smallest available positive integer suffix when that exact name is already
+in the source's task list. User-entered duplicate names remain valid. An
 annotation-promotion draft retains its promoted task name. It may be paused and
 resumed, and becomes a local labeling annotation only after the user selects an
 output location. A source collection may not own two temporary sample labeling

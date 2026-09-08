@@ -4638,6 +4638,54 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
     Require(tasks != nullptr && tasks->size() == 2, "formal annotation and one temporary task should coexist");
 }
 
+void TestGeneratedTemporaryTaskNamesReuseAvailableSlots()
+{
+    const auto directory = FreshTestDirectory("specforge_generated_task_names");
+    const auto cache = directory / "tasks.json";
+    const std::string base = "Temporary labeling task";
+    std::string second_id;
+    {
+        specforge::SampleLabelingController controller(cache);
+        ActivateCanonicalTestSource(controller, "source-identity", 3);
+        const auto create_and_save = [&](const std::string& expected, int file) {
+            Require(controller.StartOrResumeTemporaryTask().accepted, "automatic task creation should succeed");
+            Require(ActiveTask(controller)->task_name == expected, "automatic task should use smallest free exact name");
+            Require(controller.SaveActiveTemporaryTaskToOutput(
+                        directory / (std::to_string(file) + ".asdf")).output_saved,
+                    "generated task should formalize normally");
+        };
+        create_and_save(base, 0);
+        create_and_save(base + " 1", 1);
+        second_id = ActiveTask(controller)->task_id;
+        Require(controller.CreateTask(base + " 3").accepted, "manual suffix should remain legal");
+        Require(controller.SaveActiveTemporaryTaskToOutput(directory / "manual.asdf").output_saved,
+                "manual task should formalize");
+        create_and_save(base + " 2", 2);
+        Require(controller.StartOrResumeTemporaryTask().accepted && ActiveTask(controller)->task_name == base + " 4",
+                "automatic names should skip occupied manual suffixes");
+        Require(controller.RenameActiveTask(ActiveTask(controller)->task_id, base).accepted, "user-entered duplicate names remain valid");
+        Require(controller.SaveActiveTemporaryTaskToOutput(directory / "duplicate.asdf").output_saved,
+                "duplicate display names should save without changing identity rules");
+        Require(controller.RenameActiveTask(ActiveTask(controller)->task_id, "Renamed").accepted, "renaming should release the generated slot");
+        Require(controller.ActivateTask(second_id).accepted && controller.DeleteActiveTask().accepted, "deletion should release a numbered slot");
+        Require(controller.FlushStateCache(), "task list should persist");
+    }
+    {
+        specforge::SampleLabelingController restored(cache);
+        ActivateCanonicalTestSource(restored, "source-identity", 3);
+        Require(restored.StartOrResumeTemporaryTask().accepted && ActiveTask(restored)->task_name == base + " 1",
+                "recovered names should occupy their slots while deleted suffixes become reusable");
+        const std::string draft_id = ActiveTask(restored)->task_id;
+        Require(restored.DeactivateActiveTask().accepted && restored.StartOrResumeTemporaryTask().accepted &&
+                    ActiveTask(restored)->task_id == draft_id && ActiveTask(restored)->task_name == base + " 1",
+                "resuming a retained temporary task must not rename it");
+        Require(restored.RenameActiveTask(ActiveTask(restored)->task_id, "Other").accepted &&
+                    restored.SaveActiveTemporaryTaskToOutput(directory / "renamed.asdf").output_saved &&
+                    restored.StartOrResumeTemporaryTask().accepted && ActiveTask(restored)->task_name == base + " 1",
+                "renaming should make a generated suffix reusable without a persisted counter");
+    }
+}
+
 void TestControllerAtomicallyStartsOrResumesTemporaryTask()
 {
     const std::filesystem::path cache_path =
@@ -11931,6 +11979,7 @@ int main(int argc, char* argv[])
         run("TestCreateFromAnnotationRegeneratesUuidWhenIdentityLeaseIsUnavailable", TestCreateFromAnnotationRegeneratesUuidWhenIdentityLeaseIsUnavailable);
         run("TestCreateFromAnnotationRegeneratesUuidWithoutHydratingCollidingOwner", TestCreateFromAnnotationRegeneratesUuidWithoutHydratingCollidingOwner);
         run("TestControllerKeepsOneTemporaryTaskPerSource", TestControllerKeepsOneTemporaryTaskPerSource);
+        run("TestGeneratedTemporaryTaskNamesReuseAvailableSlots", TestGeneratedTemporaryTaskNamesReuseAvailableSlots);
         run("TestControllerAtomicallyStartsOrResumesTemporaryTask", TestControllerAtomicallyStartsOrResumesTemporaryTask);
         run("TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure", TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure);
         run("TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure", TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure);

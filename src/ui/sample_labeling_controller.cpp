@@ -1626,6 +1626,18 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
 SampleLabelingOperationResult
 SampleLabelingController::StartOrResumeTemporaryTask()
 {
+    const auto next_task_name = [this]() {
+        const SourceState* current = ActiveSource();
+        const std::string base{kTemporarySampleLabelingTaskName};
+        std::string candidate = base;
+        for (std::size_t suffix = 1; current != nullptr &&
+             std::ranges::any_of(current->tasks, [&](const SampleLabelingTask& task) {
+                 return task.task_name == candidate;
+             }); ++suffix) {
+            candidate = base + " " + std::to_string(suffix);
+        }
+        return candidate;
+    };
     SourceState* state = ActiveSource();
     if (state == nullptr) {
         return RejectOperation();
@@ -1663,14 +1675,14 @@ SampleLabelingController::StartOrResumeTemporaryTask()
             return result;
         }
         SampleLabelingOperationResult created = CreateTask(
-            std::string{kTemporarySampleLabelingTaskName});
+            next_task_name());
         created.task_projection_changed =
             created.task_projection_changed ||
             result.task_projection_changed;
         return created;
     }
     return CreateTask(
-        std::string{kTemporarySampleLabelingTaskName});
+        next_task_name());
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(
