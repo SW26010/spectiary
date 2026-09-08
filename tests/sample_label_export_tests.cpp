@@ -235,7 +235,7 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
         task.task_id == before.task_id &&
             task.persistence.output_path == before.persistence.output_path &&
             task.persistence.output_format == before.persistence.output_format &&
-            task.values == before.values &&
+            task.values.Complete() == before.values.Complete() &&
             task.session.remembered_position ==
                 before.session.remembered_position &&
             task.persistence.pending_sample_indices ==

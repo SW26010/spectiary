@@ -118,7 +118,7 @@ SampleLabelingTask CreateSampleLabelingTask(
     task.task_id = std::move(task_id);
     task.task_name = std::move(task_name);
     task.canonical_metadata = std::move(canonical_metadata);
-    task.values.assign(sample_count, kUnlabeledSampleLabelCode);
+    task.values.Complete().assign(sample_count, kUnlabeledSampleLabelCode);
     task.statistics.label_usage_counts.clear();
     task.statistics.labeled_count = 0;
     task.persistence.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
@@ -133,25 +133,9 @@ bool DowngradeCanonicalSampleLabelingTaskToStructural(
         return false;
     }
 
-    bool changed = task.values_are_authoritative ||
-        task.statistics.labeled_count != 0 ||
-        !task.statistics.label_usage_counts.empty() ||
-        task.persistence.save_state.pending_count !=
-            task.persistence.pending_sample_indices.size();
-    for (std::size_t sample_index = 0;
-         sample_index < task.values.size();
-         ++sample_index) {
-        if (task.persistence.pending_sample_indices.contains(
-                sample_index)) {
-            continue;
-        }
-        changed = changed ||
-            task.values[sample_index] !=
-                kUnlabeledSampleLabelCode;
-        task.values[sample_index] =
-            kUnlabeledSampleLabelCode;
-    }
-    task.values_are_authoritative = false;
+    const bool changed = task.values.MakeSparse(task.persistence.pending_sample_indices) ||
+        task.statistics.labeled_count != 0 || !task.statistics.label_usage_counts.empty() ||
+        task.persistence.save_state.pending_count != task.persistence.pending_sample_indices.size();
     task.statistics.label_usage_counts.clear();
     task.statistics.labeled_count = 0;
     task.persistence.save_state.pending_count =
@@ -240,6 +224,7 @@ bool UpdateSampleLabel(
     SampleLabelDefinition label,
     bool allow_used_code_change)
 {
+    if (!task.values.IsComplete()) return false;
     const auto original = std::find_if(
         task.label_set.labels.begin(),
         task.label_set.labels.end(),
@@ -255,9 +240,9 @@ bool UpdateSampleLabel(
     if (code_changed) {
         const bool target_code_has_label = ContainsSampleLabelCode(task.label_set, updated_code);
         const bool target_code_has_values =
-            std::find(task.values.begin(), task.values.end(), updated_code) != task.values.end();
+            std::find(task.values.Complete().begin(), task.values.Complete().end(), updated_code) != task.values.Complete().end();
         const bool original_code_has_values =
-            std::find(task.values.begin(), task.values.end(), original_code) != task.values.end();
+            std::find(task.values.Complete().begin(), task.values.Complete().end(), original_code) != task.values.Complete().end();
         if (updated_code == kUnlabeledSampleLabelCode || target_code_has_label || target_code_has_values ||
             (original_code_has_values && !allow_used_code_change)) {
             return false;
@@ -282,11 +267,11 @@ bool UpdateSampleLabel(
     task.label_set = std::move(updated_label_set);
 
     if (code_changed) {
-        for (std::size_t index = 0; index < task.values.size(); ++index) {
-            if (task.values[index] != original_code) {
+        for (std::size_t index = 0; index < task.values.SampleCount(); ++index) {
+            if (task.values.Complete()[index] != original_code) {
                 continue;
             }
-            task.values[index] = updated_code;
+            task.values.Complete()[index] = updated_code;
             task.persistence.pending_sample_indices.insert(index);
         }
         RefreshPendingSaveState(task);
@@ -297,6 +282,7 @@ bool UpdateSampleLabel(
 
 bool RemoveSampleLabel(SampleLabelingTask& task, int code)
 {
+    if (!task.values.IsComplete()) return false;
     if (code == kUnlabeledSampleLabelCode) {
         return false;
     }
@@ -308,9 +294,9 @@ bool RemoveSampleLabel(SampleLabelingTask& task, int code)
         return false;
     }
 
-    for (std::size_t index = 0; index < task.values.size(); ++index) {
-        if (task.values[index] == code) {
-            task.values[index] = kUnlabeledSampleLabelCode;
+    for (std::size_t index = 0; index < task.values.SampleCount(); ++index) {
+        if (task.values.Complete()[index] == code) {
+            task.values.Complete()[index] = kUnlabeledSampleLabelCode;
             task.persistence.pending_sample_indices.insert(index);
         }
     }
@@ -349,14 +335,16 @@ std::string FormatSampleLabelValue(const SampleLabelSet& label_set, int code, in
 
 std::size_t CountLabeledSamples(const SampleLabelingTask& task)
 {
-    return static_cast<std::size_t>(std::count_if(task.values.begin(), task.values.end(), [](int value) {
+    if (!task.values.IsComplete()) return 0;
+    return static_cast<std::size_t>(std::count_if(task.values.Complete().begin(), task.values.Complete().end(), [](int value) {
         return value != kUnlabeledSampleLabelCode;
     }));
 }
 
 std::size_t CountUnlabeledSamples(const SampleLabelingTask& task)
 {
-    return task.values.size() - CountLabeledSamples(task);
+    if (!task.values.IsComplete()) return 0;
+    return task.values.SampleCount() - CountLabeledSamples(task);
 }
 
 void RebuildSampleLabelingTaskStatistics(
@@ -365,11 +353,12 @@ void RebuildSampleLabelingTaskStatistics(
 {
     task.statistics.label_usage_counts.clear();
     task.statistics.labeled_count = 0;
-    for (std::size_t index = 0; index < task.values.size(); ++index) {
+    if (!task.values.IsComplete()) return;
+    for (std::size_t index = 0; index < task.values.SampleCount(); ++index) {
         if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const int code = task.values[index];
+        const int code = task.values.Complete()[index];
         if (code != kUnlabeledSampleLabelCode) {
             ++task.statistics.label_usage_counts[code];
             ++task.statistics.labeled_count;
@@ -385,14 +374,14 @@ SampleLabelWriteResult AssignSampleLabel(SampleLabelingTask& task, std::size_t s
     SampleLabelWriteResult result;
     result.sample_index = sample_index;
     result.current_code = code;
-    if (sample_index >= task.values.size() || !ContainsSampleLabelCode(task.label_set, code)) {
+    if (!task.values.IsComplete() || sample_index >= task.values.SampleCount() || !ContainsSampleLabelCode(task.label_set, code)) {
         result.pending_count = task.persistence.pending_sample_indices.size();
         return result;
     }
 
     result.accepted = true;
-    result.previous_code = task.values[sample_index];
-    task.values[sample_index] = code;
+    result.previous_code = task.values.Complete()[sample_index];
+    task.values.Complete()[sample_index] = code;
     result.current_code = code;
     result.changed = result.previous_code != result.current_code;
     if (result.changed) {
@@ -425,14 +414,14 @@ SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sa
 {
     SampleLabelWriteResult result;
     result.sample_index = sample_index;
-    if (sample_index >= task.values.size()) {
+    if (!task.values.IsComplete() || sample_index >= task.values.SampleCount()) {
         result.pending_count = task.persistence.pending_sample_indices.size();
         return result;
     }
 
     result.accepted = true;
-    result.previous_code = task.values[sample_index];
-    task.values[sample_index] = kUnlabeledSampleLabelCode;
+    result.previous_code = task.values.Complete()[sample_index];
+    task.values.Complete()[sample_index] = kUnlabeledSampleLabelCode;
     result.current_code = kUnlabeledSampleLabelCode;
     result.changed = result.previous_code != result.current_code;
     if (result.changed) {

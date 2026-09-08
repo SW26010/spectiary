@@ -20,13 +20,13 @@ inline void SelectLegacyFixtureOutputPath(SampleLabelingTask& task, std::filesys
     const std::optional<LoadedSampleLabelResult> output =
         SampleAnnotationIoAdapter{}.LoadLabelResult(
             *task.persistence.output_path,
-            task.values.size(),
+            task.values.SampleCount(),
             {},
             &ignored_error);
-    for (std::size_t index = 0; index < task.values.size(); ++index) {
+    for (std::size_t index = 0; index < task.values.SampleCount(); ++index) {
         const int base_value =
             output ? output->values[index] : kUnlabeledSampleLabelCode;
-        if (task.values[index] != base_value) {
+        if (task.values.Complete()[index] != base_value) {
             task.persistence.pending_sample_indices.insert(index);
         }
     }

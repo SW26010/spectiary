@@ -368,8 +368,8 @@ bool SameTaskProjection(
             right.session.remembered_position &&
         left.persistence.output_path == right.persistence.output_path &&
         left.persistence.output_format == right.persistence.output_format &&
-        left.values_are_authoritative ==
-            right.values_are_authoritative &&
+        left.values.IsComplete() ==
+            right.values.IsComplete() &&
         left.persistence.pending_sample_indices ==
             right.persistence.pending_sample_indices &&
         left.persistence.metadata_save_pending ==
@@ -432,7 +432,7 @@ SampleLabelResultMetadataSource SourceMetadataFromState(const SampleLabelingCont
 
 std::optional<SampleLabelingDocument>
 BuildCanonicalDocumentReplacement(
-    const SampleLabelingTask& task,
+    const SampleLabelingContentView& task,
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     std::string* error_message)
 {
@@ -1311,7 +1311,7 @@ SampleLabelingRecoveryView SampleLabelingController::RecoveryView() const
                  recovery_untrusted_task_ids_by_source_.end() &&
              untrusted_source->second.contains(task.task_id)) ||
             task.task_id.empty() ||
-            task.values.size() != state->sample_count;
+            task.values.SampleCount() != state->sample_count;
         const bool duplicate_task_id =
             task_id_counts.at(task.task_id) > 1;
         const std::string task_identity_key =
@@ -1426,7 +1426,7 @@ SampleLabelingController::
 {
     const SampleLabelingTask* task = ActiveTask();
     if (task == nullptr ||
-        !task->values_are_authoritative ||
+        !task->values.IsComplete() ||
         task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         !task->persistence.output_path ||
@@ -1764,7 +1764,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         state->sample_count,
         std::move(canonical_metadata));
     task.label_set = std::move(label_set);
-    task.values = std::move(values);
+    task.values.Complete() = std::move(values);
     RebuildSampleLabelingTaskStatistics(task);
     if (!PromotionArtifactMatchesPlannedGeneration(
             annotation_path,
@@ -1772,7 +1772,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
             task.canonical_metadata.origin,
             task.task_name,
             task.label_set,
-            task.values,
+            task.values.Complete(),
             active_source_descriptor_
                 ? &*active_source_descriptor_
                 : nullptr)) {
@@ -2015,7 +2015,7 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
                     latest_id_match->persistence.output_format !=
                         SampleLabelingOutputArtifactFormat::
                             CanonicalAsdf ||
-                    latest_id_match->values.size() !=
+                    latest_id_match->values.SampleCount() !=
                         state->sample_count) {
                     return RejectEditTargetChanged();
                 }
@@ -2750,11 +2750,11 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     candidate.persistence.initial_publication_pending = true;
-    candidate.values_are_authoritative = true;
+
     for (std::size_t index = 0;
-         index < candidate.values.size();
+         index < candidate.values.SampleCount();
          ++index) {
-        if (candidate.values[index] !=
+        if (candidate.values.Complete()[index] !=
             kUnlabeledSampleLabelCode) {
             candidate.persistence.pending_sample_indices.insert(index);
         }
@@ -2945,7 +2945,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
         task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::
                 LegacyNpyWithSidecar ||
-        !task->values_are_authoritative ||
+        !task->values.IsComplete() ||
         output_path.empty() ||
         !IsCanonicalAsdfOutputPath(output_path) ||
         OutputPathMatches(
@@ -2954,7 +2954,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
         active_source_descriptor_->base_identity !=
             *active_source_identity_ ||
         active_source_descriptor_->sample_count !=
-            task->values.size() ||
+            task->values.SampleCount() ||
         !ActiveTaskLeaseMatches(
             *active_source_identity_,
             *task)) {
@@ -2981,7 +2981,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     candidate.persistence.initial_publication_pending = false;
-    candidate.values_are_authoritative = true;
+
 
     TaskEditLeaseSet candidate_output_leases;
     ExclusiveFileLeaseAcquireResult candidate_lease =
@@ -3156,7 +3156,7 @@ SampleLabelingController::ExportActiveLabels(
     SampleLabelExportFormat format) const
 {
     const SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || !task->values_are_authoritative ||
+    if (task == nullptr || !task->values.IsComplete() ||
         !active_source_descriptor_) {
         return RejectOperation();
     }
@@ -3386,7 +3386,7 @@ SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
 SampleLabelingOperationResult SampleLabelingController::RememberActivePosition(std::size_t sample_index)
 {
     SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || sample_index >= task->values.size()) {
+    if (task == nullptr || sample_index >= task->values.SampleCount()) {
         return RejectOperation();
     }
     if (task->session.remembered_position && *task->session.remembered_position == sample_index) {
@@ -3656,7 +3656,7 @@ SampleLabelingController::PersistCanonicalTaskOutput(
             result.message);
     };
     if (!task.persistence.output_path ||
-        !task.values_are_authoritative ||
+        !task.values.IsComplete() ||
         asdf_snapshot == nullptr ||
         !*asdf_snapshot ||
         !OutputPathMatches(
@@ -3665,9 +3665,9 @@ SampleLabelingController::PersistCanonicalTaskOutput(
         (*asdf_snapshot)->document().labeling.id !=
             task.task_id ||
         (*asdf_snapshot)->document().annotation.values.size() !=
-            task.values.size() ||
+            task.values.SampleCount() ||
         (source_state != nullptr &&
-         source_state->sample_count != task.values.size())) {
+         source_state->sample_count != task.values.SampleCount())) {
         fail(
             "canonical ASDF publication does not have a matching durable owner generation");
         return result;
@@ -3682,7 +3682,7 @@ SampleLabelingController::PersistCanonicalTaskOutput(
         active_source_descriptor_->base_identity !=
             snapshot.document().source.base_identity ||
         active_source_descriptor_->sample_count !=
-            task.values.size()) {
+            task.values.SampleCount()) {
         fail(
             "canonical ASDF publication does not have a matching source generation");
         return result;
@@ -3691,7 +3691,7 @@ SampleLabelingController::PersistCanonicalTaskOutput(
     std::string replacement_error;
     std::optional<SampleLabelingDocument> replacement =
         BuildCanonicalDocumentReplacement(
-            task,
+            task.Content().value(),
             snapshot,
             &replacement_error);
     if (!replacement) {
@@ -3767,14 +3767,14 @@ SampleLabelingController::PublishCanonicalTaskCreation(
     if (!task.persistence.output_path ||
         task.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
-        !task.values_are_authoritative ||
+        !task.values.IsComplete() ||
         asdf_snapshot == nullptr ||
         !active_source_descriptor_ ||
         !active_source_identity_ ||
         active_source_descriptor_->base_identity !=
             *active_source_identity_ ||
         active_source_descriptor_->sample_count !=
-            task.values.size()) {
+            task.values.SampleCount()) {
         fail(
             "canonical ASDF owner creation does not have a matching source descriptor");
         return attempt;
@@ -3783,7 +3783,7 @@ SampleLabelingController::PublishCanonicalTaskCreation(
     SampleLabelingDocument document =
         BuildSampleLabelingDocument(
             *active_source_descriptor_,
-            task);
+            task.Content().value());
     if (!ValidateSampleLabelingDocumentFailFast(document).valid()) {
         fail(
             "labeling task cannot form a valid canonical ASDF document");
@@ -4487,7 +4487,7 @@ SampleLabelingController::PrepareTaskActivation(
                 known_task.task_id);
         if (pending == nullptr ||
             pending->persistence.output_path ||
-            pending->values.size() != sample_count) {
+            pending->values.SampleCount() != sample_count) {
             return false;
         }
         preparation.task = *pending;
@@ -4644,7 +4644,7 @@ SampleLabelingController::PrepareTaskActivation(
             pending_overlay->persistence.output_format ==
                 SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
-            pending_overlay->values.size() == sample_count &&
+            pending_overlay->values.SampleCount() == sample_count &&
             OutputPathMatches(
                 *pending_overlay->persistence.output_path,
                 *known_task.persistence.output_path) &&
@@ -5514,7 +5514,7 @@ bool SampleLabelingController::
         !OutputPathMatches(
             active_asdf_snapshot_->path(),
             *task->persistence.output_path) ||
-        !task->values_are_authoritative) {
+        !task->values.IsComplete()) {
         return false;
     }
 

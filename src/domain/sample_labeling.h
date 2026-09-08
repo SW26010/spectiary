@@ -1,11 +1,13 @@
 #pragma once
 
 #include "domain/canonical_timestamp.h"
+#include "domain/sample_labeling_values.h"
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -150,18 +152,44 @@ struct SampleLabelingStatistics {
     std::size_t labeled_count = 0;
 };
 
+struct SampleLabelingTask;
+
+// Borrowed canonical content. Construction is restricted to complete task
+// values; no persistence/session fields or sparse placeholders are exposed.
+// The view is valid only until its task is mutated or destroyed.
+class SampleLabelingContentView {
+public:
+    const std::string& task_id;
+    const std::string& task_name;
+    const SampleLabelingTaskCanonicalMetadata& canonical_metadata;
+    const SampleLabelSet& label_set;
+    const std::span<const int> values;
+private:
+    friend struct SampleLabelingTask;
+    SampleLabelingContentView(const std::string& id, const std::string& name,
+        const SampleLabelingTaskCanonicalMetadata& metadata, const SampleLabelSet& labels,
+        std::span<const int> complete_values)
+        : task_id(id), task_name(name), canonical_metadata(metadata),
+          label_set(labels), values(complete_values) {}
+};
+
 struct SampleLabelingTask {
     std::string task_id;
     std::string task_name;
     SampleLabelingTaskCanonicalMetadata canonical_metadata;
     SampleLabelSet label_set;
-    std::vector<int> values;
+    SampleLabelingValues values;
     SampleLabelingSessionState session;
     SampleLabelingPersistenceState persistence;
     SampleLabelingStatistics statistics;
-    // Transitional projection marker; replaced by distinct value states in
-    // the next stage of the content/cache boundary refactor.
-    bool values_are_authoritative = true;
+    [[nodiscard]] std::optional<SampleLabelingContentView> Content() const noexcept
+    {
+        const auto* complete = values.CompleteIfAvailable();
+        if (complete == nullptr) return std::nullopt;
+        return SampleLabelingContentView{task_id, task_name, canonical_metadata, label_set, *complete};
+    }
+
+
 };
 
 struct SampleLabelWriteResult {

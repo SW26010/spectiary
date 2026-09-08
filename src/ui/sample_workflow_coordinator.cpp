@@ -152,8 +152,8 @@ SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
     }
 
     std::vector<bool> eligible_samples;
-    eligible_samples.reserve(task.values.size());
-    for (int value : task.values) {
+    eligible_samples.reserve(task.values.SampleCount());
+    for (int value : task.values.Complete()) {
         eligible_samples.push_back(value == kUnlabeledSampleLabelCode);
     }
     return SampleNavigationRequest::LabelAdvanceToEligible(std::move(eligible_samples));
@@ -213,7 +213,7 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
         annotation.labeling_document &&
         local_task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
-        !local_task->values_are_authoritative &&
+        !local_task->values.IsComplete() &&
         current_index < annotation.labeling_document
                             ->annotation.values.size()) {
         int value = static_cast<int>(
@@ -221,8 +221,8 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
                 ->annotation.values[current_index]);
         if (local_task->persistence.pending_sample_indices.contains(
                 current_index) &&
-            current_index < local_task->values.size()) {
-            value = local_task->values[current_index];
+            current_index < local_task->values.SampleCount()) {
+            value = local_task->values.PendingValue(current_index);
         }
         if (local_task->persistence.metadata_save_pending) {
             view.display_text = FormatSampleLabelValue(
@@ -234,11 +234,11 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
                 SampleAnnotationValue{
                     static_cast<std::int64_t>(value)});
         }
-    } else if (local_task != nullptr &&
-               current_index < local_task->values.size()) {
+    } else if (local_task != nullptr && local_task->values.IsComplete() &&
+               current_index < local_task->values.SampleCount()) {
         view.display_text = FormatSampleLabelValue(
             local_task->label_set,
-            local_task->values[current_index]);
+            local_task->values.Complete()[current_index]);
     } else if (current_index < annotation.values.size()) {
         const SampleAnnotationValue& value =
             annotation.values[current_index];
@@ -313,11 +313,11 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.name = std::move(display_name);
     view.path = task.persistence.output_path.value_or(std::filesystem::path{});
     view.relationship = SampleAnnotationWorkflowRelationship::LocalLabelingTask;
-    if (task.values_are_authoritative) {
-        if (current_index < task.values.size()) {
+    if (task.values.IsComplete()) {
+        if (current_index < task.values.SampleCount()) {
             view.display_text = FormatSampleLabelValue(
                 task.label_set,
-                task.values[current_index]);
+                task.values.Complete()[current_index]);
         } else {
             view.missing = true;
         }
@@ -325,7 +325,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_activate_labeling = task.persistence.output_path.has_value();
     view.can_filter_samples =
         task.persistence.output_path.has_value() &&
-        task.values_are_authoritative;
+        task.values.IsComplete();
     view.can_sort_samples = false;
     view.can_rename_annotation = task.persistence.output_path.has_value();
     view.can_remove_annotation = false;
@@ -337,7 +337,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
             (task.persistence.output_format ==
                  SampleLabelingOutputArtifactFormat::
                      CanonicalAsdf &&
-             !task.values_are_authoritative) ||
+             !task.values.IsComplete()) ||
             output_probe ==
                 PathProbeResult::Missing;
         if (task.persistence.output_format ==
@@ -2168,8 +2168,8 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::UndoLastLabelWrite(
 
     const SampleLabelingTask* task = labeling_.View().active_task;
     const LabelUndoEntry entry = label_undo_history_->entries.back();
-    if (task == nullptr || entry.sample_index >= task->values.size() ||
-        task->values[entry.sample_index] != entry.current_code) {
+    if (task == nullptr || !task->values.IsComplete() || entry.sample_index >= task->values.SampleCount() ||
+        task->values.Complete()[entry.sample_index] != entry.current_code) {
         ClearLabelUndoHistory();
         return {};
     }
@@ -2402,7 +2402,7 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
                 labeling_.View().active_source_tasks) {
                 for (const SampleLabelingTask& task : *tasks) {
                     if (!task.persistence.output_path ||
-                        (!task.values_are_authoritative &&
+                        (!task.values.IsComplete() &&
                          task.persistence.output_format !=
                              SampleLabelingOutputArtifactFormat::
                                  CanonicalAsdf)) {
@@ -2471,7 +2471,7 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
                 .task_name = draft.task->task_name,
                 .status = draft.status,
                 .labeled_count = draft.task->statistics.labeled_count,
-                .sample_count = draft.task->values.size(),
+                .sample_count = draft.task->values.SampleCount(),
                 .save_state = draft.task->persistence.save_state});
     }
     view.current_index = ActiveSampleIndex(snapshot);
@@ -2491,9 +2491,9 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
         view.label_set = task->label_set;
         view.label_usage_counts = task->statistics.label_usage_counts;
         view.labeled_count = task->statistics.labeled_count;
-        view.sample_count = task->values.size();
-        if (view.current_index && *view.current_index < task->values.size()) {
-            view.current_code = task->values[*view.current_index];
+        view.sample_count = task->values.SampleCount();
+        if (task->values.IsComplete() && view.current_index && *view.current_index < task->values.SampleCount()) {
+            view.current_code = task->values.Complete()[*view.current_index];
         }
         view.auto_advance = task->session.auto_advance;
         view.skip_labeled_on_advance = task->session.skip_labeled_on_advance;
@@ -2507,7 +2507,7 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
         view.output_format = task->persistence.output_format;
         view.save_state = task->persistence.save_state;
         view.can_export_label_values =
-            task->values_are_authoritative;
+            task->values.IsComplete();
         view.can_deactivate_task = labeling_.CanDeactivateActiveTask();
         view.can_delete_task = labeling_.CanDeleteActiveTask();
     }

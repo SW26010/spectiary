@@ -155,7 +155,7 @@ specforge::SampleLabelingDocument ValidDocument()
     Require(
         specforge::UpsertSampleLabel(task.label_set, {1, "Quasar", 'q'}),
         "second label fixture should be valid");
-    task.values = {0, specforge::kUnlabeledSampleLabelCode, 1};
+    task.values.Complete() = {0, specforge::kUnlabeledSampleLabelCode, 1};
     task.session.auto_advance = true;
     task.session.skip_labeled_on_advance = true;
     task.session.remembered_position = 2;
@@ -294,7 +294,7 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
     Require(
         specforge::UpsertSampleLabel(task.label_set, {0, "Target", 't'}),
         "source-index label fixture should be valid");
-    task.values = {-1, 0};
+    task.values.Complete() = {-1, 0};
 
     const specforge::SampleLabelingDocument document =
         specforge::test_support::BuildSampleLabelingDocument("npy", source_context, task);
@@ -358,7 +358,7 @@ void TestInvalidSourceNamesFallBackToSourceIndexRoster()
     const specforge::SampleLabelingDocument from_descriptor =
         specforge::test_support::BuildSampleLabelingDocument(
             descriptor,
-            task);
+            task.Content().value());
     Require(
         descriptor.sample_names.empty() &&
             from_descriptor.source.roster.identity_kind ==
@@ -733,7 +733,7 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
             CanonicalAsdf;
     local_state.canonical_metadata =
         document.labeling.canonical_metadata;
-    local_state.values[1] = 42;
+    local_state.values.Complete()[1] = 42;
     local_state.persistence.pending_sample_indices.insert(1);
 
     Require(
@@ -756,7 +756,7 @@ void TestCanonicalProjectionRejectsUndefinedPendingCodes()
                 local_state);
     Require(
         metadata_projection &&
-            metadata_projection->values ==
+            metadata_projection->values.Complete() ==
                 std::vector<int>({0, 42, 1}),
         "pending values should be validated after a compatible local metadata overlay is applied");
 }
@@ -790,7 +790,7 @@ void TestCanonicalProjectionUsesOneMetadataAuthority()
         "without a pending overlay, the durable canonical document must be the sole metadata authority");
 
     local_state.persistence.pending_sample_indices.insert(1);
-    local_state.values[1] = 0;
+    local_state.values.Complete()[1] = 0;
     local_state.canonical_metadata.created_at =
         *specforge::ParseCanonicalTimestamp(
             "2026-08-30T16:23:45.124Z");
@@ -819,6 +819,28 @@ void TestCanonicalProjectionUsesOneMetadataAuthority()
             document,
             local_state),
         "an older pending cache generation must be treated as stale rather than overlaid on newer disk metadata");
+}
+
+void TestSparseValuesCannotExposeCanonicalContent()
+{
+    specforge::SampleLabelingTask task;
+    task.values.Complete() = {7, -1, 7};
+    Require(task.Content().has_value(), "complete values must expose content");
+    task.values.MakeSparse({1});
+    Require(!task.Content() && !task.values.CompleteIfAvailable(),
+        "sparse overlays must not expose placeholder canonical content");
+    Require(task.values.SampleCount() == 3 &&
+            task.values.Sparse()->pending_values.size() == 1 &&
+            task.values.PendingValue(1) == -1,
+        "sparse overlays must retain explicit clearing edits and source size");
+    bool rejected_unknown_row = false;
+    try {
+        (void)task.values.PendingValue(0);
+    } catch (const std::out_of_range&) {
+        rejected_unknown_row = true;
+    }
+    Require(rejected_unknown_row,
+        "an absent overlay row must not be interpreted as an unlabeled sample");
 }
 
 void TestFailFastValidatorBoundsDiagnostics()
@@ -858,6 +880,7 @@ int main()
         TestCanonicalProjectionRejectsUndefinedPendingCodes();
         TestCanonicalProjectionUsesOneMetadataAuthority();
         TestFailFastValidatorBoundsDiagnostics();
+        TestSparseValuesCannotExposeCanonicalContent();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "sample labeling document test failure: "

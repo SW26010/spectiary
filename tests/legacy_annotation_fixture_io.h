@@ -119,7 +119,7 @@ inline bool LegacyFixtureIo::SaveLabelArray(
     }
     return legacy_fixture_detail::WriteLabelValuesToNpyAtomically(
         path,
-        task.values,
+        task.values.Complete(),
         error_message,
         "sample label result");
 }
@@ -149,7 +149,7 @@ inline bool LegacyFixtureIo::SaveLabelMetadata(
             stream << "  \"task_id\": ";
             WriteJsonString(stream, task.task_id);
             stream << ",\n";
-            stream << "  \"value_count\": " << task.values.size() << ",\n";
+            stream << "  \"value_count\": " << task.values.SampleCount() << ",\n";
             stream << "  \"expected_dtype\": ";
             WriteJsonString(stream, legacy_fixture_detail::kInt32DtypeText);
             stream << ",\n";

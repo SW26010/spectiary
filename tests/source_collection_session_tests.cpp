@@ -240,7 +240,7 @@ void SaveLabelResultFixture(
 {
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), values.size());
-    task.values = std::move(values);
+    task.values.Complete() = std::move(values);
     task.label_set = std::move(label_set);
     std::string error;
     const specforge::test_support::LegacyFixtureIo adapter;
@@ -5022,7 +5022,7 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     local_task.persistence.output_path = annotation_path;
     local_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    local_task.values = {5, -1};
+    local_task.values.Complete() = {5, -1};
 
     specforge::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
@@ -5253,7 +5253,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             !source->second.tasks[0]
-                 .values_are_authoritative,
+                 .values.IsComplete(),
         "adoption should persist one canonical local owner record without creating a legacy owner");
 
     result = Submit(
@@ -5815,7 +5815,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     cached.label_set.labels = {
         {99, "stale cache label", 's'},
     };
-    cached.values[1] = 9;
+    cached.values.Complete()[1] = 9;
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.output_path = annotation_path;
     cached.persistence.output_format =
@@ -6497,7 +6497,7 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
             3);
     cached.canonical_metadata =
         document.labeling.canonical_metadata;
-    cached.values[1] = 9;
+    cached.values.Complete()[1] = 9;
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.output_path = annotation_path;
     cached.persistence.output_format =
@@ -11284,10 +11284,12 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         draft_document.error.message.empty()
             ? "navigation refresh fixture should reopen its canonical draft values"
             : draft_document.error.message);
-    draft->values.assign(
-        draft_document.document->annotation.values.begin(),
-        draft_document.document->annotation.values.end());
-    draft->values_are_authoritative = true;
+    auto projected_draft = specforge::ProjectSampleLabelingDocumentTask(
+        *draft_document.document, *draft);
+    Require(projected_draft.has_value(),
+        "navigation refresh fixture should project complete canonical values");
+    *draft = std::move(*projected_draft);
+
     specforge::RebuildSampleLabelingTaskStatistics(*draft);
     draft->persistence.output_path.reset();
     draft->persistence.output_format =
@@ -11625,6 +11627,7 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
         "retry projection fixture should load its task");
     source->second.active_task_id.reset();
     source->second.tasks[0].persistence.pending_sample_indices.insert(0);
+    source->second.tasks[0].values.SetPendingValue(0, -1);
     source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
     source->second.tasks[0].persistence.save_state.pending_count = 1;

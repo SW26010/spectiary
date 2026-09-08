@@ -179,7 +179,7 @@ struct SampleLabelingDocumentValidationResult {
 // released its SourceCollectionContext.
 [[nodiscard]] SampleLabelingDocument BuildSampleLabelingDocument(
     const SampleLabelingCanonicalSourceDescriptor& source,
-    const SampleLabelingTask& task);
+    const SampleLabelingContentView& task);
 
 // Builds the editable/runtime projection of one canonical document generation.
 // Canonical task metadata and values form the base; only local session state

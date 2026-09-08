@@ -21,7 +21,7 @@ inline SampleLabelingDocument BuildSampleLabelingDocument(
     source.source_fingerprint = context.identity.source_fingerprint;
     source.sample_count = context.identity.spectrum_count;
     source.sample_names = context.manifest.sample_names;
-    return specforge::BuildSampleLabelingDocument(source, task);
+    return specforge::BuildSampleLabelingDocument(source, task.Content().value());
 }
 
 using specforge::BuildSampleLabelingDocument;

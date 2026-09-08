@@ -114,8 +114,8 @@ bool IsLabelingSampleFilterCandidate(
     const SampleLabelingTask& task,
     std::size_t sample_count)
 {
-    return task.values_are_authoritative &&
-        task.values.size() == sample_count;
+    return task.values.IsComplete() &&
+        task.values.SampleCount() == sample_count;
 }
 
 bool AttachedCanonicalDocumentIsAuthoritative(
@@ -127,7 +127,7 @@ bool AttachedCanonicalDocumentIsAuthoritative(
         local_task != nullptr &&
         local_task->persistence.output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
-        !local_task->values_are_authoritative &&
+        !local_task->values.IsComplete() &&
         !local_task->persistence.metadata_save_pending;
 }
 
@@ -141,7 +141,7 @@ const SampleLabelingTask* EffectiveLoadedOwnerProjection(
         !annotation.labeling_document ||
         local_task->persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
-        local_task->values_are_authoritative) {
+        local_task->values.IsComplete()) {
         return local_task;
     }
     *canonical_projection =

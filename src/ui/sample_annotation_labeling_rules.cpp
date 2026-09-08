@@ -171,7 +171,7 @@ const SampleLabelingTask* FindTaskByMetadataOutput(
         active_source_tasks->end(),
         [&annotation, &metadata](const SampleLabelingTask& task) {
             return task.persistence.output_path && task.task_id == metadata.task_id &&
-                   task.values.size() == annotation.values.size() &&
+                   task.values.SampleCount() == annotation.values.size() &&
                    PathsReferToSameFile(*task.persistence.output_path, annotation.path);
         });
     return match == active_source_tasks->end() ? nullptr : &*match;
@@ -230,7 +230,7 @@ const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
                     task.task_id ==
                         annotation.labeling_document
                             ->labeling.id &&
-                    task.values.size() ==
+                    task.values.SampleCount() ==
                         annotation.values.size() &&
                     PathsReferToSameFile(
                         *task.persistence.output_path,
@@ -253,7 +253,7 @@ const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
         active_source_tasks->begin(),
         active_source_tasks->end(),
         [&annotation](const SampleLabelingTask& task) {
-            return task.persistence.output_path && task.values.size() == annotation.values.size() &&
+            return task.persistence.output_path && task.values.SampleCount() == annotation.values.size() &&
                    PathsReferToSameFile(*task.persistence.output_path, annotation.path);
         });
     return match == active_source_tasks->end() ? nullptr : &*match;

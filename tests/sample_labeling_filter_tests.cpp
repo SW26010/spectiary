@@ -149,6 +149,13 @@ const specforge::SampleLabelingTask* ActiveSourceTask(
     return task == tasks->end() ? nullptr : &*task;
 }
 
+bool HasSparseValues(const specforge::SampleLabelingTask& task, std::size_t count,
+    std::unordered_map<std::size_t, int> expected)
+{
+    const auto* sparse = task.values.Sparse();
+    return !task.Content() && sparse && sparse->sample_count == count && sparse->pending_values == expected;
+}
+
 void TestTaskLifecycleUsesInjectedUuidAndSemanticClock()
 {
     constexpr std::string_view kFirstId =
@@ -606,7 +613,7 @@ void TestSampleLabelingStateCacheRoundTrip()
     Require(
         specforge::FindSampleLabel(restored_task.label_set, 5) != nullptr,
         "label set should round-trip");
-    Require(restored_task.values.size() == 3 && restored_task.values[1] == 5, "draft values should round-trip");
+    Require(restored_task.values.SampleCount() == 3 && restored_task.values.Complete()[1] == 5, "draft values should round-trip");
     Require(
         restored_task.canonical_metadata == expected_metadata,
         "schema 4 should round-trip canonical metadata including exact author email text");
@@ -778,8 +785,8 @@ void TestInterruptedInitialCanonicalPublicationRestoresTemporaryDraft()
                 specforge::SampleLabelingOutputArtifactFormat::None &&
             task->task_name ==
                 "Interrupted formalization" &&
-            task->values_are_authoritative &&
-            task->values == std::vector<int>({-1, 5, -1}) &&
+            task->values.IsComplete() &&
+            task->values.Complete() == std::vector<int>({-1, 5, -1}) &&
             TemporaryTask(recovered) == task,
         "a restart between the initial checkpoint and ASDF creation must restore a real temporary draft without discarding its task name");
 
@@ -1011,7 +1018,7 @@ void TestSampleLabelTaskWritesStableCodes()
     Require(result.accepted, "known label code should be accepted");
     Require(result.changed, "first write should change the sample");
     Require(result.advance_requested, "auto-advance should request navigation after a label write");
-    Require(task.values[1] == 2, "label write should store the stable code");
+    Require(task.values.Complete()[1] == 2, "label write should store the stable code");
     Require(task.session.remembered_position && *task.session.remembered_position == 1, "label write should remember position");
     Require(result.pending_count == 1, "first write should mark one pending sample");
 
@@ -1022,7 +1029,7 @@ void TestSampleLabelTaskWritesStableCodes()
 
     result = specforge::ClearSampleLabel(task, 1);
     Require(result.accepted, "clear should be accepted for an in-range sample");
-    Require(task.values[1] == specforge::kUnlabeledSampleLabelCode, "clear should write the unlabeled sentinel");
+    Require(task.values.Complete()[1] == specforge::kUnlabeledSampleLabelCode, "clear should write the unlabeled sentinel");
     Require(result.pending_count == 1, "clear should keep the same pending sample count");
 
     specforge::MarkSampleLabelTaskPersisted(task, specforge::SampleLabelSaveStateKind::InternalDraftOnly);
@@ -1042,7 +1049,7 @@ void TestSampleLabelTaskWritesStableCodes()
 
     result = specforge::AssignSampleLabel(task, 2, 42);
     Require(!result.accepted, "unknown label code should not be accepted");
-    Require(task.values[2] == 3, "unknown label code must not mutate values");
+    Require(task.values.Complete()[2] == 3, "unknown label code must not mutate values");
 
     specforge::MarkSampleLabelTaskPersisted(task, specforge::SampleLabelSaveStateKind::InternalDraftOnly);
     Require(task.persistence.pending_sample_indices.empty(), "persisting should clear pending samples");
@@ -1233,7 +1240,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
     cached.session.auto_advance = true;
     cached.session.skip_labeled_on_advance = true;
     cached.session.remembered_position = 2;
-    cached.values[1] = 7;
+    cached.values.Complete()[1] = 7;
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
@@ -1272,8 +1279,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
             structural_task != nullptr &&
             structural_task->persistence.save_state.kind !=
                 specforge::SampleLabelSaveStateKind::Failed &&
-            structural_task->values ==
-                std::vector<int>({-1, 7, -1}),
+            HasSparseValues(*structural_task, 3, {{1, 7}}),
         "default cache load must leave canonical owners structural instead of sending them to the NPY loader");
 
     {
@@ -1350,7 +1356,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
                 task->label_set.labels[0].code == 2 &&
                 task->label_set.labels[0].name ==
                     "accepted" &&
-                task->values ==
+                task->values.Complete() ==
                     std::vector<int>({-1, 7, 7}) &&
                 task->session.auto_advance &&
                 task->session.skip_labeled_on_advance &&
@@ -1439,8 +1445,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         clean_cached_task != nullptr &&
             clean_cached_task
                 ->persistence.pending_sample_indices.empty() &&
-            clean_cached_task->values ==
-                std::vector<int>({-1, -1, -1}),
+            HasSparseValues(*clean_cached_task, 3, {}),
         "successful canonical publication should clear the durable sparse overlay without caching full values");
 
     specforge::SampleLabelingController reopened(
@@ -1450,7 +1455,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         CanonicalOwnerSourceDescriptor());
     Require(
         ActiveTask(reopened) != nullptr &&
-            ActiveTask(reopened)->values ==
+            ActiveTask(reopened)->values.Complete() ==
                 std::vector<int>({2, -1, 7}) &&
             ActiveTask(reopened)->canonical_metadata ==
                 published.snapshot->document().labeling.canonical_metadata,
@@ -1484,9 +1489,8 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         ActiveSourceTask(reopened, "00000000-0000-4000-8000-000000000006");
     Require(
         failed_owner != nullptr &&
-            !failed_owner->values_are_authoritative &&
-            failed_owner->values ==
-                std::vector<int>({-1, -1, -1}) &&
+            !failed_owner->values.IsComplete() &&
+            HasSparseValues(*failed_owner, 3, {}) &&
             failed_owner->persistence.pending_sample_indices.empty() &&
             reopened.active_source_tasks_generation() >
                 generation_before_failed_revalidation,
@@ -1945,7 +1949,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
                 std::vector<specforge::CanonicalTimestamp>{
                     mutation_time} &&
             failed_task != nullptr &&
-            failed_task->values ==
+            failed_task->values.Complete() ==
                 std::vector<int>({2, 2, 7}) &&
             failed_task->persistence.pending_sample_indices ==
                 std::unordered_set<std::size_t>({0}) &&
@@ -1977,8 +1981,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
                     .labeling.canonical_metadata.modified_at ==
                 original.labeling.canonical_metadata.modified_at &&
             pending_task != nullptr &&
-            pending_task->values ==
-                std::vector<int>({2, -1, -1}) &&
+            HasSparseValues(*pending_task, 3, {{0, 2}}) &&
             pending_task->persistence.pending_sample_indices ==
                 std::unordered_set<std::size_t>({0}) &&
             pending_task->canonical_metadata.modified_at ==
@@ -2533,8 +2536,8 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
         CanonicalOwnerSourceDescriptor());
     Require(
         ActiveTask(controller) != nullptr &&
-            ActiveTask(controller)->values_are_authoritative &&
-            ActiveTask(controller)->values ==
+            ActiveTask(controller)->values.IsComplete() &&
+            ActiveTask(controller)->values.Complete() ==
                 CanonicalOwnerDocument().annotation.values,
         "canonical deactivation fixture should begin with a hydrated authoritative projection");
 
@@ -2549,7 +2552,7 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
         "00000000-0000-4000-8000-000000000006";
     authoritative_prepared_state.tasks =
         *ActiveSourceTasks(controller);
-    authoritative_prepared_state.tasks[0].values[1] = 7;
+    authoritative_prepared_state.tasks[0].values.Complete()[1] = 7;
     authoritative_prepared_state.tasks[0]
         .persistence.pending_sample_indices.insert(1);
     authoritative_prepared_state.tasks[0].persistence.save_state.kind =
@@ -2562,9 +2565,8 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
         exported_state &&
             exported_state->tasks.size() == 1 &&
             !exported_state->tasks[0]
-                 .values_are_authoritative &&
-            exported_state->tasks[0].values ==
-                std::vector<int>({-1, -1, -1}),
+                 .values.IsComplete() &&
+            HasSparseValues(exported_state->tasks[0], 3, {}),
         "exporting a prepared source must not copy a snapshot-bound canonical base projection");
 
     const std::uint64_t generation_before_deactivation =
@@ -2580,9 +2582,8 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
         ActiveSourceTask(controller, "00000000-0000-4000-8000-000000000006");
     Require(
         structural != nullptr &&
-            !structural->values_are_authoritative &&
-            structural->values ==
-                std::vector<int>({-1, -1, -1}) &&
+            !structural->values.IsComplete() &&
+            HasSparseValues(*structural, 3, {}) &&
             structural->persistence.pending_sample_indices.empty() &&
             structural->statistics.labeled_count == 0 &&
             structural->statistics.label_usage_counts.empty() &&
@@ -2611,9 +2612,8 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
             ActiveTask(prepared_receiver) == nullptr &&
             failed_prepared_owner != nullptr &&
             !failed_prepared_owner
-                 ->values_are_authoritative &&
-            failed_prepared_owner->values ==
-                std::vector<int>({-1, 7, -1}) &&
+                 ->values.IsComplete() &&
+            HasSparseValues(*failed_prepared_owner, 3, {{1, 7}}) &&
             failed_prepared_owner
                     ->persistence.pending_sample_indices ==
                 std::unordered_set<std::size_t>({1}),
@@ -2644,10 +2644,10 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
     Require(
         reactivated.accepted &&
             ActiveTask(controller) != nullptr &&
-            ActiveTask(controller)->values_are_authoritative &&
+            ActiveTask(controller)->values.IsComplete() &&
             ActiveTask(controller)->task_name ==
                 "Canonical quality generation C" &&
-            ActiveTask(controller)->values ==
+            ActiveTask(controller)->values.Complete() ==
                 std::vector<int>({7, -1, 2}),
         "reactivating a downgraded owner must hydrate the current ASDF generation instead of reusing the retired projection");
 }
@@ -2752,7 +2752,7 @@ void TestCanonicalRevalidationRetainsLeaseForPendingRecoveryPatch()
         CanonicalOwnerSourceDescriptor());
     Require(
         ActiveTask(after_flush) != nullptr &&
-            ActiveTask(after_flush)->values[0] == 2,
+            ActiveTask(after_flush)->values.Complete()[0] == 2,
         "successful recovery flush should release the deferred canonical owner lease and preserve the overlay");
 }
 
@@ -2860,7 +2860,7 @@ void TestCanonicalAsdfTaskOwnerRejectsUndefinedPendingCode()
     cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    cached.values[1] = 99;
+    cached.values.Complete()[1] = 99;
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
@@ -3112,7 +3112,7 @@ void TestRemovingSampleLabelClearsAssignedValues()
     Require(specforge::RemoveSampleLabel(task, 1), "a used label should be removable");
     Require(specforge::FindSampleLabel(task.label_set, 1) == nullptr, "used label definition should be removed");
     Require(
-        task.values[0] == specforge::kUnlabeledSampleLabelCode,
+        task.values.Complete()[0] == specforge::kUnlabeledSampleLabelCode,
         "samples using a removed label should become unlabeled");
     Require(task.persistence.pending_sample_indices.contains(0), "cleared sample values should be pending persistence");
 
@@ -3163,7 +3163,7 @@ void TestChangingUsedSampleLabelCodeRequiresConfirmation()
             false),
         "a used label code should require confirmation");
     Require(specforge::FindSampleLabel(task.label_set, 1) != nullptr, "rejected recode should keep the old label");
-    Require(task.values == std::vector<int>({1, -1, 1}), "rejected recode should keep sample values");
+    Require(task.values.Complete() == std::vector<int>({1, -1, 1}), "rejected recode should keep sample values");
 
     Require(
         specforge::UpdateSampleLabel(
@@ -3174,7 +3174,7 @@ void TestChangingUsedSampleLabelCodeRequiresConfirmation()
         "confirmation should allow a used label code to change");
     Require(specforge::FindSampleLabel(task.label_set, 1) == nullptr, "confirmed recode should remove the old code");
     Require(specforge::FindSampleLabel(task.label_set, 7) != nullptr, "confirmed recode should add the new code");
-    Require(task.values == std::vector<int>({7, -1, 7}), "confirmed recode should migrate assigned values");
+    Require(task.values.Complete() == std::vector<int>({7, -1, 7}), "confirmed recode should migrate assigned values");
     Require(
         task.persistence.pending_sample_indices == std::unordered_set<std::size_t>({0, 2}),
         "confirmed recode should dirty every migrated sample value");
@@ -3187,7 +3187,7 @@ void TestChangingUsedSampleLabelCodeRequiresConfirmation()
             true),
         "confirmation should not overwrite another label code");
 
-    task.values[1] = 9;
+    task.values.Complete()[1] = 9;
     Require(
         !specforge::UpdateSampleLabel(
             task,
@@ -3279,7 +3279,7 @@ void TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization()
                 "selected",
         "snapshot should copy active task data in unsorted canonical source roster order");
 
-    task.values[0] = specforge::kUnlabeledSampleLabelCode;
+    task.values.Complete()[0] = specforge::kUnlabeledSampleLabelCode;
     source.sample_names[0] = "changed.fits";
     Require(
         named_snapshot->values[0] == 5 &&
@@ -3303,7 +3303,7 @@ void TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization()
                 5) == "selected (5)",
         "export label serialization should be stable and separate from presentation text");
 
-    task.values = {5, -1, 5};
+    task.values.Complete() = {5, -1, 5};
     source.sample_names.clear();
     error.clear();
     const std::optional<specforge::SampleLabelExportSnapshot>
@@ -3999,7 +3999,7 @@ void TestAnnotationAdapterRoundTripsLabelArtifacts()
         adapter.LoadLabelResult(path, 3, {}, &error);
     Require(loaded.has_value(), error.empty() ? "adapter label result should load" : error);
     Require(
-        loaded->values == task.values,
+        loaded->values == task.values.Complete(),
         "adapter round-trip should preserve every int32 label value");
     Require(
         loaded->metadata_sidecar_exists && loaded->metadata &&
@@ -4212,7 +4212,7 @@ void TestSampleLabelingControllerAutosavesDraftRecord()
         Require(task->task_id == created_task_id, "restored task id should match");
         Require(task->session.auto_advance, "restored workflow setting should match");
         Require(specforge::FindSampleLabel(task->label_set, 5) != nullptr, "restored label set should include saved code");
-        Require(task->values.size() == 3 && task->values[1] == 5, "restored draft should include saved sample value");
+        Require(task->values.SampleCount() == 3 && task->values.Complete()[1] == 5, "restored draft should include saved sample value");
         Require(task->persistence.pending_sample_indices.empty(), "restored autosave should be clean");
         Require(
             task->persistence.save_state.kind == specforge::SampleLabelSaveStateKind::InternalDraftOnly,
@@ -4552,14 +4552,14 @@ void TestImportedDraftRetainsValuesWhileRecoveryCheckpointBlocked()
         "Imported", labels, {5, -1, -1}, import_path);
     Require(created.accepted && !created.state_saved && !created.output_save_attempted &&
                 ActiveTask(controller) && !ActiveTask(controller)->persistence.output_path &&
-                ActiveTask(controller)->values == std::vector<int>({5, -1, -1}),
+                ActiveTask(controller)->values.Complete() == std::vector<int>({5, -1, -1}),
             "an imported draft should retain accepted values while local recovery publication is blocked");
     lock.lease.Reset();
     Require(controller.FlushStateCache() && !std::filesystem::exists(import_path),
             "retry should save only the local recovery cache, never create an import artifact");
     const auto restored = specforge::LoadSampleLabelingStateCache(cache_path);
     const auto* task = FindTask(restored.cache, "shared-source", ActiveTask(controller)->task_id);
-    Require(task && !task->persistence.output_path && task->values == std::vector<int>({5, -1, -1}),
+    Require(task && !task->persistence.output_path && task->values.Complete() == std::vector<int>({5, -1, -1}),
             "recovered import values should match the accepted draft");
 }
 
@@ -4598,7 +4598,7 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
         "create should resume the existing temporary task");
     const specforge::SampleLabelingTask* resumed = ActiveTask(controller);
     Require(resumed != nullptr && resumed->task_id == temporary_task_id, "create should resume the existing temporary task");
-    Require(resumed->values[1] == 5, "resumed temporary task should keep its draft values");
+    Require(resumed->values.Complete()[1] == 5, "resumed temporary task should keep its draft values");
     const std::vector<specforge::SampleLabelingTask>* tasks = ActiveSourceTasks(controller);
     Require(tasks != nullptr && tasks->size() == 1, "source should keep only one temporary task");
 
@@ -4818,7 +4818,7 @@ void TestExternalOutputIsResultSourceOfTruth()
                     specforge::SampleLabelingOutputArtifactFormat::
                         CanonicalAsdf,
             "legacy output path and format should restore");
-        Require(task->values.size() == 3 && task->values[1] == 5, "output-backed task should load values from NPY");
+        Require(task->values.SampleCount() == 3 && task->values.Complete()[1] == 5, "output-backed task should load values from NPY");
     }
 }
 
@@ -4942,7 +4942,7 @@ void TestMissingExternalOutputRestoresFailedState()
             "missing canonical owners should remain listed without becoming editable");
     const specforge::SampleLabelingTask* task = &ActiveSourceTasks(restored)->front();
     Require(task != nullptr, "output-backed task should restore even when output is missing");
-    Require(!task->values_are_authoritative && task->persistence.output_path == output_path,
+    Require(!task->values.IsComplete() && task->persistence.output_path == output_path,
             "missing canonical output should retain its locator without claiming hydrated values");
     const std::string task_id = task->task_id;
     Require(!restored.ActivateTask(task_id).accepted && ActiveTask(restored) == nullptr,
@@ -4998,7 +4998,7 @@ void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
         restored.ActivateSource("source-identity", 3);
         const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr && !task->persistence.output_path, "failed temporary draft should restore without an output");
-        Require(task->values.size() == 3 && task->values[1] == 5, "failed draft restore should preserve its label");
+        Require(task->values.SampleCount() == 3 && task->values.Complete()[1] == 5, "failed draft restore should preserve its label");
         Require(TemporaryTask(restored) != nullptr, "restored failed draft should remain resumable");
         Require(restored.CanDeactivateActiveTask(), "restored failed draft should remain pausable");
         Require(
@@ -5065,7 +5065,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
             7,
             "repaired",
             'r'});
-    repaired.values = {7, -1, 7};
+    repaired.values.Complete() = {7, -1, 7};
     repaired.persistence.output_path = output_path;
     repaired.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
@@ -5110,7 +5110,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
             task->persistence.output_path ==
                 std::optional<std::filesystem::path>{
                     output_path} &&
-            task->values == std::vector<int>({7, -1, 7}),
+            task->values.Complete() == std::vector<int>({7, -1, 7}),
         "retry must not replace the repaired formal task with the stale draft");
 
     const specforge::SampleLabelingOperationResult deleted =
@@ -5130,7 +5130,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
             task->persistence.output_path ==
                 std::optional<std::filesystem::path>{
                     output_path} &&
-            task->values == std::vector<int>({7, -1, 7}),
+            task->values.Complete() == std::vector<int>({7, -1, 7}),
         "deleting the stale draft must not tombstone the repaired task with the same id");
 }
 
@@ -5200,7 +5200,7 @@ void TestFailedExternalOutputPersistsPendingOverlay()
         const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "failed output-backed task should restore");
         Require(task->persistence.output_path && *task->persistence.output_path == output_path, "output path should restore");
-        Require(task->values.size() == 3 && task->values[1] == 5, "pending overlay should restore over the output base");
+        Require(task->values.SampleCount() == 3 && task->values.Complete()[1] == 5, "pending overlay should restore over the output base");
         Require(task->persistence.pending_sample_indices.find(1) != task->persistence.pending_sample_indices.end(), "pending sample should restore");
         Require(
             task->persistence.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
@@ -5390,7 +5390,7 @@ void TestInteractiveOutputLabelWritesDoNotWaitForCacheCommitLock()
 
     Require(
         ActiveTask(controller) != nullptr &&
-            ActiveTask(controller)->values[0] ==
+            ActiveTask(controller)->values.Complete()[0] ==
                 specforge::kUnlabeledSampleLabelCode,
         "interactive edits should keep the newest in-memory label while persistence is pending");
     commit_lock.lease.Reset();
@@ -5506,7 +5506,7 @@ void TestSuccessfulOutputCannotRetainOlderPendingOverlay()
     ActivateCanonicalTestSource(restored, "shared-source", 3);
     Require(
         ActiveTask(restored) != nullptr &&
-            ActiveTask(restored)->values[0] == 7,
+            ActiveTask(restored)->values.Complete()[0] == 7,
         "restart must not replay the older failed value over the newer output");
     RunMaintenanceUntilIdle(restored);
     Require(
@@ -5642,10 +5642,10 @@ void TestDifferentTemporaryTasksMergeAcrossInstances()
             "source-second",
             second_task_id);
     Require(
-        first_task != nullptr && first_task->values[0] == 5,
+        first_task != nullptr && first_task->values.Complete()[0] == 5,
         "merged cache should retain the first draft");
     Require(
-        second_task != nullptr && second_task->values[1] == 7,
+        second_task != nullptr && second_task->values.Complete()[1] == 7,
         "merged cache should retain the second draft");
 }
 
@@ -5814,7 +5814,7 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
     first_task.label_set.labels = {
         {5, "first", 'f'},
         {7, "changed", 'c'}};
-    first_task.values = {5, -1, -1};
+    first_task.values.Complete() = {5, -1, -1};
     first_task.persistence.output_path = first_output;
     first_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
@@ -5833,7 +5833,7 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
     second_task.label_set.labels = {
         {5, "first", 'f'},
         {7, "changed", 'c'}};
-    second_task.values = {-1, 7, -1};
+    second_task.values.Complete() = {-1, 7, -1};
     second_task.persistence.output_path = second_output;
     second_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
@@ -6272,7 +6272,7 @@ void TestTemporaryDraftRecoveryUsesPendingCreateBeforeFlush()
             !recovered.state_saved &&
             ActiveTask(controller) != nullptr &&
             ActiveTask(controller)->task_id == pending_task_id &&
-            ActiveTask(controller)->values.size() == 3,
+            ActiveTask(controller)->values.SampleCount() == 3,
         "Recover should restore a pending-create draft before its first cache flush");
 
     specforge::ExclusiveFileLeaseAcquireResult task_lease =
@@ -6308,7 +6308,7 @@ void TestTemporaryDraftRecoveryUsesPendingCreateBeforeFlush()
     Require(
         task != nullptr &&
             task->task_name == "Pending draft" &&
-            task->values == std::vector<int>({-1, -1, -1}) &&
+            task->values.Complete() == std::vector<int>({-1, -1, -1}) &&
             ActiveTask(controller) != nullptr &&
             ActiveTask(controller)->task_id == pending_task_id,
         "Recover should persist the pending-create draft without a restart");
@@ -6457,7 +6457,7 @@ void TestTemporaryDraftRecoveryRetainsDeferredPendingEdit()
     Require(
         editor.AssignLabel(0, 5).write.changed &&
             ActiveTask(editor) != nullptr &&
-            ActiveTask(editor)->values[0] == 5,
+            ActiveTask(editor)->values.Complete()[0] == 5,
         "pending-edit fixture should create a newer local edit");
     Require(
         editor.DeactivateActiveTask().accepted &&
@@ -6474,13 +6474,13 @@ void TestTemporaryDraftRecoveryRetainsDeferredPendingEdit()
         recovered.accepted &&
             !recovered.state_saved &&
             ActiveTask(editor) != nullptr &&
-            ActiveTask(editor)->values[0] == 5,
+            ActiveTask(editor)->values.Complete()[0] == 5,
         "recovering a deferred temporary draft must retain its pending local edit");
     Require(
         editor.AssignLabel(1, 5).write.changed &&
             ActiveTask(editor) != nullptr &&
-            ActiveTask(editor)->values[0] == 5 &&
-            ActiveTask(editor)->values[1] == 5,
+            ActiveTask(editor)->values.Complete()[0] == 5 &&
+            ActiveTask(editor)->values.Complete()[1] == 5,
         "editing after deferred temporary recovery must build on the retained pending value");
 
     blocked_commit.lease.Reset();
@@ -6496,9 +6496,9 @@ void TestTemporaryDraftRecoveryRetainsDeferredPendingEdit()
             task_id);
     Require(
         task != nullptr &&
-            task->values.size() == 3 &&
-            task->values[0] == 5 &&
-            task->values[1] == 5,
+            task->values.SampleCount() == 3 &&
+            task->values.Complete()[0] == 5 &&
+            task->values.Complete()[1] == 5,
         "the recovered pending temporary edit must remain durable");
 }
 
@@ -6736,7 +6736,7 @@ void TestLeaseConflictTemporaryReopenPreservesPendingEdit()
     Require(
         ActiveTask(fallback) != nullptr &&
             ActiveTask(fallback)->task_id == temporary_task_id &&
-            ActiveTask(fallback)->values[0] == 5,
+            ActiveTask(fallback)->values.Complete()[0] == 5,
         "reopening the conflicted source must preserve the pending temporary edit and selection");
 
     Require(
@@ -6763,7 +6763,7 @@ void TestLeaseConflictTemporaryReopenPreservesPendingEdit()
             source->second.active_task_id &&
             *source->second.active_task_id == temporary_task_id &&
             recovered != nullptr &&
-            recovered->values ==
+            recovered->values.Complete() ==
                 std::vector<int>{5, 7, specforge::kUnlabeledSampleLabelCode},
         "recovered temporary selection and edits should be committed without reverting to the formal snapshot");
 
@@ -7575,7 +7575,7 @@ void TestLeaseHandoffRefreshInvalidatesTaskProjectionGeneration()
         "stale instance should acquire the released task");
     Require(
         ActiveTask(stale) != nullptr &&
-            ActiveTask(stale)->values[1] == 7 &&
+            ActiveTask(stale)->values.Complete()[1] == 7 &&
             specforge::FindSampleLabel(
                 ActiveTask(stale)->label_set,
                 7) != nullptr,
@@ -8058,7 +8058,7 @@ void TestSequentialLeaseHandoffRefreshesLatestTask()
         ActiveTask(stale_second);
     Require(
         refreshed != nullptr &&
-            refreshed->values[1] == 7 &&
+            refreshed->values.Complete()[1] == 7 &&
             specforge::FindSampleLabel(
                 refreshed->label_set,
                 7) != nullptr,
@@ -8379,8 +8379,7 @@ void TestPreparedReopenAdoptsUnprotectedTasksAndDeletions()
         old_state = stale.SourceStateForIdentity(identity.id);
     Require(
         old_state && old_state->tasks.size() == 1 &&
-            old_state->tasks[0].values[0] ==
-                specforge::kUnlabeledSampleLabelCode,
+            HasSparseValues(old_state->tasks[0], 3, {}),
         "prepared reopen fixture should materialize the original task projection");
 
     {
@@ -10429,7 +10428,7 @@ void TestTaskDeletionMergesWithAnotherInstanceUpsert()
             "shared-source",
             added_task_id);
     Require(
-        added != nullptr && added->values[2] == 7,
+        added != nullptr && added->values.Complete()[2] == 7,
         "deletion merge should retain the other instance task upsert");
 }
 
@@ -10741,7 +10740,7 @@ void TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure()
             failed.state_saved &&
             ActiveTask(controller) != nullptr &&
             !ActiveTask(controller)->persistence.output_path &&
-            ActiveTask(controller)->values ==
+            ActiveTask(controller)->values.Complete() ==
                 std::vector<int>({-1, 5, -1}) &&
             controller.ActiveCanonicalAsdfAnnotationProjection() ==
                 std::nullopt,
@@ -10891,7 +10890,7 @@ void TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure()
             ActiveTask(controller)->persistence.output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::None &&
             !ActiveTask(controller)->persistence.initial_publication_pending &&
-            ActiveTask(controller)->values ==
+            ActiveTask(controller)->values.Complete() ==
                 std::vector<int>({-1, 5, -1}) &&
             !controller.NextMaintenanceDeadline(),
         "maintenance must reconcile the durable initial-publication checkpoint back into an editable temporary draft");
@@ -10913,7 +10912,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
     auto legacy = specforge::CreateSampleLabelingTask(
         "11111111-2222-4333-8444-555555555555", "Original", 3);
     legacy.label_set.labels = {{5, "Reject", 'r'}, {7, "Accept", 'a'}};
-    legacy.values = {5, 5, -1};
+    legacy.values.Complete() = {5, 5, -1};
     specforge::test_support::SelectLegacyFixtureOutputPath(legacy, legacy_path);
     Require(specforge::test_support::LegacyFixtureIo{}.SaveLabelResult(
                 legacy_path, legacy, nullptr).metadata_saved,
@@ -10924,7 +10923,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
 
     // Simulate a supported cache left by a failed old-version autosave:
     // one assignment, one clearing operation, and pending label/task metadata.
-    legacy.values = {7, -1, -1};
+    legacy.values.Complete() = {7, -1, -1};
     legacy.persistence.pending_sample_indices = {0, 1};
     legacy.task_name = "Recovered review";
     legacy.label_set.labels[1].name = "Accepted after review";
@@ -10943,7 +10942,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
         std::filesystem::rename(legacy_path, unavailable);
         specforge::SampleLabelingController missing(cache_path);
         ActivateCanonicalTestSource(missing, source_id, 3);
-        Require(ActiveTask(missing) && !ActiveTask(missing)->values_are_authoritative &&
+        Require(ActiveTask(missing) && !ActiveTask(missing)->values.IsComplete() &&
                     ActiveTask(missing)->persistence.pending_sample_indices.contains(0),
                 "a missing legacy base must retain its sparse recovery edits without claiming complete values");
         Require(!missing.MigrateActiveLegacyTaskToCanonicalAsdf(directory / "invalid.asdf").accepted &&
@@ -10993,7 +10992,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
         ActivateCanonicalTestSource(reopened, source_id, 3);
         const auto* task = ActiveTask(reopened);
         Require(task && task->persistence.output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
-                    task->values == std::vector<int>({7, -1, 7}) && task->persistence.pending_sample_indices.empty(),
+                    task->values.Complete() == std::vector<int>({7, -1, 7}) && task->persistence.pending_sample_indices.empty(),
                 "reopening should hydrate the canonical owner without retaining a legacy pending overlay");
     }
 }
@@ -11005,7 +11004,7 @@ void TestNpyPromotionCreatesDraftWithoutModifyingImport()
     const auto cache = directory / "tasks.json";
     const auto asdf = directory / "adopted.asdf";
     auto fixture = specforge::CreateSampleLabelingTask("old-task", "Imported labels", 3);
-    fixture.values = {5, -1, 5};
+    fixture.values.Complete() = {5, -1, 5};
     fixture.label_set.labels = {{5, "Review", 'r'}};
     Require(specforge::test_support::LegacyFixtureIo{}.SaveLabelResult(npy, fixture, nullptr).metadata_saved,
             "import fixture should contain a legacy result and sidecar");
@@ -11027,7 +11026,7 @@ void TestNpyPromotionCreatesDraftWithoutModifyingImport()
         const auto* task = ActiveTask(controller);
         Require(promoted.accepted && !promoted.output_save_attempted && task && !task->persistence.output_path &&
                     task->persistence.output_format == specforge::SampleLabelingOutputArtifactFormat::None &&
-                    task->task_id != fixture.task_id && task->values == fixture.values,
+                    task->task_id != fixture.task_id && task->values.Complete() == fixture.values.Complete(),
                 "NPY promotion should create a fresh output-free draft preserving imported labels");
         task_id = task->task_id;
         Require(!controller.CreateTaskFromAnnotation(
@@ -11040,7 +11039,7 @@ void TestNpyPromotionCreatesDraftWithoutModifyingImport()
         specforge::SampleLabelingController restored(cache);
         ActivateCanonicalTestSource(restored, "import-source", 3);
         Require(ActiveTask(restored) && ActiveTask(restored)->task_id == task_id &&
-                    ActiveTask(restored)->values == std::vector<int>({5, 5, 5}) &&
+                    ActiveTask(restored)->values.Complete() == std::vector<int>({5, 5, 5}) &&
                     !ActiveTask(restored)->persistence.output_path,
                 "recovery should retain imported draft edits without acquiring a legacy owner");
         Require(restored.SaveActiveTemporaryTaskToOutput(asdf).output_saved,
@@ -11059,14 +11058,14 @@ void SeedLegacyRecoveryFixture(
     specforge::SampleLabelingTask task, std::optional<int> pending_code)
 {
     if (pending_code) {
-        task.values[0] = *pending_code;
+        task.values.Complete()[0] = *pending_code;
         task.persistence.pending_sample_indices.insert(0);
         specforge::MarkSampleLabelTaskSaveFailed(task, "historical pending write");
     }
     specforge::RebuildSampleLabelingTaskStatistics(task);
     specforge::SampleLabelingStateCache cache;
     auto& source = cache.sources[source_id];
-    source.sample_count = task.values.size();
+    source.sample_count = task.values.SampleCount();
     source.tasks.push_back(std::move(task));
     Require(specforge::SaveSampleLabelingStateCache(path, cache),
             "legacy recovery fixture should persist the historical owner and accepted overlay");
@@ -11119,7 +11118,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
                 legacy.label_set,
                 {7, "good", 'g'}),
         "legacy migration fixture should define its portable labels");
-    legacy.values = {-1, 5, -1};
+    legacy.values.Complete() = {-1, 5, -1};
     specforge::RebuildSampleLabelingTaskStatistics(legacy);
     specforge::test_support::SelectLegacyFixtureOutputPath(
         legacy,
@@ -11197,8 +11196,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
                     specforge::
                         SampleLabelingOutputArtifactFormat::
                             LegacyNpyWithSidecar &&
-                checkpoint_task->values ==
-                    std::vector<int>({7, -1, -1}) &&
+                HasSparseValues(*checkpoint_task, 3, {{0, 7}}) &&
                 checkpoint_task->persistence.pending_sample_indices.contains(0);
             return specforge::
                 WriteSampleLabelingAsdfDocumentAndOpenAtomically(
@@ -11247,7 +11245,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
                 specforge::
                     SampleLabelingOutputArtifactFormat::
                         CanonicalAsdf &&
-            active->values ==
+            active->values.Complete() ==
                 std::vector<int>({7, 5, -1}) &&
             specforge::FindSampleLabel(
                 active->label_set,
@@ -11353,7 +11351,7 @@ void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
             legacy.label_set,
             {5, "bad", 'b'}),
         "failed migration fixture should define its legacy label");
-    legacy.values = {-1, 5, -1};
+    legacy.values.Complete() = {-1, 5, -1};
     specforge::RebuildSampleLabelingTaskStatistics(legacy);
     specforge::test_support::SelectLegacyFixtureOutputPath(
         legacy,
@@ -11459,7 +11457,7 @@ void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
                 specforge::
                     SampleLabelingOutputArtifactFormat::
                         LegacyNpyWithSidecar &&
-            active->values ==
+            active->values.Complete() ==
                 std::vector<int>({5, 5, -1}) &&
             active->persistence.pending_sample_indices.contains(0) &&
             !controller.ActiveCanonicalAsdfAnnotationProjection(),
@@ -11488,8 +11486,7 @@ void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
                 specforge::
                     SampleLabelingOutputArtifactFormat::
                         LegacyNpyWithSidecar &&
-            cached->values ==
-                std::vector<int>({5, -1, -1}) &&
+            HasSparseValues(*cached, 3, {{0, 5}}) &&
             cached->persistence.pending_sample_indices.contains(0),
         "failed migration checkpoint should keep the legacy durable base plus newest sparse overlay");
     specforge::ExclusiveFileLeaseAcquireResult old_lease_after =
@@ -11525,7 +11522,7 @@ void TestLegacyOwnerMigrationRejectsUsedOutputPathWithStructuredIssue()
             legacy.label_set,
             {5, "bad", 'b'}),
         "migration conflict fixture should define its legacy label");
-    legacy.values = {5, -1, -1};
+    legacy.values.Complete() = {5, -1, -1};
     specforge::RebuildSampleLabelingTaskStatistics(legacy);
     specforge::test_support::SelectLegacyFixtureOutputPath(
         legacy,
@@ -11608,7 +11605,7 @@ void TestLegacyOwnerMigrationOwnerSwitchCheckpointFailureKeepsLegacyOwnerAndCanR
             legacy.label_set,
             {5, "bad", 'b'}),
         "owner-switch failure fixture should define its legacy label");
-    legacy.values = {-1, 5, -1};
+    legacy.values.Complete() = {-1, 5, -1};
     specforge::RebuildSampleLabelingTaskStatistics(legacy);
     specforge::test_support::SelectLegacyFixtureOutputPath(
         legacy,

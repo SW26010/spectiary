@@ -587,7 +587,7 @@ bool SaveAnnotationFixture(
         "shell-drain-annotation",
         "Shell drain annotation",
         values.size());
-    task.values = std::move(values);
+    task.values.Complete() = std::move(values);
     return specforge::test_support::LegacyFixtureIo{}.SaveLabelArray(path, task, error);
 }
 
@@ -6029,6 +6029,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     pending_source->second.active_task_id.reset();
     pending_source->second.tasks[0]
         .persistence.pending_sample_indices.insert(0);
+    pending_source->second.tasks[0].values.SetPendingValue(0, -1);
     pending_source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
     pending_source->second.tasks[0].persistence.save_state.pending_count = 1;

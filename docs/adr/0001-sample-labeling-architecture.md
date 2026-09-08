@@ -135,6 +135,18 @@ The complete wire-tree example and field-level validation rules live in
 
 ## Local persistence failure semantics
 
+The C++ runtime mirrors this ownership split. `SampleLabelingContentView`
+borrows only identity, canonical metadata, labels, and a complete value vector;
+canonical document construction accepts that view. Local session preferences,
+persistence/retry state, and derived statistics have separate state types.
+`SampleLabelingValues` holds either complete values or an explicit sparse
+overlay containing the source sample count and pending row values. An absent
+overlay row is unknown, including when an explicit pending value is `-1`.
+Sparse state cannot yield a content view. Deactivation drops complete values
+into the sparse representation; canonical projection restores complete content
+from the ASDF base before applying pending edits. This is an implementation
+boundary and changes neither schema 2.0 nor cache schema 4.
+
 Source-session, navigation, labeling, and workflow state remain four
 independently validated, independently written versioned JSON caches. Their
 codecs continue to own schema support and field validation; the session only

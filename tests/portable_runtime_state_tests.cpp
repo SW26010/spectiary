@@ -338,8 +338,8 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
                     LegacyNpyWithSidecar,
         "package-relative output and its legacy owner should restore together");
     Require(
-        restored_task.values.size() == 3 &&
-            restored_task.values[1] == 5,
+        restored_task.values.SampleCount() == 3 &&
+            restored_task.values.Complete()[1] == 5,
         "package-relative output should load values from NPY");
 }
 

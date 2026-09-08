@@ -106,7 +106,8 @@ BuildSampleLabelExportSnapshot(
     const SampleLabelingCanonicalSourceDescriptor& source,
     std::string* error_message)
 {
-    if (!task.values_are_authoritative) {
+    const auto content = task.Content();
+    if (!content) {
         SetError(
             error_message,
             "active labeling task values are not authoritative");
@@ -118,7 +119,7 @@ BuildSampleLabelExportSnapshot(
             "canonical labeling source kind is empty");
         return std::nullopt;
     }
-    if (source.sample_count != task.values.size()) {
+    if (source.sample_count != content->values.size()) {
         SetError(
             error_message,
             "active labeling task values do not match the canonical source roster");
@@ -147,8 +148,8 @@ BuildSampleLabelExportSnapshot(
         .source_kind = source.source_kind,
         .sample_names = source.sample_names,
         .uses_source_index = source.sample_names.empty(),
-        .labels = task.label_set,
-        .values = task.values,
+        .labels = content->label_set,
+        .values = std::vector<int>(content->values.begin(), content->values.end()),
     };
 }
 

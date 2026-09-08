@@ -299,7 +299,7 @@ int WriteLabelingSeedFixture(
             const auto descriptor = specforge::BuildSampleLabelingCanonicalSourceDescriptor(
                 *snapshot, context);
             const auto write_outcome = specforge::WriteSampleLabelingAsdfDocumentAtomically(
-                *output_path, specforge::BuildSampleLabelingDocument(descriptor, task));
+                *output_path, specforge::BuildSampleLabelingDocument(descriptor, task.Content().value()));
             if (!write_outcome.succeeded()) {
                 return 5;
             }
@@ -547,8 +547,8 @@ int VerifyLabelingStateFixture(
         if (!projected) return 6;
         effective = &*projected;
     }
-    if (*spectrum_index >= effective->values.size() ||
-        effective->values[*spectrum_index] != static_cast<int>(*expected_code)) {
+    if (*spectrum_index >= effective->values.SampleCount() ||
+        effective->values.Complete()[*spectrum_index] != static_cast<int>(*expected_code)) {
         return 6;
     }
     return 0;

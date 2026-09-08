@@ -230,11 +230,11 @@ bool ApplyPendingValues(
         }
         const std::optional<std::size_t> sample_index = ReadSizeMember(pending_object, "index");
         const std::optional<int> value = ReadIntMember(pending_object, "value");
-        if (!sample_index || !value || *sample_index >= task.values.size()) {
+        if (!sample_index || !value || *sample_index >= task.values.SampleCount()) {
             valid = false;
             continue;
         }
-        task.values[*sample_index] = *value;
+        task.values.Complete()[*sample_index] = *value;
         task.persistence.pending_sample_indices.insert(*sample_index);
     }
     return valid;
@@ -508,14 +508,14 @@ ParsedTask ParseTask(
         task_name.value_or(*task_id),
         0,
         std::move(*canonical_metadata));
-    task.values.reserve(sample_count);
+    task.values.Complete().reserve(sample_count);
     constexpr std::size_t kInitializationChunk = 4096U;
-    while (task.values.size() < sample_count) {
+    while (task.values.SampleCount() < sample_count) {
         if (cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        task.values.resize(
-            std::min(sample_count, task.values.size() + kInitializationChunk),
+        task.values.Complete().resize(
+            std::min(sample_count, task.values.SampleCount() + kInitializationChunk),
             kUnlabeledSampleLabelCode);
     }
     bool labels_valid = true;
@@ -575,9 +575,10 @@ ParsedTask ParseTask(
              SampleLabelingOutputArtifactFormat::CanonicalAsdf)) {
         malformed = true;
     }
+    bool needs_projection = false;
     if (task.persistence.output_format == SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         (task.persistence.output_path && !hydrate_persistent_output)) {
-        task.values_are_authoritative = false;
+        needs_projection = true;
     }
     bool output_load_failed = false;
     std::string output_load_error;
@@ -595,13 +596,13 @@ ParsedTask ParseTask(
                 cancellation_checkpoint,
                 &output_load_error);
         if (loaded) {
-            task.values = std::move(loaded->values);
+            task.values.Complete() = std::move(loaded->values);
         } else {
             output_load_failed = true;
             // Sparse pending values cannot reconstruct the untouched rows of
             // a missing legacy base. Keep the recovery record, but do not
             // permit publishing this placeholder projection as canonical data.
-            task.values_are_authoritative = false;
+            needs_projection = true;
         }
         if (!output_load_failed) {
             if (loaded->metadata) {
@@ -660,7 +661,7 @@ ParsedTask ParseTask(
                     parsed_values.push_back(static_cast<int>(value.integer_value));
                 }
                 if (all_ints) {
-                    task.values = std::move(parsed_values);
+                    task.values.Complete() = std::move(parsed_values);
                 }
             }
             malformed = malformed || !values_valid;
@@ -775,12 +776,13 @@ ParsedTask ParseTask(
         task.persistence.output_format =
             SampleLabelingOutputArtifactFormat::None;
         task.persistence.initial_publication_pending = false;
-        task.values_are_authoritative = true;
+        needs_projection = false;
         task.persistence.pending_sample_indices.clear();
         task.persistence.metadata_save_pending = false;
         task.persistence.save_state = SampleLabelSaveState{
             .kind = SampleLabelSaveStateKind::InternalDraftOnly};
     }
+    if (needs_projection) task.values.MakeSparse(task.persistence.pending_sample_indices);
     RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
     return ParsedTask{
         .task = std::move(task),
@@ -885,11 +887,24 @@ bool ValidateCacheStructure(
                     "sample-labeling cache contains duplicate or empty task ids");
                 return false;
             }
-            if (task.values.size() != state.sample_count) {
+            if (task.values.SampleCount() != state.sample_count) {
                 SetError(
                     error_message,
                     "sample-labeling cache task sample count does not match its source");
                 return false;
+            }
+            if (const auto* sparse = task.values.Sparse()) {
+                if (!task.persistence.output_path) {
+                    SetError(error_message, "a sparse labeling cache task requires a persistent base");
+                    return false;
+                }
+                for (const auto index : task.persistence.pending_sample_indices) {
+                    if (index >= state.sample_count ||
+                        !sparse->pending_values.contains(index)) {
+                        SetError(error_message, "a pending labeling cache row has no overlay value");
+                        return false;
+                    }
+                }
             }
         }
         if (state.active_task_id &&
@@ -1707,9 +1722,9 @@ bool SaveSampleLabelingStateCache(
                     if (!task.persistence.output_path) {
                         stream << ",\n";
                         stream << "          \"values\": [";
-                        for (std::size_t value_index = 0; value_index < task.values.size(); ++value_index) {
-                            stream << task.values[value_index];
-                            if (value_index + 1 != task.values.size()) {
+                        for (std::size_t value_index = 0; value_index < task.values.SampleCount(); ++value_index) {
+                            stream << task.values.Complete()[value_index];
+                            if (value_index + 1 != task.values.SampleCount()) {
                                 stream << ", ";
                             }
                         }
@@ -1724,13 +1739,13 @@ bool SaveSampleLabelingStateCache(
                         stream << "          \"pending_values\": [";
                         bool wrote_pending_value = false;
                         for (const std::size_t sample_index : pending_indices) {
-                            if (sample_index >= task.values.size()) {
+                            if (sample_index >= task.values.SampleCount()) {
                                 continue;
                             }
                             if (wrote_pending_value) {
                                 stream << ", ";
                             }
-                            stream << "{ \"index\": " << sample_index << ", \"value\": " << task.values[sample_index]
+                            stream << "{ \"index\": " << sample_index << ", \"value\": " << task.values.PendingValue(sample_index)
                                    << " }";
                             wrote_pending_value = true;
                         }

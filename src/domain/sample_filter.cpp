@@ -357,15 +357,17 @@ SampleFilterSource BuildLabelingFilterSource(
     source.id = BuildLabelingFilterSourceId(task);
     source.name = task.task_name;
     source.kind = SampleAnnotationKind::CategoricalInteger;
+    const auto content = task.Content();
+    if (!content) return source;
     source.filterable = true;
-    source.value_keys_by_sample.reserve(task.values.size());
+    source.value_keys_by_sample.reserve(task.values.SampleCount());
 
     std::unordered_map<std::string, std::size_t> option_indices;
-    for (std::size_t index = 0; index < task.values.size(); ++index) {
+    for (std::size_t index = 0; index < task.values.SampleCount(); ++index) {
         if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const int value = task.values[index];
+        const int value = content->values[index];
         const std::string key = std::to_string(value);
         source.value_keys_by_sample.push_back(key);
         AddOption(

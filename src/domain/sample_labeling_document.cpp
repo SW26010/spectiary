@@ -75,7 +75,7 @@ void AddIssue(
 
 SampleLabelingDocument BuildDocumentWithSource(
     SampleLabelingDocumentSource source,
-    const SampleLabelingTask& task)
+    const SampleLabelingContentView& task)
 {
     SampleLabelingDocument document;
     document.source = std::move(source);
@@ -106,7 +106,7 @@ SampleLabelingDocument BuildDocumentWithSource(
 
 SampleLabelingDocument BuildSampleLabelingDocument(
     const SampleLabelingCanonicalSourceDescriptor& source,
-    const SampleLabelingTask& task)
+    const SampleLabelingContentView& task)
 {
     SampleLabelingDocumentSource document_source;
     document_source.base_identity = source.base_identity;
@@ -138,7 +138,7 @@ ProjectSampleLabelingDocumentTask(
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         document.labeling.id != local_state.task_id ||
         document.annotation.values.size() !=
-            local_state.values.size()) {
+            local_state.values.SampleCount()) {
         return std::nullopt;
     }
 
@@ -161,7 +161,7 @@ ProjectSampleLabelingDocumentTask(
             document.labeling.name,
             0,
             document.labeling.canonical_metadata);
-    projected.values.reserve(
+    projected.values.Complete().reserve(
         document.annotation.values.size());
     for (std::size_t index = 0;
          index < document.annotation.values.size();
@@ -170,7 +170,7 @@ ProjectSampleLabelingDocumentTask(
             cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        projected.values.push_back(
+        projected.values.Complete().push_back(
             static_cast<int>(
                 document.annotation.values[index]));
     }
@@ -202,7 +202,7 @@ ProjectSampleLabelingDocumentTask(
         local_state.session.remembered_position;
     projected.persistence.output_path = local_state.persistence.output_path;
     projected.persistence.output_format = local_state.persistence.output_format;
-    projected.values_are_authoritative = true;
+
     projected.persistence.pending_sample_indices =
         local_state.persistence.pending_sample_indices;
     if (!projected.persistence.pending_sample_indices.empty() &&
@@ -213,11 +213,15 @@ ProjectSampleLabelingDocumentTask(
     }
     for (const std::size_t sample_index :
          projected.persistence.pending_sample_indices) {
-        if (sample_index >= projected.values.size()) {
+        if (sample_index >= projected.values.SampleCount()) {
             return std::nullopt;
         }
-        projected.values[sample_index] =
-            local_state.values[sample_index];
+        if (const auto* sparse = local_state.values.Sparse();
+            sparse && !sparse->pending_values.contains(sample_index)) {
+            return std::nullopt;
+        }
+        projected.values.Complete()[sample_index] =
+            local_state.values.PendingValue(sample_index);
     }
 
     projected.persistence.metadata_save_pending =
@@ -245,13 +249,13 @@ ProjectSampleLabelingDocumentTask(
     }
     std::ranges::sort(defined_label_codes);
     for (std::size_t index = 0;
-         index < projected.values.size();
+         index < projected.values.SampleCount();
          ++index) {
         if ((index & 0xfffU) == 0U &&
             cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const int value = projected.values[index];
+        const int value = projected.values.Complete()[index];
         if (value != kUnlabeledSampleLabelCode &&
             !std::ranges::binary_search(
                 defined_label_codes,
