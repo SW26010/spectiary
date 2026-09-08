@@ -95,11 +95,7 @@ struct LoadedSampleLabelResult {
     std::string metadata_warning;
 };
 
-struct SampleLabelResultWriteOutcome {
-    bool array_saved = false;
-    bool metadata_saved = false;
-    std::string message;
-};
+
 
 // Writes a one-shot NumPy value export. This API deliberately accepts only
 // values: it does not own a labeling task, mutate its persistence target, or
@@ -139,19 +135,6 @@ public:
         std::size_t expected_count,
         const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint = {},
         std::string* error_message = nullptr) const;
-    [[nodiscard]] bool SaveLabelArray(
-        const std::filesystem::path& path,
-        const SampleLabelingTask& task,
-        std::string* error_message = nullptr) const;
-    [[nodiscard]] bool SaveLabelMetadata(
-        const std::filesystem::path& result_path,
-        const SampleLabelingTask& task,
-        const SampleLabelResultMetadataSource* source = nullptr,
-        std::string* error_message = nullptr) const;
-    [[nodiscard]] SampleLabelResultWriteOutcome SaveLabelResult(
-        const std::filesystem::path& path,
-        const SampleLabelingTask& task,
-        const SampleLabelResultMetadataSource* source = nullptr) const;
     [[nodiscard]] SampleLabelResultMetadataLoadResult LoadLabelMetadata(
         const std::filesystem::path& result_path,
         std::size_t expected_count,

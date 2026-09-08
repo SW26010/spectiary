@@ -25,18 +25,6 @@ constexpr auto kWorkflowStateSaveDebounce = 500ms;
 constexpr auto kWorkflowStateSaveRetry = 2s;
 constexpr std::size_t kMaxLabelUndoEntries = 256;
 
-SampleLabelingController::LegacyOutputPublisher
-DefaultLegacyOutputPublisher()
-{
-    return [](
-               SampleLabelingTask& task,
-               const SampleLabelResultMetadataSource* source) {
-        return PublishLegacySampleLabelingTaskOutput(
-            task,
-            source);
-    };
-}
-
 SampleLabelingController::CanonicalDocumentPublisher
 DefaultCanonicalDocumentPublisher()
 {
@@ -502,7 +490,6 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
       labeling_(
           std::move(labeling_state_cache_path),
           std::move(labeling_state_cache_loader),
-          DefaultLegacyOutputPublisher(),
           canonical_document_publisher
               ? std::move(canonical_document_publisher)
               : DefaultCanonicalDocumentPublisher(),
@@ -1885,7 +1872,6 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         std::move(plan.label_set),
         std::move(plan.values),
         target_annotation_path,
-        plan.metadata_clean,
         std::move(plan.origin));
     ApplyLabelingLeaseIssue(outcome, create_result);
     if (!create_result.accepted) {
@@ -1904,10 +1890,6 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         return outcome;
     }
     ClearLabelUndoHistory();
-    if (!plan.metadata_clean && create_result.output_saved) {
-        (void)navigation_.AddReadOnlyAnnotationToActiveSource(
-            target_annotation_path);
-    }
     ApplyNavigationInputEffects(
         outcome,
         ReconcileNavigationInputs(

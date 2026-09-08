@@ -65,6 +65,8 @@ enum class SampleLabelSaveMessageKind {
 
 enum class SampleLabelingOutputArtifactFormat {
     None,
+    // Transitional read-only import/recovery source. Never a save destination;
+    // pending schema-4 overlays are retained until explicit ASDF migration.
     LegacyNpyWithSidecar,
     CanonicalAsdf,
 };
@@ -209,7 +211,6 @@ void RebuildSampleLabelingTaskStatistics(
     std::size_t sample_index,
     int code);
 [[nodiscard]] SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sample_index);
-void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path);
 void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task);
 // Records a canonical semantic value mutation. modified_at is persisted with
 // the complete replacement document generation.
@@ -225,9 +226,5 @@ void MarkSampleLabelTaskSaveFailed(
     std::string message,
     SampleLabelSaveMessageKind message_kind =
         SampleLabelSaveMessageKind::SystemDetail);
-[[nodiscard]] SampleLabelOutputPublicationResult
-PublishLegacySampleLabelingTaskOutput(
-    SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source = nullptr);
 
 }  // namespace specforge

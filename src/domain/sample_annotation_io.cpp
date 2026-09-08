@@ -181,36 +181,10 @@ std::string FormatFloatingValue(T value)
     return stream.str();
 }
 
-std::string RelativeResultFileReference(const std::filesystem::path& result_path)
-{
-    const std::filesystem::path filename = result_path.filename();
-    return filename.empty() ? PathToUtf8(result_path) : PathToUtf8(filename);
-}
-
 bool PathExists(const std::filesystem::path& path)
 {
     std::error_code error;
     return std::filesystem::exists(path, error) && !error;
-}
-
-bool ValidateNpyLabelOutputPath(
-    const std::filesystem::path& result_path,
-    std::string* error_message)
-{
-    if (result_path.empty()) {
-        if (error_message != nullptr) {
-            *error_message = "label output path is empty";
-        }
-        return false;
-    }
-    if (IsAsdfLabelingPath(result_path)) {
-        if (error_message != nullptr) {
-            *error_message =
-                "ASDF label output is unavailable until the ASDF persistence owner is enabled";
-        }
-        return false;
-    }
-    return true;
 }
 
 bool WriteLabelValuesToNpyAtomically(
@@ -235,23 +209,6 @@ bool WriteLabelValuesToNpyAtomically(
             return true;
         },
         error_message);
-}
-
-bool ValidateLabelMetadataContract(
-    const std::filesystem::path& result_path,
-    const SampleLabelingTask& task,
-    std::string* error_message)
-{
-    if (!ValidateNpyLabelOutputPath(result_path, error_message)) {
-        return false;
-    }
-    if (task.task_id.empty()) {
-        if (error_message != nullptr) {
-            *error_message = "sample label result metadata task id is empty";
-        }
-        return false;
-    }
-    return true;
 }
 
 bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesystem::path& right)
@@ -1182,114 +1139,6 @@ bool ExportLabelValuesToNpy(
         values,
         error_message,
         "sample label values export");
-}
-
-bool SampleAnnotationIoAdapter::SaveLabelArray(
-    const std::filesystem::path& path,
-    const SampleLabelingTask& task,
-    std::string* error_message) const
-{
-    if (!ValidateNpyLabelOutputPath(path, error_message)) {
-        return false;
-    }
-    return WriteLabelValuesToNpyAtomically(
-        path,
-        task.values,
-        error_message,
-        "sample label result");
-}
-
-bool SampleAnnotationIoAdapter::SaveLabelMetadata(
-    const std::filesystem::path& result_path,
-    const SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source,
-    std::string* error_message) const
-{
-    if (!ValidateLabelMetadataContract(result_path, task, error_message)) {
-        return false;
-    }
-
-    const std::filesystem::path metadata_path = MetadataPathForResult(result_path);
-    const std::string result_file = RelativeResultFileReference(result_path);
-    return WriteVersionedJsonCacheFile(
-        metadata_path,
-        kMetadataFormatKind,
-        kMetadataSchemaVersion,
-        "sample label result metadata",
-        [&](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            stream << "  \"result_file\": ";
-            WriteJsonString(stream, result_file);
-            stream << ",\n";
-            stream << "  \"task_id\": ";
-            WriteJsonString(stream, task.task_id);
-            stream << ",\n";
-            stream << "  \"value_count\": " << task.values.size() << ",\n";
-            stream << "  \"expected_dtype\": ";
-            WriteJsonString(stream, kInt32DtypeText);
-            stream << ",\n";
-            stream << "  \"unlabeled_sentinel\": " << kUnlabeledSampleLabelCode << ",\n";
-            stream << "  \"task_name\": ";
-            WriteJsonString(stream, task.task_name);
-            stream << ",\n";
-            stream << "  \"labels\": [";
-            if (!task.label_set.labels.empty()) {
-                stream << "\n";
-            }
-            for (std::size_t label_index = 0; label_index < task.label_set.labels.size(); ++label_index) {
-                const SampleLabelDefinition& label = task.label_set.labels[label_index];
-                stream << "    { \"code\": " << label.code << ", \"name\": ";
-                WriteJsonString(stream, label.name);
-                stream << ", \"shortcut\": ";
-                const std::string shortcut =
-                    label.shortcut == '\0' ? std::string{} : std::string(1, label.shortcut);
-                WriteJsonString(stream, shortcut);
-                stream << " }" << (label_index + 1 == task.label_set.labels.size() ? "\n" : ",\n");
-            }
-            if (!task.label_set.labels.empty()) {
-                stream << "  ";
-            }
-            stream << "]";
-            if (source != nullptr) {
-                stream << ",\n";
-                stream << "  \"source_collection\": {\n";
-                stream << "    \"source_name\": ";
-                WriteJsonString(stream, source->source_name);
-                stream << ",\n";
-                stream << "    \"source_fingerprint\": ";
-                WriteJsonString(stream, source->source_fingerprint);
-                stream << ",\n";
-                stream << "    \"context_fingerprint\": ";
-                WriteJsonString(stream, source->context_fingerprint);
-                stream << ",\n";
-                stream << "    \"spectrum_count\": " << source->spectrum_count << "\n";
-                stream << "  }";
-            }
-            stream << "\n";
-            return true;
-        },
-        error_message);
-}
-
-SampleLabelResultWriteOutcome SampleAnnotationIoAdapter::SaveLabelResult(
-    const std::filesystem::path& path,
-    const SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source) const
-{
-    SampleLabelResultWriteOutcome outcome;
-    if (!ValidateLabelMetadataContract(path, task, &outcome.message)) {
-        return outcome;
-    }
-    if (!SaveLabelArray(path, task, &outcome.message)) {
-        return outcome;
-    }
-    outcome.array_saved = true;
-
-    if (!SaveLabelMetadata(path, task, source, &outcome.message)) {
-        return outcome;
-    }
-    outcome.metadata_saved = true;
-    return outcome;
 }
 
 SampleLabelResultMetadataLoadResult SampleAnnotationIoAdapter::LoadLabelMetadata(

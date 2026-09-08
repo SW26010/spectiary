@@ -1,3 +1,4 @@
+#include "domain/sample_labeling_asdf_store.h"
 #include "app/application_settings.h"
 #include "app/runtime_paths.h"
 #include "domain/sample_annotation_io.h"
@@ -283,7 +284,7 @@ int WriteLabelingSeedFixture(
     if (output_path) {
         task.output_path = *output_path;
         task.output_format =
-            specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
         if (HasArgument(
                 argc,
                 argv,
@@ -295,19 +296,11 @@ int WriteLabelingSeedFixture(
             if (directory_error) {
                 return 5;
             }
-            const specforge::SampleLabelResultMetadataSource source_metadata{
-                .source_name = context.identity.source_name,
-                .source_fingerprint = context.identity.source_fingerprint,
-                .context_fingerprint = context.identity.context_fingerprint,
-                .spectrum_count = context.identity.spectrum_count,
-            };
-            const specforge::SampleLabelResultWriteOutcome write_outcome =
-                specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
-                    *output_path,
-                    task,
-                    &source_metadata);
-            if (!write_outcome.array_saved ||
-                !write_outcome.metadata_saved) {
+            const auto descriptor = specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+                *snapshot, context);
+            const auto write_outcome = specforge::WriteSampleLabelingAsdfDocumentAtomically(
+                *output_path, specforge::BuildSampleLabelingDocument(descriptor, task));
+            if (!write_outcome.succeeded()) {
                 return 5;
             }
             task.save_state.kind =
@@ -447,46 +440,26 @@ int VerifyLabelOutputFixture(
         return 4;
     }
 
-    std::string load_error;
-    const std::optional<specforge::LoadedSampleLabelResult> loaded =
-        specforge::SampleAnnotationIoAdapter{}.LoadLabelResult(
-            *output_path,
-            context.identity.spectrum_count,
-            {},
-            &load_error);
-    if (!loaded) {
-        std::cerr << "FAILED: could not load label output: "
-                  << load_error << '\n';
+    const auto loaded = specforge::ReadSampleLabelingAsdfDocument(*output_path);
+    if (!loaded.succeeded()) {
         return 5;
     }
-    if (loaded->values != *expected_values ||
-        !loaded->metadata_sidecar_exists ||
-        !loaded->metadata) {
+    if (!std::ranges::equal(loaded.document->annotation.values, *expected_values)) {
+        std::cerr << "actual ASDF values:";
+        for (const auto value : loaded.document->annotation.values) std::cerr << ' ' << value;
+        std::cerr << '\n';
         return 6;
     }
-
-    const std::string expected_task_id =
-        task_id_text
-        ? std::filesystem::path(*task_id_text).string()
-        : std::string(kLabelingTaskId);
-    const specforge::SampleLabelResultMetadata& metadata =
-        *loaded->metadata;
-    if (metadata.task_id != expected_task_id ||
-        metadata.value_count !=
-            context.identity.spectrum_count ||
-        metadata.expected_dtype != "int32" ||
-        !metadata.source) {
+    const std::string expected_task_id = task_id_text
+        ? std::filesystem::path(*task_id_text).string() : std::string(kLabelingTaskId);
+    if (loaded.document->labeling.id != expected_task_id) {
         return 7;
     }
-    const auto& source_metadata = *metadata.source;
-    if (source_metadata.source_name !=
-            context.identity.source_name ||
-        source_metadata.source_fingerprint !=
-            context.identity.source_fingerprint ||
-        source_metadata.context_fingerprint !=
-            context.identity.context_fingerprint ||
-        source_metadata.spectrum_count !=
-            context.identity.spectrum_count) {
+    const auto& source = loaded.document->source;
+    if (source.base_identity != context.identity.id ||
+        source.name != context.identity.source_name ||
+        source.fingerprint != context.identity.source_fingerprint ||
+        source.sample_count != context.identity.spectrum_count) {
         return 8;
     }
     return 0;
@@ -562,11 +535,20 @@ int VerifyLabelingStateFixture(
                    *source->second
                         .active_task_id;
         });
-    if (task == source->second.tasks.end() ||
-        *spectrum_index >=
-            task->values.size() ||
-        task->values[*spectrum_index] !=
-            static_cast<int>(*expected_code)) {
+    if (task == source->second.tasks.end()) {
+        return 6;
+    }
+    std::optional<specforge::SampleLabelingTask> projected;
+    const specforge::SampleLabelingTask* effective = &*task;
+    if (task->output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        const auto document = specforge::ReadSampleLabelingAsdfDocument(*task->output_path);
+        if (!document.succeeded()) return 6;
+        projected = specforge::ProjectSampleLabelingDocumentTask(*document.document, *task);
+        if (!projected) return 6;
+        effective = &*projected;
+    }
+    if (*spectrum_index >= effective->values.size() ||
+        effective->values[*spectrum_index] != static_cast<int>(*expected_code)) {
         return 6;
     }
     return 0;

@@ -1407,11 +1407,11 @@ try {
     $definitions = @(
         [pscustomobject]@{
             Name = 'formal-a'
-            Output = Join-Path $sharedStateRoot 'outputs\formal-a.npy'
+            Output = Join-Path $sharedStateRoot 'outputs\formal-a.asdf'
         },
         [pscustomobject]@{
             Name = 'formal-b'
-            Output = Join-Path $sharedStateRoot 'outputs\formal-b.npy'
+            Output = Join-Path $sharedStateRoot 'outputs\formal-b.asdf'
         },
         [pscustomobject]@{
             Name = 'temporary-a'
@@ -1756,7 +1756,7 @@ try {
         -Description 'formal-a durable label output' `
         -Arguments @(
         '--verify-label-output',
-        (Join-Path $sharedStateRoot 'outputs\formal-a.npy'),
+        (Join-Path $sharedStateRoot 'outputs\formal-a.asdf'),
         '--source', $fixtures['formal-a'].SourcePath,
         '--expected-values', '5,7,-1',
         '--task-id', $script:LabelingTaskId)
@@ -1764,7 +1764,7 @@ try {
         -Description 'formal-b durable label output' `
         -Arguments @(
         '--verify-label-output',
-        (Join-Path $sharedStateRoot 'outputs\formal-b.npy'),
+        (Join-Path $sharedStateRoot 'outputs\formal-b.asdf'),
         '--source', $fixtures['formal-b'].SourcePath,
         '--expected-values', '7,-1,-1',
         '--task-id', $script:LabelingTaskId)

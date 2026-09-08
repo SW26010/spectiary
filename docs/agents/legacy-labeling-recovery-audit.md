@@ -29,20 +29,28 @@ legacy recovery record available for another explicit migration attempt.
 
 `TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication` covers schema-4
 recovery of an assignment, a clearing operation and metadata edits, migration,
-subsequent canonical editing, and reopening. It also counts legacy publisher
-calls and checks both original files byte for byte. Existing migration tests
+subsequent canonical editing, and reopening. It checks both original files byte
+for byte and rejects migration when the base NPY is missing. Existing migration tests
 exercise publication/checkpoint failure and output conflicts.
 
-## Remaining retirement work
+## Runtime boundary
 
-- Prevent new NPY promotions from acquiring an editable legacy owner; use the
-  normal temporary-task and explicit canonical Save As lifecycle.
-- Keep old owners as recovery/import sources with no ordinary edit, autosave or
-  retry dispatch. Preserve their pending overlay until explicit ASDF adoption.
-- Remove the production legacy publisher and its injected publishing seams,
-  migrating persistence tests to canonical owners while retaining historical
-  input fixtures in test support.
-- Remove legacy publication-only lock handling. Preserve protection against
-  exports overwriting a loaded import source or another task's canonical owner.
-- Update product wording and architecture documentation when the runtime
-  transition is implemented; NPY annotation reading and stateless export remain.
+New NPY promotions use output-free temporary tasks, as CSV promotions do.
+Controller mutations reject legacy recovery owners. Save dispatch and retry
+selection never publish them. The production publisher and its injected
+constructor argument are removed. Historical result/sidecar writers and the
+old output-selection helper exist only in `tests/legacy_annotation_fixture_io.h`
+and `tests/legacy_labeling_test_support.h`.
+
+The UI identifies recovered legacy records as read-only migration sources,
+suppresses canonical editing and label shortcuts, and retains explicit Save As.
+The legacy output-format tag remains only for schema-4 recovery, annotation
+recognition and migration input protection. Its artifact leases prevent an
+export or another adoption from overwriting migration inputs, with no two-file
+publication branch. Stateless NPY export and annotation ingestion remain.
+
+Controller persistence tests now exercise canonical owners. Historical cache
+fixtures cover the bounded migration bridge, including missing bases, pending
+values, publication/checkpoint failures and output conflicts. Session tests
+cover independent NPY imports, explicit canonical Save As, source-file
+preservation and canonical lease switching. Shell maintenance tests use ASDF.

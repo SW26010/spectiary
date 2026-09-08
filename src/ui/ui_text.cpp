@@ -649,8 +649,8 @@ constexpr std::array kTextCatalog = {
         "State: temporary local draft; use Save to... to create a labeling annotation.",
         "状态：临时本地草稿；使用“另存为…”创建标注结果。"},
     UiTextEntry{
-        "State: output file and metadata sidecar are saved.",
-        "状态：输出文件与元数据附属文件均已保存。"},
+        "State: ASDF labeling document is saved.",
+        "状态：ASDF 标注文档已保存。"},
     UiTextEntry{
         "State: output/metadata autosave is pending; close is disabled until it finishes.",
         "状态：正在自动保存输出/元数据；完成前无法关闭任务。"},
@@ -719,8 +719,8 @@ constexpr std::array kTextCatalog = {
         "Output autosave must finish before this task can be deleted.",
         "必须等待输出自动保存完成，才能删除此任务。"},
     UiTextEntry{
-        "Make \"%s\" editable in Labeling. Future autosaves will write to this annotation result and its metadata sidecar.",
-        "使“%s”可在“标注任务”中编辑。此后的自动保存将写入该标注结果及其元数据附属文件。"},
+        "Create a temporary labeling task from \"%s\". The original annotation files will be preserved.",
+        "从“%s”创建临时标注任务。原始标注文件将保留。"},
     UiTextEntry{
         "Adopt the existing ASDF document \"%s\" as an editable labeling task. Future autosaves will update only this single file in place; no metadata sidecar will be created.",
         "将现有 ASDF 文档“%s”收养为可编辑的标注任务。后续自动保存只会原地更新该单文件，不会创建元数据附属文件。"},
@@ -728,8 +728,8 @@ constexpr std::array kTextCatalog = {
         "This edits the selected annotation result in place. Back up the file first if you need to preserve the original labels.",
         "此操作会直接修改所选标注结果。若需保留原标签，请先备份文件。"},
     UiTextEntry{
-        "No metadata sidecar is present; one will be created on save.",
-        "不存在元数据附属文件；保存时将创建。"},
+        "Choose Save As to save the new labeling task as an ASDF document.",
+        "选择“另存为”，将新的标注任务保存为 ASDF 文档。"},
     UiTextEntry{
         "Existing label metadata will be reused.",
         "将复用现有标签元数据。"},
@@ -757,6 +757,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Skip labeled", "跳过已标注样本"},
     UiTextEntry{"Save to...", "另存为…"},
     UiTextEntry{"Migrate to ASDF...", "迁移到 ASDF…"},
+    UiTextEntry{"Legacy labeling data is read-only. Migrate to ASDF to continue editing; the original files will be preserved.", "旧格式标注数据为只读。请迁移到 ASDF 后继续编辑；原始文件将保留。"},
     UiTextEntry{"Export Labels", "导出标签"},
     UiTextEntry{"Labels", "标签"},
     UiTextEntry{"Add label", "添加标签"},

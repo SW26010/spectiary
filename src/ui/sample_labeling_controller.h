@@ -122,10 +122,6 @@ public:
     using SourceState = SampleLabelingSourceState;
     using StateCacheLoader =
         std::function<SampleLabelingStateCacheLoadResult(const std::filesystem::path&)>;
-    using LegacyOutputPublisher =
-        std::function<SampleLabelOutputPublicationResult(
-        SampleLabelingTask&,
-        const SampleLabelResultMetadataSource*)>;
     using CanonicalDocumentPublisher =
         std::function<SampleLabelingAsdfStoreGenerationWriteResult(
             const SampleLabelingAsdfOpenSnapshot&,
@@ -152,28 +148,20 @@ public:
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher);
-    SampleLabelingController(
-        std::filesystem::path state_cache_path,
-        StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalValuesPublisher canonical_values_publisher);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalCreationPublisher canonical_creation_publisher);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalCreationPublisher canonical_creation_publisher,
         TaskIdGenerator task_id_generator,
@@ -181,7 +169,6 @@ public:
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        LegacyOutputPublisher legacy_output_publisher,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalValuesPublisher canonical_values_publisher,
         CanonicalCreationPublisher canonical_creation_publisher,
@@ -221,14 +208,12 @@ public:
         std::string task_name,
         SampleLabelSet label_set,
         std::vector<int> values,
-        std::filesystem::path output_path,
-        bool metadata_clean);
+        std::filesystem::path annotation_path);
     [[nodiscard]] SampleLabelingOperationResult CreateTaskFromAnnotation(
         std::string task_name,
         SampleLabelSet label_set,
         std::vector<int> values,
-        std::filesystem::path output_path,
-        bool metadata_clean,
+        std::filesystem::path annotation_path,
         SampleLabelingOrigin origin);
     // Adopts an attached canonical document without rewriting it. The
     // attached generation supplies only the expected task identity; the
@@ -457,10 +442,6 @@ private:
         std::optional<SampleLabelingAsdfOpenSnapshot>*
             asdf_snapshot);
     [[nodiscard]] SampleLabelOutputPublicationResult
-        PersistLegacyTaskOutput(
-            SampleLabelingTask& task,
-            const SourceState* source_state);
-    [[nodiscard]] SampleLabelOutputPublicationResult
         PersistCanonicalTaskOutput(
             SampleLabelingTask& task,
             const SourceState* source_state,
@@ -622,7 +603,6 @@ private:
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> state_cache_snapshot_;
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
-    LegacyOutputPublisher legacy_output_publisher_;
     CanonicalDocumentPublisher canonical_document_publisher_;
     CanonicalValuesPublisher canonical_values_publisher_;
     CanonicalCreationPublisher canonical_creation_publisher_;

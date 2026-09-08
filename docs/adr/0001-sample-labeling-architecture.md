@@ -3,8 +3,13 @@
 SpecForge models per-sample data as sample annotation results and treats storage
 formats such as NPY and CSV as annotation I/O adapters, not as the domain model.
 New formal labeling owners use the canonical SpecForge sample-labeling schema
-`2.0.0` in one ASDF document; legacy NPY owners retain their adjacent portable
-metadata sidecar. Sample labeling task records, workflow settings, autosave
+`2.0.0` in one ASDF document. Legacy NPY results and adjacent portable
+metadata sidecars are read-only compatibility inputs. Importing NPY or CSV
+creates an output-free draft; explicit Save As establishes an ASDF owner
+without rewriting the import files. Supported legacy recovery records retain
+accepted pending edits for explicit ASDF migration, with no legacy autosave.
+See [recovery compatibility](../agents/legacy-labeling-recovery-audit.md).
+Sample labeling task records, workflow settings, autosave
 state, output paths, and recovery remain local user state rather than canonical
 document fields. Annotation I/O belongs behind a domain or service boundary; UI
 code consumes loaded annotation results and save state rather than parsing

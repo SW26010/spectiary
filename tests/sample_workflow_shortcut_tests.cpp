@@ -1418,7 +1418,7 @@ void TestCanonicalAnnotationActivationUsesSingleFileConfirmation()
                     UseAnnotationEditableMessage &&
             plain_annotation.detail_message ==
                 specforge::UiTextId::
-                    MetadataSidecarWillBeCreated,
+                    ImportedTaskSaveAsHint,
         "ownerless plain annotation confirmation should retain its existing sidecar-creation wording");
 }
 

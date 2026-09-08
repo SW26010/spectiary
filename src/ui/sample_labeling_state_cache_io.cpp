@@ -575,8 +575,8 @@ ParsedTask ParseTask(
              SampleLabelingOutputArtifactFormat::CanonicalAsdf)) {
         malformed = true;
     }
-    if (task.output_format ==
-        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+    if (task.output_format == SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
+        (task.output_path && !hydrate_persistent_output)) {
         task.values_are_authoritative = false;
     }
     bool output_load_failed = false;
@@ -598,6 +598,10 @@ ParsedTask ParseTask(
             task.values = std::move(loaded->values);
         } else {
             output_load_failed = true;
+            // Sparse pending values cannot reconstruct the untouched rows of
+            // a missing legacy base. Keep the recovery record, but do not
+            // permit publishing this placeholder projection as canonical data.
+            task.values_are_authoritative = false;
         }
         if (!output_load_failed) {
             if (loaded->metadata) {

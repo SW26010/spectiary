@@ -466,31 +466,6 @@ void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveState
     task.save_state.message.clear();
 }
 
-void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path)
-{
-    task.output_path = std::move(output_path);
-    task.output_format =
-        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    task.initial_publication_pending = false;
-    task.pending_sample_indices.clear();
-    task.metadata_save_pending = true;
-
-    std::string ignored_error;
-    const std::optional<LoadedSampleLabelResult> output =
-        SampleAnnotationIoAdapter{}.LoadLabelResult(
-            *task.output_path,
-            task.values.size(),
-            {},
-            &ignored_error);
-    for (std::size_t index = 0; index < task.values.size(); ++index) {
-        const int base_value =
-            output ? output->values[index] : kUnlabeledSampleLabelCode;
-        if (task.values[index] != base_value) {
-            task.pending_sample_indices.insert(index);
-        }
-    }
-    RefreshPendingSaveState(task);
-}
 
 void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task)
 {
@@ -539,63 +514,5 @@ void MarkSampleLabelTaskSaveFailed(
     task.save_state.message = std::move(message);
 }
 
-SampleLabelOutputPublicationResult
-PublishLegacySampleLabelingTaskOutput(
-    SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source)
-{
-    SampleLabelOutputPublicationResult result;
-    if (!task.output_path) {
-        return result;
-    }
-    if (task.output_format !=
-        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
-        result.message =
-            "labeling output format is not owned by the legacy NPY writer";
-        MarkSampleLabelTaskSaveFailed(task, result.message);
-        return result;
-    }
-
-    result.attempted = true;
-    const SampleLabelResultWriteOutcome write =
-        SampleAnnotationIoAdapter{}.SaveLabelResult(*task.output_path, task, source);
-    result.artifacts_replaced = write.array_saved;
-    if (!write.array_saved) {
-        result.retryable = true;
-        if (write.message.empty()) {
-            result.message = "could not save label output";
-            MarkSampleLabelTaskSaveFailed(
-                task,
-                {},
-                SampleLabelSaveMessageKind::OutputSaveFailed);
-        } else {
-            result.message = write.message;
-            MarkSampleLabelTaskSaveFailed(task, result.message);
-        }
-        return result;
-    }
-
-    task.pending_sample_indices.clear();
-    task.metadata_save_pending = true;
-
-    result.published = write.metadata_saved;
-    if (write.metadata_saved) {
-        MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
-    } else {
-        result.retryable = true;
-        if (write.message.empty()) {
-            result.message =
-                "could not save label output metadata";
-            MarkSampleLabelTaskSaveFailed(
-                task,
-                {},
-                SampleLabelSaveMessageKind::OutputSaveFailed);
-        } else {
-            result.message = write.message;
-            MarkSampleLabelTaskSaveFailed(task, result.message);
-        }
-    }
-    return result;
-}
 
 }  // namespace specforge
