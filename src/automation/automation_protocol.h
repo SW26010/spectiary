@@ -157,6 +157,77 @@ struct AutomationServerMessageParseResult {
 [[nodiscard]] AutomationServerMessageParseResult
 ParseAutomationServerMessage(std::string_view json);
 
+// Computed command facts. Wire field names and optional-member rules belong
+// to the protocol serializer, never to application command coordinators.
+struct AutomationSettingResult {
+    std::string name;
+    std::variant<std::string, int> value;
+    std::optional<bool> changed;
+};
+struct AutomationPanelResult {
+    std::string name;
+    bool visible = true;
+    std::optional<bool> changed;
+    std::optional<std::uint64_t> frame_index;
+};
+struct AutomationResultSpectrum {
+    std::size_t index = 0;
+    std::string name;
+};
+struct AutomationSourceOpenResult {
+    std::string source_id;
+    std::string path;
+    std::size_t spectrum_count = 0;
+    AutomationResultSpectrum current_spectrum;
+};
+struct AutomationSpectrumGotoResult {
+    std::string source_id;
+    AutomationResultSpectrum spectrum;
+    bool changed = false;
+};
+struct AutomationPersistenceResult {
+    bool state_save_scheduled = false;
+    bool state_save_attempted = false;
+    bool state_saved = false;
+    bool output_save_attempted = false;
+    bool output_saved = false;
+    bool output_retry_scheduled = false;
+};
+struct AutomationLabelAssignResult {
+    std::string source_id;
+    std::string task_id;
+    AutomationResultSpectrum spectrum;
+    int previous_code = -1;
+    int new_code = -1;
+    bool changed = false;
+    AutomationPersistenceResult persistence;
+    std::optional<AutomationResultSpectrum> current_spectrum_after;
+};
+struct AutomationFrameCaptureResult {
+    std::string path;
+    std::uint64_t frame_index = 0;
+    unsigned int width = 0;
+    unsigned int height = 0;
+};
+struct AutomationProfileStartResult { std::string path; };
+struct AutomationProfileStopResult {
+    std::string path;
+    ProfileSink::StopReason reason = ProfileSink::StopReason::None;
+    std::uint64_t dropped_events = 0;
+};
+struct AutomationCancellationResult { std::string code; std::string message; };
+using AutomationCommandResult = std::variant<std::monostate,
+    AutomationSettingResult, AutomationPanelResult, AutomationSourceOpenResult,
+    AutomationSpectrumGotoResult, AutomationLabelAssignResult,
+    AutomationFrameCaptureResult, AutomationProfileStartResult,
+    AutomationProfileStopResult, AutomationCancellationResult>;
+
+[[nodiscard]] std::string SerializeAutomationCommandResultBody(
+    const AutomationCommandResult& result);
+[[nodiscard]] std::string SerializeAutomationTerminalResponse(
+    std::string_view request_id, AutomationCommandKind command,
+    std::string_view status, const AutomationCommandResult& result);
+
 [[nodiscard]] std::string SerializeAutomationHelloRequest(
     std::string_view request_id,
     std::string_view nonce);

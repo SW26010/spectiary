@@ -520,6 +520,50 @@ const specforge::JsonValue& RequireObjectMember(
     return *member;
 }
 
+void TestTypedCommandResultProtocol()
+{
+    using namespace specforge;
+    Require(SerializeAutomationTerminalResponse("r", AutomationCommandKind::SettingGet, "completed",
+                AutomationCommandResult{AutomationSettingResult{"a\"b", std::string{"x\n\\y"}, std::nullopt}}) ==
+            R"({"type":"response","request_id":"r","command":"setting.get","status":"completed","result":{"name":"a\"b","value":"x\n\\y"}})",
+        "typed setting result must preserve the complete wire shape and escape string values");
+    Require(SerializeAutomationCommandResultBody(AutomationSettingResult{"ui.scale", 100, false}) ==
+            R"("result":{"name":"ui.scale","value":100,"changed":false})",
+        "false changed and integer setting values must remain present");
+    Require(SerializeAutomationCommandResultBody(AutomationPanelResult{"files", false, false, 0}) ==
+            R"("result":{"name":"files","visible":false,"changed":false,"frame_index":0})",
+        "panel optional false and zero fields must remain present");
+    Require(SerializeAutomationCommandResultBody(AutomationPanelResult{"files", true}) ==
+            R"("result":{"name":"files","visible":true})",
+        "panel get must omit mutation and frame fields");
+    Require(SerializeAutomationCommandResultBody(AutomationSourceOpenResult{"s", "C:\\data", 3, {0, "first"}}) ==
+            R"("result":{"source":{"id":"s","path":"C:\\data","spectrum_count":3},"current_spectrum":{"index":0,"name":"first"}})",
+        "source open must preserve nested source and current spectrum fields");
+    Require(SerializeAutomationCommandResultBody(AutomationSpectrumGotoResult{"s", {2, "last"}, true}) ==
+            R"("result":{"source_id":"s","spectrum":{"index":2,"name":"last"},"changed":true})",
+        "navigation must preserve its complete result shape");
+    AutomationLabelAssignResult assignment{"s", "t", {0, "first"}, -1, 5, true,
+        {true, true, true, true, false, true}, std::nullopt};
+    Require(SerializeAutomationCommandResultBody(assignment) ==
+            R"("result":{"assignment":{"source_id":"s","task_id":"t","spectrum":{"index":0,"name":"first"},"previous_code":-1,"new_code":5,"changed":true},"persistence":{"status":"output_retry_scheduled","state_save_scheduled":true,"state_save_attempted":true,"state_saved":true,"output_save_attempted":true,"output_saved":false,"output_retry_scheduled":true},"current_spectrum_after":{"present":false}})",
+        "label result must preserve persistence priority and omit an absent spectrum's identity");
+    assignment.current_spectrum_after = AutomationResultSpectrum{1, "next"};
+    assignment.persistence.output_saved = true;
+    const auto saved = SerializeAutomationCommandResultBody(assignment);
+    Require(saved.find(R"("status":"output_saved")") != std::string::npos &&
+            saved.find(R"("current_spectrum_after":{"present":true,"index":1,"name":"next"})") != std::string::npos,
+        "successful output persistence and present spectrum must serialize explicitly");
+    Require(SerializeAutomationCommandResultBody(AutomationFrameCaptureResult{"frame.png", 7, 800, 600}) ==
+            R"("result":{"path":"frame.png","format":"png","scope":"main_viewport","frame_index":7,"width":800,"height":600})",
+        "capture protocol constants and dimensions must retain their wire shape");
+    Require(SerializeAutomationCommandResultBody(AutomationProfileStartResult{"trace.jsonl"}) ==
+            R"("result":{"status":"recording","path":"trace.jsonl"})",
+        "profile start must retain recording status");
+    Require(SerializeAutomationCommandResultBody(AutomationCancellationResult{"cancel", "a\nb"}) ==
+            R"("error":{"code":"cancel","message":"a\nb"})",
+        "cancellation must escape structured error facts");
+}
+
 void TestProtocolAndStableState()
 {
     const auto write_failure_policy =
@@ -3269,6 +3313,7 @@ int wmain(int argc, wchar_t** argv)
             *fixture_mode);
     }
 
+    TestTypedCommandResultProtocol();
     TestProtocolAndStableState();
     TestStartupAndNoActivationContract();
     TestProfileOutputCreationIsHandleBoundToAutomationRoot();

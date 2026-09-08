@@ -779,6 +779,87 @@ std::string SerializeAutomationHelloResponse(
     return output.str();
 }
 
+std::string SerializeAutomationCommandResultBody(const AutomationCommandResult& result)
+{
+    std::ostringstream out;
+    const auto boolean = [](bool value) { return value ? "true" : "false"; };
+    const auto spectrum = [&](const AutomationResultSpectrum& value) {
+        out << "{\"index\":" << value.index << ",\"name\":" << JsonString(value.name) << '}';
+    };
+    std::visit([&](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            return;
+        } else if constexpr (std::is_same_v<T, AutomationCancellationResult>) {
+            out << "\"error\":{\"code\":" << JsonString(value.code)
+                << ",\"message\":" << JsonString(value.message) << '}';
+        } else {
+            out << "\"result\":{";
+            if constexpr (std::is_same_v<T, AutomationSettingResult>) {
+                out << "\"name\":" << JsonString(value.name) << ",\"value\":";
+                std::visit([&](const auto& setting) {
+                    if constexpr (std::is_same_v<std::decay_t<decltype(setting)>, std::string>) out << JsonString(setting);
+                    else out << setting;
+                }, value.value);
+                if (value.changed) out << ",\"changed\":" << boolean(*value.changed);
+            } else if constexpr (std::is_same_v<T, AutomationPanelResult>) {
+                out << "\"name\":" << JsonString(value.name) << ",\"visible\":" << boolean(value.visible);
+                if (value.changed) out << ",\"changed\":" << boolean(*value.changed);
+                if (value.frame_index) out << ",\"frame_index\":" << *value.frame_index;
+            } else if constexpr (std::is_same_v<T, AutomationSourceOpenResult>) {
+                out << "\"source\":{\"id\":" << JsonString(value.source_id)
+                    << ",\"path\":" << JsonString(value.path)
+                    << ",\"spectrum_count\":" << value.spectrum_count << "},\"current_spectrum\":";
+                spectrum(value.current_spectrum);
+            } else if constexpr (std::is_same_v<T, AutomationSpectrumGotoResult>) {
+                out << "\"source_id\":" << JsonString(value.source_id) << ",\"spectrum\":";
+                spectrum(value.spectrum);
+                out << ",\"changed\":" << boolean(value.changed);
+            } else if constexpr (std::is_same_v<T, AutomationLabelAssignResult>) {
+                out << "\"assignment\":{\"source_id\":" << JsonString(value.source_id)
+                    << ",\"task_id\":" << JsonString(value.task_id) << ",\"spectrum\":";
+                spectrum(value.spectrum);
+                out << ",\"previous_code\":" << value.previous_code << ",\"new_code\":" << value.new_code
+                    << ",\"changed\":" << boolean(value.changed) << "},\"persistence\":{";
+                const auto& p = value.persistence;
+                const char* status = p.output_saved ? "output_saved" : p.output_save_attempted
+                    ? (p.output_retry_scheduled ? "output_retry_scheduled" : "output_save_failed")
+                    : p.state_saved ? "state_saved" : p.state_save_scheduled ? "state_save_scheduled" : "unchanged";
+                out << "\"status\":" << JsonString(status)
+                    << ",\"state_save_scheduled\":" << boolean(p.state_save_scheduled)
+                    << ",\"state_save_attempted\":" << boolean(p.state_save_attempted)
+                    << ",\"state_saved\":" << boolean(p.state_saved)
+                    << ",\"output_save_attempted\":" << boolean(p.output_save_attempted)
+                    << ",\"output_saved\":" << boolean(p.output_saved)
+                    << ",\"output_retry_scheduled\":" << boolean(p.output_retry_scheduled)
+                    << "},\"current_spectrum_after\":{\"present\":" << boolean(value.current_spectrum_after.has_value());
+                if (value.current_spectrum_after) out << ",\"index\":" << value.current_spectrum_after->index
+                    << ",\"name\":" << JsonString(value.current_spectrum_after->name);
+                out << '}';
+            } else if constexpr (std::is_same_v<T, AutomationFrameCaptureResult>) {
+                out << "\"path\":" << JsonString(value.path) << ",\"format\":\"png\",\"scope\":\"main_viewport\""
+                    << ",\"frame_index\":" << value.frame_index << ",\"width\":" << value.width << ",\"height\":" << value.height;
+            } else if constexpr (std::is_same_v<T, AutomationProfileStartResult>) {
+                out << "\"status\":\"recording\",\"path\":" << JsonString(value.path);
+            } else if constexpr (std::is_same_v<T, AutomationProfileStopResult>) {
+                out << "\"status\":\"succeeded\",\"path\":" << JsonString(value.path)
+                    << ",\"stop_reason\":" << JsonString(ProfileSink::StopReasonName(value.reason))
+                    << ",\"dropped_events\":" << value.dropped_events;
+            }
+            out << '}';
+        }
+    }, result);
+    return out.str();
+}
+
+std::string SerializeAutomationTerminalResponse(
+    std::string_view request_id, AutomationCommandKind command,
+    std::string_view status, const AutomationCommandResult& result)
+{
+    return SerializeAutomationTerminalResponse(request_id, command, status,
+        std::string_view(SerializeAutomationCommandResultBody(result)));
+}
+
 std::string SerializeAutomationAcceptedResponse(
     std::string_view request_id,
     AutomationCommandKind command)
