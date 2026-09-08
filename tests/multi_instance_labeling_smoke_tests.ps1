@@ -1123,6 +1123,7 @@ function Invoke-StateFixture {
     $start.WorkingDirectory = Split-Path -Parent $script:ResolvedStateFixture
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
+    $start.RedirectStandardError = $true
     if (-not [string]::IsNullOrWhiteSpace(
             [string]$script:RunnerTempRoot)) {
         $start.Environment['TEMP'] = $script:RunnerTempRoot
@@ -1130,14 +1131,22 @@ function Invoke-StateFixture {
     }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $start
+    $errorRead = $null
     try {
         Assert-True `
             -Condition $process.Start() `
             -Message 'Could not start the labeling state fixture.'
+        $errorRead = $process.StandardError.ReadToEndAsync()
         Wait-FixtureCleanupHelper `
             -Process $process `
             -DeadlineUtc $deadline `
             -Description ("State fixture: " + ($Arguments -join ' '))
+    }
+    catch {
+        $detail = if ($null -ne $errorRead -and $errorRead.IsCompleted) {
+            $errorRead.GetAwaiter().GetResult()
+        } else { '' }
+        throw ("{0} {1}" -f $_.Exception.Message, $detail)
     }
     finally {
         $process.Dispose()
@@ -1537,6 +1546,18 @@ try {
         -Description 'formal-b spectrum 0 label assignment'
     [void](Invoke-GuiCommand -Instance $instanceA -Command 'wait.idle')
     [void](Invoke-GuiCommand -Instance $instanceB -Command 'wait.idle')
+    # wait.idle is a command/loader barrier, not the labeling autosave timer.
+    # Observe durable output while each GUI still owns its active formal task.
+    Invoke-StateFixtureEventually `
+        -Description 'initial formal-a autosave before source switch' `
+        -Arguments @('--verify-label-output', $fixtures['formal-a'].Output,
+            '--source', $fixtures['formal-a'].SourcePath,
+            '--expected-values', '5,-1,-1', '--task-id', $script:LabelingTaskId)
+    Invoke-StateFixtureEventually `
+        -Description 'initial formal-b autosave before source switch' `
+        -Arguments @('--verify-label-output', $fixtures['formal-b'].Output,
+            '--source', $fixtures['formal-b'].SourcePath,
+            '--expected-values', '7,-1,-1', '--task-id', $script:LabelingTaskId)
     Write-Host 'smoke: temporary labels'
 
     $script:CurrentStep = 'edit different temporary targets concurrently'
