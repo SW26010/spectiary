@@ -1,3 +1,4 @@
+#include "domain/sample_labeling_document_diagnostics.h"
 #include "domain/canonical_timestamp.h"
 #include "domain/sample_labeling_asdf_codec.h"
 #include "domain/sample_labeling_asdf_store.h"
@@ -672,7 +673,7 @@ void VerifyUnknownMappings(
         };
 
     const specforge::SampleLabelingDocumentValidationResult validation =
-        specforge::ValidateSampleLabelingDocument(document);
+        specforge::diagnostics::ValidateSampleLabelingDocument(document);
     if (!validation.valid()) {
         throw std::runtime_error(
             "normalized mutation seed failed canonical validation");
@@ -697,7 +698,7 @@ void VerifyUnknownMappings(
     const specforge::SampleLabelingAsdfReadResult verified =
         specforge::ReadSampleLabelingAsdfDocument(verification_path);
     if (!verified.succeeded() || !verified.durable_base ||
-        !specforge::ValidateSampleLabelingDocument(*verified.document)
+        !specforge::diagnostics::ValidateSampleLabelingDocument(*verified.document)
              .valid()) {
         throw std::runtime_error(
             "production reader did not accept the canonical durable seed");
@@ -759,7 +760,7 @@ void VerifyInvalidWriterEmitsNoBytes(
         throw std::runtime_error(
             "mutation marked MustReject was accepted");
     }
-    if (!specforge::ValidateSampleLabelingDocument(*read.document).valid()) {
+    if (!specforge::diagnostics::ValidateSampleLabelingDocument(*read.document).valid()) {
         throw std::runtime_error(
             "accepted mutation failed canonical document validation");
     }
@@ -818,7 +819,7 @@ void VerifyInvalidWriterEmitsNoBytes(
         const specforge::SampleLabelingAsdfReadResult reread =
             specforge::ReadSampleLabelingAsdfDocument(case_path);
         if (!reread.succeeded() ||
-            !specforge::ValidateSampleLabelingDocument(*reread.document)
+            !specforge::diagnostics::ValidateSampleLabelingDocument(*reread.document)
                  .valid() ||
             !DocumentsEqual(*reread.document, replacement)) {
             throw std::runtime_error(

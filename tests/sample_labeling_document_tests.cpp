@@ -1,3 +1,5 @@
+#include "sample_labeling_document_test_support.h"
+#include "domain/sample_labeling_document_diagnostics.h"
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_document.h"
 #include "domain/sample_labeling_source_compatibility.h"
@@ -164,7 +166,7 @@ specforge::SampleLabelingDocument ValidDocument()
     task.metadata_save_pending = true;
     task.save_state.kind = specforge::SampleLabelSaveStateKind::Pending;
 
-    return specforge::BuildSampleLabelingDocument(
+    return specforge::test_support::BuildSampleLabelingDocument(
         "npy",
         source_context,
         task);
@@ -206,7 +208,7 @@ void TestBuildSeparatesCanonicalDocumentFromTaskSessionState()
             document.labeling.labels.size() == 2,
         "builder should copy task identity, name, and label definitions");
     Require(
-        specforge::ValidateSampleLabelingDocument(document).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(document).valid(),
         "builder output should satisfy canonical semantic invariants");
 }
 
@@ -295,7 +297,7 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
     task.values = {-1, 0};
 
     const specforge::SampleLabelingDocument document =
-        specforge::BuildSampleLabelingDocument("npy", source_context, task);
+        specforge::test_support::BuildSampleLabelingDocument("npy", source_context, task);
     Require(
         document.source.roster.identity_kind ==
                 specforge::kSampleLabelingDocumentSourceIndexRoster &&
@@ -309,7 +311,7 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
             document.annotation.values[1] == 0,
         "source-index values[i] should align with source index i without a redundant index array");
     Require(
-        specforge::ValidateSampleLabelingDocument(document).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(document).valid(),
         "source-index roster should be semantically valid");
 }
 
@@ -333,7 +335,7 @@ void TestInvalidSourceNamesFallBackToSourceIndexRoster()
             3);
 
     const specforge::SampleLabelingDocument from_context =
-        specforge::BuildSampleLabelingDocument(
+        specforge::test_support::BuildSampleLabelingDocument(
             "npy",
             source_context,
             task);
@@ -341,7 +343,7 @@ void TestInvalidSourceNamesFallBackToSourceIndexRoster()
         from_context.source.roster.identity_kind ==
                 specforge::kSampleLabelingDocumentSourceIndexRoster &&
             from_context.source.roster.sample_names.empty() &&
-            specforge::ValidateSampleLabelingDocument(from_context)
+            specforge::diagnostics::ValidateSampleLabelingDocument(from_context)
                 .valid(),
         "blank or duplicate manifest names must fall back to source-index identity instead of making canonical Save As invalid");
 
@@ -354,14 +356,14 @@ void TestInvalidSourceNamesFallBackToSourceIndexRoster()
             snapshot,
             source_context);
     const specforge::SampleLabelingDocument from_descriptor =
-        specforge::BuildSampleLabelingDocument(
+        specforge::test_support::BuildSampleLabelingDocument(
             descriptor,
             task);
     Require(
         descriptor.sample_names.empty() &&
             from_descriptor.source.roster.identity_kind ==
                 specforge::kSampleLabelingDocumentSourceIndexRoster &&
-            specforge::ValidateSampleLabelingDocument(from_descriptor)
+            specforge::diagnostics::ValidateSampleLabelingDocument(from_descriptor)
                 .valid(),
         "the durable source descriptor must preserve the same source-index fallback used by the direct builder");
 }
@@ -370,7 +372,7 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
     document.source.sample_count = 4;
-    const auto count_result = specforge::ValidateSampleLabelingDocument(document);
+    const auto count_result = specforge::diagnostics::ValidateSampleLabelingDocument(document);
     Require(
         HasIssue(
             count_result,
@@ -382,7 +384,7 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
 
     document = ValidDocument();
     document.source.roster.sample_names[2] = document.source.roster.sample_names[0];
-    const auto duplicate_result = specforge::ValidateSampleLabelingDocument(document);
+    const auto duplicate_result = specforge::diagnostics::ValidateSampleLabelingDocument(document);
     Require(
         HasIssue(
             duplicate_result,
@@ -393,7 +395,7 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
     document = ValidDocument();
     document.source.roster.identity_kind =
         std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
-    const auto index_result = specforge::ValidateSampleLabelingDocument(document);
+    const auto index_result = specforge::diagnostics::ValidateSampleLabelingDocument(document);
     Require(
         HasIssue(
             index_result,
@@ -404,7 +406,7 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
     document.annotation.alignment.mode = "by_key";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 UnsupportedAnnotationAlignmentMode),
         "schema 2.0 must reject alignment modes other than by_index");
@@ -413,7 +415,7 @@ void TestValidatorEnforcesSampleAlignmentAndRosterShape()
     document.annotation.alignment.target = "source_collection";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 UnsupportedAnnotationAlignmentTarget),
         "schema 2.0 must reject alignment targets other than sample_roster");
@@ -425,7 +427,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
     document.labeling.labels[0].code = -1;
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::ReservedLabelCode,
             0),
         "-1 must remain reserved for unlabeled values");
@@ -434,7 +436,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
     document.labeling.labels[1].code = document.labeling.labels[0].code;
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::DuplicateLabelCode,
             1),
         "label codes should be unique");
@@ -443,7 +445,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
     document.labeling.labels[1].shortcut = "G";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::DuplicateLabelShortcut,
             1),
         "shortcut uniqueness should follow the task domain's normalized semantics");
@@ -452,7 +454,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
     document.annotation.values[2] = 42;
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::UndefinedAnnotationValue,
             2),
         "every labeled value should resolve to a label definition");
@@ -461,7 +463,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
     document.annotation.missing.value = 0;
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::InvalidUnlabeledValue),
         "canonical missing semantics should remain fixed to -1");
 }
@@ -476,7 +478,7 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
     document.source.base_identity.clear();
     document.labeling.id.clear();
 
-    const auto result = specforge::ValidateSampleLabelingDocument(document);
+    const auto result = specforge::diagnostics::ValidateSampleLabelingDocument(document);
     const std::unordered_set<specforge::SampleLabelingDocumentValidationIssueKind> expected = {
         specforge::SampleLabelingDocumentValidationIssueKind::UnsupportedFormatKind,
         specforge::SampleLabelingDocumentValidationIssueKind::UnsupportedSchemaVersion,
@@ -500,20 +502,20 @@ void TestValidatorEnforcesBuildSourceIdentityInvariant()
         .source_mode = "head",
         .source_revision = std::string{revision}};
     Require(
-        specforge::ValidateSampleLabelingDocument(document).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(document).valid(),
         "head build source should require and accept one full lowercase revision");
 
     document.build_source = {
         .source_mode = "working_tree",
         .source_revision = std::nullopt};
     Require(
-        specforge::ValidateSampleLabelingDocument(document).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(document).valid(),
         "working-tree build source should be valid without a revision");
 
     document.build_source.source_mode = "archive";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 UnsupportedBuildSourceMode),
         "unknown build source modes must be rejected");
@@ -523,7 +525,7 @@ void TestValidatorEnforcesBuildSourceIdentityInvariant()
         .source_revision = std::nullopt};
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 MissingBuildSourceRevision),
         "head build source must carry a revision");
@@ -531,7 +533,7 @@ void TestValidatorEnforcesBuildSourceIdentityInvariant()
     document.build_source.source_revision = "0123456789abcdef";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidBuildSourceRevision),
         "head build source revision must be the full lowercase object id");
@@ -541,7 +543,7 @@ void TestValidatorEnforcesBuildSourceIdentityInvariant()
         .source_revision = std::string{revision}};
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 UnexpectedBuildSourceRevision),
         "working-tree build source must not carry a revision");
@@ -553,7 +555,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
     document.labeling.id = "00000000-0000-4000-8000-00000000000A";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidTaskId),
         "schema 2 task ids must use the lowercase canonical UUID v4 form");
@@ -564,7 +566,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
             "2026-08-30T16:00:00.000Z");
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidCanonicalTimestampOrder),
         "created_at must not be later than modified_at");
@@ -576,7 +578,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
             .format = "csv"};
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidOriginAnnotation),
         "manual origin must not carry annotation promotion metadata");
@@ -586,7 +588,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
         "annotation_promotion";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidOriginAnnotation),
         "annotation promotion must carry portable annotation provenance");
@@ -595,7 +597,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
     document.labeling.canonical_metadata.origin.kind = "Bad-Origin";
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidOriginKind),
         "origin kinds must remain lowercase extensible tokens");
@@ -611,7 +613,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
                 "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"};
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidOriginAnnotation),
         "promotion provenance must use a non-whitespace UTF-8 name, csv/npy format, and lowercase SHA-256");
@@ -621,7 +623,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
         std::string{"\xC3\x28", 2};
     Require(
         HasIssue(
-            specforge::ValidateSampleLabelingDocument(document),
+            specforge::diagnostics::ValidateSampleLabelingDocument(document),
             specforge::SampleLabelingDocumentValidationIssueKind::
                 InvalidDescription),
         "description must contain valid UTF-8");
@@ -635,7 +637,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
         {.name = "\xE3\x80\x80"},
     };
     const auto invalid_authors =
-        specforge::ValidateSampleLabelingDocument(document);
+        specforge::diagnostics::ValidateSampleLabelingDocument(document);
     Require(
         HasIssue(
             invalid_authors,
@@ -676,7 +678,7 @@ void TestValidatorEnforcesSchemaTwoIdentityAndMetadata()
         {.name = "山田太郎", .email = "連絡先"},
     };
     Require(
-        specforge::ValidateSampleLabelingDocument(document).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(document).valid(),
         "schema 2 canonical metadata should accept valid Unicode declarations without normalization");
 }
 
@@ -691,7 +693,7 @@ void TestValidatorRequiresPortableAnnotationOriginBasename()
             .format = "csv",
             .fingerprint = "sha256:" + std::string(64, 'a')};
     Require(
-        specforge::ValidateSampleLabelingDocument(promoted).valid(),
+        specforge::diagnostics::ValidateSampleLabelingDocument(promoted).valid(),
         "shared document validation should accept a Unicode annotation provenance basename");
 
     for (const std::string_view nonportable_name : {
@@ -709,7 +711,7 @@ void TestValidatorRequiresPortableAnnotationOriginBasename()
             nonportable_name;
         Require(
             HasIssue(
-                specforge::ValidateSampleLabelingDocument(promoted),
+                specforge::diagnostics::ValidateSampleLabelingDocument(promoted),
                 specforge::SampleLabelingDocumentValidationIssueKind::
                     InvalidOriginAnnotation),
             "shared document validation must reject rooted, directory-bearing, and drive-relative annotation provenance names");

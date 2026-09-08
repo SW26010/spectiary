@@ -1,4 +1,5 @@
 #include "domain/sample_labeling_document.h"
+#include "domain/sample_labeling_document_diagnostics.h"
 
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_source_compatibility.h"
@@ -102,31 +103,6 @@ SampleLabelingDocument BuildDocumentWithSource(
 }
 
 }  // namespace
-
-SampleLabelingDocument BuildSampleLabelingDocument(
-    std::string source_kind,
-    const SourceCollectionContext& source_context,
-    const SampleLabelingTask& task)
-{
-    SampleLabelingDocumentSource source;
-    const SourceCollectionIdentity& source_identity = source_context.identity;
-    source.base_identity = source_identity.id;
-    source.kind = std::move(source_kind);
-    source.name = source_identity.source_name;
-    source.fingerprint = source_identity.source_fingerprint;
-    source.sample_count = source_identity.spectrum_count;
-    if (SourceCollectionSampleNamesFormCanonicalRoster(
-            source_context.manifest.sample_names,
-            source.sample_count)) {
-        source.roster.identity_kind =
-            std::string{kSampleLabelingDocumentExplicitNamesRoster};
-        source.roster.sample_names =
-            source_context.manifest.sample_names;
-    }
-    return BuildDocumentWithSource(
-        std::move(source),
-        task);
-}
 
 SampleLabelingDocument BuildSampleLabelingDocument(
     const SampleLabelingCanonicalSourceDescriptor& source,
@@ -702,7 +678,7 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
 
 }  // namespace
 
-SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
+SampleLabelingDocumentValidationResult diagnostics::ValidateSampleLabelingDocument(
     const SampleLabelingDocument& document)
 {
     return ValidateSampleLabelingDocumentImpl(document, false);
