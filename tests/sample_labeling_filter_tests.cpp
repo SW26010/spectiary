@@ -11310,6 +11310,83 @@ void TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure()
         "the recovered draft must remain eligible for Save As");
 }
 
+void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
+{
+    const auto directory = FreshTestDirectory("specforge_legacy_pending_migration");
+    const auto cache_path = directory / "tasks.json";
+    const auto legacy_path = directory / "legacy.npy";
+    const auto canonical_path = directory / "recovered.asdf";
+    const std::string source_id = "pending-legacy-source";
+    auto legacy = specforge::CreateSampleLabelingTask(
+        "11111111-2222-4333-8444-555555555555", "Original", 3);
+    legacy.label_set.labels = {{5, "Reject", 'r'}, {7, "Accept", 'a'}};
+    legacy.values = {5, 5, -1};
+    specforge::SelectSampleLabelTaskOutputPath(legacy, legacy_path);
+    Require(specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
+                legacy_path, legacy, nullptr).metadata_saved,
+            "historical fixture should contain valid NPY and metadata");
+    const auto original_array = ReadBinaryFile(legacy_path);
+    const auto metadata_path = specforge::SampleAnnotationIoAdapter::MetadataPathForResult(legacy_path);
+    const auto original_metadata = ReadBinaryFile(metadata_path);
+
+    // Simulate a supported cache left by a failed old-version autosave:
+    // one assignment, one clearing operation, and pending label/task metadata.
+    legacy.values = {7, -1, -1};
+    legacy.pending_sample_indices = {0, 1};
+    legacy.task_name = "Recovered review";
+    legacy.label_set.labels[1].name = "Accepted after review";
+    legacy.metadata_save_pending = true;
+    specforge::MarkSampleLabelTaskSaveFailed(legacy, "interrupted legacy save");
+    specforge::RebuildSampleLabelingTaskStatistics(legacy);
+    specforge::SampleLabelingStateCache cache;
+    auto& source = cache.sources[source_id];
+    source.sample_count = 3;
+    source.active_task_id = legacy.task_id;
+    source.tasks.push_back(legacy);
+    Require(specforge::SaveSampleLabelingStateCache(cache_path, cache),
+            "historical pending edits should be persisted before recovery");
+    std::size_t legacy_publications = 0;
+    {
+        specforge::SampleLabelingController restored(
+            cache_path,
+            [](const std::filesystem::path& path) {
+                return specforge::LoadSampleLabelingStateCache(path);
+            },
+            [&legacy_publications](specforge::SampleLabelingTask&,
+                                   const specforge::SampleLabelResultMetadataSource*) {
+                ++legacy_publications;
+                return specforge::SampleLabelOutputPublicationResult{};
+            });
+        ActivateCanonicalTestSource(restored, source_id, 3);
+        const auto* recovered = ActiveTask(restored);
+        Require(recovered && recovered->values == legacy.values &&
+                    recovered->task_name == legacy.task_name && recovered->metadata_save_pending &&
+                    recovered->pending_sample_indices.contains(0) && recovered->pending_sample_indices.contains(1),
+                "cache recovery must overlay assignments, clearing and metadata on the legacy base");
+        Require(restored.MigrateActiveLegacyTaskToCanonicalAsdf(canonical_path).output_saved,
+                "recovered pending edits should migrate directly to ASDF");
+        Require(restored.AssignLabel(2, 7).write.accepted,
+                "editing should continue through canonical persistence after migration");
+        Require(restored.FlushStateCache(), "canonical owner recovery state should persist");
+    }
+    Require(legacy_publications == 0 && ReadBinaryFile(legacy_path) == original_array &&
+                ReadBinaryFile(metadata_path) == original_metadata,
+            "recovering and migrating pending edits must not publish or change either legacy artifact");
+    const auto read = specforge::ReadSampleLabelingAsdfDocument(canonical_path);
+    Require(read.succeeded() && read.document->annotation.values == std::vector<std::int32_t>({7, -1, 7}) &&
+                read.document->labeling.name == legacy.task_name &&
+                read.document->labeling.labels[1].name == "Accepted after review",
+            "canonical output should retain recovered values and metadata plus subsequent edits");
+    {
+        specforge::SampleLabelingController reopened(cache_path);
+        ActivateCanonicalTestSource(reopened, source_id, 3);
+        const auto* task = ActiveTask(reopened);
+        Require(task && task->output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+                    task->values == std::vector<int>({7, -1, 7}) && task->pending_sample_indices.empty(),
+                "reopening should hydrate the canonical owner without retaining a legacy pending overlay");
+    }
+}
+
 void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifacts()
 {
     const std::filesystem::path directory =
@@ -12221,6 +12298,7 @@ int main(int argc, char* argv[])
         TestControllerAtomicallyStartsOrResumesTemporaryTask();
         TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure();
         TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure();
+        TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication();
         TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifacts();
         TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts();
         TestLegacyOwnerMigrationRejectsUsedOutputPathWithStructuredIssue();
