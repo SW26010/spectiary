@@ -1,7 +1,7 @@
 #include "automation/automation_protocol.h"
 
 #include "app/local_user_state_json.h"
-#include "platform/win32_text.h"
+#include "domain/utf8.h"
 
 #include <algorithm>
 #include <array>
@@ -28,11 +28,6 @@ bool IsValidRequestId(std::string_view request_id)
                    value == '-' || value == '_' ||
                    value == '.';
         });
-}
-
-bool IsValidUtf8(std::string_view value)
-{
-    return value.empty() || !Utf8ToWide(value).empty();
 }
 
 std::string JsonString(std::string_view value)

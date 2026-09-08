@@ -6,6 +6,7 @@
 #include "automation/automation_startup.h"
 #include "automation/automation_state.h"
 #include "platform/win32_text.h"
+#include "domain/utf8.h"
 #include "platform/win32_window.h"
 
 #include <Windows.h>
@@ -798,6 +799,25 @@ void TestProtocolAndStableState()
             invalid_id.error_code ==
                 "invalid_request_id",
         "request IDs outside the bounded ASCII contract should fail");
+    for (const std::string text : {"", "ASCII", "\xc2\xa2\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
+        const auto parsed = specforge::ParseAutomationServerMessage(
+            specforge::SerializeAutomationFailureResponse("utf8", "state.get", "test", text));
+        Require(parsed.message && parsed.message->error_message == text,
+                "server text should preserve empty, ASCII and multibyte UTF-8");
+        Require(specforge::ParseAutomationClientMessage(
+                    specforge::SerializeAutomationHelloRequest("utf8", text)).error_code != "invalid_utf8",
+                "valid client UTF-8 should reach protocol validation");
+    }
+    for (const std::string text : {"\xc3", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
+        const std::string json = "{\"text\":\"" + text + "\"}";
+        Require(specforge::ParseAutomationClientMessage(json).error_code == "invalid_utf8",
+                "client should reject truncated, overlong, surrogate and out-of-range UTF-8");
+        Require(!specforge::ParseAutomationServerMessage(json).message,
+                "server should reject malformed UTF-8");
+    }
+    Require(specforge::ParseAutomationClientMessage("").error_code == "invalid_json" &&
+                !specforge::ParseAutomationServerMessage("").message,
+            "empty protocol documents remain invalid");
     const std::string invalid_utf8 =
         std::string(
             "{\"type\":\"hello\",\"request_id\":\"x\",\"nonce\":\"") +
@@ -813,9 +833,9 @@ void TestProtocolAndStableState()
     Require(
         unicode_command ==
                 "source open C:\\数据\\光谱" &&
-            specforge::IsWellFormedUtf8(
+            specforge::IsValidUtf8(
                 unicode_command) &&
-            !specforge::IsWellFormedUtf8(
+            !specforge::IsValidUtf8(
                 std::string_view(
                     invalid_utf8.data() +
                         invalid_utf8.find(

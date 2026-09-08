@@ -1,8 +1,9 @@
 #include "domain/csv_record_codec.h"
 
+#include "domain/utf8.h"
 #include "platform/atomic_file.h"
 
-#include <cstdint>
+
 #include <ios>
 #include <istream>
 #include <limits>
@@ -14,55 +15,6 @@
 
 namespace specforge {
 namespace {
-
-[[nodiscard]] bool IsValidUtf8(std::string_view text)
-{
-    std::size_t index = 0;
-    while (index < text.size()) {
-        const unsigned char lead =
-            static_cast<unsigned char>(text[index]);
-        if (lead <= 0x7fU) {
-            ++index;
-            continue;
-        }
-
-        std::size_t continuation = 0;
-        std::uint32_t codepoint = 0;
-        if ((lead & 0xe0U) == 0xc0U) {
-            continuation = 1;
-            codepoint = lead & 0x1fU;
-        } else if ((lead & 0xf0U) == 0xe0U) {
-            continuation = 2;
-            codepoint = lead & 0x0fU;
-        } else if ((lead & 0xf8U) == 0xf0U) {
-            continuation = 3;
-            codepoint = lead & 0x07U;
-        } else {
-            return false;
-        }
-        if (index + continuation >= text.size()) {
-            return false;
-        }
-        for (std::size_t part = 0; part < continuation; ++part) {
-            const unsigned char byte = static_cast<unsigned char>(
-                text[index + part + 1]);
-            if ((byte & 0xc0U) != 0x80U) {
-                return false;
-            }
-            codepoint = (codepoint << 6U) | (byte & 0x3fU);
-        }
-
-        const std::uint32_t minimum = continuation == 1   ? 0x80U
-                                      : continuation == 2 ? 0x800U
-                                                          : 0x10000U;
-        if (codepoint < minimum || codepoint > 0x10ffffU ||
-            (codepoint >= 0xd800U && codepoint <= 0xdfffU)) {
-            return false;
-        }
-        index += continuation + 1;
-    }
-    return true;
-}
 
 [[nodiscard]] CsvRecordError MakeError(
     CsvRecordErrorKind kind,
