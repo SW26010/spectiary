@@ -39,7 +39,7 @@ its reconciliation module own those semantics; the generic atomic-file and
 local-user-state facilities do not.
 
 If the latest durable document cannot be trusted because parsing, schema,
-shape, semantic-identity, or allocator-history validation fails, the commit
+shape, or semantic-identity validation fails, the commit
 fails closed with the diagnostic and leaves that document untouched. A stale
 startup snapshot must not replace or repair it. A missing cache remains the
 normal empty first-write state, and supported legacy migration is allowed only

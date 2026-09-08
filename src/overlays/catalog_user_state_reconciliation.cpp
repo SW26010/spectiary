@@ -87,11 +87,7 @@ std::string FreshId(
 }
 
 struct ReconciliationContext {
-    // These sets contain identities allocated by the durable peers.  Local
-    // additions are deliberately inserted as they are accepted, so a stale
-    // task can keep its own requested id when it is still free, but must
-    // remap when another peer has already reserved that identity and later
-    // deleted the entity.
+    // Collision checks cover live objects from all participating snapshots.
     std::unordered_set<std::string> occupied_view_ids;
     std::unordered_set<std::string> occupied_group_ids;
     std::unordered_map<std::string, std::string> local_view_id_remap;
@@ -694,12 +690,6 @@ bool ReconcileCatalogUserStateTask(
     }
 
     ReconciliationContext context;
-    context.occupied_view_ids.insert(
-        base.reserved_view_ids.begin(),
-        base.reserved_view_ids.end());
-    context.occupied_view_ids.insert(
-        latest.reserved_view_ids.begin(),
-        latest.reserved_view_ids.end());
     for (const GroupingView& view : base.grouping_views) {
         context.occupied_view_ids.insert(view.id);
         for (const UserGroup& group : view.groups) {
@@ -718,12 +708,6 @@ bool ReconcileCatalogUserStateTask(
             }
         }
     }
-    context.occupied_group_ids.insert(
-        base.reserved_group_ids.begin(),
-        base.reserved_group_ids.end());
-    context.occupied_group_ids.insert(
-        latest.reserved_group_ids.begin(),
-        latest.reserved_group_ids.end());
     result.state = local;
     result.state.catalog_identity =
         local.catalog_identity.id == base.catalog_identity.id
@@ -753,42 +737,6 @@ bool ReconcileCatalogUserStateTask(
         latest.grouping_views,
         context,
         local_group_ordering_view_ids);
-    result.state.reserved_view_ids = base.reserved_view_ids;
-    result.state.reserved_view_ids.insert(
-        local.reserved_view_ids.begin(),
-        local.reserved_view_ids.end());
-    result.state.reserved_view_ids.insert(
-        latest.reserved_view_ids.begin(),
-        latest.reserved_view_ids.end());
-    result.state.reserved_group_ids = base.reserved_group_ids;
-    result.state.reserved_group_ids.insert(
-        local.reserved_group_ids.begin(),
-        local.reserved_group_ids.end());
-    result.state.reserved_group_ids.insert(
-        latest.reserved_group_ids.begin(),
-        latest.reserved_group_ids.end());
-    for (const GroupingView& view : result.state.grouping_views) {
-        result.state.reserved_view_ids.insert(view.id);
-        for (const UserGroup& group : view.groups) {
-            if (!group.is_unassigned &&
-                group.id != UnassignedUserGroupId()) {
-                result.state.reserved_group_ids.insert(group.id);
-            }
-        }
-    }
-    // Allocator high-water marks are monotonic durable facts.  A stale task
-    // must never move them backwards and thereby make a later identity
-    // reusable after restart.
-    result.state.next_view_sequence = std::max({
-        std::uint64_t{1},
-        base.next_view_sequence,
-        local.next_view_sequence,
-        latest.next_view_sequence});
-    result.state.next_group_sequence = std::max({
-        std::uint64_t{1},
-        base.next_group_sequence,
-        local.next_group_sequence,
-        latest.next_group_sequence});
     if (local_selection_changed) {
         if (const auto view_match = context.local_view_id_remap.find(
                 result.state.active_view_id);

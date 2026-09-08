@@ -1434,7 +1434,7 @@ void TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict()
         "a colliding task addition should receive a fresh id and retain task selection");
 }
 
-void TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations()
+void TestCatalogTaskReconciliationPreservesExplicitOrderAndAdditions()
 {
     const specforge::CatalogIdentity identity =
         specforge::PublicSpectralLineCatalogIdentity();
@@ -1449,8 +1449,6 @@ void TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations()
         specforge::UserGroup{.id = "group-1", .name = "One"});
     base.grouping_views[0].groups.push_back(
         specforge::UserGroup{.id = "group-2", .name = "Two"});
-    base.reserved_view_ids = {"view-1", "view-2"};
-    base.reserved_group_ids = {"group-1", "group-2"};
 
     specforge::CatalogUserState local = base;
     std::swap(local.grouping_views[0], local.grouping_views[1]);
@@ -1463,16 +1461,12 @@ void TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations()
         specforge::UserGroup{.id = "group-3", .name = "Task group"});
     local.grouping_views.push_back(
         ReconciliationView("view-3", "Task addition"));
-    local.reserved_view_ids.insert("view-3");
-    local.reserved_group_ids.insert("group-3");
 
     specforge::CatalogUserState latest = base;
     latest.grouping_views[0].groups.push_back(
         specforge::UserGroup{.id = "group-4", .name = "Durable group"});
     latest.grouping_views.push_back(
         ReconciliationView("view-4", "Durable addition"));
-    latest.reserved_view_ids.insert("view-4");
-    latest.reserved_group_ids.insert("group-4");
     latest.active_view_id = "view-1";
 
     specforge::CatalogUserStateReconciliationResult result;
@@ -1506,12 +1500,7 @@ void TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations()
             groups[3].id == "group-4" &&
             groups[4].id == "group-3",
         "local explicit group order must win while durable additions precede task additions");
-    Require(
-        result.state.reserved_view_ids.contains("view-3") &&
-            result.state.reserved_view_ids.contains("view-4") &&
-            result.state.reserved_group_ids.contains("group-3") &&
-            result.state.reserved_group_ids.contains("group-4"),
-        "reconciliation must carry all durable identity reservations");
+
 }
 
 void TestCatalogTaskReconciliationRemapsIdsDeterministically()
@@ -1660,7 +1649,7 @@ int main()
         TestCatalogTaskReconciliationMergesDisjointChanges();
         TestCatalogTaskReconciliationMergesColorOverridesAndReset();
         TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict();
-        TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations();
+        TestCatalogTaskReconciliationPreservesExplicitOrderAndAdditions();
         TestCatalogTaskReconciliationRemapsIdsDeterministically();
         TestCatalogReconciliationRejectsInvalidSemanticIdentities();
         return 0;

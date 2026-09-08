@@ -1,3 +1,4 @@
+#include "domain/uuid_v4.h"
 #include "overlays/spectral_line_user_state_cache_io.h"
 #include "platform/exclusive_file_lease.h"
 #include "ui/spectral_lines_panel_controller.h"
@@ -354,30 +355,41 @@ DWORD WaitForCatalogChild(
     return exit_code;
 }
 
+std::string NewOpaqueViewId(const specforge::CatalogUserStateView& snapshot)
+{
+    for (const auto& view : snapshot.grouping_views) {
+        if (specforge::IsCanonicalUuidV4(view.id)) return view.id;
+    }
+    throw std::runtime_error("expected a newly created UUID view");
+}
+
+std::string NewOpaqueGroupId(const specforge::CatalogUserStateView& snapshot)
+{
+    for (const auto& view : snapshot.grouping_views) {
+        for (const auto& group : view.groups) {
+            if (specforge::IsCanonicalUuidV4(group.id)) return group.id;
+        }
+    }
+    throw std::runtime_error("expected a newly created UUID group");
+}
+
 void SeedMultiProcessCache(const std::filesystem::path& path)
 {
     RemoveTestCache(path);
-    specforge::SpectralLinesPanelController seed(
-        GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
-        path);
-    RequireApplied(
-        seed.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-        "multi-process seed should create the first grouping view");
-    RequireApplied(
-        seed.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-        "multi-process seed should create the second grouping view");
-    RequireApplied(
-        seed.Submit(specforge::CatalogUserStateIntent::AddUserGroup("view-2")),
-        "multi-process seed should create the first ordinary group");
-    RequireApplied(
-        seed.Submit(specforge::CatalogUserStateIntent::AddUserGroup("view-2")),
-        "multi-process seed should create the second ordinary group");
-    RequireApplied(
-        seed.Submit(specforge::CatalogUserStateIntent::SelectGroupingView(
-            specforge::CatalogGroupingViewId())),
-        "multi-process seed should make selection conflicts explicit");
-    Require(seed.Flush(), "multi-process seed should flush");
+    specforge::CatalogUserStateCache cache;
+    auto& state = specforge::EnsureCatalogUserState(cache, specforge::PublicSpectralLineCatalogIdentity());
+    for (int index = 1; index <= 2; ++index) {
+        state.grouping_views.push_back(specforge::CreateUserGroupingViewFromCatalog(
+            GroupedCatalog(), state.catalog_identity, "view-" + std::to_string(index),
+            "Grouping " + std::to_string(index)));
+    }
+    Require(specforge::AddUserGroup(state.grouping_views[1], "group-1", "Group 1"), "seed group one");
+    Require(specforge::AddUserGroup(state.grouping_views[1], "group-2", "Group 2"), "seed group two");
+    state.active_view_id = specforge::CatalogGroupingViewId();
+    (void)specforge::EnsureCatalogPanelState(cache, state.catalog_identity);
+    std::string error;
+    Require(specforge::SaveCatalogUserStateCache(path, cache, error), error);
+
 }
 
 void SeedMultiProcessCacheWithReferences(const std::filesystem::path& path)
@@ -426,34 +438,23 @@ void SeedMultiProcessCacheWithReferences(const std::filesystem::path& path)
 void SeedMultiProcessCacheWithThreeGroups(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
-    specforge::SpectralLinesPanelController seed(
-        GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
-        path);
-    RequireApplied(
-        seed.Submit(
-            specforge::CatalogUserStateIntent::AddUserGroup("view-2")),
-        "ordering seed should create group-3");
-    Require(seed.Flush(), "ordering seed should flush");
+    auto loaded = specforge::LoadCatalogUserStateCache(path);
+    auto& state = loaded.cache.catalogs.at("specforge.public");
+    Require(specforge::AddUserGroup(state.grouping_views[1], "group-3", "Group 3"), "seed third legacy group");
+    std::string error;
+    Require(specforge::SaveCatalogUserStateCache(path, loaded.cache, error), error);
 }
 
 void SeedMultiProcessCacheWithThreeViews(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
-    specforge::SpectralLinesPanelController seed(
-        GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
-        path);
-    RequireApplied(
-        seed.Submit(
-            specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-        "selection fallback seed should create view-3");
-    RequireApplied(
-        seed.Submit(
-            specforge::CatalogUserStateIntent::SelectGroupingView(
-                "view-1")),
-        "selection fallback seed should make view-1 active");
-    Require(seed.Flush(), "selection fallback seed should flush");
+    auto loaded = specforge::LoadCatalogUserStateCache(path);
+    auto& state = loaded.cache.catalogs.at("specforge.public");
+    state.grouping_views.push_back(specforge::CreateUserGroupingViewFromCatalog(
+        GroupedCatalog(), state.catalog_identity, "view-3", "Grouping 3"));
+    state.active_view_id = "view-1";
+    std::string error;
+    Require(specforge::SaveCatalogUserStateCache(path, loaded.cache, error), error);
 }
 
 void RunConcurrentCatalogChildren(
@@ -519,6 +520,7 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
         WaitForMarkerFile(marker_root / "ready", 10s),
         "stale view-add peer should publish its startup snapshot");
 
+    std::string deleted_id;
     {
         specforge::SpectralLinesPanelController owner(
             GroupedCatalog(),
@@ -528,11 +530,12 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
             owner.Submit(
                 specforge::CatalogUserStateIntent::CreateUserGroupingView()),
             "the first view-add peer should create view-3");
+        deleted_id = NewOpaqueViewId(owner.View());
         Require(owner.Flush(), "the first view-add peer should commit view-3");
         RequireApplied(
             owner.Submit(
                 specforge::CatalogUserStateIntent::DeleteUserGroupingView(
-                    "view-3")),
+                    deleted_id)),
             "the first view-add peer should delete its own view-3");
         Require(
             owner.Flush(),
@@ -552,8 +555,7 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
             [&](const auto& view) { return view.id == id; });
     };
     Require(
-        state.grouping_views.size() == 3 && !has_view("view-3") &&
-            state.reserved_view_ids.contains("view-3") &&
+        state.grouping_views.size() == 3 && !has_view(deleted_id) &&
             std::any_of(
                 state.grouping_views.begin(),
                 state.grouping_views.end(),
@@ -584,6 +586,7 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
         WaitForMarkerFile(marker_root / "ready", 10s),
         "stale group-add peer should publish its startup snapshot");
 
+    std::string deleted_id;
     {
         specforge::SpectralLinesPanelController owner(
             GroupedCatalog(),
@@ -594,12 +597,13 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
                 specforge::CatalogUserStateIntent::AddUserGroup(
                     "view-2")),
             "the first group-add peer should create group-3");
+        deleted_id = NewOpaqueGroupId(owner.View());
         Require(owner.Flush(), "the first group-add peer should commit group-3");
         RequireApplied(
             owner.Submit(
                 specforge::CatalogUserStateIntent::DeleteUserGroup(
                     "view-2",
-                    "group-3")),
+                    deleted_id)),
             "the first group-add peer should delete its own group-3");
         Require(
             owner.Flush(),
@@ -624,8 +628,7 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
             [&](const auto& group) { return group.id == id; });
     };
     Require(
-        view->groups.size() == 4 && !has_group("group-3") &&
-            state.reserved_group_ids.contains("group-3") &&
+        view->groups.size() == 4 && !has_group(deleted_id) &&
             std::any_of(
                 view->groups.begin(),
                 view->groups.end(),
@@ -657,6 +660,7 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
         WaitForMarkerFile(marker_root / "ready", 10s),
         "ordering stale task should publish its startup snapshot");
 
+    std::string durable_id;
     {
         specforge::SpectralLinesPanelController durable_peer(
             GroupedCatalog(),
@@ -667,6 +671,7 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
                 specforge::CatalogUserStateIntent::AddUserGroup(
                     "view-2")),
             "ordering durable peer should add group-4");
+        durable_id = NewOpaqueGroupId(durable_peer.View());
         Require(
             durable_peer.Flush(),
             "ordering durable peer should commit before the stale task");
@@ -688,8 +693,8 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
             view->groups[0].id == "group-2" &&
             view->groups[1].id == "group-1" &&
             view->groups[2].id == "group-3" &&
-            view->groups[3].id == "group-4" &&
-            view->groups[4].id == "group-4-2" &&
+            view->groups[3].id == durable_id &&
+            view->groups[4].id != durable_id && specforge::IsCanonicalUuidV4(view->groups[4].id) &&
             view->groups[5].id == specforge::UnassignedUserGroupId(),
         "multi-process ordering must preserve the task reorder and place durable addition before task addition");
     std::filesystem::remove_all(marker_root, remove_error);
@@ -811,96 +816,10 @@ void SeedLegacyMultiCatalogCache(
         path,
         ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 5",
+            "\"schema_version\": 6",
             "\"schema_version\": " + std::to_string(schema_version)));
 }
 
-std::string RemoveSerializedObjectMemberLine(
-    std::string contents,
-    std::string_view member_name)
-{
-    const std::string needle =
-        "\"" + std::string(member_name) + "\":";
-    const std::size_t position = contents.find(needle);
-    Require(
-        position != std::string::npos,
-        "serialized test object member is missing");
-    const std::size_t previous_newline =
-        contents.rfind('\n', position);
-    const std::size_t line_start =
-        previous_newline == std::string::npos
-            ? 0
-            : previous_newline + 1;
-    const std::size_t line_end = contents.find('\n', position);
-    Require(
-        line_end != std::string::npos,
-        "serialized test object member line is unterminated");
-    contents.erase(line_start, line_end + 1 - line_start);
-    return contents;
-}
-
-void RunMissingAllocatorHistoryFailsClosedRace(
-    const std::filesystem::path& cache_path)
-{
-    SeedMultiProcessCache(cache_path);
-    const std::filesystem::path marker_root =
-        cache_path.parent_path() /
-        (cache_path.stem().string() + "_missing_allocator_history_markers");
-    std::error_code remove_error;
-    std::filesystem::remove_all(marker_root, remove_error);
-    std::filesystem::create_directories(marker_root);
-
-    ChildProcess stale_peer = StartCatalogChild(
-        "create_view",
-        cache_path,
-        marker_root / "ready",
-        marker_root / "go",
-        marker_root / "done");
-    Require(
-        WaitForMarkerFile(marker_root / "ready", 10s),
-        "allocator-history stale peer should publish its startup snapshot");
-
-    {
-        specforge::SpectralLinesPanelController owner(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            cache_path);
-        RequireApplied(
-            owner.Submit(
-                specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-            "allocator-history owner should create view-3");
-        Require(owner.Flush(), "allocator-history owner should commit view-3");
-        RequireApplied(
-            owner.Submit(
-                specforge::CatalogUserStateIntent::DeleteUserGroupingView(
-                    "view-3")),
-            "allocator-history owner should delete view-3");
-        Require(
-            owner.Flush(),
-            "allocator-history owner should commit the view-3 reservation");
-    }
-
-    std::string missing_history = ReadFile(cache_path);
-    for (const std::string_view member_name :
-         {"next_view_sequence",
-          "next_group_sequence",
-          "reserved_view_ids",
-          "reserved_group_ids"}) {
-        missing_history = RemoveSerializedObjectMemberLine(
-            std::move(missing_history),
-            member_name);
-    }
-    WriteTextFile(cache_path, missing_history);
-    WriteMarkerFile(marker_root / "go");
-    Require(
-        WaitForCatalogChild(stale_peer, "create_view") == 2,
-        "a current-schema cache missing allocator history must reject stale create");
-    Require(
-        ReadFile(cache_path) == missing_history,
-        "missing allocator history must preserve the durable file");
-
-    std::filesystem::remove_all(marker_root, remove_error);
-}
 
 void RunExplicitSelectionRoundTripRace(
     const std::filesystem::path& cache_path)
@@ -1805,7 +1724,7 @@ void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
 
     const std::string rewritten = ReadFile(path);
     Require(
-        rewritten.find("\"schema_version\": 5") !=
+        rewritten.find("\"schema_version\": 6") !=
                 std::string::npos &&
             rewritten.find("\"name_source\"") ==
                 std::string::npos,
@@ -2332,95 +2251,49 @@ void TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation()
     RemoveTestCache(path);
 }
 
-void TestGeneratedCatalogIdsRemainMonotonicAcrossDeletionAndRestart()
+void TestGeneratedCatalogIdsSurviveDeletionAndRestart()
 {
-    const std::filesystem::path path =
-        TestCachePath("monotonic_generated_ids");
+    const auto path = TestCachePath("opaque_generated_ids");
     RemoveTestCache(path);
-
+    std::string old_view_id, old_group_id;
     {
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-            "the id fixture should create view-1");
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::AddUserGroup("view-1")),
-            "the id fixture should create group-1");
-        Require(session.Flush(), "the initial generated ids should flush");
+        specforge::SpectralLinesPanelController session(GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(), path);
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()), "create view");
+        old_view_id = FindActiveEditableView(session.View())->id;
+        Require(specforge::IsCanonicalUuidV4(old_view_id), "new view must have UUID v4 identity");
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(old_view_id)), "create group");
+        const auto snapshot = session.View();
+        for (const auto& group : FindActiveEditableView(snapshot)->groups) {
+            if (!group.is_unassigned) old_group_id = group.id;
+        }
+        Require(specforge::IsCanonicalUuidV4(old_group_id), "new group must have UUID v4 identity");
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::DuplicateGroupingView(old_view_id)), "copy view");
+        const auto copied = session.View();
+        const auto* copy = FindActiveEditableView(copied);
+        Require(copy->id != old_view_id && specforge::IsCanonicalUuidV4(copy->id), "copy must have fresh view identity");
+        for (const auto& group : copy->groups) {
+            if (!group.is_unassigned) Require(group.id != old_group_id && specforge::IsCanonicalUuidV4(group.id), "copied groups need fresh UUIDs");
+        }
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::DeleteUserGroupingView(old_view_id)), "delete original");
+        Require(session.Flush(), "flush deletion");
     }
     {
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::DeleteUserGroup(
-                    "view-1",
-                    "group-1")),
-            "the id fixture should delete group-1");
-        Require(session.Flush(), "the deleted group should flush");
+        specforge::SpectralLinesPanelController session(GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(), path);
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()), "recreate view");
+        const auto id = FindActiveEditableView(session.View())->id;
+        Require(id != old_view_id && specforge::IsCanonicalUuidV4(id), "recreated view must not reuse deleted identity");
+        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(id)), "recreate group");
+        const auto snapshot = session.View();
+        for (const auto& group : FindActiveEditableView(snapshot)->groups) {
+            if (!group.is_unassigned) Require(group.id != old_group_id && specforge::IsCanonicalUuidV4(group.id), "recreated group must not reuse deleted identity");
+        }
+        Require(session.Flush(), "flush recreated identities");
     }
-    {
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::AddUserGroup("view-1")),
-            "the recreated group should be accepted");
-        const specforge::CatalogUserStateView view_state = session.View();
-        const specforge::SpectralLineGroupingView* view =
-            FindGroupingView(view_state, "view-1");
-        Require(
-            view != nullptr && FindGroup(*view, "group-2") != nullptr,
-            "deleting and recreating a group must not reuse group-1");
-        Require(session.Flush(), "the recreated group should flush");
-    }
-    {
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::DeleteUserGroupingView(
-                    "view-1")),
-            "the id fixture should delete view-1");
-        Require(session.Flush(), "the deleted view should flush");
-    }
-    {
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::CreateUserGroupingView()),
-            "the recreated view should be accepted");
-        Require(
-            FindGroupingView(session.View(), "view-2") != nullptr,
-            "deleting and recreating a view must not reuse view-1");
-        Require(session.Flush(), "the recreated view should flush");
-    }
-
-    const specforge::CatalogUserStateCacheLoadResult loaded =
-        specforge::LoadCatalogUserStateCache(path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
-    Require(
-        state.next_view_sequence >= 3 &&
-            state.next_group_sequence >= 3 &&
-            state.reserved_view_ids.contains("view-1") &&
-            state.reserved_view_ids.contains("view-2") &&
-            state.reserved_group_ids.contains("group-1") &&
-            state.reserved_group_ids.contains("group-2"),
-        "generated identity high-water marks and durable reservations must survive restart");
+    const auto bytes = ReadFile(path);
+    Require(bytes.find("reserved_") == std::string::npos && bytes.find("next_view_sequence") == std::string::npos &&
+        bytes.find("next_group_sequence") == std::string::npos, "cache must not retain allocator history");
     RemoveTestCache(path);
 }
 
@@ -2488,7 +2361,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
             RequireApplied(
                 session.Submit(
                     specforge::CatalogUserStateIntent::AddUserGroup(
-                        "view-3")),
+                        FindActiveEditableView(session.View())->id)),
                 "child should add a group to its new view");
         } else if (operation == "delete_view_1") {
             RequireApplied(
@@ -2997,7 +2870,7 @@ void TestLegacyIdentityCorruptionFailsClosedBeforeMigration()
             SeedMultiProcessCache(path);
             std::string corrupted = ReplaceFirst(
                 ReadFile(path),
-                "\"schema_version\": 5",
+                "\"schema_version\": 6",
                 "\"schema_version\": " + std::to_string(schema_version));
             corrupted = ReplaceFirst(
                 std::move(corrupted),
@@ -3037,55 +2910,23 @@ void TestLegacyIdentityCorruptionFailsClosedBeforeMigration()
     RemoveTestCache(path);
 }
 
-void TestCurrentSchemaAllocatorHistoryCorruptionFailsClosed()
+void TestSchemaFiveMigrationDropsAllocatorHistory()
 {
-    const std::filesystem::path path =
-        TestCachePath("current_schema_allocator_history_corruption");
-    const std::vector<std::pair<std::string_view, std::string_view>> corruptions = {
-        {"\"next_view_sequence\": 3", "\"next_view_sequence\": 0"},
-        {"\"next_view_sequence\": 3", "\"next_view_sequence\": 2"},
-        {"\"reserved_view_ids\": [\"view-1\", \"view-2\"]",
-         "\"reserved_view_ids\": [\"view-1\"]"},
-        {"\"next_group_sequence\": 3", "\"next_group_sequence\": 2"},
-        {"\"reserved_group_ids\": [\"group-1\", \"group-2\"]",
-         "\"reserved_group_ids\": [\"group-1\"]"},
-        {"\"reserved_view_ids\": [\"view-1\", \"view-2\"]",
-         "\"reserved_view_ids\": [\"view-1\", \"view-2\", \"view-99\"]"},
-        {"\"reserved_view_ids\": [\"view-1\", \"view-2\"]",
-         "\"reserved_view_ids\": [\"view-1\", \"view-2\", \"view-2\"]"},
-    };
-
-    for (const auto& [needle, replacement] : corruptions) {
-        RemoveTestCache(path);
-        SeedMultiProcessCache(path);
-        const std::string corrupted = ReplaceFirst(
-            ReadFile(path),
-            needle,
-            replacement);
-        WriteTextFile(path, corrupted);
-
-        specforge::SpectralLinesPanelController session(
-            GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
-            path);
-        RequireApplied(
-            session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
-                    "h_alpha",
-                    false)),
-            "allocator-history corruption test should create a replacement attempt");
-        Require(
-            !session.Flush(),
-            "inconsistent current-schema allocator history must fail closed");
-        Require(
-            session.View().persistence.save_diagnostic_detail.find(
-                "allocator") != std::string::npos,
-            "allocator-history rejection must expose an actionable diagnostic: " +
-                session.View().persistence.save_diagnostic_detail);
-        Require(
-            ReadFile(path) == corrupted,
-            "allocator-history corruption must preserve the original latest file");
+    const auto path = TestCachePath("schema_five_opaque_migration");
+    SeedMultiProcessCacheWithReferences(path);
+    std::string legacy = ReplaceFirst(ReadFile(path), "\"schema_version\": 6", "\"schema_version\": 5");
+    legacy = ReplaceFirst(legacy, "\"active_view_id\":", "\"next_view_sequence\": 999, \"next_group_sequence\": 999, \"reserved_view_ids\": [\"view-998\"], \"reserved_group_ids\": [\"group-998\"], \"active_view_id\":");
+    WriteTextFile(path, legacy);
+    {
+        specforge::SpectralLinesPanelController session(GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(), path);
+        Require(session.Flush(), "schema five migration should preserve live state");
     }
+    const auto loaded = specforge::LoadCatalogUserStateCache(path);
+    Require(loaded.schema_version == 6 && !loaded.requires_save, "migration should write schema six");
+    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    Require(state.grouping_views.size() == 2 && state.grouping_views[1].id == "view-2", "migration preserves live view IDs");
+    Require(ReadFile(path).find("reserved_") == std::string::npos, "deleted allocator history must disappear");
     RemoveTestCache(path);
 }
 
@@ -3099,7 +2940,7 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
         SeedMultiProcessCache(path);
         std::string corrupted = ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 5",
+            "\"schema_version\": 6",
             "\"schema_version\": " + std::to_string(schema_version));
         corrupted = ReplaceFirst(
             std::move(corrupted),
@@ -3143,7 +2984,7 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
         SeedMultiProcessCache(path);
         std::string corrupted = ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 5",
+            "\"schema_version\": 6",
             "\"schema_version\": 3");
         corrupted = ReplaceFirst(
             std::move(corrupted),
@@ -3192,11 +3033,12 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
         session.Submit(
             specforge::CatalogUserStateIntent::AddUserGroup("view-2")),
         "same-task ordering test should create group-4");
+    const std::string new_group_id = NewOpaqueGroupId(session.View());
     RequireApplied(
         session.Submit(
             specforge::CatalogUserStateIntent::ReorderUserGroupBefore(
                 "view-2",
-                "group-4",
+                new_group_id,
                 "group-1")),
         "same-task ordering test should move the new group before group-1");
     Require(
@@ -3212,7 +3054,7 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
     Require(view != views.end(), "same-task ordering test should retain view-2");
     Require(
         view->groups.size() == 5 &&
-            view->groups[0].id == "group-4" &&
+            view->groups[0].id == new_group_id &&
             view->groups[1].id == "group-1" &&
             view->groups[2].id == "group-2" &&
             view->groups[3].id == "group-3" &&
@@ -3242,7 +3084,7 @@ void TestLegacyMultiCatalogMigrationFailsClosed()
                 session.View().persistence.save_diagnostic_detail.find(
                     "unrelated catalog") != std::string::npos &&
                     session.View().persistence.save_diagnostic_detail.find(
-                        "schema 5") != std::string::npos,
+                        "schema 6") != std::string::npos,
                 "legacy multi-catalog rejection must identify the unsafe schema-five migration");
         }
         Require(
@@ -3350,7 +3192,6 @@ void TestConcurrentCatalogStateReconciliation()
 
     RunCreateDeleteViewRace(path);
     RunExplicitSelectionRoundTripRace(path);
-    RunMissingAllocatorHistoryFailsClosedRace(path);
     RunCreateDeleteGroupRace(path);
 
     SeedMultiProcessCache(path);
@@ -3392,7 +3233,7 @@ void TestConcurrentCatalogStateReconciliation()
         bool found_new_view = false;
         for (const auto& view : views) {
             view_ids.insert(view.id);
-            found_new_view = found_new_view || view.id == "view-3";
+            found_new_view = found_new_view || specforge::IsCanonicalUuidV4(view.id);
             if (view.id == "view-2") {
                 view_two_group_count = view.groups.size();
             }
@@ -3666,14 +3507,14 @@ int main(int argc, char* argv[])
         TestDirtyCatalogStateFlushesDuringShutdown();
         TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta();
         TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation();
-        TestGeneratedCatalogIdsRemainMonotonicAcrossDeletionAndRestart();
+        TestGeneratedCatalogIdsSurviveDeletionAndRestart();
         TestCorruptLatestCatalogStateFailsClosed();
         TestSemanticallyInvalidLatestCatalogStateFailsClosed();
         TestEmptyLatestCatalogIdentitiesFailClosed();
         TestDuplicateLatestJsonKeysFailClosed();
         TestCurrentSchemaSemanticCorruptionFailsClosedWithoutMaintenanceRewrite();
         TestLegacyIdentityCorruptionFailsClosedBeforeMigration();
-        TestCurrentSchemaAllocatorHistoryCorruptionFailsClosed();
+        TestSchemaFiveMigrationDropsAllocatorHistory();
         TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration();
         TestSameTaskNewGroupReorderPreservesFinalOrder();
         TestLegacyMultiCatalogMigrationFailsClosed();
