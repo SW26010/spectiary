@@ -264,7 +264,7 @@ void TestBatchLoadsWorkflowCachesOnce()
                 "timed out waiting to release the batch decoders");
             return MakeSnapshot(path, index);
         },
-        &cache_loads));
+        &cache_loads), {.foreground_limit = 2});
 
     const auto ids = queue.EnqueueBatch({
         {.path = first},
@@ -401,7 +401,7 @@ void TestSourcesUseIndependentThreads()
                 canceled,
                 "timed out waiting to release the parallel decoders");
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
 
     (void)queue.Enqueue({.path = first});
     (void)queue.Enqueue({.path = second});
@@ -446,7 +446,7 @@ void TestIndividualLoadsPublishInRequestOrder()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("second individual source finished first");
-        }));
+        }), {.foreground_limit = 2});
     const std::uint64_t first_id = queue.Enqueue({.path = first});
     const std::uint64_t second_id = queue.Enqueue({.path = second});
     const bool second_started =
@@ -663,7 +663,7 @@ void TestBatchPublishesInRequestOrder()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("second source finished first");
-        }));
+        }), {.foreground_limit = 2});
     const std::vector<std::uint64_t> ids = queue.EnqueueBatch({
         {.path = first},
         {.path = second},
@@ -732,7 +732,7 @@ void TestCompletionReadyNotificationCoalescesUntilDrain()
                 second_decoder_entered_promise.set_value();
             }
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
     queue.RegisterCompletionReadyCallback([&notifications]() {
         notifications.fetch_add(1, std::memory_order_relaxed);
     });
@@ -803,7 +803,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("buffered completion should be canceled");
-        }));
+        }), {.foreground_limit = 2});
     queue.RegisterCompletionReadyCallback([&notifications]() {
         notifications.fetch_add(1, std::memory_order_relaxed);
     });
@@ -1146,7 +1146,7 @@ void TestCancelStopsOnlyItsSourceThread()
                 }
             }
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
     const std::uint64_t canceled_id = queue.Enqueue({.path = canceled_path});
     const std::uint64_t surviving_id = queue.Enqueue({.path = surviving_path});
     Require(

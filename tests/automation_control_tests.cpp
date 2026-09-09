@@ -23,6 +23,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <source_location>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -61,10 +62,15 @@ namespace {
 
 using namespace std::chrono_literals;
 
-void Require(bool condition, std::string_view message)
+void Require(
+    bool condition,
+    std::string_view message,
+    const std::source_location location = std::source_location::current())
 {
     if (!condition) {
-        std::cerr << "FAILED: " << message << '\n';
+        std::cerr << "FAILED: " << location.file_name() << ':'
+                  << location.line() << " (" << location.function_name()
+                  << "): " << message << '\n';
         std::exit(1);
     }
 }
@@ -428,19 +434,19 @@ int RunLauncherCleanupFixture(
 }
 
 specforge::AutomationServerMessage ReceiveParsed(
-    specforge::AutomationNamedPipeClient& client)
+    specforge::AutomationNamedPipeClient& client,
+    const std::source_location location = std::source_location::current())
 {
     std::string message;
     std::string error;
-    Require(
-        client.Receive(message, error),
-        error);
+    const bool received = client.Receive(message, error);
+    Require(received, error, location);
     const auto parsed =
         specforge::ParseAutomationServerMessage(
             message);
     Require(
         parsed.message.has_value(),
-        parsed.error_message);
+        parsed.error_message, location);
     return *parsed.message;
 }
 
