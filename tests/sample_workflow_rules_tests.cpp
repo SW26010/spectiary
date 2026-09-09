@@ -44,8 +44,8 @@ specforge::SampleLabelingTask MakeTask(
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), sample_count);
     if (!output_path.empty()) {
-        task.output_path = std::move(output_path);
-        task.output_format =
+        task.persistence.output_path = std::move(output_path);
+        task.persistence.output_format =
             specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     }
     return task;
@@ -242,7 +242,7 @@ void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
         "a same-path local task must not activate when sidecar task identity differs");
 
     tasks[0].task_id = metadata.task_id;
-    tasks[0].values.resize(2);
+    tasks[0].values.Complete().resize(2);
     const specforge::SampleAnnotationLabelingActivationPlan count_mismatch_plan =
         specforge::PlanSampleAnnotationLabelingActivation(
             specforge::SampleAnnotationLabelingActivationRequest{
@@ -342,7 +342,7 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
             "Canonical quality",
             3,
             path));
-    tasks[0].output_format =
+    tasks[0].persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     plan = specforge::PlanSampleAnnotationLabelingActivation(
@@ -372,7 +372,7 @@ void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
         "canonical adoption should preserve the embedded identity so the controller can report an owner conflict");
 
     tasks[0].task_id = "33333333-3333-4333-8333-333333333333";
-    tasks[0].output_path = TempPath("_different_owner.asdf");
+    tasks[0].persistence.output_path = TempPath("_different_owner.asdf");
     plan = specforge::PlanSampleAnnotationLabelingActivation(
         specforge::SampleAnnotationLabelingActivationRequest{
             .annotation = &annotation,
@@ -654,10 +654,11 @@ void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
             "structural cache placeholder",
             3,
             annotation_path));
-    tasks[0].output_format =
+    tasks[0].persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    tasks[0].values_are_authoritative = false;
+    const auto complete_values = tasks[0].values;
+    tasks[0].values.MakeSparse(tasks[0].persistence.pending_sample_indices);
 
     const specforge::SampleWorkflowSourceContext context{
         .collection = &manifest,
@@ -692,7 +693,7 @@ void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
                 std::vector<bool>({true, false, true}),
         "canonical owner filter evaluation should use the same effective projection as its view");
 
-    tasks[0].values_are_authoritative = true;
+    tasks[0].values = complete_values;
     tasks[0].task_name =
         "Canonical quality generation B";
     Require(
@@ -709,7 +710,7 @@ void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
             policy.StoreState()
                 .annotation_display_names.empty(),
         "submitting the authoritative canonical name must not persist it as a local display override");
-    tasks[0].values_are_authoritative = false;
+    tasks[0].values.MakeSparse(tasks[0].persistence.pending_sample_indices);
     manifest.annotations[0].name =
         "Canonical quality generation C";
     Require(

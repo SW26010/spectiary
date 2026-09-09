@@ -795,8 +795,8 @@ void TestSampleWorkflowMappingsAreExact()
             "状态：临时本地草稿；使用“另存为…”创建标注结果。"},
         ExpectedText{
             UiTextId::LabelSaveStateAutosaved,
-            "State: output file and metadata sidecar are saved.",
-            "状态：输出文件与元数据附属文件均已保存。"},
+            "State: ASDF labeling document is saved.",
+            "状态：ASDF 标注文档已保存。"},
         ExpectedText{
             UiTextId::LabelSaveStatePending,
             "State: output/metadata autosave is pending; close is disabled until it finishes.",
@@ -852,8 +852,8 @@ void TestSampleWorkflowMappingsAreExact()
             "必须等待输出自动保存完成，才能删除此任务。"},
         ExpectedText{
             UiTextId::UseAnnotationEditableMessage,
-            "Make \"%s\" editable in Labeling. Future autosaves will write to this annotation result and its metadata sidecar.",
-            "使“%s”可在“标注任务”中编辑。此后的自动保存将写入该标注结果及其元数据附属文件。"},
+            "Create a temporary labeling task from \"%s\". The original annotation files will be preserved.",
+            "从“%s”创建临时标注任务。原始标注文件将保留。"},
         ExpectedText{
             UiTextId::AdoptCanonicalAsdfEditableMessage,
             "Adopt the existing ASDF document \"%s\" as an editable labeling task. Future autosaves will update only this single file in place; no metadata sidecar will be created.",
@@ -863,9 +863,9 @@ void TestSampleWorkflowMappingsAreExact()
             "This edits the selected annotation result in place. Back up the file first if you need to preserve the original labels.",
             "此操作会直接修改所选标注结果。若需保留原标签，请先备份文件。"},
         ExpectedText{
-            UiTextId::MetadataSidecarWillBeCreated,
-            "No metadata sidecar is present; one will be created on save.",
-            "不存在元数据附属文件；保存时将创建。"},
+            UiTextId::ImportedTaskSaveAsHint,
+            "Choose Save As to save the new labeling task as an ASDF document.",
+            "选择“另存为”，将新的标注任务保存为 ASDF 文档。"},
         ExpectedText{UiTextId::ExistingLabelMetadataReused, "Existing label metadata will be reused.", "将复用现有标签元数据。"},
         ExpectedText{UiTextId::UseAnnotation, "Use annotation", "使用此标注"},
         ExpectedText{UiTextId::Cancel, "Cancel", "取消"},
@@ -886,6 +886,7 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::SkipLabeled, "Skip labeled", "跳过已标注样本"},
         ExpectedText{UiTextId::SaveTo, "Save to...", "另存为…"},
         ExpectedText{UiTextId::MigrateToAsdf, "Migrate to ASDF...", "迁移到 ASDF…"},
+        ExpectedText{UiTextId::LegacyLabelingMigrationRequired, "Legacy labeling data is read-only. Migrate to ASDF to continue editing; the original files will be preserved.", "旧格式标注数据为只读。请迁移到 ASDF 后继续编辑；原始文件将保留。"},
         ExpectedText{UiTextId::ExportLabels, "Export Labels", "导出标签"},
         ExpectedText{UiTextId::Labels, "Labels", "标签"},
         ExpectedText{UiTextId::AddLabel, "Add label", "添加标签"},

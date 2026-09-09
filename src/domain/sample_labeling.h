@@ -1,11 +1,13 @@
 #pragma once
 
 #include "domain/canonical_timestamp.h"
+#include "domain/sample_labeling_values.h"
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -65,6 +67,8 @@ enum class SampleLabelSaveMessageKind {
 
 enum class SampleLabelingOutputArtifactFormat {
     None,
+    // Transitional read-only import/recovery source. Never a save destination;
+    // pending schema-4 overlays are retained until explicit ASDF migration.
     LegacyNpyWithSidecar,
     CanonicalAsdf,
 };
@@ -118,15 +122,15 @@ struct SampleLabelingTaskCanonicalMetadata {
         const SampleLabelingTaskCanonicalMetadata&) const = default;
 };
 
-struct SampleLabelingTask {
-    std::string task_id;
-    std::string task_name;
-    SampleLabelingTaskCanonicalMetadata canonical_metadata;
-    SampleLabelSet label_set;
-    std::vector<int> values;
+// Local workflow preferences, never part of the canonical labeling document.
+struct SampleLabelingSessionState {
     bool auto_advance = false;
     bool skip_labeled_on_advance = false;
     std::optional<std::size_t> remembered_position;
+};
+
+// Local output ownership, write-ahead recovery and save presentation.
+struct SampleLabelingPersistenceState {
     // Formal output ownership is explicit state. A path is present exactly
     // when the format is not None; callers must not infer it from a suffix.
     std::optional<std::filesystem::path> output_path;
@@ -136,17 +140,56 @@ struct SampleLabelingTask {
     // its first canonical owner. A cache reader rolls this phase back to a
     // real temporary draft if the process exits before publication completes.
     bool initial_publication_pending = false;
-    // Runtime projection provenance; never serialized. Canonical ASDF cache
-    // records carry only sparse local state, so their placeholder values are
-    // not data-bearing until projected over the canonical document.
-    bool values_are_authoritative = true;
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;
+};
+
+struct SampleLabelingStatistics {
     // Derived, non-persisted presentation statistics. Mutations maintain these
     // incrementally; cache ingestion rebuilds them off the UI thread.
     std::unordered_map<int, std::size_t> label_usage_counts;
     std::size_t labeled_count = 0;
+};
+
+struct SampleLabelingTask;
+
+// Borrowed canonical content. Construction is restricted to complete task
+// values; no persistence/session fields or sparse placeholders are exposed.
+// The view is valid only until its task is mutated or destroyed.
+class SampleLabelingContentView {
+public:
+    const std::string& task_id;
+    const std::string& task_name;
+    const SampleLabelingTaskCanonicalMetadata& canonical_metadata;
+    const SampleLabelSet& label_set;
+    const std::span<const int> values;
+private:
+    friend struct SampleLabelingTask;
+    SampleLabelingContentView(const std::string& id, const std::string& name,
+        const SampleLabelingTaskCanonicalMetadata& metadata, const SampleLabelSet& labels,
+        std::span<const int> complete_values)
+        : task_id(id), task_name(name), canonical_metadata(metadata),
+          label_set(labels), values(complete_values) {}
+};
+
+struct SampleLabelingTask {
+    std::string task_id;
+    std::string task_name;
+    SampleLabelingTaskCanonicalMetadata canonical_metadata;
+    SampleLabelSet label_set;
+    SampleLabelingValues values;
+    SampleLabelingSessionState session;
+    SampleLabelingPersistenceState persistence;
+    SampleLabelingStatistics statistics;
+    [[nodiscard]] std::optional<SampleLabelingContentView> Content() const noexcept
+    {
+        const auto* complete = values.CompleteIfAvailable();
+        if (complete == nullptr) return std::nullopt;
+        return SampleLabelingContentView{task_id, task_name, canonical_metadata, label_set, *complete};
+    }
+
+
 };
 
 struct SampleLabelWriteResult {
@@ -209,7 +252,6 @@ void RebuildSampleLabelingTaskStatistics(
     std::size_t sample_index,
     int code);
 [[nodiscard]] SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sample_index);
-void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path);
 void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task);
 // Records a canonical semantic value mutation. modified_at is persisted with
 // the complete replacement document generation.
@@ -225,9 +267,5 @@ void MarkSampleLabelTaskSaveFailed(
     std::string message,
     SampleLabelSaveMessageKind message_kind =
         SampleLabelSaveMessageKind::SystemDetail);
-[[nodiscard]] SampleLabelOutputPublicationResult
-PublishLegacySampleLabelingTaskOutput(
-    SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source = nullptr);
 
 }  // namespace specforge

@@ -27,6 +27,7 @@ inline constexpr std::string_view
         "Automation request send deadline expired.";
 
 struct AutomationNamedPipeServerTestAccess;
+struct AutomationStateSnapshot;
 
 struct AutomationQueuedCommand {
     std::string request_id;
@@ -97,24 +98,29 @@ public:
     [[nodiscard]] AutomationControlQueueSnapshot
     queue_snapshot() const;
 
-    void Complete(
+    void Complete(const AutomationQueuedCommand& command,
+        const AutomationCommandResult& result = {});
+    [[nodiscard]] FrameCaptureFinalizationResult TryFinalizeFrameCapture(
         const AutomationQueuedCommand& command,
-        std::string_view body_members = {});
+        const AutomationCommandResult& result,
+        const FrameCapturePublishCallback& publish);
+    void CompleteState(const AutomationQueuedCommand& command,
+        const AutomationStateSnapshot& state);
     void Fail(
         const AutomationQueuedCommand& command,
         std::string_view error_code,
         std::string_view error_message);
     [[nodiscard]] AppQuitClaimResult TryBeginAppQuit(
         const AutomationQueuedCommand& quit_command);
-    [[nodiscard]] FrameCaptureFinalizationResult
-    TryFinalizeFrameCapture(
-        const AutomationQueuedCommand& command,
-        std::string_view body_members,
-        const FrameCapturePublishCallback& publish);
     [[nodiscard]] bool TryCompleteIdleWaits(
         const std::vector<std::string>& request_ids);
 
 private:
+    void CompleteSerializedBody(const AutomationQueuedCommand& command,
+        std::string_view body_members);
+    [[nodiscard]] FrameCaptureFinalizationResult FinalizeSerializedFrameCapture(
+        const AutomationQueuedCommand& command, std::string_view body_members,
+        const FrameCapturePublishCallback& publish);
     friend struct AutomationNamedPipeServerTestAccess;
 
     struct OutstandingRequest {

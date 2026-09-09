@@ -168,14 +168,10 @@ The cache should be normalized and versioned:
 ```json
 {
   "format_kind": "specforge.catalog_user_state.cache",
-  "schema_version": 5,
+  "schema_version": 6,
   "catalogs": {
     "specforge.public": {
       "active_view_id": "view-1",
-      "next_view_sequence": 2,
-      "next_group_sequence": 1,
-      "reserved_view_ids": ["view-1"],
-      "reserved_group_ids": [],
       "marker_visibility": {
         "h_alpha": true
       },
@@ -216,9 +212,13 @@ The cache should be normalized and versioned:
 
 Schema 3 introduced explicit, writer-owned generated-name provenance. Schema 4
 added the required monotonic allocator high-water marks and durable identity
-reservation sets. Schema 5 adds `marker_colors`, which stores only per-marker
+reservation sets. Schema 5 added `marker_colors`, which stores only per-marker
 `explicit-color` RGBA overrides keyed by stable marker id. An absent marker
 entry is canonical Auto state; a theme-resolved Auto color is never persisted.
+Schema 6 removes the sequence counters and reservation sets. New user views
+and ordinary groups use UUID v4 identities; existing live IDs such as `view-1`
+remain valid. Copies receive new identities, while built-in IDs remain unchanged.
+Names and display order do not expose or depend on the UUIDs.
 Generated names participate in UI localization only when a supported schema stores that
 provenance explicitly.
 
@@ -238,11 +238,12 @@ generated-name provenance. Empty, duplicate, cross-catalog, or mismatched
 legacy identities are therefore preserved as failure evidence rather than
 repaired. A legacy cache containing unrelated
 catalog or panel state entries is not safely migratable without their domain
-definitions and is therefore rejected without a partial schema-five rewrite.
-A current-schema cache missing `marker_colors` or allocator/history fields,
-with zero or insufficient high-water marks, with an uncovered persisted
-identity, with duplicate reservation entries, or with a malformed marker color
-mode/RGBA payload is invalid and is never rewritten or merged. An
+definitions and is therefore rejected without a partial schema-six rewrite.
+Schema 5 is also a migration input: its live identities, references, names,
+colors, and panel state are preserved after semantic validation; obsolete
+allocator history is discarded. A current-schema cache missing `marker_colors`,
+with duplicate live identities, or with a malformed marker color mode/RGBA
+payload is invalid and is never rewritten or merged. An
 invalid body is reported and is never rewritten merely by opening and closing
 the application.
 

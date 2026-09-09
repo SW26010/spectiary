@@ -14,7 +14,6 @@ namespace specforge {
 
 struct SampleLabelingCanonicalSourceDescriptor;
 
-struct SourceCollectionContext;
 
 inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
     "specforge.sample_labeling";
@@ -175,17 +174,12 @@ struct SampleLabelingDocumentValidationResult {
     }
 };
 
-[[nodiscard]] SampleLabelingDocument BuildSampleLabelingDocument(
-    std::string source_kind,
-    const SourceCollectionContext& source_context,
-    const SampleLabelingTask& task);
-
 // Builds a canonical owner directly from the controller's durable source
 // descriptor. This is the creation path used after source preparation has
 // released its SourceCollectionContext.
 [[nodiscard]] SampleLabelingDocument BuildSampleLabelingDocument(
     const SampleLabelingCanonicalSourceDescriptor& source,
-    const SampleLabelingTask& task);
+    const SampleLabelingContentView& task);
 
 // Builds the editable/runtime projection of one canonical document generation.
 // Canonical task metadata and values form the base; only local session state
@@ -195,9 +189,6 @@ ProjectSampleLabelingDocumentTask(
     const SampleLabelingDocument& document,
     const SampleLabelingTask& local_state,
     const std::function<void()>& cancellation_checkpoint = {});
-
-[[nodiscard]] SampleLabelingDocumentValidationResult
-ValidateSampleLabelingDocument(const SampleLabelingDocument& document);
 
 // Production codec paths use the same semantic rules without retaining an
 // attacker-controlled number of diagnostics.

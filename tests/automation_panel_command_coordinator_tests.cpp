@@ -78,12 +78,12 @@ struct Fixture {
             },
             .complete = [this](
                             const AutomationQueuedCommand& command,
-                            std::string_view body) {
+                            const specforge::AutomationCommandResult& body) {
                 active[command.request_id] = false;
                 terminals.push_back({
                     .request_id = command.request_id,
                     .status = "completed",
-                    .body = std::string(body),
+                    .body = specforge::SerializeAutomationCommandResultBody(body),
                 });
             },
             .fail = [this](

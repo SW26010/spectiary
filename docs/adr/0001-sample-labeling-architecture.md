@@ -3,12 +3,23 @@
 SpecForge models per-sample data as sample annotation results and treats storage
 formats such as NPY and CSV as annotation I/O adapters, not as the domain model.
 New formal labeling owners use the canonical SpecForge sample-labeling schema
-`2.0.0` in one ASDF document; legacy NPY owners retain their adjacent portable
-metadata sidecar. Sample labeling task records, workflow settings, autosave
+`2.0.0` in one ASDF document. Legacy NPY results and adjacent portable
+metadata sidecars are read-only compatibility inputs. Importing NPY or CSV
+creates an output-free draft; explicit Save As establishes an ASDF owner
+without rewriting the import files. Supported legacy recovery records retain
+accepted pending edits for explicit ASDF migration, with no legacy autosave.
+See [recovery compatibility](../agents/legacy-labeling-recovery-audit.md).
+Sample labeling task records, workflow settings, autosave
 state, output paths, and recovery remain local user state rather than canonical
 document fields. Annotation I/O belongs behind a domain or service boundary; UI
 code consumes loaded annotation results and save state rather than parsing
 dtype, shape, ASDF blocks, or file-write capabilities.
+
+The runtime task groups local navigation preferences in `SampleLabelingSessionState`,
+output ownership/write tracking in `SampleLabelingPersistenceState`, and derived
+counts in `SampleLabelingStatistics`. The cache codec explicitly maps these local
+groups to the existing schema; neither the ASDF document nor cache wire layout
+changes because of this C++ decomposition.
 
 `SampleLabelingController` is the single mutable owner of active tasks, drafts,
 output-save state, retry scheduling, and the labeling state cache. Callers
@@ -123,6 +134,18 @@ The complete wire-tree example and field-level validation rules live in
 [`sample_labeling.md`](../sample_labeling.md#canonical-schema-20-identity-and-provenance).
 
 ## Local persistence failure semantics
+
+The C++ runtime mirrors this ownership split. `SampleLabelingContentView`
+borrows only identity, canonical metadata, labels, and a complete value vector;
+canonical document construction accepts that view. Local session preferences,
+persistence/retry state, and derived statistics have separate state types.
+`SampleLabelingValues` holds either complete values or an explicit sparse
+overlay containing the source sample count and pending row values. An absent
+overlay row is unknown, including when an explicit pending value is `-1`.
+Sparse state cannot yield a content view. Deactivation drops complete values
+into the sparse representation; canonical projection restores complete content
+from the ASDF base before applying pending edits. This is an implementation
+boundary and changes neither schema 2.0 nor cache schema 4.
 
 Source-session, navigation, labeling, and workflow state remain four
 independently validated, independently written versioned JSON caches. Their

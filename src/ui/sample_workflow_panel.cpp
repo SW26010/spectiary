@@ -1024,6 +1024,10 @@ std::string_view SaveStateReminder(
     UiLanguage language,
     const SourceCollectionLabelingView& labeling_view)
 {
+    if (labeling_view.output_format ==
+        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
+        return UiText(language, UiTextId::LegacyLabelingMigrationRequired);
+    }
     switch (labeling_view.save_state.kind) {
     case SampleLabelSaveStateKind::InternalDraftOnly:
         return UiText(
@@ -1080,7 +1084,7 @@ SampleWorkflowAnnotationActivationText(
                 SampleAnnotationWorkflowRelationship::
                     PlainAnnotation
             ? std::optional<UiTextId>{
-                  UiTextId::MetadataSidecarWillBeCreated}
+                  UiTextId::ImportedTaskSaveAsHint}
             : std::optional<UiTextId>{
                   UiTextId::ExistingLabelMetadataReused},
     };
@@ -1351,6 +1355,11 @@ void SampleWorkflowPanelUi::RenderTaskNameEditor(
         return;
     }
     if (!labeling_view.has_active_task) {
+        return;
+    }
+    if (labeling_view.output_format == SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
+        ResetTaskNameEditState();
+        RenderText(labeling_view.task_name);
         return;
     }
 
@@ -1632,7 +1641,8 @@ void SampleWorkflowPanelUi::RenderLabeling(
             {
                 .focused = labeling_context_focused,
                 .hovered = labeling_context_hovered,
-                .labeling_enabled = latest_labeling.has_active_task,
+                .labeling_enabled = latest_labeling.has_active_task &&
+                    latest_labeling.output_format != SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
                 .blocked = blocked,
             },
             latest_labeling.label_set);
@@ -2596,14 +2606,13 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGui::TextWrapped(
             "%s",
             editable_message.c_str());
-        const std::string_view in_place_warning =
-            UiText(
-                language,
-                UiTextId::EditAnnotationInPlaceWarning);
-        ImGui::TextWrapped(
-            "%.*s",
-            static_cast<int>(in_place_warning.size()),
-            in_place_warning.data());
+        if (pending_annotation_activation_owner_format_ ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+            const std::string_view in_place_warning =
+                UiText(language, UiTextId::EditAnnotationInPlaceWarning);
+            ImGui::TextWrapped("%.*s", static_cast<int>(in_place_warning.size()),
+                               in_place_warning.data());
+        }
         if (activation_text.detail_message) {
             RenderDisabledText(
                 UiText(
@@ -2921,6 +2930,13 @@ void SampleWorkflowPanelUi::RenderLabeling(
             export_format_min.y,
             export_format_max.x,
             export_format_max.y};
+    }
+
+    if (labeling_view.output_format == SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
+        RenderDisabledText(UiText(language, UiTextId::LegacyLabelingMigrationRequired));
+        route_latest_labeling_shortcuts(true);
+        ImGui::End();
+        return;
     }
 
     bool block_shortcuts_this_frame = label_shortcut_capture_active_;

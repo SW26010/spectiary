@@ -322,6 +322,26 @@ void TestUtf8AndEveryByteLimitAreEnforced()
 
 void TestWriterRejectsInvalidUtf8BeforeWritingRecord()
 {
+    for (const std::string text : {"", "ASCII", "\xc2\xa2\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
+        std::ostringstream output;
+        specforge::BoundedCsvRecordWriter writer(output);
+        Require(writer.WriteRecord(specforge::CsvRecord{text}).succeeded(), "valid UTF-8 should serialize");
+        std::istringstream input(output.str());
+        specforge::BoundedCsvRecordReader reader(input);
+        const auto result = reader.ReadRecord();
+        Require(result.has_record() && result.record == specforge::CsvRecord{text},
+                "empty, ASCII and multibyte fields should round-trip");
+    }
+    for (const std::string text : {"\xc3", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
+        std::ostringstream output;
+        specforge::BoundedCsvRecordWriter writer(output);
+        Require(writer.WriteRecord(specforge::CsvRecord{text}).error.kind == specforge::CsvRecordErrorKind::InvalidUtf8 && output.str().empty(),
+                "invalid Unicode sequences should fail before CSV output");
+        std::istringstream input(text + "\n");
+        specforge::BoundedCsvRecordReader reader(input);
+        Require(reader.ReadRecord().error.kind == specforge::CsvRecordErrorKind::InvalidUtf8,
+                "CSV input should reject truncated, overlong, surrogate and out-of-range sequences");
+    }
     std::ostringstream output;
     specforge::BoundedCsvRecordWriter writer(output);
     const specforge::CsvRecord record{std::string("\xc3\x28", 2)};

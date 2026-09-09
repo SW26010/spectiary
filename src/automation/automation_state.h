@@ -94,9 +94,6 @@ struct AutomationStateSnapshot {
     AutomationRuntimeState runtime;
 };
 
-[[nodiscard]] std::string SerializeAutomationStateBody(
-    const AutomationStateSnapshot& state);
-
 // Publishes the terminal profile.stop response after the production sink has
 // completed its asynchronous drain and final flush.
 void CompleteAutomationProfileStopTerminal(

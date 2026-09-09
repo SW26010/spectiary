@@ -278,8 +278,6 @@ private:
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;
-    std::uint64_t next_view_sequence_ = 1;
-    std::uint64_t next_group_sequence_ = 1;
     // Canonicalization may change active_view_id after a deletion without
     // representing a user selection. Keep task provenance separate from the
     // durable scalar so stale fallback cannot win a real peer selection.

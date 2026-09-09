@@ -15,6 +15,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <system_error>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -262,7 +264,7 @@ void TestBatchLoadsWorkflowCachesOnce()
                 "timed out waiting to release the batch decoders");
             return MakeSnapshot(path, index);
         },
-        &cache_loads));
+        &cache_loads), {.foreground_limit = 2});
 
     const auto ids = queue.EnqueueBatch({
         {.path = first},
@@ -280,6 +282,91 @@ void TestBatchLoadsWorkflowCachesOnce()
     Require(cache_loads.load() == 1, "one restore batch should share one immutable cache snapshot");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
+}
+
+void TestLargeQueuesBoundExecutionAndPreserveOrder()
+{
+    constexpr std::size_t count = 64;
+    constexpr std::size_t canceled_index = 30;
+    for (const bool batch : {false, true}) {
+        const auto path = UniqueTempPath(batch ? "_bounded_batch.csv" : "_bounded_ordered.csv");
+        WriteFixture(path);
+        std::atomic_bool release_workers = false, release_first = false;
+        std::atomic_int active = 0, peak = 0, decoded = 0, starts = 0;
+        std::mutex ids_mutex;
+        std::unordered_set<std::thread::id> thread_ids;
+        auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
+            Dependencies([&](const auto& source, std::size_t index, const auto& canceled) {
+                const int running = ++active;
+                int previous = peak.load();
+                while (previous < running && !peak.compare_exchange_weak(previous, running)) {}
+                struct Exit { std::atomic_int& value; ~Exit() { --value; } } exit{active};
+                ++decoded;
+                {
+                    std::lock_guard lock(ids_mutex);
+                    thread_ids.insert(std::this_thread::get_id());
+                }
+                Require(index != canceled_index, "a canceled queued request must never enter decoding");
+                while ((!release_workers.load() || (index == 0 && !release_first.load())) && !canceled()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                return MakeSnapshot(source, index, count);
+            }),
+            {.foreground_limit = 2, .before_worker_start = [&]() { ++starts; }});
+        std::vector<specforge::SourceCollectionLoadRequest> requests;
+        for (std::size_t index = 0; index < count; ++index) {
+            requests.push_back({.path = path, .spectrum_index = index});
+        }
+        std::vector<std::uint64_t> ids;
+        if (batch) ids = queue.EnqueueBatch(std::move(requests));
+        else for (auto& request : requests) ids.push_back(queue.Enqueue(std::move(request)));
+        Require(WaitUntil([&]() { return active == 2; }), "two workers must begin the large queue");
+        Require(queue.ActivitySnapshot().worker_count == 2 && starts == 2,
+            "large admission must create only the configured workers");
+        Require(queue.Cancel(ids[canceled_index]), "queued task cancellation must be accepted independently");
+        release_workers = true;
+        Require(WaitUntil([&]() { return decoded == static_cast<int>(count - 1); }),
+            "an available worker must drain later requests while the first is blocked");
+        Require(queue.TakeCompleted().empty(), "later completions must stay behind the first request");
+        release_first = true;
+        const auto completed = WaitForCompletions(queue, count - 1);
+        std::size_t result_index = 0;
+        for (std::size_t index = 0; index < count; ++index) {
+            if (index == canceled_index) continue;
+            Require(completed[result_index].task_id == ids[index] && completed[result_index].prepared.has_value(),
+                "bounded execution must retain request order and successful content");
+            ++result_index;
+        }
+        Require(peak <= 2 && starts == 2, "execution and thread creation must stay bounded across the whole queue");
+        {
+            std::lock_guard lock(ids_mutex);
+            Require(thread_ids.size() == 2, "workers must be reused across requests");
+        }
+        Require(WaitUntil([&]() { (void)queue.TakeCompleted(); return queue.ActivitySnapshot().worker_count == 0; }),
+            "idle workers must exit and remain reapable");
+        std::filesystem::remove(path);
+    }
+}
+
+void TestWorkerStartFailureCompletesWithoutStrandingQueue()
+{
+    const auto path = UniqueTempPath("_admission_failure.csv");
+    WriteFixture(path);
+    int starts = 0;
+    auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
+        Dependencies([](const auto& source, std::size_t index, const auto&) { return MakeSnapshot(source, index); }),
+        {.foreground_limit = 1, .before_worker_start = [&]() {
+            if (++starts == 1) throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+        }});
+    const auto ids = queue.EnqueueBatch({{.path = path}, {.path = path}, {.path = path}});
+    const auto completed = WaitForCompletions(queue, 3);
+    Require(completed[0].task_id == ids[0] && !completed[0].prepared && !completed[0].error_message.empty(),
+        "thread start failure must produce one ordered task failure");
+    Require(completed[1].task_id == ids[1] && completed[1].prepared &&
+        completed[2].task_id == ids[2] && completed[2].prepared,
+        "admission failure must not strand later requests");
+    Require(WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }), "failed admission must not leak active queue state");
+    std::filesystem::remove(path);
 }
 
 void TestSourcesUseIndependentThreads()
@@ -314,7 +401,7 @@ void TestSourcesUseIndependentThreads()
                 canceled,
                 "timed out waiting to release the parallel decoders");
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
 
     (void)queue.Enqueue({.path = first});
     (void)queue.Enqueue({.path = second});
@@ -359,7 +446,7 @@ void TestIndividualLoadsPublishInRequestOrder()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("second individual source finished first");
-        }));
+        }), {.foreground_limit = 2});
     const std::uint64_t first_id = queue.Enqueue({.path = first});
     const std::uint64_t second_id = queue.Enqueue({.path = second});
     const bool second_started =
@@ -450,7 +537,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
                         std::memory_order_relaxed);
                 }
                 return MakeSnapshot(path, index);
-            }));
+            }), {.foreground_limit = 1});
     const std::uint64_t prefetch_id =
         queue.EnqueuePrefetch({
             .path = prefetch_path,
@@ -495,7 +582,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
         });
     Require(
         WaitUntil([&queue]() {
-            return !queue.NeedsService();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService();
         }),
         "canceled prefetch should reach a terminal state");
 
@@ -576,7 +663,7 @@ void TestBatchPublishesInRequestOrder()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("second source finished first");
-        }));
+        }), {.foreground_limit = 2});
     const std::vector<std::uint64_t> ids = queue.EnqueueBatch({
         {.path = first},
         {.path = second},
@@ -645,7 +732,7 @@ void TestCompletionReadyNotificationCoalescesUntilDrain()
                 second_decoder_entered_promise.set_value();
             }
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
     queue.RegisterCompletionReadyCallback([&notifications]() {
         notifications.fetch_add(1, std::memory_order_relaxed);
     });
@@ -716,7 +803,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
             }
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("buffered completion should be canceled");
-        }));
+        }), {.foreground_limit = 2});
     queue.RegisterCompletionReadyCallback([&notifications]() {
         notifications.fetch_add(1, std::memory_order_relaxed);
     });
@@ -743,7 +830,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
             return notifications.load(std::memory_order_relaxed) == 1;
         }),
         "retiring a canceled buffered result must not add an activatable notification");
-    Require(!queue.NeedsService(), "a canceled buffered completion should leave no queued result");
+    Require(WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }), "a canceled buffered completion should leave no queued result");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
 }
@@ -781,7 +868,7 @@ void TestCancelSuppressesCompletion()
         "activity snapshot should expose the live source worker");
     queue.Cancel(task_id);
     Require(
-        WaitUntil([&]() { return !queue.NeedsService(); }),
+        WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }),
         "canceled worker should reach a terminal state");
     Require(queue.TakeCompleted().empty(), "canceled task should not publish a stale result");
     Require(
@@ -867,7 +954,7 @@ void TestCanceledWorkerRemainsNonIdleUntilItRetires()
     release_promise.set_value();
     Require(
         WaitUntil([&]() {
-            return !queue.NeedsService();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService();
         }),
         "the canceled source worker should become idle after controlled retirement");
     Require(
@@ -936,7 +1023,7 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
         "the checkpointed resident request should remain cancelable");
     Require(
         WaitUntil([&queue]() {
-            (void)queue.TakeCompleted();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion");
             return !queue.NeedsService();
         }),
         "the canceled checkpointed request should terminate");
@@ -1059,7 +1146,7 @@ void TestCancelStopsOnlyItsSourceThread()
                 }
             }
             return MakeSnapshot(path, index);
-        }));
+        }), {.foreground_limit = 2});
     const std::uint64_t canceled_id = queue.Enqueue({.path = canceled_path});
     const std::uint64_t surviving_id = queue.Enqueue({.path = surviving_path});
     Require(
@@ -1123,15 +1210,18 @@ void TestDestructionStopsEverySourceThread()
                 }
                 ++canceled_decoders;
                 return MakeSnapshot(path, index);
-            }));
-        (void)queue.Enqueue({.path = first});
-        (void)queue.Enqueue({.path = second});
+            }), {.foreground_limit = 2});
+        std::vector<specforge::SourceCollectionLoadRequest> requests;
+        for (int index = 0; index < 64; ++index) {
+            requests.push_back({.path = index % 2 == 0 ? first : second});
+        }
+        (void)queue.EnqueueBatch(std::move(requests));
         Require(
             both_decoders_entered.wait_for(2s) == std::future_status::ready,
-            "shutdown test should start every source thread");
+            "shutdown test should fill both bounded worker slots");
     }
 
-    Require(canceled_decoders.load() == 2, "queue destruction should stop and join every source thread");
+    Require(canceled_decoders.load() == 2 && decoder_entries == 2, "destruction must cancel running decoders and discard queued requests without decoding");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
 }
@@ -1183,6 +1273,8 @@ int main()
         TestEnqueueReturnsBeforeLoaderCompletes();
         TestBatchLoadsWorkflowCachesOnce();
         TestSourcesUseIndependentThreads();
+        TestLargeQueuesBoundExecutionAndPreserveOrder();
+        TestWorkerStartFailureCompletesWithoutStrandingQueue();
         TestIndividualLoadsPublishInRequestOrder();
         TestPrefetchNeverBlocksForegroundPublication();
         TestBatchPublishesInRequestOrder();

@@ -6,6 +6,7 @@
 #include "automation/automation_startup.h"
 #include "automation/automation_state.h"
 #include "platform/win32_text.h"
+#include "domain/utf8.h"
 #include "platform/win32_window.h"
 
 #include <Windows.h>
@@ -22,6 +23,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <source_location>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -60,10 +62,15 @@ namespace {
 
 using namespace std::chrono_literals;
 
-void Require(bool condition, std::string_view message)
+void Require(
+    bool condition,
+    std::string_view message,
+    const std::source_location location = std::source_location::current())
 {
     if (!condition) {
-        std::cerr << "FAILED: " << message << '\n';
+        std::cerr << "FAILED: " << location.file_name() << ':'
+                  << location.line() << " (" << location.function_name()
+                  << "): " << message << '\n';
         std::exit(1);
     }
 }
@@ -427,19 +434,19 @@ int RunLauncherCleanupFixture(
 }
 
 specforge::AutomationServerMessage ReceiveParsed(
-    specforge::AutomationNamedPipeClient& client)
+    specforge::AutomationNamedPipeClient& client,
+    const std::source_location location = std::source_location::current())
 {
     std::string message;
     std::string error;
-    Require(
-        client.Receive(message, error),
-        error);
+    const bool received = client.Receive(message, error);
+    Require(received, error, location);
     const auto parsed =
         specforge::ParseAutomationServerMessage(
             message);
     Require(
         parsed.message.has_value(),
-        parsed.error_message);
+        parsed.error_message, location);
     return *parsed.message;
 }
 
@@ -517,6 +524,68 @@ const specforge::JsonValue& RequireObjectMember(
                 specforge::JsonValue::Kind::Object,
         "expected JSON object member");
     return *member;
+}
+
+void TestTypedCommandResultProtocol()
+{
+    using namespace specforge;
+    Require(SerializeAutomationTerminalResponse("r", AutomationCommandKind::SettingGet, "completed",
+                AutomationCommandResult{AutomationSettingResult{"a\"b", std::string{"x\n\\y"}, std::nullopt}}) ==
+            R"({"type":"response","request_id":"r","command":"setting.get","status":"completed","result":{"name":"a\"b","value":"x\n\\y"}})",
+        "typed setting result must preserve the complete wire shape and escape string values");
+    Require(SerializeAutomationCommandResultBody(AutomationSettingResult{"ui.scale", 100, false}) ==
+            R"("result":{"name":"ui.scale","value":100,"changed":false})",
+        "false changed and integer setting values must remain present");
+    Require(SerializeAutomationCommandResultBody(AutomationPanelResult{"files", false, false, 0}) ==
+            R"("result":{"name":"files","visible":false,"changed":false,"frame_index":0})",
+        "panel optional false and zero fields must remain present");
+    Require(SerializeAutomationCommandResultBody(AutomationPanelResult{"files", true}) ==
+            R"("result":{"name":"files","visible":true})",
+        "panel get must omit mutation and frame fields");
+    Require(SerializeAutomationCommandResultBody(AutomationSourceOpenResult{"s", "C:\\data", 3, {0, "first"}}) ==
+            R"("result":{"source":{"id":"s","path":"C:\\data","spectrum_count":3},"current_spectrum":{"index":0,"name":"first"}})",
+        "source open must preserve nested source and current spectrum fields");
+    Require(SerializeAutomationCommandResultBody(AutomationSpectrumGotoResult{"s", {2, "last"}, true}) ==
+            R"("result":{"source_id":"s","spectrum":{"index":2,"name":"last"},"changed":true})",
+        "navigation must preserve its complete result shape");
+    AutomationLabelAssignResult assignment{"s", "t", {0, "first"}, -1, 5, true,
+        {true, true, true, true, false, true}, std::nullopt};
+    Require(SerializeAutomationCommandResultBody(assignment) ==
+            R"("result":{"assignment":{"source_id":"s","task_id":"t","spectrum":{"index":0,"name":"first"},"previous_code":-1,"new_code":5,"changed":true},"persistence":{"status":"output_retry_scheduled","state_save_scheduled":true,"state_save_attempted":true,"state_saved":true,"output_save_attempted":true,"output_saved":false,"output_retry_scheduled":true},"current_spectrum_after":{"present":false}})",
+        "label result must preserve persistence priority and omit an absent spectrum's identity");
+    assignment.current_spectrum_after = AutomationResultSpectrum{1, "next"};
+    assignment.persistence.output_saved = true;
+    const auto saved = SerializeAutomationCommandResultBody(assignment);
+    Require(saved.find(R"("status":"output_saved")") != std::string::npos &&
+            saved.find(R"("current_spectrum_after":{"present":true,"index":1,"name":"next"})") != std::string::npos,
+        "successful output persistence and present spectrum must serialize explicitly");
+    const std::pair<AutomationPersistenceResult, std::string_view> persistence_cases[] = {
+        {{}, "unchanged"},
+        {{true, false, false, false, false, false}, "state_save_scheduled"},
+        {{true, true, true, false, false, false}, "state_saved"},
+        {{true, true, true, true, false, false}, "output_save_failed"},
+        {{true, true, true, true, false, true}, "output_retry_scheduled"},
+        {{true, true, true, true, true, false}, "output_saved"},
+    };
+    for (const auto& [facts, status] : persistence_cases) {
+        assignment.persistence = facts;
+        Require(SerializeAutomationCommandResultBody(assignment).find(
+            "\"status\":\"" + std::string(status) + '"') != std::string::npos,
+            "each persistence outcome must preserve its established wire status");
+    }
+    Require(SerializeAutomationCommandResultBody(AutomationFrameCaptureResult{"frame.png", 7, 800, 600}) ==
+            R"("result":{"path":"frame.png","format":"png","scope":"main_viewport","frame_index":7,"width":800,"height":600})",
+        "capture protocol constants and dimensions must retain their wire shape");
+    Require(SerializeAutomationCommandResultBody(AutomationProfileStartResult{"trace.jsonl"}) ==
+            R"("result":{"status":"recording","path":"trace.jsonl"})",
+        "profile start must retain recording status");
+    Require(SerializeAutomationCommandResultBody(AutomationProfileStopResult{
+                "trace.jsonl", ProfileSink::StopReason::None, 3}) ==
+            R"("result":{"status":"succeeded","path":"trace.jsonl","stop_reason":"none","dropped_events":3})",
+        "profile stop serializer must preserve supplied facts; terminal policy chooses success separately");
+    Require(SerializeAutomationCommandResultBody(AutomationCancellationResult{"cancel", "a\nb"}) ==
+            R"("error":{"code":"cancel","message":"a\nb"})",
+        "cancellation must escape structured error facts");
 }
 
 void TestProtocolAndStableState()
@@ -798,6 +867,25 @@ void TestProtocolAndStableState()
             invalid_id.error_code ==
                 "invalid_request_id",
         "request IDs outside the bounded ASCII contract should fail");
+    for (const std::string text : {"", "ASCII", "\xc2\xa2\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
+        const auto parsed = specforge::ParseAutomationServerMessage(
+            specforge::SerializeAutomationFailureResponse("utf8", "state.get", "test", text));
+        Require(parsed.message && parsed.message->error_message == text,
+                "server text should preserve empty, ASCII and multibyte UTF-8");
+        Require(specforge::ParseAutomationClientMessage(
+                    specforge::SerializeAutomationHelloRequest("utf8", text)).error_code != "invalid_utf8",
+                "valid client UTF-8 should reach protocol validation");
+    }
+    for (const std::string text : {"\xc3", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
+        const std::string json = "{\"text\":\"" + text + "\"}";
+        Require(specforge::ParseAutomationClientMessage(json).error_code == "invalid_utf8",
+                "client should reject truncated, overlong, surrogate and out-of-range UTF-8");
+        Require(!specforge::ParseAutomationServerMessage(json).message,
+                "server should reject malformed UTF-8");
+    }
+    Require(specforge::ParseAutomationClientMessage("").error_code == "invalid_json" &&
+                !specforge::ParseAutomationServerMessage("").message,
+            "empty protocol documents remain invalid");
     const std::string invalid_utf8 =
         std::string(
             "{\"type\":\"hello\",\"request_id\":\"x\",\"nonce\":\"") +
@@ -813,9 +901,9 @@ void TestProtocolAndStableState()
     Require(
         unicode_command ==
                 "source open C:\\数据\\光谱" &&
-            specforge::IsWellFormedUtf8(
+            specforge::IsValidUtf8(
                 unicode_command) &&
-            !specforge::IsWellFormedUtf8(
+            !specforge::IsValidUtf8(
                 std::string_view(
                     invalid_utf8.data() +
                         invalid_utf8.find(
@@ -1828,9 +1916,8 @@ void TestSingleClientQueueAndLifecycle()
     Require(
         commands.size() == 1,
         "duplicate request must not enter the UI queue");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{}");
+    fixture.server.CompleteState(
+        commands.front(), specforge::AutomationStateSnapshot{});
     Require(
         ReceiveParsed(client).status ==
             "completed",
@@ -2367,13 +2454,9 @@ void TestOversizedTerminalResponseIsBounded()
     Require(
         commands.size() == 1,
         "oversized response fixture should dequeue state.get");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{\"source\":{\"path\":\"" +
-            std::string(
-                specforge::kAutomationMaxMessageBytes,
-                'x') +
-            "\"}}");
+    specforge::AutomationStateSnapshot oversized_state;
+    oversized_state.shell.current_source_path = std::string(specforge::kAutomationMaxMessageBytes, 'x');
+    fixture.server.CompleteState(commands.front(), oversized_state);
 
     const auto bounded = ReceiveParsed(client);
     Require(
@@ -2395,9 +2478,8 @@ void TestOversizedTerminalResponseIsBounded()
     Require(
         commands.size() == 1,
         "the post-oversize request should still reach the UI queue");
-    fixture.server.Complete(
-        commands.front(),
-        "\"state\":{}");
+    fixture.server.CompleteState(
+        commands.front(), specforge::AutomationStateSnapshot{});
     const auto completed = ReceiveParsed(client);
     Require(
         completed.request_id ==
@@ -2447,7 +2529,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "setting.set should enter the synchronized mutation claim");
         setting_fixture.server.Complete(
             setting_commands.front(),
-            "\"result\":{}");
+            specforge::AutomationCommandResult{});
         Require(
             ReceiveParsed(setting_client).status ==
                 "completed",
@@ -2492,7 +2574,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "panel.set should enter the synchronized mutation claim");
         panel_fixture.server.Complete(
             panel_commands.front(),
-            "\"result\":{}");
+            specforge::AutomationCommandResult{});
         Require(
             ReceiveParsed(panel_client).status ==
                 "completed",
@@ -2580,7 +2662,7 @@ void TestExecutionClaimsAndQuitBarrier()
 
     fixture.server.Complete(
         *label,
-        "\"result\":{}");
+        specforge::AutomationCommandResult{});
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
             specforge::AutomationNamedPipeServer::
@@ -2921,7 +3003,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     completed_command,
-                    "\"result\":{}",
+                    specforge::AutomationCommandResult{},
                     []() {
                         return S_OK;
                     });
@@ -2943,7 +3025,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     failed_command,
-                    "\"result\":{}",
+                    specforge::AutomationCommandResult{},
                     []() {
                         return HRESULT_FROM_WIN32(
                             ERROR_FILE_EXISTS);
@@ -3009,7 +3091,7 @@ void TestFrameCaptureFinalizationLease()
                 lease_first_fixture.server
                     .TryFinalizeFrameCapture(
                         lease_first_commands.front(),
-                        "\"result\":{}",
+                        specforge::AutomationCommandResult{},
                         [&]() {
                             ++publish_count;
                             publish_entered = true;
@@ -3120,7 +3202,7 @@ void TestFrameCaptureFinalizationLease()
         finalization =
             fixture.server.TryFinalizeFrameCapture(
                 commands.front(),
-                "\"result\":{}",
+                specforge::AutomationCommandResult{},
                 [&]() {
                     publish_called = true;
                     return S_OK;
@@ -3249,6 +3331,7 @@ int wmain(int argc, wchar_t** argv)
             *fixture_mode);
     }
 
+    TestTypedCommandResultProtocol();
     TestProtocolAndStableState();
     TestStartupAndNoActivationContract();
     TestProfileOutputCreationIsHandleBoundToAutomationRoot();

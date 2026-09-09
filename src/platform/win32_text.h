@@ -86,11 +86,4 @@ namespace specforge {
     return converted;
 }
 
-[[nodiscard]] inline bool IsWellFormedUtf8(
-    std::string_view value)
-{
-    return value.empty() ||
-           !Utf8ToWide(value).empty();
-}
-
 }  // namespace specforge

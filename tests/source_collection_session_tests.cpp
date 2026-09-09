@@ -1,3 +1,4 @@
+#include "legacy_annotation_fixture_io.h"
 #include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
@@ -239,10 +240,10 @@ void SaveLabelResultFixture(
 {
     specforge::SampleLabelingTask task =
         specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), values.size());
-    task.values = std::move(values);
+    task.values.Complete() = std::move(values);
     task.label_set = std::move(label_set);
     std::string error;
-    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::test_support::LegacyFixtureIo adapter;
     Require(
         adapter.SaveLabelArray(path, task, &error),
         error.empty() ? "label result fixture NPY should save" : error);
@@ -3426,7 +3427,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
     const std::filesystem::path csv_export_path =
         UniqueTempPath("_export_labels.csv");
     const std::filesystem::path sidecar_path =
-        specforge::SampleAnnotationIoAdapter::
+        specforge::test_support::LegacyFixtureIo::
             MetadataPathForResult(export_path);
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(
@@ -3472,7 +3473,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
     std::string load_error;
     const std::optional<specforge::LoadedSampleLabelResult>
         exported =
-            specforge::SampleAnnotationIoAdapter{}
+            specforge::test_support::LegacyFixtureIo{}
                 .LoadLabelResult(
                     export_path,
                     3,
@@ -3800,9 +3801,9 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
             "55555555-5555-4555-8555-555555555555",
             "Formal task",
             3);
-    formal_task.output_path =
+    formal_task.persistence.output_path =
         UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
-    formal_task.output_format =
+    formal_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingSourceState source_state;
     source_state.sample_count = 3;
@@ -4586,6 +4587,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     const std::filesystem::path navigation_cache =
         UniqueTempPath("_quality_navigation.json");
     const std::filesystem::path labeling_cache =
@@ -4640,10 +4642,12 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     Require(session.View().labeling.has_active_task, "annotation activation should create an active task");
     Require(session.View().labeling.task_name == "Quality review", "annotation metadata task name should be reused");
     Require(session.View().labeling.current_code == 5, "labeling task should reuse annotation values");
-    Require(session.View().labeling.output_path && *session.View().labeling.output_path == annotation_path, "task should bind output path");
-    Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
-        "metadata-backed annotation activation should be clean");
+    Require(!session.View().labeling.output_path && session.View().labeling.active_task_is_temporary,
+        "legacy annotation import should create an output-free draft");
+    (void)Submit(session, RemoveReadOnlyAnnotation(annotation_path));
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+    Require(session.View().labeling.output_path == output_path,
+        "explicit Save As should establish a canonical owner");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
@@ -4651,7 +4655,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     const std::string labeling_filter_source_id =
         "labeling:" + session.View().labeling.task_id;
 
-    result = Submit(session, RemoveReadOnlyAnnotation(annotation_path));
+    result = Submit(session, RemoveReadOnlyAnnotation(output_path));
     Require(!result.action.workflow_changed, "removing an annotation should not delete the local task");
     Require(session.View().navigation.current_annotations.size() == 1, "local task should remain visible after annotation removal");
     Require(
@@ -4664,6 +4668,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         Submit(session, DeactivateActiveLabelingTask())
             .action.workflow_changed,
         "the synthetic local task should pause before its output is removed externally");
+    (void)Submit(session, AddReadOnlyAnnotation(output_path));
     Require(
         Submit(
             session,
@@ -4685,14 +4690,14 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     std::error_code remove_error;
     Require(
         std::filesystem::remove(
-            annotation_path,
+            output_path,
             remove_error) &&
             !remove_error,
         "the local task fixture should simulate external output removal");
 
     result = Submit(
         session,
-        RemoveReadOnlyAnnotation(annotation_path));
+        RemoveReadOnlyAnnotation(output_path));
     const specforge::SourceCollectionSessionView abandoned_view =
         session.View();
     Require(
@@ -4830,26 +4835,26 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
     Require(session.View().labeling.label_set.labels[0].code == 5, "plain annotation labels should include value 5");
     Require(session.View().labeling.label_set.labels[1].code == 7, "plain annotation labels should include value 7");
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
-        "plain annotation activation should write its new metadata sidecar");
+        session.View().labeling.active_task_is_temporary && !session.View().labeling.output_path,
+        "plain annotation activation should create an output-free draft");
     Require(
-        std::filesystem::exists(
-            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path)),
-        "plain annotation activation should create metadata sidecar");
+        !std::filesystem::exists(
+            specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
+        "plain annotation activation must not create a metadata sidecar");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
-        "plain annotation should become local after activation");
+            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+        "draft import must not claim ownership of its plain annotation source");
 }
 
-void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
+void TestLegacyImportCanSaveAsCanonicalAsdf()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_migration_source.npy");
     const std::filesystem::path legacy_path =
         UniqueTempPath("_migration_labels.npy");
     const std::filesystem::path metadata_path =
-        specforge::SampleAnnotationIoAdapter::
+        specforge::test_support::LegacyFixtureIo::
             MetadataPathForResult(legacy_path);
     const std::filesystem::path canonical_path =
         UniqueTempPath("_migration_labels.asdf");
@@ -4891,7 +4896,7 @@ void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
     const std::string promoted_task_id =
         session.View().labeling.task_id;
     Require(
-        session.View().labeling.output_path == legacy_path &&
+        !session.View().labeling.output_path &&
             specforge::IsCanonicalUuidV4(promoted_task_id) &&
             promoted_task_id != "session-legacy-task" &&
             session.View().labeling.task_name ==
@@ -4900,8 +4905,8 @@ void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
     const std::string promoted_metadata_bytes =
         ReadBinaryFile(metadata_path);
     Require(
-        promoted_metadata_bytes != metadata_bytes,
-        "legacy promotion should replace stale sidecar identity metadata");
+        promoted_metadata_bytes == metadata_bytes,
+        "legacy import must preserve original sidecar identity metadata");
 
     const specforge::SourceCollectionSessionResult migrated =
         Submit(
@@ -4949,7 +4954,7 @@ void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
         "successful migration should attach the new canonical owner to the current source session");
 }
 
-void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
+void TestImportedDraftDoesNotRequireMetadataSidecar()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_missing_metadata.npy");
@@ -4968,27 +4973,25 @@ void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
     specforge::SourceCollectionSessionResult result =
         Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(session.View().labeling.has_active_task, "plain annotation should become a local task");
-    Require(
-        std::filesystem::exists(
-            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path)),
-        "test should start with a converted metadata sidecar");
-
-    std::filesystem::remove(
-        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path));
+    Require(!session.View().labeling.output_path,
+        "imported draft must remain independent of the original annotation");
+    Require(!std::filesystem::exists(
+        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
+        "import must not create a sidecar");
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(
         session.View().navigation.current_annotations.size() == 1,
         "same loaded output path should render as one annotation row");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
-        "loaded output path owned by a local task should stay local when metadata is missing");
+            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+        "reloading the original annotation should leave it read-only and independent");
     Require(
-        session.View().navigation.current_annotations[0].metadata_missing,
-        "missing local metadata sidecar should be surfaced in the annotation row");
+        !session.View().navigation.current_annotations[0].metadata_missing,
+        "plain annotation must not report missing owner metadata");
     Require(
-        session.View().navigation.current_annotations[0].display_text == "7 (7)",
-        "local task values should drive the row after missing metadata fallback");
+        session.View().navigation.current_annotations[0].display_text == "7",
+        "original annotation values should drive the independent row");
 }
 
 void TestAnnotationLocalMatchRequiresSidecarTaskId()
@@ -5016,10 +5019,10 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
             "66666666-6666-4666-8666-666666666666",
             "Local task",
             2);
-    local_task.output_path = annotation_path;
-    local_task.output_format =
+    local_task.persistence.output_path = annotation_path;
+    local_task.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    local_task.values = {5, -1};
+    local_task.values.Complete() = {5, -1};
 
     specforge::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
@@ -5245,12 +5248,12 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             source->second.tasks.size() == 1 &&
             source->second.tasks[0].task_id ==
                 "33333333-3333-4333-8333-333333333333" &&
-            source->second.tasks[0].output_path == annotation_path &&
-            source->second.tasks[0].output_format ==
+            source->second.tasks[0].persistence.output_path == annotation_path &&
+            source->second.tasks[0].persistence.output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             !source->second.tasks[0]
-                 .values_are_authoritative,
+                 .values.IsComplete(),
         "adoption should persist one canonical local owner record without creating a legacy owner");
 
     result = Submit(
@@ -5641,7 +5644,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
             relinked_source != relinked_cache.cache.sources.end() &&
             relinked_source->second.tasks.size() == 1 &&
-            relinked_source->second.tasks.front().output_path ==
+            relinked_source->second.tasks.front().persistence.output_path ==
                 moved_path,
         "automatic relink should durably replace the missing owner path");
 
@@ -5812,13 +5815,13 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     cached.label_set.labels = {
         {99, "stale cache label", 's'},
     };
-    cached.values[1] = 9;
-    cached.pending_sample_indices.insert(1);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.values.Complete()[1] = 9;
+    cached.persistence.pending_sample_indices.insert(1);
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    cached.save_state.kind =
+    cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
 
     specforge::SampleLabelingSourceState source_state;
@@ -6320,8 +6323,8 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
             "33333333-3333-4333-8333-333333333333",
             "structural cache owner",
             3);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     specforge::SampleLabelingSourceState source_state;
@@ -6494,13 +6497,13 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
             3);
     cached.canonical_metadata =
         document.labeling.canonical_metadata;
-    cached.values[1] = 9;
-    cached.pending_sample_indices.insert(1);
-    cached.output_path = annotation_path;
-    cached.output_format =
+    cached.values.Complete()[1] = 9;
+    cached.persistence.pending_sample_indices.insert(1);
+    cached.persistence.output_path = annotation_path;
+    cached.persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    cached.save_state.kind =
+    cached.persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
 
     specforge::SampleLabelingSourceState source_state;
@@ -7190,9 +7193,9 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_lease_switch_source.npy");
-    const std::filesystem::path first_annotation =
+    std::filesystem::path first_annotation =
         UniqueTempPath("_lease_switch_first.npy");
-    const std::filesystem::path second_annotation =
+    std::filesystem::path second_annotation =
         UniqueTempPath("_lease_switch_second.npy");
     const std::filesystem::path labeling_cache =
         UniqueTempPath("_lease_switch_labeling.json");
@@ -7264,6 +7267,10 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                     seed.View().labeling.task_id),
             "lease-switch seed should register the first task");
         first_task_id = seed.View().labeling.task_id;
+        first_annotation.replace_extension(".asdf");
+        (void)Submit(seed, SetActiveLabelingOutputPath(first_annotation));
+        Require(seed.View().labeling.output_path == first_annotation,
+            "lease-switch fixture should establish a canonical owner");
         (void)Submit(
             seed,
             DeactivateActiveLabelingTask());
@@ -7281,6 +7288,10 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 seed.View().labeling.task_id != first_task_id,
             "lease-switch seed should register the second task");
         second_task_id = seed.View().labeling.task_id;
+        second_annotation.replace_extension(".asdf");
+        (void)Submit(seed, SetActiveLabelingOutputPath(second_annotation));
+        Require(seed.View().labeling.output_path == second_annotation,
+            "lease-switch fixture should establish a canonical owner");
         (void)Submit(
             seed,
             DeactivateActiveLabelingTask());
@@ -8011,7 +8022,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     context.identity = specforge::BuildSourceCollectionIdentity(*prepared_snapshot);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "prepared restore annotation fixture should load");
     context.manifest.annotations.push_back(std::move(*annotation));
     specforge::PreparedSampleWorkflowState prepared_workflow =
@@ -8035,7 +8046,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     specforge::SourceCollectionContext corrected_context;
     corrected_context.identity = specforge::BuildSourceCollectionIdentity(*corrected_snapshot);
     std::optional<specforge::SampleAnnotationResult> corrected_annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(corrected_annotation.has_value(), "corrected prepared annotation fixture should load");
     corrected_context.manifest.annotations.push_back(std::move(*corrected_annotation));
     specforge::PreparedSampleWorkflowState corrected_workflow =
@@ -9228,7 +9239,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(initial_annotation.has_value(), "initial context annotation should load");
     initial_context.manifest.annotations.push_back(std::move(*initial_annotation));
     specforge::PreparedSampleWorkflowState initial_workflow =
@@ -9280,7 +9291,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     const specforge::SourceCollectionIdentity changed_identity = changed_context.identity;
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::optional<specforge::SampleAnnotationResult> changed_annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(changed_annotation.has_value(), "changed context annotation should load");
     changed_context.manifest.annotations.push_back(std::move(*changed_annotation));
     specforge::PreparedSampleWorkflowState stale_workflow =
@@ -9314,7 +9325,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     final_context.identity = changed_identity;
     final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::optional<specforge::SampleAnnotationResult> final_annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(final_annotation.has_value(), "final context annotation should load");
     final_context.manifest.annotations.push_back(std::move(*final_annotation));
     specforge::PreparedSampleWorkflowState final_workflow =
@@ -9484,7 +9495,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         false);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "same-identity reload annotation fixture should load");
 
     specforge::SourceCollectionSession session({}, {}, {}, {});
@@ -10118,7 +10129,7 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         false);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
+        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "interrupted follow-up annotation fixture should load");
 
     specforge::SourceCollectionSession session(
@@ -11263,7 +11274,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             return task.task_id == fixture.draft_task_id;
         });
     Require(
-        draft != source->second.tasks.end() && draft->output_path,
+        draft != source->second.tasks.end() && draft->persistence.output_path,
         "navigation refresh fixture should find its formalized draft");
     const specforge::SampleLabelingAsdfReadResult draft_document =
         specforge::ReadSampleLabelingAsdfDocument(
@@ -11273,13 +11284,15 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         draft_document.error.message.empty()
             ? "navigation refresh fixture should reopen its canonical draft values"
             : draft_document.error.message);
-    draft->values.assign(
-        draft_document.document->annotation.values.begin(),
-        draft_document.document->annotation.values.end());
-    draft->values_are_authoritative = true;
+    auto projected_draft = specforge::ProjectSampleLabelingDocumentTask(
+        *draft_document.document, *draft);
+    Require(projected_draft.has_value(),
+        "navigation refresh fixture should project complete canonical values");
+    *draft = std::move(*projected_draft);
+
     specforge::RebuildSampleLabelingTaskStatistics(*draft);
-    draft->output_path.reset();
-    draft->output_format =
+    draft->persistence.output_path.reset();
+    draft->persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::None;
     Require(
         specforge::SaveSampleLabelingStateCache(
@@ -11613,10 +11626,11 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
             source->second.tasks.size() == 1,
         "retry projection fixture should load its task");
     source->second.active_task_id.reset();
-    source->second.tasks[0].pending_sample_indices.insert(0);
-    source->second.tasks[0].save_state.kind =
+    source->second.tasks[0].persistence.pending_sample_indices.insert(0);
+    source->second.tasks[0].values.SetPendingValue(0, -1);
+    source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
-    source->second.tasks[0].save_state.pending_count = 1;
+    source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
         specforge::SaveSampleLabelingStateCache(
             fixture.labeling_cache,
@@ -11745,8 +11759,8 @@ void RunAllTests()
     TestRejectedAnnotationImportRefreshesDiagnosticProjection();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
-    TestActiveLegacyOwnerCanMigrateToCanonicalAsdf();
-    TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing();
+    TestLegacyImportCanSaveAsCanonicalAsdf();
+    TestImportedDraftDoesNotRequireMetadataSidecar();
     TestAnnotationLocalMatchRequiresSidecarTaskId();
     TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters();
     TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback();

@@ -130,15 +130,13 @@ not a stale PID or a best-effort marker.
 
 The merge ownership is intentionally narrow:
 
-- catalog additions are keyed by stable view/group ids. Generated view/group
-  ids use persisted monotonic high-water marks plus durable reservation sets.
-  The reservation sets retain identities allocated before a concurrent
-  create/delete race, so deleting an entity and restarting—or reconciling a
-  stale peer after the entity was deleted—cannot make its id available for
-  reuse. An addition that uses an id concurrently added with different content
-  is retained under a fresh deterministic id; both additions remain visible.
-  A local deletion is a tombstone for that entity and wins over a concurrent
-  edit to the same entity.
+- catalog additions are keyed by stable opaque view/group IDs. New user views
+  and ordinary groups, including copies, use the existing UUID v4 generator.
+  Built-in identities remain explicit. Names and order are independent of IDs;
+  deletion does not persist an allocator reservation. Concurrent additions keep
+  their distinct UUIDs. Defensive remapping still preserves both live additions
+  if malformed/imported snapshots genuinely request the same identity. A local
+  deletion wins over a concurrent edit to that same entity.
 - names, generated-name provenance, unassigned flags, per-marker visibility,
   and per-marker explicit color overrides are field-owned. A field unchanged
   by the stale task is taken from the latest durable state; a field changed by
@@ -171,15 +169,14 @@ diagnostic and leave the durable file untouched. Schema-one/two/three/four
 documents are supported migration inputs only when every persisted catalog
 entry belongs to the catalog being migrated; a legacy multi-catalog document
 without domain definitions for all entries fails closed rather than producing
-a partially migrated schema-five file. A single-catalog legacy document is
+a partially migrated schema-six file. A single-catalog legacy document is
 checked for raw view/group identity uniqueness, current-catalog marker
 references, and (for schema three) the unassigned identity/flag pairing before
 canonicalization, then canonicalized under the commit lease and validated again
-before it is atomically rewritten. Current-schema allocator history is also
-validated:
-high-water marks are nonzero and cover every generated/reserved identity, and
-every persisted view/group is covered by its reservation set. Current-schema
-semantic or allocator corruption is never repaired by a write. A missing cache
+before it is atomically rewritten. Schema-five migration preserves all live
+identities and references, validates semantic state, and discards only obsolete
+allocator fields. Schema six contains no sequence counters or reservation sets.
+Current-schema semantic corruption is never repaired by a write. A missing cache
 is still treated as the normal first-write empty state, preserving
 single-instance startup behavior.
 

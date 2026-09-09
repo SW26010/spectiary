@@ -1,7 +1,7 @@
 #include "ui/source_collection_load_queue.h"
 
 #include "profile/source_load_latency_trace.h"
-#include "ui/source_collection_preparation_internal.h"
+#include "ui/source_collection_load_queue_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -22,8 +22,13 @@ namespace specforge {
 
 class SourceCollectionLoadQueue::Impl {
 public:
-    explicit Impl(SourceCollectionPreparationAdapters adapters)
+    explicit Impl(SourceCollectionPreparationAdapters adapters,
+        SourceCollectionLoadQueueExecutionOptions options)
         : preparation_(std::move(adapters)),
+          foreground_limit_(options.foreground_limit == 0
+              ? std::clamp<std::size_t>(std::thread::hardware_concurrency(), 1, 4)
+              : std::clamp<std::size_t>(options.foreground_limit, 1, 4)),
+          before_worker_start_(std::move(options.before_worker_start)),
           retirement_worker_([this](std::stop_token stop_token) {
               RetirementLoop(stop_token);
           })
@@ -61,7 +66,6 @@ public:
         std::uint64_t id = 0;
         SourceCollectionLoadRequest request;
         std::shared_ptr<std::atomic_bool> canceled;
-        std::shared_ptr<std::atomic_bool> finished;
         std::shared_ptr<BatchState> batch;
         std::size_t batch_index = 0;
         std::shared_ptr<BatchCompletionSlot> ordered_completion;
@@ -76,6 +80,7 @@ public:
             Impl* owner,
             Task task)
             : finished(std::move(finished_flag)),
+              prefetch(task.prefetch),
               thread([owner,
                       task = std::move(task),
                       finished_flag = finished](std::stop_token stop_token) mutable {
@@ -84,8 +89,7 @@ public:
                           ::GetCurrentThread(),
                           THREAD_PRIORITY_BELOW_NORMAL);
                   }
-                  owner->RunTask(task, stop_token);
-                  finished_flag->store(true, std::memory_order_release);
+                  owner->RunTaskLoop(std::move(task), stop_token, finished_flag);
               })
         {
         }
@@ -96,6 +100,7 @@ public:
         Worker& operator=(const Worker&) = delete;
 
         std::shared_ptr<std::atomic_bool> finished;
+        bool prefetch = false;
         std::jthread thread;
     };
 
@@ -232,7 +237,10 @@ public:
     bool NeedsService() const
     {
         std::lock_guard lock(mutex_);
-        return active_task_count_ > 0 || !completed_.empty();
+        // Completion publication precedes the worker's finished flag. Keep
+        // the activation service deadline alive until TakeCompleted reaps it,
+        // even if the last completion has already been drained.
+        return active_task_count_ > 0 || !completed_.empty() || !workers_.empty();
     }
 
     SourceCollectionLoadActivitySnapshot ActivitySnapshot() const
@@ -376,7 +384,6 @@ private:
             id,
             std::move(request),
             canceled,
-            finished,
             std::move(batch),
             batch_index,
             std::move(ordered_completion),
@@ -389,7 +396,18 @@ private:
             ++active_prefetch_task_count_;
         }
         try {
-            workers_.emplace_back(std::move(finished), this, std::move(task));
+            const auto running = std::count_if(workers_.begin(), workers_.end(),
+                [prefetch](const Worker& worker) {
+                    return worker.prefetch == prefetch &&
+                        !worker.finished->load(std::memory_order_acquire);
+                });
+            const std::size_t limit = prefetch ? 1 : foreground_limit_;
+            if (static_cast<std::size_t>(running) < limit) {
+                if (before_worker_start_) before_worker_start_();
+                workers_.emplace_back(std::move(finished), this, std::move(task));
+            } else {
+                (prefetch ? pending_prefetch_ : pending_foreground_).push_back(std::move(task));
+            }
         } catch (const std::system_error& error) {
             --active_task_count_;
             if (prefetch) {
@@ -698,7 +716,6 @@ private:
                     task,
                     std::move(completion));
             }
-            task.finished->store(true, std::memory_order_release);
             completion_became_ready = completed_was_empty && !completed_.empty();
         }
         if (completion_became_ready) {
@@ -727,7 +744,6 @@ private:
                     task,
                     std::nullopt);
             }
-            task.finished->store(true, std::memory_order_release);
             completion_became_ready = completed_was_empty && !completed_.empty();
         }
         if (completion_became_ready) {
@@ -754,6 +770,28 @@ private:
         cancellation_.clear();
         active_task_count_ = 0;
         active_prefetch_task_count_ = 0;
+    }
+
+    void RunTaskLoop(Task task, std::stop_token stop_token,
+        const std::shared_ptr<std::atomic_bool>& finished)
+    {
+        const bool prefetch = task.prefetch;
+        for (;;) {
+            RunTask(task, stop_token);
+            std::optional<Task> next;
+            {
+                std::lock_guard lock(mutex_);
+                auto& pending = prefetch ? pending_prefetch_ : pending_foreground_;
+                if (pending.empty()) {
+                    finished->store(true, std::memory_order_release);
+                    return;
+                }
+                next.emplace(std::move(pending.front()));
+                pending.pop_front();
+            }
+            // Request-owned graphs are released on this worker, outside the lock.
+            task = std::move(*next);
+        }
     }
 
     void RunTask(const Task& task, std::stop_token stop_token)
@@ -869,6 +907,10 @@ private:
     }
 
     SourceCollectionPreparation preparation_;
+    const std::size_t foreground_limit_;
+    std::function<void()> before_worker_start_;
+    std::deque<Task> pending_foreground_;
+    std::deque<Task> pending_prefetch_;
     mutable std::mutex mutex_;
     std::condition_variable_any retirement_condition_;
     std::condition_variable_any
@@ -899,7 +941,7 @@ private:
 };
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue()
-    : SourceCollectionLoadQueue(SourceCollectionPreparationAdapters{})
+    : SourceCollectionLoadQueue(SourceCollectionPreparationAdapters{}, {})
 {
 }
 
@@ -911,13 +953,14 @@ SourceCollectionLoadQueue::SourceCollectionLoadQueue(
               adapters.workflow_cache_paths =
                   std::move(workflow_cache_paths);
               return adapters;
-          }())
+          }(), {})
 {
 }
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue(
-    SourceCollectionPreparationAdapters adapters)
-    : impl_(std::make_unique<Impl>(std::move(adapters)))
+    SourceCollectionPreparationAdapters adapters,
+    SourceCollectionLoadQueueExecutionOptions options)
+    : impl_(std::make_unique<Impl>(std::move(adapters), std::move(options)))
 {
 }
 

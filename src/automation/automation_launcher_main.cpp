@@ -6,6 +6,7 @@
 #include "app/runtime_paths.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
+#include "domain/utf8.h"
 #include "ui/sample_labeling_state_cache_io.h"
 
 #include <Windows.h>
@@ -286,7 +287,7 @@ bool RejectLabelingStateOutputPaths(
          cache.sources) {
         (void)source_id;
         for (const auto& task : source.tasks) {
-            if (!task.output_path) {
+            if (!task.persistence.output_path) {
                 continue;
             }
             error_message =
@@ -593,7 +594,7 @@ LauncherLineReadStatus ReadLauncherLine(
             "Could not read an automation command from standard input.";
         return LauncherLineReadStatus::Error;
     }
-    if (!specforge::IsWellFormedUtf8(line)) {
+    if (!specforge::IsValidUtf8(line)) {
         error_message =
             "Redirected automation commands must be encoded as UTF-8.";
         return LauncherLineReadStatus::Error;

@@ -1,8 +1,11 @@
+#include "legacy_annotation_fixture_io.h"
+#include "legacy_labeling_test_support.h"
 #include "ui/shell_ui.h"
 
 #include "app/runtime_paths.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_path_identity.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_workflow_preparation.h"
@@ -524,10 +527,12 @@ void WaitForRelease(
 
 std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
+    static const auto run_id = std::chrono::high_resolution_clock::now()
+        .time_since_epoch().count();
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-           ("specforge_shell_activation_" + std::to_string(next_id.fetch_add(1)) +
-            std::string(suffix));
+           ("specforge_shell_activation_" + std::to_string(run_id) + "_" +
+            std::to_string(next_id.fetch_add(1)) + std::string(suffix));
 }
 
 void WriteFixture(const std::filesystem::path& path)
@@ -582,8 +587,8 @@ bool SaveAnnotationFixture(
         "shell-drain-annotation",
         "Shell drain annotation",
         values.size());
-    task.values = std::move(values);
-    return specforge::SampleAnnotationIoAdapter{}.SaveLabelArray(path, task, error);
+    task.values.Complete() = std::move(values);
+    return specforge::test_support::LegacyFixtureIo{}.SaveLabelArray(path, task, error);
 }
 
 specforge::SourceCollectionSession MakePreparedDeferredSession(
@@ -631,7 +636,7 @@ void OpenPreparedFixtureSource(
     if (annotation_path) {
         std::string annotation_error;
         std::optional<specforge::SampleAnnotationResult> annotation =
-            specforge::SampleAnnotationIoAdapter{}.Load(
+            specforge::test_support::LegacyFixtureIo{}.Load(
                 *annotation_path,
                 context.identity.spectrum_count,
                 &annotation_error);
@@ -1126,7 +1131,7 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
         MakePreparedDeferredSession(source_path);
     std::optional<specforge::SampleAnnotationResult>
         annotation =
-            specforge::SampleAnnotationIoAdapter{}.
+            specforge::test_support::LegacyFixtureIo{}.
                 Load(
                     *annotation_path,
                     3,
@@ -2508,7 +2513,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
 
     specforge::SourceCollectionSession session = MakePreparedDeferredSession(path);
     std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(
+        specforge::test_support::LegacyFixtureIo{}.Load(
             *annotation_path,
             3,
             &annotation_error);
@@ -4319,7 +4324,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
             : annotation_error);
     const std::optional<specforge::SampleAnnotationResult>
         annotation =
-            specforge::SampleAnnotationIoAdapter{}.Load(
+            specforge::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -4506,7 +4511,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
             : annotation_error);
     const std::optional<specforge::SampleAnnotationResult>
         annotation =
-            specforge::SampleAnnotationIoAdapter{}.Load(
+            specforge::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -4862,7 +4867,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
             : annotation_error);
     const std::optional<specforge::SampleAnnotationResult>
         annotation =
-            specforge::SampleAnnotationIoAdapter{}.Load(
+            specforge::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -5919,8 +5924,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
 void TestMaintenanceResynchronizesRetainedNavigationTopology()
 {
     using Access = specforge::ShellUiTestAccess;
-    const std::string task_id =
-        "99999999-9999-4999-8999-999999999999";
+    std::string task_id;
     const std::filesystem::path source_path =
         UniqueTempPath("_maintenance_navigation_source.npy");
     const std::filesystem::path navigation_cache =
@@ -5930,7 +5934,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     const std::filesystem::path workflow_cache =
         UniqueTempPath("_maintenance_workflow.json");
     const std::filesystem::path output_path =
-        UniqueTempPath("_maintenance_labels.npy");
+        UniqueTempPath("_maintenance_labels.asdf");
     {
         std::ofstream stream(
             source_path,
@@ -5957,44 +5961,20 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
         workflow_cache,
         navigation_cache};
 
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
-            task_id,
-            "Maintenance task",
-            3);
-    task.label_set.labels.push_back(
-        specforge::SampleLabelDefinition{
-            2,
-            "selected",
-            's'});
-    task.values = {-1, 2, 2};
-    task.output_path = output_path;
-    task.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    Require(
-        specforge::PublishLegacySampleLabelingTaskOutput(
-            task,
-            nullptr)
-            .published,
-        "maintenance topology fixture should persist its formal artifact set");
-    specforge::SampleLabelingStateCache labeling_state;
-    specforge::SampleLabelingSourceState labeling_source;
-    labeling_source.sample_count = 3;
-    labeling_source.source_name =
-        context.identity.source_name;
-    labeling_source.source_fingerprint =
-        context.identity.source_fingerprint;
-    labeling_source.context_fingerprint =
-        context.identity.context_fingerprint;
-    labeling_source.tasks.push_back(task);
-    labeling_state.sources.emplace(
-        context.identity.id,
-        std::move(labeling_source));
-    Require(
-        specforge::SaveSampleLabelingStateCache(
-            labeling_cache,
-            labeling_state),
-        "maintenance topology fixture should persist its inactive task");
+    {
+        specforge::SampleLabelingController creator(labeling_cache);
+        creator.ActivateSource(context.identity,
+            specforge::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
+        Require(creator.CreateTask("Maintenance task").accepted &&
+            creator.UpsertActiveLabel({2, "selected", 's'}).accepted &&
+            creator.AssignLabel(1, 2).write.accepted &&
+            creator.AssignLabel(2, 2).write.accepted &&
+            creator.SaveActiveTemporaryTaskToOutput(output_path).output_saved,
+            "maintenance topology fixture should publish a canonical task");
+        task_id = creator.View().active_task->task_id;
+        Require(creator.DeactivateActiveTask().state_saved,
+            "maintenance topology fixture should release its owner");
+    }
 
     {
         specforge::SourceCollectionSession seed(
@@ -6048,10 +6028,11 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
         "maintenance topology fixture should load its task");
     pending_source->second.active_task_id.reset();
     pending_source->second.tasks[0]
-        .pending_sample_indices.insert(0);
-    pending_source->second.tasks[0].save_state.kind =
+        .persistence.pending_sample_indices.insert(0);
+    pending_source->second.tasks[0].values.SetPendingValue(0, -1);
+    pending_source->second.tasks[0].persistence.save_state.kind =
         specforge::SampleLabelSaveStateKind::Pending;
-    pending_source->second.tasks[0].save_state.pending_count = 1;
+    pending_source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
         specforge::SaveSampleLabelingStateCache(
             labeling_cache,
@@ -6135,7 +6116,8 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
 
     specforge::SampleLabelingController editor(
         labeling_cache);
-    editor.ActivateSource(context.identity);
+    editor.ActivateSource(context.identity,
+        specforge::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
     Require(
         editor.ActivateTask(
                   task_id)
@@ -6292,7 +6274,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     for (const std::filesystem::path& path : {
              source_path,
              legacy_annotation_path,
-             specforge::SampleAnnotationIoAdapter::
+             specforge::test_support::LegacyFixtureIo::
                  MetadataPathForResult(legacy_annotation_path),
              formal_output_path,
              cache_paths.source_session,
@@ -6313,8 +6295,8 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             8,
             "Review",
             'r'});
-    const specforge::SampleLabelResultWriteOutcome annotation_write =
-        specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
+    const specforge::test_support::SampleLabelResultWriteOutcome annotation_write =
+        specforge::test_support::LegacyFixtureIo{}.SaveLabelResult(
             legacy_annotation_path,
             annotation_seed);
     Require(
@@ -6574,7 +6556,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     for (const std::filesystem::path& path : {
              source_path,
              legacy_annotation_path,
-             specforge::SampleAnnotationIoAdapter::
+             specforge::test_support::LegacyFixtureIo::
                  MetadataPathForResult(legacy_annotation_path),
              formal_output_path,
              cache_paths.source_session,

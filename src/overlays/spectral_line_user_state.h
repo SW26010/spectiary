@@ -68,19 +68,7 @@ struct CatalogUserState {
     std::unordered_map<std::string, PlotSeriesColor> marker_colors;
     std::vector<GroupingView> grouping_views;
 
-    // Persisted high-water marks keep generated identities monotonic across
-    // deletion, restart, and task-level reconciliation.  They are allocator
-    // state, not user-visible ordering or selection state.
-    std::uint64_t next_view_sequence = 1;
-    std::uint64_t next_group_sequence = 1;
 
-    // A high-water mark alone cannot remember an identity that was allocated
-    // by one stale instance, then deleted before another stale instance
-    // committed its own addition.  These durable reservations are the
-    // identity history: an id may remain absent from grouping_views/groups,
-    // but it must never be allocated again.
-    std::unordered_set<std::string> reserved_view_ids;
-    std::unordered_set<std::string> reserved_group_ids;
 };
 
 struct CatalogPanelState {
@@ -130,8 +118,7 @@ CanonicalizeCatalogUserState(
 // then overwrite the evidence that caused it.
 [[nodiscard]] bool ValidateCatalogUserStateCacheForReconciliation(
     const CatalogUserStateCache& cache,
-    std::string& diagnostic,
-    bool require_allocator_history = false);
+    std::string& diagnostic);
 
 // Legacy schema one/two/three/four state is validated before startup
 // canonicalization.  It intentionally checks identity and reference

@@ -39,7 +39,7 @@ its reconciliation module own those semantics; the generic atomic-file and
 local-user-state facilities do not.
 
 If the latest durable document cannot be trusted because parsing, schema,
-shape, semantic-identity, or allocator-history validation fails, the commit
+shape, or semantic-identity validation fails, the commit
 fails closed with the diagnostic and leaves that document untouched. A stale
 startup snapshot must not replace or repair it. A missing cache remains the
 normal empty first-write state, and supported legacy migration is allowed only
@@ -78,9 +78,10 @@ draft becoming an output-backed task and never changes identity during that
 transition. Temporary tasks additionally hold one source-scoped draft-slot
 lease, while formal tasks also hold an output lease covering the complete
 artifact set declared by their persisted owner format. A canonical ASDF owner
-protects its one document path; an existing or explicitly adopted legacy NPY
-owner protects both the selected result path and its derived `.sf-labels.json`
-metadata sidecar.
+protects its one document path. A recovered legacy NPY record temporarily
+protects its result and `.sf-labels.json` migration inputs until explicit ASDF
+adoption succeeds. These leases prevent conflicting adoption or export; they
+do not enable legacy publication or autosave.
 
 Every output artifact contributes a normalized-path identity. This is the
 mandatory coordination baseline and the exclusion guaranteed by the

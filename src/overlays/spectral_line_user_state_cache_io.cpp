@@ -24,7 +24,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kCacheFormatKind = "specforge.catalog_user_state.cache";
-constexpr int kCacheSchemaVersion = 5;
+constexpr int kCacheSchemaVersion = 6;
 constexpr std::string_view kExplicitColorMode =
     "explicit-color";
 
@@ -513,7 +513,6 @@ ValidateCatalogCacheBodyShape(
     const JsonValue& catalogs,
     const JsonValue* panel_state,
     bool require_unassigned_flag,
-    bool require_allocator_history,
     bool require_marker_colors)
 {
     for (const auto& [identity_id, catalog] :
@@ -535,50 +534,6 @@ ValidateCatalogCacheBodyShape(
                     JsonValue::Kind::String,
                     catalog_path)) {
             return issue;
-        }
-        for (const std::string_view member_name :
-             {"next_view_sequence", "next_group_sequence"}) {
-            if (std::optional<std::string> issue =
-                    (require_allocator_history
-                         ? ValidateRequiredMemberKind(
-                               catalog,
-                               member_name,
-                               JsonValue::Kind::Integer,
-                               catalog_path)
-                         : ValidateOptionalMemberKind(
-                               catalog,
-                               member_name,
-                               JsonValue::Kind::Integer,
-                               catalog_path))) {
-                return issue;
-            }
-            if (const JsonValue* member =
-                    ObjectMember(catalog, member_name);
-                member != nullptr && member->integer_value < 0) {
-                return catalog_path + "." +
-                       std::string(member_name) +
-                       " must not be negative";
-            }
-        }
-        for (const std::string_view member_name :
-             {"reserved_view_ids", "reserved_group_ids"}) {
-            const JsonValue* member =
-                ObjectMember(catalog, member_name);
-            if (member == nullptr && require_allocator_history) {
-                return catalog_path + "." +
-                       std::string(member_name) +
-                       " is missing";
-            }
-            if (member != nullptr) {
-                if (std::optional<std::string> issue =
-                        ValidateStringArrayShape(
-                            *member,
-                            catalog_path + "." +
-                                std::string(member_name),
-                            require_allocator_history)) {
-                    return issue;
-                }
-            }
         }
         const JsonValue* marker_visibility =
             ObjectMember(
@@ -1074,7 +1029,7 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
     VersionedJsonCacheLoadResult cache = LoadVersionedJsonCacheFile(
         path,
         kCacheFormatKind,
-        {1, 2, 3, 4, kCacheSchemaVersion},
+        {1, 2, 3, 4, 5, kCacheSchemaVersion},
         "spectral-line user-state cache");
     if (!cache.document) {
         result.issue_kind =
@@ -1123,7 +1078,6 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
                 *catalogs,
                 panel_state,
                 cache.document->schema_version >= 3,
-                cache.document->schema_version >= 4,
                 cache.document->schema_version >= 5)) {
         result.issue_kind =
             CatalogUserStateCacheLoadIssueKind::
@@ -1153,20 +1107,6 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
             active_view_id != nullptr &&
             active_view_id->kind == JsonValue::Kind::String) {
             state.active_view_id = active_view_id->string_value;
-        }
-        state.next_view_sequence = static_cast<std::uint64_t>(
-            ReadJsonSizeMember(catalog_value, "next_view_sequence")
-                .value_or(1));
-        state.next_group_sequence = static_cast<std::uint64_t>(
-            ReadJsonSizeMember(catalog_value, "next_group_sequence")
-                .value_or(1));
-        if (const JsonValue* reserved_view_ids =
-                ObjectMember(catalog_value, "reserved_view_ids")) {
-            state.reserved_view_ids = ReadStringSet(*reserved_view_ids);
-        }
-        if (const JsonValue* reserved_group_ids =
-                ObjectMember(catalog_value, "reserved_group_ids")) {
-            state.reserved_group_ids = ReadStringSet(*reserved_group_ids);
         }
         if (const JsonValue* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
             state.marker_visibility = ReadMarkerVisibility(*marker_visibility);
@@ -1248,36 +1188,6 @@ bool SaveCatalogUserStateCache(
                 stream << "      \"active_view_id\": ";
                 WriteJsonString(stream, state.active_view_id);
                 stream << ",\n";
-                stream << "      \"next_view_sequence\": "
-                       << state.next_view_sequence << ",\n";
-                stream << "      \"next_group_sequence\": "
-                       << state.next_group_sequence << ",\n";
-
-                stream << "      \"reserved_view_ids\": [";
-                const std::vector<std::string> reserved_view_ids =
-                    SortedSetValues(state.reserved_view_ids);
-                for (std::size_t index = 0;
-                     index < reserved_view_ids.size();
-                     ++index) {
-                    if (index != 0) {
-                        stream << ", ";
-                    }
-                    WriteJsonString(stream, reserved_view_ids[index]);
-                }
-                stream << "],\n";
-                stream << "      \"reserved_group_ids\": [";
-                const std::vector<std::string> reserved_group_ids =
-                    SortedSetValues(state.reserved_group_ids);
-                for (std::size_t index = 0;
-                     index < reserved_group_ids.size();
-                     ++index) {
-                    if (index != 0) {
-                        stream << ", ";
-                    }
-                    WriteJsonString(stream, reserved_group_ids[index]);
-                }
-                stream << "],\n";
-
                 stream << "      \"marker_visibility\": {";
                 const std::vector<std::string> marker_ids = SortedCacheKeys(state.marker_visibility);
                 if (!marker_ids.empty()) {

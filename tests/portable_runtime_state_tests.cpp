@@ -1,3 +1,4 @@
+#include "legacy_labeling_test_support.h"
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
@@ -287,9 +288,9 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
     Require(
         specforge::AssignSampleLabel(task, 1, 5).accepted,
         "package-relative fixture should accept label value");
-    specforge::SelectSampleLabelTaskOutputPath(task, output_path);
+    specforge::test_support::SelectLegacyFixtureOutputPath(task, output_path);
     const specforge::SampleLabelOutputPublicationResult persisted =
-        specforge::PublishLegacySampleLabelingTaskOutput(task);
+        specforge::test_support::PublishLegacyFixture(task);
     Require(
         persisted.published,
         persisted.message.empty()
@@ -330,15 +331,15 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
     const specforge::SampleLabelingTask& restored_task =
         source->second.tasks.front();
     Require(
-        restored_task.output_path &&
-            *restored_task.output_path == output_path &&
-            restored_task.output_format ==
+        restored_task.persistence.output_path &&
+            *restored_task.persistence.output_path == output_path &&
+            restored_task.persistence.output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::
                     LegacyNpyWithSidecar,
         "package-relative output and its legacy owner should restore together");
     Require(
-        restored_task.values.size() == 3 &&
-            restored_task.values[1] == 5,
+        restored_task.values.SampleCount() == 3 &&
+            restored_task.values.Complete()[1] == 5,
         "package-relative output should load values from NPY");
 }
 

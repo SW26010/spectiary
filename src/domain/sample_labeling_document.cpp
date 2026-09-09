@@ -1,4 +1,5 @@
 #include "domain/sample_labeling_document.h"
+#include "domain/sample_labeling_document_diagnostics.h"
 
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_source_compatibility.h"
@@ -74,7 +75,7 @@ void AddIssue(
 
 SampleLabelingDocument BuildDocumentWithSource(
     SampleLabelingDocumentSource source,
-    const SampleLabelingTask& task)
+    const SampleLabelingContentView& task)
 {
     SampleLabelingDocument document;
     document.source = std::move(source);
@@ -104,33 +105,8 @@ SampleLabelingDocument BuildDocumentWithSource(
 }  // namespace
 
 SampleLabelingDocument BuildSampleLabelingDocument(
-    std::string source_kind,
-    const SourceCollectionContext& source_context,
-    const SampleLabelingTask& task)
-{
-    SampleLabelingDocumentSource source;
-    const SourceCollectionIdentity& source_identity = source_context.identity;
-    source.base_identity = source_identity.id;
-    source.kind = std::move(source_kind);
-    source.name = source_identity.source_name;
-    source.fingerprint = source_identity.source_fingerprint;
-    source.sample_count = source_identity.spectrum_count;
-    if (SourceCollectionSampleNamesFormCanonicalRoster(
-            source_context.manifest.sample_names,
-            source.sample_count)) {
-        source.roster.identity_kind =
-            std::string{kSampleLabelingDocumentExplicitNamesRoster};
-        source.roster.sample_names =
-            source_context.manifest.sample_names;
-    }
-    return BuildDocumentWithSource(
-        std::move(source),
-        task);
-}
-
-SampleLabelingDocument BuildSampleLabelingDocument(
     const SampleLabelingCanonicalSourceDescriptor& source,
-    const SampleLabelingTask& task)
+    const SampleLabelingContentView& task)
 {
     SampleLabelingDocumentSource document_source;
     document_source.base_identity = source.base_identity;
@@ -157,18 +133,18 @@ ProjectSampleLabelingDocumentTask(
     const SampleLabelingTask& local_state,
     const std::function<void()>& cancellation_checkpoint)
 {
-    if (!local_state.output_path ||
-        local_state.output_format !=
+    if (!local_state.persistence.output_path ||
+        local_state.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
         document.labeling.id != local_state.task_id ||
         document.annotation.values.size() !=
-            local_state.values.size()) {
+            local_state.values.SampleCount()) {
         return std::nullopt;
     }
 
     const bool has_pending_local_edits =
-        !local_state.pending_sample_indices.empty() ||
-        local_state.metadata_save_pending;
+        !local_state.persistence.pending_sample_indices.empty() ||
+        local_state.persistence.metadata_save_pending;
     if (has_pending_local_edits &&
         (local_state.canonical_metadata.created_at !=
              document.labeling.canonical_metadata.created_at ||
@@ -185,7 +161,7 @@ ProjectSampleLabelingDocumentTask(
             document.labeling.name,
             0,
             document.labeling.canonical_metadata);
-    projected.values.reserve(
+    projected.values.Complete().reserve(
         document.annotation.values.size());
     for (std::size_t index = 0;
          index < document.annotation.values.size();
@@ -194,7 +170,7 @@ ProjectSampleLabelingDocumentTask(
             cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        projected.values.push_back(
+        projected.values.Complete().push_back(
             static_cast<int>(
                 document.annotation.values[index]));
     }
@@ -219,34 +195,38 @@ ProjectSampleLabelingDocumentTask(
             });
     }
 
-    projected.auto_advance = local_state.auto_advance;
-    projected.skip_labeled_on_advance =
-        local_state.skip_labeled_on_advance;
-    projected.remembered_position =
-        local_state.remembered_position;
-    projected.output_path = local_state.output_path;
-    projected.output_format = local_state.output_format;
-    projected.values_are_authoritative = true;
-    projected.pending_sample_indices =
-        local_state.pending_sample_indices;
-    if (!projected.pending_sample_indices.empty() &&
+    projected.session.auto_advance = local_state.session.auto_advance;
+    projected.session.skip_labeled_on_advance =
+        local_state.session.skip_labeled_on_advance;
+    projected.session.remembered_position =
+        local_state.session.remembered_position;
+    projected.persistence.output_path = local_state.persistence.output_path;
+    projected.persistence.output_format = local_state.persistence.output_format;
+
+    projected.persistence.pending_sample_indices =
+        local_state.persistence.pending_sample_indices;
+    if (!projected.persistence.pending_sample_indices.empty() &&
         local_state.canonical_metadata.modified_at >
             projected.canonical_metadata.modified_at) {
         projected.canonical_metadata.modified_at =
             local_state.canonical_metadata.modified_at;
     }
     for (const std::size_t sample_index :
-         projected.pending_sample_indices) {
-        if (sample_index >= projected.values.size()) {
+         projected.persistence.pending_sample_indices) {
+        if (sample_index >= projected.values.SampleCount()) {
             return std::nullopt;
         }
-        projected.values[sample_index] =
-            local_state.values[sample_index];
+        if (const auto* sparse = local_state.values.Sparse();
+            sparse && !sparse->pending_values.contains(sample_index)) {
+            return std::nullopt;
+        }
+        projected.values.Complete()[sample_index] =
+            local_state.values.PendingValue(sample_index);
     }
 
-    projected.metadata_save_pending =
-        local_state.metadata_save_pending;
-    if (projected.metadata_save_pending) {
+    projected.persistence.metadata_save_pending =
+        local_state.persistence.metadata_save_pending;
+    if (projected.persistence.metadata_save_pending) {
         projected.task_name = local_state.task_name;
         projected.label_set = local_state.label_set;
         projected.canonical_metadata.description =
@@ -269,13 +249,13 @@ ProjectSampleLabelingDocumentTask(
     }
     std::ranges::sort(defined_label_codes);
     for (std::size_t index = 0;
-         index < projected.values.size();
+         index < projected.values.SampleCount();
          ++index) {
         if ((index & 0xfffU) == 0U &&
             cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const int value = projected.values[index];
+        const int value = projected.values.Complete()[index];
         if (value != kUnlabeledSampleLabelCode &&
             !std::ranges::binary_search(
                 defined_label_codes,
@@ -283,21 +263,21 @@ ProjectSampleLabelingDocumentTask(
             return std::nullopt;
         }
     }
-    projected.save_state = local_state.save_state;
-    projected.save_state.pending_count =
-        projected.pending_sample_indices.size();
+    projected.persistence.save_state = local_state.persistence.save_state;
+    projected.persistence.save_state.pending_count =
+        projected.persistence.pending_sample_indices.size();
     const bool has_pending_output =
-        !projected.pending_sample_indices.empty() ||
-        projected.metadata_save_pending;
+        !projected.persistence.pending_sample_indices.empty() ||
+        projected.persistence.metadata_save_pending;
     if (has_pending_output &&
-        projected.save_state.kind !=
+        projected.persistence.save_state.kind !=
             SampleLabelSaveStateKind::Failed) {
-        projected.save_state.kind =
+        projected.persistence.save_state.kind =
             SampleLabelSaveStateKind::Pending;
     } else if (!has_pending_output &&
-               projected.save_state.kind ==
+               projected.persistence.save_state.kind ==
                    SampleLabelSaveStateKind::Pending) {
-        projected.save_state.kind =
+        projected.persistence.save_state.kind =
             SampleLabelSaveStateKind::AutosavedToOutput;
     }
     RebuildSampleLabelingTaskStatistics(
@@ -702,7 +682,7 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
 
 }  // namespace
 
-SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
+SampleLabelingDocumentValidationResult diagnostics::ValidateSampleLabelingDocument(
     const SampleLabelingDocument& document)
 {
     return ValidateSampleLabelingDocumentImpl(document, false);

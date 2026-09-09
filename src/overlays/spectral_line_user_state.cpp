@@ -1,12 +1,9 @@
 #include "overlays/spectral_line_user_state.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
 #include <cstddef>
-#include <cstdint>
 #include <iterator>
-#include <limits>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -21,66 +18,6 @@ constexpr const char* kPublicCatalogIdentity = "specforge.public";
 constexpr const char* kPublicCatalogDisplayName = "Public catalog";
 constexpr const char* kCatalogGroupingViewId = "__catalog_grouping_view__";
 constexpr const char* kUnassignedUserGroupId = "__unassigned__";
-
-std::uint64_t NextSequenceAfterGeneratedId(
-    std::string_view id,
-    std::string_view prefix)
-{
-    if (!id.starts_with(prefix) || id.size() == prefix.size()) {
-        return 0;
-    }
-
-    const std::string_view digits = id.substr(prefix.size());
-    std::uint64_t value = 0;
-    const auto parsed = std::from_chars(
-        digits.data(),
-        digits.data() + digits.size(),
-        value);
-    if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size()) {
-        return 0;
-    }
-    if (value == std::numeric_limits<std::uint64_t>::max()) {
-        return value;
-    }
-    return value + 1;
-}
-
-std::optional<std::uint64_t> ParseGeneratedIdentitySequence(
-    std::string_view id,
-    std::string_view prefix)
-{
-    if (!id.starts_with(prefix) || id.size() == prefix.size()) {
-        return std::nullopt;
-    }
-    const std::string_view digits = id.substr(prefix.size());
-    for (const char digit : digits) {
-        if (digit < '0' || digit > '9') {
-            return std::nullopt;
-        }
-    }
-    std::uint64_t value = 0;
-    const auto parsed = std::from_chars(
-        digits.data(),
-        digits.data() + digits.size(),
-        value);
-    if (parsed.ec != std::errc{} ||
-        parsed.ptr != digits.data() + digits.size()) {
-        return std::nullopt;
-    }
-    return value;
-}
-
-void RaiseSequenceHighWaterMark(
-    std::uint64_t& sequence,
-    std::uint64_t required)
-{
-    if (sequence == 0) {
-        sequence = 1;
-    }
-    if (required > sequence) {
-        sequence = required;
-    }
-}
 
 std::string LowerAscii(std::string value)
 {
@@ -481,25 +418,14 @@ bool ValidateCatalogUserStateCacheForLegacyMigration(
             }
         }
 
-        for (const std::string& id : state.reserved_view_ids) {
-            if (id.empty() || id == CatalogGroupingViewId()) {
-                return fail("reserved view identity must be a user identity");
-            }
-        }
-        for (const std::string& id : state.reserved_group_ids) {
-            if (id.empty() || id == UnassignedUserGroupId()) {
-                return fail(
-                    "reserved group identity must be an ordinary identity");
-            }
-        }
+
     }
     return true;
 }
 
 bool ValidateCatalogUserStateCacheForReconciliation(
     const CatalogUserStateCache& cache,
-    std::string& diagnostic,
-    bool require_allocator_history)
+    std::string& diagnostic)
 {
     diagnostic.clear();
     const auto fail = [&](std::string message) {
@@ -616,96 +542,7 @@ bool ValidateCatalogUserStateCacheForReconciliation(
                 return fail("marker color channels must be finite values from zero to one");
             }
         }
-        for (const std::string& id : state.reserved_view_ids) {
-            if (id.empty() || id == CatalogGroupingViewId()) {
-                return fail("reserved view identity must be a user identity");
-            }
-        }
-        for (const std::string& id : state.reserved_group_ids) {
-            if (id.empty() || id == UnassignedUserGroupId()) {
-                return fail(
-                    "reserved group identity must be an ordinary identity");
-            }
-        }
 
-        if (!require_allocator_history) {
-            continue;
-        }
-        if (state.next_view_sequence == 0 ||
-            state.next_group_sequence == 0) {
-            return fail(
-                "allocator history high-water marks must be greater than zero");
-        }
-
-        const auto validate_generated_identity =
-            [&](std::string_view id,
-                std::string_view prefix,
-                std::uint64_t next_sequence,
-                std::string_view kind) -> bool {
-            const std::optional<std::uint64_t> sequence =
-                ParseGeneratedIdentitySequence(id, prefix);
-            if (!sequence) {
-                return true;
-            }
-            if (*sequence == 0 || *sequence >= next_sequence) {
-                return fail(
-                    std::string(kind) + " allocator history does not cover " +
-                    std::string(id) + " before next sequence " +
-                    std::to_string(next_sequence));
-            }
-            return true;
-        };
-
-        for (const GroupingView& view : state.grouping_views) {
-            if (view.id != CatalogGroupingViewId() &&
-                !state.reserved_view_ids.contains(view.id)) {
-                return fail(
-                    "view identity " + view.id +
-                    " is not covered by reserved allocator history");
-            }
-            if (!validate_generated_identity(
-                    view.id,
-                    "view-",
-                    state.next_view_sequence,
-                    "view")) {
-                return false;
-            }
-            for (const UserGroup& group : view.groups) {
-                if (group.id == UnassignedUserGroupId()) {
-                    continue;
-                }
-                if (!state.reserved_group_ids.contains(group.id)) {
-                    return fail(
-                        "group identity " + group.id +
-                        " is not covered by reserved allocator history");
-                }
-                if (!validate_generated_identity(
-                        group.id,
-                        "group-",
-                        state.next_group_sequence,
-                        "group")) {
-                    return false;
-                }
-            }
-        }
-        for (const std::string& id : state.reserved_view_ids) {
-            if (!validate_generated_identity(
-                    id,
-                    "view-",
-                    state.next_view_sequence,
-                    "view")) {
-                return false;
-            }
-        }
-        for (const std::string& id : state.reserved_group_ids) {
-            if (!validate_generated_identity(
-                    id,
-                    "group-",
-                    state.next_group_sequence,
-                    "group")) {
-                return false;
-            }
-        }
     }
     return true;
 }
@@ -978,74 +815,6 @@ CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
         normalized_views.push_back(std::move(normalized_view));
     }
     state.grouping_views = std::move(normalized_views);
-
-    std::unordered_set<std::string> normalized_reserved_view_ids;
-    for (const std::string& id : state.reserved_view_ids) {
-        if (!id.empty() && id != CatalogGroupingViewId()) {
-            normalized_reserved_view_ids.insert(id);
-        }
-    }
-    for (const GroupingView& view : state.grouping_views) {
-        normalized_reserved_view_ids.insert(view.id);
-    }
-    if (normalized_reserved_view_ids != state.reserved_view_ids) {
-        state.reserved_view_ids = std::move(normalized_reserved_view_ids);
-        result.changed = true;
-    }
-
-    std::unordered_set<std::string> normalized_reserved_group_ids;
-    for (const std::string& id : state.reserved_group_ids) {
-        if (!id.empty() && id != UnassignedUserGroupId()) {
-            normalized_reserved_group_ids.insert(id);
-        }
-    }
-    for (const GroupingView& view : state.grouping_views) {
-        for (const UserGroup& group : view.groups) {
-            if (!group.is_unassigned && group.id != UnassignedUserGroupId()) {
-                normalized_reserved_group_ids.insert(group.id);
-            }
-        }
-    }
-    if (normalized_reserved_group_ids != state.reserved_group_ids) {
-        state.reserved_group_ids = std::move(normalized_reserved_group_ids);
-        result.changed = true;
-    }
-
-    std::uint64_t required_next_view_sequence = 1;
-    std::uint64_t required_next_group_sequence = 1;
-    for (const GroupingView& view : state.grouping_views) {
-        RaiseSequenceHighWaterMark(
-            required_next_view_sequence,
-            NextSequenceAfterGeneratedId(view.id, "view-"));
-        for (const UserGroup& group : view.groups) {
-            RaiseSequenceHighWaterMark(
-                required_next_group_sequence,
-                NextSequenceAfterGeneratedId(group.id, "group-"));
-        }
-    }
-    for (const std::string& id : state.reserved_view_ids) {
-        RaiseSequenceHighWaterMark(
-            required_next_view_sequence,
-            NextSequenceAfterGeneratedId(id, "view-"));
-    }
-    for (const std::string& id : state.reserved_group_ids) {
-        RaiseSequenceHighWaterMark(
-            required_next_group_sequence,
-            NextSequenceAfterGeneratedId(id, "group-"));
-    }
-    const std::uint64_t previous_next_view_sequence =
-        state.next_view_sequence;
-    const std::uint64_t previous_next_group_sequence =
-        state.next_group_sequence;
-    RaiseSequenceHighWaterMark(
-        state.next_view_sequence,
-        required_next_view_sequence);
-    RaiseSequenceHighWaterMark(
-        state.next_group_sequence,
-        required_next_group_sequence);
-    result.changed = result.changed ||
-                     state.next_view_sequence != previous_next_view_sequence ||
-                     state.next_group_sequence != previous_next_group_sequence;
 
     for (auto iterator = state.marker_visibility.begin();
          iterator != state.marker_visibility.end();) {

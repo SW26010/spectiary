@@ -1,5 +1,7 @@
 #include "ui/spectral_lines_panel_controller.h"
 
+#include "domain/uuid_v4.h"
+
 #include "platform/exclusive_file_lease.h"
 #include "overlays/spectral_line_user_state_cache_io.h"
 
@@ -20,6 +22,17 @@ constexpr auto kSaveDebounce = 500ms;
 constexpr auto kSaveRetry = 10s;
 constexpr auto kCommitLeaseRetryDelay = 10ms;
 constexpr std::size_t kCommitLeaseMaximumAttempts = 200;
+
+std::size_t AvailableGroupNameOrdinal(const CatalogUserState& state)
+{
+    std::unordered_set<std::string> names;
+    for (const auto& view : state.grouping_views) {
+        for (const auto& group : view.groups) names.insert(group.name);
+    }
+    std::size_t ordinal = 1;
+    while (names.contains("Group " + std::to_string(ordinal))) ++ordinal;
+    return ordinal;
+}
 
 std::optional<ExclusiveFileLease> AcquireCatalogCommitLease(
     const std::filesystem::path& cache_path,
@@ -389,10 +402,11 @@ SpectralLinesPanelController::SpectralLinesPanelController(
                 match->second);
         }
         std::string legacy_validation_error;
-        if (!ValidateCatalogUserStateCacheForLegacyMigration(
-                legacy_validation,
-                legacy_validation_error,
-                load_result.schema_version)) {
+        const bool valid = load_result.schema_version >= 5
+            ? ValidateCatalogUserStateCacheForReconciliation(legacy_validation, legacy_validation_error)
+            : ValidateCatalogUserStateCacheForLegacyMigration(
+                  legacy_validation, legacy_validation_error, load_result.schema_version);
+        if (!valid) {
             load_result.issue_kind =
                 CatalogUserStateCacheLoadIssueKind::InvalidDocument;
             load_result.diagnostic_detail =
@@ -443,12 +457,6 @@ SpectralLinesPanelController::SpectralLinesPanelController(
     // later peer write.
     reconciliation_base_state_ = user_state_;
     reconciliation_base_panel_state_ = panel_state_;
-    next_view_sequence_ = std::max<std::uint64_t>(
-        1,
-        user_state_.next_view_sequence);
-    next_group_sequence_ = std::max<std::uint64_t>(
-        1,
-        user_state_.next_group_sequence);
 }
 
 SpectralLinesPanelController::~SpectralLinesPanelController()
@@ -493,6 +501,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
 
     case CatalogUserStateIntent::Kind::CreateUserGroupingView: {
         const std::string id = NextGroupingViewId();
+        if (id.empty()) return Rejected("Could not generate a grouping view identity.");
         const std::size_t ordinal =
             user_state_.grouping_views.size() + 1;
         const std::string name =
@@ -520,9 +529,18 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return Rejected("Grouping view identity does not belong to this catalog user state.");
         }
         const std::string id = NextGroupingViewId();
+        if (id.empty()) return Rejected("Could not generate a grouping view identity.");
         const std::string name = source->name + " copy";
-        user_state_.grouping_views.push_back(
-            DuplicateGroupingView(*source, catalog_, catalog_identity_, id, name));
+        GroupingView copy = DuplicateGroupingView(*source, catalog_, catalog_identity_, id, name);
+        std::unordered_set<std::string> copied_group_ids;
+        for (auto& group : copy.groups) {
+            if (group.is_unassigned) continue;
+            group.id = NextUserGroupId();
+            if (group.id.empty() || !copied_group_ids.insert(group.id).second) {
+                return Rejected("Could not generate distinct copied group identities.");
+            }
+        }
+        user_state_.grouping_views.push_back(std::move(copy));
         user_state_.active_view_id = id;
         explicit_selection_intent_pending_ = true;
         RequestGroupingViewSelection();
@@ -572,13 +590,6 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             // is derived state, not a competing explicit selection.
             explicit_selection_intent_pending_ = false;
         }
-        user_state_.reserved_view_ids.insert(deleted_view_id);
-        for (const UserGroup& group : match->groups) {
-            if (!group.is_unassigned &&
-                group.id != UnassignedUserGroupId()) {
-                user_state_.reserved_group_ids.insert(group.id);
-            }
-        }
         user_state_.grouping_views.erase(match);
         for (auto iterator = panel_state_.expanded_group_ids.begin();
              iterator != panel_state_.expanded_group_ids.end();) {
@@ -597,9 +608,8 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return Rejected("Editable grouping view identity does not belong to this catalog user state.");
         }
         const std::string group_id = NextUserGroupId();
-        const std::size_t ordinal =
-            static_cast<std::size_t>(
-                next_group_sequence_ - 1);
+        if (group_id.empty()) return Rejected("Could not generate a group identity.");
+        const std::size_t ordinal = AvailableGroupNameOrdinal(user_state_);
         const std::string group_name =
             "Group " + std::to_string(ordinal);
         GeneratedNameMetadata generated_name;
@@ -633,9 +643,8 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         }
 
         const std::string group_id = NextUserGroupId();
-        const std::size_t ordinal =
-            static_cast<std::size_t>(
-                next_group_sequence_ - 1);
+        if (group_id.empty()) return Rejected("Could not generate a group identity.");
+        const std::size_t ordinal = AvailableGroupNameOrdinal(user_state_);
         const std::string group_name =
             "Group " + std::to_string(ordinal);
         GeneratedNameMetadata generated_name;
@@ -700,7 +709,6 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         if (view == nullptr || !RemoveUserGroup(*view, intent.group_id_)) {
             return Rejected("Editable user group identity does not belong to the grouping view.");
         }
-        user_state_.reserved_group_ids.insert(intent.group_id_);
         panel_state_.expanded_group_ids.erase(GroupExpansionKey(view->id, intent.group_id_));
         return Applied(true);
     }
@@ -1023,12 +1031,12 @@ SpectralLinesPanelController::SaveCatalogUserState()
 
     CatalogUserState latest_state =
         MakeCatalogUserState(catalog_identity_);
-    if (latest_load.requires_save) {
+    if (latest_load.schema_version < 5 && latest_load.requires_save) {
         // Schema-one/two/three/four state is a supported migration input only
         // when every persisted entry belongs to this controller's catalog.
         // Without the corresponding domain catalog, another legacy entry
         // cannot be canonicalized and validated before the whole document is
-        // rewritten as schema five.
+        // rewritten as schema six.
         const bool has_unrelated_catalog = std::any_of(
             latest_load.cache.catalogs.begin(),
             latest_load.cache.catalogs.end(),
@@ -1044,7 +1052,7 @@ SpectralLinesPanelController::SaveCatalogUserState()
         if (has_unrelated_catalog || has_unrelated_panel_state) {
             error =
                 "legacy catalog user-state cache contains unrelated catalog "
-                "entries and cannot be safely migrated to schema 5";
+                "entries and cannot be safely migrated to schema 6";
             return {
                 .saved = false,
                 .error = std::move(error),
@@ -1108,8 +1116,7 @@ SpectralLinesPanelController::SaveCatalogUserState()
         }
     } else if (!ValidateCatalogUserStateCacheForReconciliation(
                    latest_load.cache,
-                   error,
-                   true)) {
+                   error)) {
         // Current-schema state must be trusted before every replacement,
         // including startup canonicalization and maintenance/destructor
         // flushes that carry no explicit task delta.
@@ -1182,12 +1189,6 @@ SpectralLinesPanelController::SaveCatalogUserState()
     panel_state_ = user_state_cache_.catalog_panel_state.at(catalog_identity_.id);
     reconciliation_base_state_ = user_state_;
     reconciliation_base_panel_state_ = panel_state_;
-    next_view_sequence_ = std::max<std::uint64_t>(
-        1,
-        user_state_.next_view_sequence);
-    next_group_sequence_ = std::max<std::uint64_t>(
-        1,
-        user_state_.next_group_sequence);
     load_issue_kind_ =
         SpectralLineCacheLoadIssueKind::None;
     explicit_selection_intent_pending_ = false;
@@ -1316,36 +1317,34 @@ const UserGroup* SpectralLinesPanelController::FindUserGroup(
 
 std::string SpectralLinesPanelController::NextGroupingViewId()
 {
-    for (;;) {
-        const std::uint64_t sequence = next_view_sequence_++;
-        std::string id = "view-" + std::to_string(sequence);
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        const auto generated = GenerateUuidV4();
+        if (!generated) return {};
+        std::string id = *generated;
         if (!ViewExists(id) &&
-            !user_state_.reserved_view_ids.contains(id) &&
             id != CatalogGroupingViewId()) {
-            user_state_.reserved_view_ids.insert(id);
-            user_state_.next_view_sequence = next_view_sequence_;
             return id;
         }
     }
+    return {};
 }
 
 std::string SpectralLinesPanelController::NextUserGroupId()
 {
-    for (;;) {
-        const std::uint64_t sequence = next_group_sequence_++;
-        std::string id = "group-" + std::to_string(sequence);
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        const auto generated = GenerateUuidV4();
+        if (!generated) return {};
+        std::string id = *generated;
         bool exists = false;
         for (const GroupingView& view : user_state_.grouping_views) {
             exists = exists || FindUserGroup(view, id) != nullptr;
         }
         if (!exists &&
-            !user_state_.reserved_group_ids.contains(id) &&
             id != UnassignedUserGroupId()) {
-            user_state_.reserved_group_ids.insert(id);
-            user_state_.next_group_sequence = next_group_sequence_;
             return id;
         }
     }
+    return {};
 }
 
 void SpectralLinesPanelController::MarkCacheDirty()

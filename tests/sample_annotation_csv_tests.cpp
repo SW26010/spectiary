@@ -1,3 +1,4 @@
+#include "legacy_annotation_fixture_io.h"
 #include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_filter.h"
@@ -95,7 +96,7 @@ std::optional<specforge::SampleAnnotationResult> LoadCsv(
     std::size_t sample_count,
     std::string* error)
 {
-    return specforge::SampleAnnotationIoAdapter{}.
+    return specforge::test_support::LegacyFixtureIo{}.
         LoadForSource(
             path,
             specforge::SampleAnnotationSourceCompatibility{
@@ -115,7 +116,7 @@ std::optional<specforge::SampleAnnotationResult> LoadCsvCancelable(
     const specforge::SampleAnnotationCancellationCheckpoint& checkpoint,
     std::string* error)
 {
-    return specforge::SampleAnnotationIoAdapter{}.
+    return specforge::test_support::LegacyFixtureIo{}.
         LoadForSourceCancelable(
             path,
             specforge::SampleAnnotationSourceCompatibility{
@@ -196,7 +197,7 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
 
     error.clear();
     Require(
-        !specforge::SampleAnnotationIoAdapter{}.
+        !specforge::test_support::LegacyFixtureIo{}.
              Load(path, sample_names.size(), &error) &&
             error.find("source collection") !=
                 std::string::npos,
@@ -304,7 +305,7 @@ void TestNpyLoadCapturesPortableArtifactProvenance()
             : error);
 
     const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.Load(
+        specforge::test_support::LegacyFixtureIo{}.Load(
             path,
             values.size(),
             &error);
@@ -357,14 +358,14 @@ void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
         task.task_name = nonportable_name;
         error.clear();
         Require(
-            specforge::SampleAnnotationIoAdapter{}.
+            specforge::test_support::LegacyFixtureIo{}.
                 SaveLabelMetadata(path, task, nullptr, &error),
             error.empty()
                 ? "NPY nonportable sidecar fixture should write"
                 : error);
 
         const std::optional<specforge::SampleAnnotationResult> annotation =
-            specforge::SampleAnnotationIoAdapter{}.
+            specforge::test_support::LegacyFixtureIo{}.
                 Load(path, values.size(), &error);
         Require(
             annotation.has_value(),
@@ -381,13 +382,13 @@ void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
     task.task_name = "初始标签-😀.npy";
     error.clear();
     Require(
-        specforge::SampleAnnotationIoAdapter{}.
+        specforge::test_support::LegacyFixtureIo{}.
             SaveLabelMetadata(path, task, nullptr, &error),
         error.empty()
             ? "NPY Unicode sidecar fixture should write"
             : error);
     const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.
+        specforge::test_support::LegacyFixtureIo{}.
             Load(path, values.size(), &error);
     Require(
         annotation.has_value() &&
@@ -494,7 +495,7 @@ void TestNpyProvenanceUsesTheParsedFileGeneration()
     std::size_t checkpoint_calls = 0;
     ScopedCurrentPath current_path(generation_a);
     const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
+        specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             3,
             [&]() {

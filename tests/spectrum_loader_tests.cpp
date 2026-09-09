@@ -1,3 +1,4 @@
+#include "legacy_annotation_fixture_io.h"
 #include "domain/spectrum_loader.h"
 #include "cancellation_stage_probe.h"
 #include "domain/npy_array_io.h"
@@ -1351,7 +1352,7 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     const double adjacent = std::nextafter(1.0, 2.0);
     WriteNpy(floating_path, "<f8", {2}, BytesFor<double>({1.0, adjacent}));
 
-    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::test_support::LegacyFixtureIo adapter;
     std::string error;
     const std::optional<specforge::SampleAnnotationResult> signed_annotation =
         adapter.Load(signed_path, 2, &error);
@@ -1547,7 +1548,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
         .sample_names = sample_names,
     };
 
-    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::test_support::LegacyFixtureIo adapter;
     std::string error;
     const std::optional<specforge::SampleAnnotationResult> loaded =
         adapter.LoadForSource(explicit_path, compatible_source, &error);
@@ -1725,7 +1726,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
     std::filesystem::remove(source_index_path, cleanup_error);
     std::filesystem::remove(npy_path, cleanup_error);
     std::filesystem::remove(
-        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(npy_path),
+        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(npy_path),
         cleanup_error);
 }
 
@@ -1759,7 +1760,7 @@ void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::SampleAnnotationIoAdapter{}
+        (void)specforge::test_support::LegacyFixtureIo{}
             .LoadForSourceCancelable(
                 path,
                 source,
@@ -1791,7 +1792,7 @@ void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
     WriteNpy(shape_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     WriteNpy(dtype_path, "<f8", {2}, BytesFor<double>({1.0, 2.0}));
 
-    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::test_support::LegacyFixtureIo adapter;
     std::string error;
     Require(
         !adapter.LoadLabelResult(shape_path, 3, {}, &error).has_value(),
@@ -2652,7 +2653,7 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
+        (void)specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -2686,7 +2687,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
         "metadata cancellation fixture label should be valid");
     std::string metadata_error;
     Require(
-        specforge::SampleAnnotationIoAdapter{}.SaveLabelMetadata(
+        specforge::test_support::LegacyFixtureIo{}.SaveLabelMetadata(
             path,
             task,
             nullptr,
@@ -2711,7 +2712,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
+        (void)specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -2730,7 +2731,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
     std::error_code error;
     std::filesystem::remove(path, error);
     std::filesystem::remove(
-        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path),
+        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(path),
         error);
 }
 
@@ -2741,7 +2742,7 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     {
         std::ofstream metadata(
-            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path),
+            specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path),
             std::ios::trunc);
         metadata << "{invalid-json";
     }
@@ -2760,7 +2761,7 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
                     SourceCollectionManifestDiagnosticKind::
                         AnnotationMetadataIgnored &&
             manifest.diagnostics.front().path ==
-                specforge::SampleAnnotationIoAdapter::
+                specforge::test_support::LegacyFixtureIo::
                     MetadataPathForResult(
                         annotation_path) &&
             !manifest.diagnostics.front().detail.empty(),
