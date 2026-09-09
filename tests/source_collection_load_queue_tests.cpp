@@ -365,7 +365,7 @@ void TestWorkerStartFailureCompletesWithoutStrandingQueue()
     Require(completed[1].task_id == ids[1] && completed[1].prepared &&
         completed[2].task_id == ids[2] && completed[2].prepared,
         "admission failure must not strand later requests");
-    Require(!queue.NeedsService(), "failed admission must not leak active queue state");
+    Require(WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }), "failed admission must not leak active queue state");
     std::filesystem::remove(path);
 }
 
@@ -582,7 +582,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
         });
     Require(
         WaitUntil([&queue]() {
-            return !queue.NeedsService();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService();
         }),
         "canceled prefetch should reach a terminal state");
 
@@ -830,7 +830,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
             return notifications.load(std::memory_order_relaxed) == 1;
         }),
         "retiring a canceled buffered result must not add an activatable notification");
-    Require(!queue.NeedsService(), "a canceled buffered completion should leave no queued result");
+    Require(WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }), "a canceled buffered completion should leave no queued result");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
 }
@@ -868,7 +868,7 @@ void TestCancelSuppressesCompletion()
         "activity snapshot should expose the live source worker");
     queue.Cancel(task_id);
     Require(
-        WaitUntil([&]() { return !queue.NeedsService(); }),
+        WaitUntil([&]() { Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService(); }),
         "canceled worker should reach a terminal state");
     Require(queue.TakeCompleted().empty(), "canceled task should not publish a stale result");
     Require(
@@ -954,7 +954,7 @@ void TestCanceledWorkerRemainsNonIdleUntilItRetires()
     release_promise.set_value();
     Require(
         WaitUntil([&]() {
-            return !queue.NeedsService();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion"); return !queue.NeedsService();
         }),
         "the canceled source worker should become idle after controlled retirement");
     Require(
@@ -1023,7 +1023,7 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
         "the checkpointed resident request should remain cancelable");
     Require(
         WaitUntil([&queue]() {
-            (void)queue.TakeCompleted();
+            Require(queue.TakeCompleted().empty(), "teardown must not publish an unexpected completion");
             return !queue.NeedsService();
         }),
         "the canceled checkpointed request should terminate");

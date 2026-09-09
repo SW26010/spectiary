@@ -74,6 +74,11 @@ struct SourceCollectionActivationTransactionTestAccess {
             .completed_count;
     }
 
+    static SourceCollectionLoadActivitySnapshot QueueActivity(const SourceCollectionActivationTransaction& activation)
+    {
+        return activation.load_queue_.ActivitySnapshot();
+    }
+
     static bool PrefetchActive(
         const SourceCollectionActivationTransaction&
             activation)
@@ -494,6 +499,52 @@ void TestActivationOwnsQueueServiceDeadline()
     Require(
         failure_drained && !after_drain,
         "draining the terminal completion should clear the queue service deadline");
+}
+
+void TestLastWorkerIsReapedByScheduledServiceAfterCompletionDrain()
+{
+    const auto path = UniqueTempPath("_last_worker_service.csv");
+    WriteFixture(path);
+    std::promise<void> notified_promise, release_promise;
+    auto notified = notified_promise.get_future();
+    auto release = release_promise.get_future().share();
+    auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
+        MakeDependencies([](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("terminal fixture failure");
+        }));
+    // Hold RunTask inside its notification, after publishing the result but
+    // before RunTaskLoop can mark the final worker finished.
+    queue.RegisterCompletionReadyCallback([&]() {
+        notified_promise.set_value();
+        release.wait();
+    });
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+    Activation activation(session, std::move(queue));
+    (void)activation.OpenSource(path, 0);
+    const bool notification_received = notified.wait_for(2s) == std::future_status::ready;
+    (void)activation.Drain(false);
+    const auto drained = ActivationAccess::QueueActivity(activation);
+    const auto scheduled = ActivationAccess::NextMaintenanceDeadline(activation);
+    release_promise.set_value();
+    Require(notification_received, "last completion must wake the UI");
+    Require(drained.active_task_count == 0 && drained.completed_count == 0 && drained.worker_count == 1,
+        "the completion must be drained while the final worker is still unwinding");
+    Require(scheduled.has_value(), "worker teardown must retain a production service deadline after completion drain");
+
+    const auto timeout = std::chrono::steady_clock::now() + 2s;
+    while (ActivationAccess::QueueActivity(activation).worker_count != 0 &&
+           std::chrono::steady_clock::now() < timeout) {
+        const auto deadline = ActivationAccess::NextMaintenanceDeadline(activation);
+        if (!deadline) break;
+        // Drain only when the production scheduler requests service. There is
+        // no unconditional polling drain and no new user operation.
+        std::this_thread::sleep_until(*deadline);
+        (void)activation.Drain(false);
+    }
+    Require(ActivationAccess::QueueActivity(activation).worker_count == 0 &&
+        !ActivationAccess::NextMaintenanceDeadline(activation),
+        "scheduled service must reap the final worker and then become idle");
+    std::filesystem::remove(path);
 }
 
 void TestSuccessfulSourceDoesNotHideConcurrentFailure()
@@ -1539,6 +1590,7 @@ int main()
         TestRapidNavigationPublishesOnlyLatestIntent();
         TestFailedExplicitOpenProducesTerminalLifecycleResult();
         TestActivationOwnsQueueServiceDeadline();
+        TestLastWorkerIsReapedByScheduledServiceAfterCompletionDrain();
         TestSuccessfulSourceDoesNotHideConcurrentFailure();
         TestConcurrentFailuresRemainVisible();
         TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();

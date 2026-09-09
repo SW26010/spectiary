@@ -237,7 +237,10 @@ public:
     bool NeedsService() const
     {
         std::lock_guard lock(mutex_);
-        return active_task_count_ > 0 || !completed_.empty();
+        // Completion publication precedes the worker's finished flag. Keep
+        // the activation service deadline alive until TakeCompleted reaps it,
+        // even if the last completion has already been drained.
+        return active_task_count_ > 0 || !completed_.empty() || !workers_.empty();
     }
 
     SourceCollectionLoadActivitySnapshot ActivitySnapshot() const
