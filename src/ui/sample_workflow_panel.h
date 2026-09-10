@@ -191,16 +191,6 @@ private:
     std::unordered_set<std::string> retained_recovery_drafts_;
     std::unordered_map<std::string, std::string>
         recovery_draft_fingerprints_;
-    std::optional<std::array<float, 4>> labeling_recovery_rect_;
-    std::optional<std::array<float, 4>>
-        labeling_output_action_rect_;
-    std::optional<std::array<float, 4>> labeling_export_rect_;
-    std::optional<std::array<float, 4>>
-        labeling_export_format_rect_;
-    std::unordered_map<std::string, std::array<float, 4>>
-        recovery_action_rects_;
-    std::unordered_map<std::string, std::array<float, 4>>
-        recovery_identity_rects_;
     bool labeling_export_format_initialized_ = false;
     std::string labeling_export_source_identity_;
     SampleLabelExportFormat labeling_export_format_ =

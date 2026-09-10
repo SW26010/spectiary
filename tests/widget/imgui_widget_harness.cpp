@@ -87,13 +87,13 @@ WidgetHarness& WidgetHarness::Current()
     return *static_cast<WidgetHarness*>(context->TestEngine);
 }
 
-std::optional<Widget> WidgetHarness::Observe(std::string_view label, std::string_view scope) const
+std::optional<Widget> WidgetHarness::Observe(std::string_view label, std::string_view scope, std::string_view window) const
 {
     if (observed_frame_ != context_->FrameCount) return std::nullopt;
     std::optional<Widget> match;
     for (const auto& widget : widgets_) {
         // Window decorations may be reported before the root ID stack exists.
-        if (widget.id_stack.empty()) continue;
+        if (widget.id_stack.empty() || (!window.empty() && widget.window != window)) continue;
         const auto suffix = widget.label.find("###");
         const auto seed = widget.id_stack.back();
         const bool identity = widget.label.empty() &&
@@ -118,22 +118,7 @@ Widget WidgetHarness::Find(std::string_view label, std::string_view window)
 {
     ImGui::SetCurrentContext(context_);
     for (int attempt = 0; attempt <= 8; ++attempt) {
-        const Widget* match = nullptr;
-        for (const auto& widget : widgets_) {
-            const auto suffix = widget.label.find("###");
-            // BeginCombo supplies ItemAdd but no ItemInfo in this ImGui version.
-            // For root-scope ### identities, derive the ID from the real window
-            // seed; bounds still come exclusively from the item hook.
-            const auto* owner = ImGui::FindWindowByName(widget.window.c_str());
-            const bool root_identity = widget.label.empty() && owner &&
-                widget.id == ImHashStr(("###" + std::string(label)).c_str(), 0, owner->ID);
-            const bool matches = root_identity || widget.label == label ||
-                (suffix != std::string::npos && std::string_view(widget.label).substr(suffix + 3) == label);
-            if (!matches || (!window.empty() && widget.window != window)) continue;
-            if (match && (match->id != widget.id || match->window != widget.window))
-                throw std::runtime_error("Ambiguous widget: " + std::string(label));
-            match = &widget;
-        }
+        const auto match = Observe(label, {}, window);
         if (match) return *match;
         if (attempt < 8) Frames();
     }
@@ -157,6 +142,21 @@ void WidgetHarness::Click(std::string_view label, ImGuiMouseButton button)
     Frames();
     ImGui::GetIO().AddMouseButtonEvent(button, false);
     Frames(2);
+}
+
+void WidgetHarness::Click(std::string_view label, std::function<void()> complete_frame)
+{
+    if (mode_ != FrameMode::ExistingContext)
+        throw std::runtime_error("Complete frame driver requires an existing context");
+    auto previous_driver = std::move(render_);
+    render_ = std::move(complete_frame);
+    try {
+        Click(label);
+    } catch (...) {
+        render_ = std::move(previous_driver);
+        throw;
+    }
+    render_ = std::move(previous_driver);
 }
 
 void WidgetHarness::Key(ImGuiKey key)

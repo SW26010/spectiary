@@ -33,9 +33,13 @@ public:
     Widget Find(std::string_view label, std::string_view window = {});
     // Observe only this frame, including disabled controls. A semantic PushID
     // scope disambiguates repeated rows without relying on their screen order.
-    std::optional<Widget> Observe(std::string_view label, std::string_view scope = {}) const;
+    std::optional<Widget> Observe(std::string_view label, std::string_view scope = {},
+        std::string_view window = {}) const;
     static WidgetHarness& Current();
     void Click(std::string_view label, ImGuiMouseButton button = ImGuiMouseButton_Left);
+    // Legacy lifecycle fixtures own NewFrame/EndFrame and observe individual
+    // submissions. Borrow their frame driver only for this interaction.
+    void Click(std::string_view label, std::function<void()> complete_frame);
     void Key(ImGuiKey key);
     void Text(std::string_view text);
     void Until(const std::function<bool()>& predicate, std::string_view description,

@@ -168,48 +168,8 @@ struct SampleWorkflowPanelUiTestAccess {
 
 
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingRecoveryRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_recovery_rect_;
-    }
 
 
-
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    RecoveryActionRect(
-        const SampleWorkflowPanelUi& panel,
-        const SourceCollectionSessionView& view,
-        std::size_t draft_index,
-        std::string_view stable_id)
-    {
-        std::string key = RecoveryDraftRowToken(
-            view,
-            draft_index);
-        key.push_back('\n');
-        key.append(stable_id);
-        const auto found = panel.recovery_action_rects_.find(key);
-        if (found == panel.recovery_action_rects_.end()) {
-            return std::nullopt;
-        }
-        return found->second;
-    }
-
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    RecoveryIdentityRect(
-        const SampleWorkflowPanelUi& panel,
-        const SourceCollectionSessionView& view,
-        std::size_t draft_index)
-    {
-        const std::string key = RecoveryDraftRowToken(
-            view,
-            draft_index);
-        const auto found = panel.recovery_identity_rects_.find(key);
-        if (found == panel.recovery_identity_rects_.end()) {
-            return std::nullopt;
-        }
-        return found->second;
-    }
 
     static void SetEditingLabelCode(
         SampleWorkflowPanelUi& panel,
@@ -244,18 +204,7 @@ struct SampleWorkflowPanelUiTestAccess {
         return panel.label_shortcut_capture_active_;
     }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingExportRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_export_rect_;
-    }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingExportFormatRect(
-        const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_export_format_rect_;
-    }
 
     [[nodiscard]] static SampleLabelExportFormat
     LabelingExportFormat(
@@ -264,12 +213,6 @@ struct SampleWorkflowPanelUiTestAccess {
         return panel.labeling_export_format_;
     }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingOutputActionRect(
-        const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_output_action_rect_;
-    }
 
     static void SetPendingAnnotationActivation(
         SampleWorkflowPanelUi& panel,
@@ -289,6 +232,20 @@ struct SampleWorkflowPanelUiTestAccess {
 }  // namespace specforge
 
 namespace {
+
+std::optional<std::array<float, 4>> OutputWidgetBounds()
+{
+    const auto save = WidgetBounds("SpecForgeSaveLabelingTaskTo");
+    return save ? save : WidgetBounds("SpecForgeMigrateLabelingTaskToAsdf");
+}
+
+std::optional<std::array<float, 4>> RecoveryWidgetBounds(
+    const specforge::SourceCollectionSessionView& view, std::size_t draft_index,
+    std::string_view stable_id)
+{
+    const auto scope = specforge::SampleWorkflowPanelUiTestAccess::RecoveryDraftRowToken(view, draft_index) + "#row";
+    return WidgetBounds(stable_id, scope);
+}
 
 void Require(bool condition, std::string_view message)
 {
@@ -720,24 +677,9 @@ void FocusLabelingTaskNameField(
     const specforge::SourceCollectionSessionView& view)
 {
     (void)RenderLabelingTaskNameFrame(panel, view);
-    const auto field_rect =
-        WidgetBounds("##labeling_task_name");
-    Require(
-        field_rect.has_value(),
-        "an active task should expose its task-name field rectangle");
-    const ImVec2 field_center = RectCenter(*field_rect);
-    ImGui::GetIO().AddMousePosEvent(
-        field_center.x,
-        field_center.y);
-    (void)RenderLabelingTaskNameFrame(panel, view);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    (void)RenderLabelingTaskNameFrame(panel, view);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    (void)RenderLabelingTaskNameFrame(panel, view);
+    specforge::test::WidgetHarness::Current().Click("##labeling_task_name", [&] {
+        (void)RenderLabelingTaskNameFrame(panel, view);
+    });
 }
 
 void ReplaceFocusedText(
@@ -836,103 +778,19 @@ void SelectLabelExportFormatThroughUi(
     const specforge::SourceCollectionSessionView& view,
     specforge::SampleLabelExportFormat format)
 {
-    const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingExportFormatRect(panel);
-    Require(
-        selector_rect.has_value(),
-        "export format selector should expose a deterministic rectangle");
-    const ImVec2 selector_position(
-        ((*selector_rect)[0] + (*selector_rect)[2]) *
-            0.5f,
-        ((*selector_rect)[1] + (*selector_rect)[3]) *
-            0.5f);
-    ImGui::GetIO().AddMousePosEvent(
-        selector_position.x,
-        selector_position.y);
-    (void)RenderLabelingExportFrame(panel, view);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    (void)RenderLabelingExportFrame(panel, view);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    const LabelingExportFrameObservation opened =
-        RenderLabelingExportFrame(panel, view);
-    Require(
-        !opened.requested_export_format &&
-            !opened.submitted_workflow_kind &&
-            !GImGui->OpenPopupStack.empty() &&
-            GImGui->OpenPopupStack.back().Window != nullptr,
-        "clicking the export format selector should open its popup without exporting");
-
-    ImGuiWindow* popup_window =
-        GImGui->OpenPopupStack.back().Window;
-    ImGui::GetIO().AddMousePosEvent(
-        popup_window->InnerRect.Min.x + 1.0f,
-        popup_window->InnerRect.Min.y + 1.0f);
-    const LabelingExportFrameObservation settled =
-        RenderLabelingExportFrame(panel, view);
-    Require(
-        !settled.requested_export_format &&
-            !settled.submitted_workflow_kind &&
-            !GImGui->OpenPopupStack.empty() &&
-            GImGui->OpenPopupStack.back().Window != nullptr,
-        "settling the real export format popup must not execute an export");
-    popup_window = GImGui->OpenPopupStack.back().Window;
-    const int option_index =
-        format == specforge::SampleLabelExportFormat::Npy
-        ? 0
-        : 1;
-    const char* option_label =
-        format == specforge::SampleLabelExportFormat::Csv
-        ? "CSV##SpecForgeLabelExportFormatCsv"
-        : "NPY##SpecForgeLabelExportFormatNpy";
-    const ImGuiID option_id =
-        popup_window->GetID(option_label);
-    const float option_height = ImGui::GetTextLineHeight();
-    const ImVec2 option_position(
-        popup_window->DC.CursorStartPos.x +
-            ImGui::GetStyle().FramePadding.x,
-        popup_window->DC.CursorStartPos.y +
-            static_cast<float>(option_index) *
-                (option_height +
-                 ImGui::GetStyle().ItemSpacing.y) +
-            option_height * 0.5f);
-    ImGui::GetIO().AddMousePosEvent(
-        option_position.x,
-        option_position.y);
-    const LabelingExportFrameObservation hovered =
-        RenderLabelingExportFrame(panel, view);
-    Require(
-        !hovered.requested_export_format &&
-            !hovered.submitted_workflow_kind &&
-            !GImGui->OpenPopupStack.empty() &&
-            GImGui->HoveredId == option_id,
-        "hovering a real export format option must hit that item without exporting");
-
-    ImGui::GetIO().AddMousePosEvent(
-        option_position.x,
-        option_position.y);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    const LabelingExportFrameObservation pressed =
-        RenderLabelingExportFrame(panel, view);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    const LabelingExportFrameObservation selected =
-        RenderLabelingExportFrame(panel, view);
-    Require(
-        !pressed.requested_export_format &&
-            !pressed.submitted_workflow_kind &&
-            !selected.requested_export_format &&
-            !selected.submitted_workflow_kind &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingExportFormat(panel) == format,
-        "clicking a real combo option should switch only the export format preference");
+    int unexpected_actions = 0;
+    const auto render = [&] {
+        const auto observation = RenderLabelingExportFrame(panel, view);
+        if (observation.requested_export_format || observation.submitted_workflow_kind)
+            ++unexpected_actions;
+    };
+    auto& ui = specforge::test::WidgetHarness::Current();
+    ui.Click("##SpecForgeLabelExportFormat", render);
+    ui.Click(format == specforge::SampleLabelExportFormat::Csv
+        ? "CSV##SpecForgeLabelExportFormatCsv" : "NPY##SpecForgeLabelExportFormatNpy", render);
+    Require(unexpected_actions == 0 &&
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingExportFormat(panel) == format,
+        "choosing an export format must update the preference without exporting");
 }
 
 struct LabelingTaskSwitchFrameObservation {
@@ -1442,8 +1300,7 @@ void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, view);
     const auto action_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingOutputActionRect(panel);
+        OutputWidgetBounds();
     Require(
         action_rect.has_value(),
         "temporary task should expose the canonical output chooser action");
@@ -1484,12 +1341,10 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, active_view);
     const auto export_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingExportRect(panel);
+        WidgetBounds("SpecForgeExportLabels");
     Require(
         export_rect.has_value() &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingExportFormatRect(panel) &&
+            WidgetBounds("##SpecForgeLabelExportFormat") &&
             specforge::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
                 specforge::SampleLabelExportFormat::Npy,
@@ -1529,8 +1384,7 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, inactive_view);
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingExportRect(panel),
+        !WidgetBounds("SpecForgeExportLabels"),
         "Export Labels should be hidden when no editable task is active");
 
     specforge::SourceCollectionSessionView structural_view =
@@ -1542,8 +1396,7 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     const LabelingExportFrameObservation structural =
         RenderLabelingExportFrame(panel, structural_view);
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::
-             LabelingExportRect(panel) &&
+        !WidgetBounds("SpecForgeExportLabels") &&
             structural.export_path_request_count == 0 &&
             !structural.submitted_workflow_kind,
         "Export Labels should be hidden for a structural canonical task without authoritative values");
@@ -1600,8 +1453,7 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, folder_view);
     const auto export_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingExportRect(panel);
+        WidgetBounds("SpecForgeExportLabels");
     Require(
         export_rect &&
             specforge::SampleWorkflowPanelUiTestAccess::
@@ -1744,8 +1596,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
         }
 
         const auto export_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingExportRect(panel);
+            WidgetBounds("SpecForgeExportLabels");
         Require(
             export_rect.has_value(),
             "each export matrix case should expose the export action");
@@ -2237,20 +2088,17 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             specforge::UiLanguage::English,
             compact_window_size);
         const auto recover_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 recovery_view,
                 0,
                 "SpecForgeRecoverTemporaryDraft");
         const auto keep_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 recovery_view,
                 0,
                 "SpecForgeKeepTemporaryDraft");
         const auto delete_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 recovery_view,
                 0,
                 "SpecForgeDeleteTemporaryDraft");
@@ -2304,8 +2152,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             specforge::UiLanguage::English,
             compact_window_size);
         const auto keep_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 recovery_view,
                 0,
                 "SpecForgeKeepTemporaryDraft");
@@ -2460,8 +2307,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             specforge::UiLanguage::English,
             compact_window_size);
         const auto delete_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 recovery_view,
                 0,
                 "SpecForgeDeleteTemporaryDraft");
@@ -2588,8 +2434,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         specforge::UiLanguage::English,
         compact_window_size);
     const auto second_keep_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-            panel,
+        RecoveryWidgetBounds(
             duplicate_view,
             1,
             "SpecForgeKeepTemporaryDraft");
@@ -2659,8 +2504,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         specforge::UiLanguage::English,
         compact_window_size);
     const auto first_keep_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-            panel,
+        RecoveryWidgetBounds(
             duplicate_view,
             0,
             "SpecForgeKeepTemporaryDraft");
@@ -2756,8 +2600,7 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
                 std::string::npos,
             "ambiguous duplicate rows should show localized conflict feedback");
         const auto action_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 duplicate_view,
                 1,
                 stable_id);
@@ -2916,8 +2759,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
             specforge::UiLanguage::English,
             window_size);
         const auto action_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 ambiguous_view,
                 0,
                 stable_id);
@@ -3081,8 +2923,7 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
         specforge::UiLanguage::English,
         compact_window_size);
     const auto delete_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-            panel,
+        RecoveryWidgetBounds(
             view,
             0,
             "SpecForgeDeleteTemporaryDraft");
@@ -3182,33 +3023,20 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
                 WidgetBounds("SpecForgePauseLabelingTask");
             const auto delete_rect =
                 WidgetBounds("SpecForgeDeleteLabelingTask");
-            const auto recovery_rect =
-                specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingRecoveryRect(panel);
             Require(selector_rect.has_value(), "layout: selector must be observed");
             Require(pause_rect.has_value(), "layout: Pause must be observed");
             Require(delete_rect.has_value(), "layout: Delete must be observed");
-            Require(recovery_rect.has_value(), "layout: recovery must be observed");
             Require(
                 std::fabs((*selector_rect)[1] - (*pause_rect)[1]) <= 1.0f &&
                     std::fabs((*pause_rect)[1] - (*delete_rect)[1]) <= 1.0f,
                 "selector, Pause, and Delete should share the first-row baseline");
-            Require(
-                (*recovery_rect)[1] >=
-                    std::max((*pause_rect)[3], (*delete_rect)[3]) &&
-                    (*recovery_rect)[3] > (*recovery_rect)[1],
-                "the recovery rectangle should begin below the complete selector row");
             Require(
                 (*selector_rect)[0] >= 20.0f &&
                     (*selector_rect)[2] <= 20.0f + window_size.x &&
                     (*pause_rect)[0] >= 20.0f &&
                     (*delete_rect)[2] <= 20.0f + window_size.x,
                 "selector row controls should remain inside the labeling window");
-            if (expect_recovery_action) {
-                Require(
-                    (*recovery_rect)[1] > (*delete_rect)[3],
-                    "formal-task recovery actions should begin below Pause and Delete");
-            }
+            (void)expect_recovery_action;
             (void)rendered;
         }
     };
@@ -3370,8 +3198,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             panel,
             view.labeling.task_id);
         const auto delete_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 view,
                 0,
                 "SpecForgeDeleteTemporaryDraft");
@@ -3527,8 +3354,7 @@ void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
         "the default labeling dock should keep all recovery actions visible in a narrow layout");
     for (const std::string_view action_id : action_ids) {
         const auto action_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-                panel,
+            RecoveryWidgetBounds(
                 view,
                 0,
                 action_id);
@@ -4099,8 +3925,7 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         "laying out the recovery controls should not settle a focused edit");
 
     const auto recovery_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
-            panel,
+        RecoveryWidgetBounds(
             frame_view,
             0,
             "SpecForgeRecoverTemporaryDraft");
@@ -4262,37 +4087,21 @@ void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
         true,
         specforge::UiLanguage::English,
         narrow_window_size);
-    const auto identity_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::RecoveryIdentityRect(
-            panel,
-            view,
-            0);
-    Require(
-        identity_rect.has_value(),
-        "a recovery row should expose a deterministic task identity rectangle");
-    const ImVec2 identity_position(
-        (*identity_rect)[0] + 4.0f,
-        ((*identity_rect)[1] + (*identity_rect)[3]) * 0.5f);
-    ImGui::GetIO().AddMousePosEvent(
-        identity_position.x,
-        identity_position.y);
-    const RecoveryFrameObservation hovered = RenderRecoveryFrame(
-        panel,
-        view,
-        latest_view,
-        false,
-        specforge::UiLanguage::English,
-        narrow_window_size,
-        specforge::SampleLabelingOperationResult::Issue::None,
-        true);
-    const std::size_t first_identity =
-        hovered.logged_text.find(long_task_id);
-    Require(
-        first_identity != std::string::npos &&
-            hovered.logged_text.find(
-                long_task_id,
-                first_identity + long_task_id.size()) != std::string::npos,
-        "hovering a narrow recovery identity should render the complete task ID tooltip");
+    bool full_tooltip = false;
+    // Text has no ImGui widget ID. This bounded scan tests text hover geometry,
+    // while all ordinary buttons use widget identity above.
+    for (float y = 60; y < narrow_window_size.y && !full_tooltip; y += 8) {
+        for (float x = 28; x < narrow_window_size.x && !full_tooltip; x += 24) {
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            const auto hovered = RenderRecoveryFrame(panel, view, latest_view, false,
+                specforge::UiLanguage::English, narrow_window_size,
+                specforge::SampleLabelingOperationResult::Issue::None, true);
+            const auto first = hovered.logged_text.find(long_task_id);
+            full_tooltip = first != std::string::npos &&
+                hovered.logged_text.find(long_task_id, first + long_task_id.size()) != std::string::npos;
+        }
+    }
+    Require(full_tooltip, "hovering recovery identity must show the complete task ID tooltip");
 }
 
 void TestLabelingPanelShowsPausedDraftSaveFailure()

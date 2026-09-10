@@ -1529,12 +1529,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
-    labeling_recovery_rect_.reset();
-    labeling_output_action_rect_.reset();
-    labeling_export_rect_.reset();
-    labeling_export_format_rect_.reset();
-    recovery_action_rects_.clear();
-    recovery_identity_rects_.clear();
     const auto capture_result = [this, language](
                                     SourceCollectionSessionResult result) {
         CaptureLabelingOperationResult(
@@ -1665,33 +1659,16 @@ void SampleWorkflowPanelUi::RenderLabeling(
     bool recovery_action_submitted = false;
     bool open_delete_task_popup = false;
     const auto render_recovery_drafts = [&]() {
-        const ImVec2 recovery_top = ImGui::GetCursorScreenPos();
-        const auto finish_recovery_layout =
-            [this, &recovery_top](const ImVec2 recovery_bottom) {
-                labeling_recovery_rect_ = {
-                    recovery_top.x,
-                    recovery_top.y,
-                    recovery_bottom.x,
-                    recovery_bottom.y};
-            };
         const std::string current_source_prefix =
             labeling_view.source_identity + "\n";
         const auto render_recovery_task_identity =
-            [this, language](std::string_view task_id, std::string_view key) {
+            [language](std::string_view task_id) {
                 const std::string task_id_value(task_id);
                 const std::string task_identity = FormatUiText(
                     language,
                     UiTextId::TemporaryDraftTaskIdentity,
                     task_id_value.c_str());
                 RenderDisabledText(task_identity);
-                const ImRect rect = GImGui->LastItemData.Rect;
-                recovery_identity_rects_.insert_or_assign(
-                    std::string(key),
-                    std::array<float, 4>{
-                        rect.Min.x,
-                        rect.Min.y,
-                        rect.Max.x,
-                        rect.Max.y});
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip(
                         "%s",
@@ -1715,7 +1692,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                                current_source_prefix.size(),
                                current_source_prefix) == 0;
                 });
-            finish_recovery_layout(ImGui::GetCursorScreenPos());
             return;
         }
 
@@ -1807,20 +1783,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 return;
             }
 
-            const auto record_action_rect =
-                [this, key](std::string_view stable_id) {
-                    const ImRect rect = GImGui->LastItemData.Rect;
-                    std::string action_key(key);
-                    action_key.push_back('\n');
-                    action_key.append(stable_id);
-                    recovery_action_rects_.insert_or_assign(
-                        std::move(action_key),
-                        std::array<float, 4>{
-                            rect.Min.x,
-                            rect.Min.y,
-                            rect.Max.x,
-                            rect.Max.y});
-                };
             const bool recovery_activation_disabled =
                 labeling_view.has_active_task &&
                 !labeling_view.can_deactivate_task;
@@ -1842,7 +1804,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                         draft.task_id)));
                 recovery_action_submitted = true;
             }
-            record_action_rect("SpecForgeRecoverTemporaryDraft");
             if (recover_disabled) {
                 ImGui::EndDisabled();
                 if (ImGui::IsItemHovered(
@@ -1878,7 +1839,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             if (retained) {
                 ImGui::EndDisabled();
             }
-            record_action_rect("SpecForgeKeepTemporaryDraft");
             if (!compact_layout) {
                 ImGui::SameLine();
             }
@@ -1898,7 +1858,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 pending_delete_task_id_ = draft.task_id;
                 open_delete_task_popup = true;
             }
-            record_action_rect("SpecForgeDeleteTemporaryDraft");
             if (duplicate_task_id) {
                 ImGui::EndDisabled();
                 if (ImGui::IsItemHovered(
@@ -1939,8 +1898,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                         language,
                         draft.task_name));
                 render_recovery_task_identity(
-                    draft.task_id,
-                    key);
+                    draft.task_id);
                 RenderText(
                     UiText(
                         language,
@@ -1971,7 +1929,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 ImGui::Separator();
                 ImGui::PopID();
             }
-            finish_recovery_layout(ImGui::GetCursorScreenPos());
             return;
         }
         if (ImGui::BeginTable(
@@ -2040,8 +1997,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 RenderText(task_name);
                 ImGui::TableSetColumnIndex(1);
                 render_recovery_task_identity(
-                    draft.task_id,
-                    key);
+                    draft.task_id);
                 ImGui::TableSetColumnIndex(2);
                 RenderText(
                     UiText(
@@ -2076,7 +2032,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             }
             ImGui::EndTable();
         }
-        finish_recovery_layout(ImGui::GetCursorScreenPos());
     };
     const auto clear_pending_delete = [this]() {
         pending_delete_task_name_.clear();
@@ -2794,13 +2749,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                             SetActiveLabelingOutputPath(*path)));
             }
         }
-        const ImVec2 output_action_min = ImGui::GetItemRectMin();
-        const ImVec2 output_action_max = ImGui::GetItemRectMax();
-        labeling_output_action_rect_ = {
-            output_action_min.x,
-            output_action_min.y,
-            output_action_max.x,
-            output_action_max.y};
     }
     if (labeling_view.has_active_task &&
         labeling_view.can_export_label_values) {
@@ -2827,13 +2775,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                                 labeling_export_format_)));
             }
         }
-        const ImVec2 export_min = ImGui::GetItemRectMin();
-        const ImVec2 export_max = ImGui::GetItemRectMax();
-        labeling_export_rect_ = {
-            export_min.x,
-            export_min.y,
-            export_max.x,
-            export_max.y};
 
         ImGui::SameLine();
         const char* export_format_text =
@@ -2874,15 +2815,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             }
             ImGui::EndCombo();
         }
-        const ImVec2 export_format_min =
-            ImGui::GetItemRectMin();
-        const ImVec2 export_format_max =
-            ImGui::GetItemRectMax();
-        labeling_export_format_rect_ = {
-            export_format_min.x,
-            export_format_min.y,
-            export_format_max.x,
-            export_format_max.y};
     }
 
     if (labeling_view.output_format == SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
