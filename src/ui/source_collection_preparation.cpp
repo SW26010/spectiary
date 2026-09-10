@@ -120,10 +120,10 @@ bool AllWorkflowCachePathsPresent(
            !paths.navigation_state_cache_path.empty();
 }
 
-SourceCollectionPreparationAdapters DefaultAdapters(
+SourceCollectionLoadDependencies DefaultAdapters(
     SampleWorkflowPreparationPaths workflow_cache_paths)
 {
-    SourceCollectionPreparationAdapters adapters;
+    SourceCollectionLoadDependencies adapters;
     adapters.snapshot_loader =
         LoadSpectrumSnapshotFromPathCancelable;
     adapters.folder_snapshot_loader =
@@ -143,7 +143,7 @@ SourceCollectionPreparationAdapters DefaultAdapters(
 }
 
 void FillMissingAdapters(
-    SourceCollectionPreparationAdapters& adapters)
+    SourceCollectionLoadDependencies& adapters)
 {
     if (!AllWorkflowCachePathsEmpty(
             adapters.workflow_cache_paths) &&
@@ -154,7 +154,7 @@ void FillMissingAdapters(
             "or all explicit.");
     }
 
-    SourceCollectionPreparationAdapters defaults =
+    SourceCollectionLoadDependencies defaults =
         DefaultAdapters(adapters.workflow_cache_paths);
     if (!adapters.snapshot_loader) {
         adapters.snapshot_loader =
@@ -278,7 +278,7 @@ SourceCollectionPreparationStale::
 
 class SourceCollectionPreparation::Impl {
 public:
-    explicit Impl(SourceCollectionPreparationAdapters adapters)
+    explicit Impl(SourceCollectionLoadDependencies adapters)
         : adapters_(std::move(adapters))
     {
         FillMissingAdapters(adapters_);
@@ -1107,17 +1107,17 @@ private:
 
     std::unique_ptr<DirectoryChangeGenerationMonitor>
         directory_change_generation_monitor_;
-    SourceCollectionPreparationAdapters adapters_;
+    SourceCollectionLoadDependencies adapters_;
 };
 
 SourceCollectionPreparation::SourceCollectionPreparation()
     : SourceCollectionPreparation(
-          SourceCollectionPreparationAdapters{})
+          SourceCollectionLoadDependencies{})
 {
 }
 
 SourceCollectionPreparation::SourceCollectionPreparation(
-    SourceCollectionPreparationAdapters adapters)
+    SourceCollectionLoadDependencies adapters)
     : impl_(std::make_unique<Impl>(std::move(adapters)))
 {
 }

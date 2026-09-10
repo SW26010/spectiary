@@ -1,50 +1,13 @@
 #pragma once
 
-#include "ui/source_collection_preparation.h"
+#include "ui/source_collection_load_dependencies.h"
 
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <stdexcept>
+#include <stop_token>
 
 namespace specforge {
-
-class SourceCollectionPreparationCanceled : public std::runtime_error {
-public:
-    SourceCollectionPreparationCanceled();
-};
-
-class SourceCollectionPreparationStale : public std::runtime_error {
-public:
-    SourceCollectionPreparationStale();
-};
-
-struct SourceCollectionPreparationAdapters {
-    // A queue may invoke these adapters concurrently from independent source
-    // loads. Test adapters must therefore be safe for concurrent calls.
-    using CancellationCheck = std::function<bool()>;
-    using SnapshotLoader = std::function<SpectrumSnapshotHandle(
-        const std::filesystem::path&,
-        std::size_t,
-        const CancellationCheck&)>;
-    using FolderSnapshotLoader = std::function<SpectrumSnapshotHandle(
-        const std::filesystem::path&,
-        std::size_t,
-        const SourceCollectionFolderListing&,
-        const CancellationCheck&)>;
-    using SourceOpenProbe = std::function<SourceOpenFilesystemProbe(
-        const SourceOpenRequest&,
-        const SourceCollectionCancellationCheckpoint&)>;
-
-    SnapshotLoader snapshot_loader;
-    FolderSnapshotLoader folder_snapshot_loader;
-    SourceOpenProbe source_open_probe;
-    // OS registration boundary: deterministic cancellation, timeout and
-    // late-result lifetime tests (ADR 0008).
-    DirectoryChangeGenerationMonitor::RegistrationFactory
-        folder_change_generation_registration_factory;
-    SampleWorkflowPreparationPaths workflow_cache_paths;
-};
 
 using SourceCollectionWorkflowCacheProvider =
     std::function<
@@ -55,7 +18,7 @@ class SourceCollectionPreparation {
 public:
     SourceCollectionPreparation();
     explicit SourceCollectionPreparation(
-        SourceCollectionPreparationAdapters adapters);
+        SourceCollectionLoadDependencies adapters);
     ~SourceCollectionPreparation();
 
     SourceCollectionPreparation(

@@ -1371,7 +1371,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
     old_snapshot.reset();
     old_y_values.reset();
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =

@@ -141,13 +141,12 @@ specforge::SourceCollectionContextReuseProof MakeFolderReuseProof(
     };
 }
 
-specforge::SourceCollectionPreparationAdapters Dependencies(
-    specforge::SourceCollectionPreparationAdapters::SnapshotLoader loader)
+specforge::SourceCollectionLoadDependencies Dependencies(
+    specforge::SourceCollectionLoadDependencies::SnapshotLoader loader)
 {
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = std::move(loader);
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     return dependencies;
 }
 

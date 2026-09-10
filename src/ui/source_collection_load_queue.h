@@ -15,7 +15,7 @@
 
 namespace specforge {
 
-struct SourceCollectionPreparationAdapters;
+struct SourceCollectionLoadDependencies;
 struct SourceCollectionLoadQueueExecutionOptions;
 struct SourceCollectionLoadQueueTestAccess;
 
@@ -110,7 +110,7 @@ public:
 
 private:
     explicit SourceCollectionLoadQueue(
-        SourceCollectionPreparationAdapters adapters,
+        SourceCollectionLoadDependencies adapters,
         SourceCollectionLoadQueueExecutionOptions options);
 
     friend struct SourceCollectionLoadQueueTestAccess;

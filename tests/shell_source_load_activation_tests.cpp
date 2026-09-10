@@ -682,10 +682,10 @@ specforge::SourceCollectionSession MakeCachedSession(
         cache_paths.workflow);
 }
 
-specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
+specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
     const SourceSessionCachePaths& cache_paths)
 {
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
@@ -703,7 +703,7 @@ specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
 
 std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
     const SourceSessionCachePaths& cache_paths,
-    specforge::SourceCollectionPreparationAdapters dependencies)
+    specforge::SourceCollectionLoadDependencies dependencies)
 {
     using Access = specforge::ShellUiTestAccess;
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
@@ -1094,7 +1094,7 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
 
     const auto make_dependencies = []() {
         specforge::
-            SourceCollectionPreparationAdapters dependencies;
+            SourceCollectionLoadDependencies dependencies;
             dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
         dependencies.snapshot_loader =
             [](const std::filesystem::path& source,
@@ -1241,7 +1241,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     }
 
     specforge::SourceCollectionSession session({}, {}, {}, {});
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -1368,7 +1368,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
     }
 
     specforge::SourceCollectionSession session({}, {}, {}, {});
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path&, std::size_t, const auto&)
@@ -1428,7 +1428,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::shared_future<void> row_two_entered = row_two_entered_promise.get_future().share();
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_one_entered_promise,
@@ -1591,7 +1591,7 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -1663,7 +1663,7 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -1796,7 +1796,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
     }
 
     std::atomic_int decoder_calls = 0;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [&decoder_calls](
                                        const std::filesystem::path& source,
@@ -2008,7 +2008,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -2115,7 +2115,7 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
             session.CurrentSampleSnapshot()->source.path == path_a,
         "source A should be active before navigation");
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -2189,7 +2189,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -2267,7 +2267,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     std::promise<void> release_row_two_promise;
     std::shared_future<void> release_row_two = release_row_two_promise.get_future().share();
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
@@ -2379,7 +2379,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     std::shared_future<void> decoder_entered = decoder_entered_promise.get_future().share();
     std::promise<void> release_decoder_promise;
     std::shared_future<void> release_decoder = release_decoder_promise.get_future().share();
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_entered_promise,
@@ -2505,7 +2505,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         intermediate_destroyed_promise->get_future();
     std::atomic_bool initial_open_failed = false;
     std::atomic_int row_one_decode_count = 0;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&first_decode_entered_promise,
@@ -2682,7 +2682,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             other_context,
             0,
             {{}, {}});
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
@@ -2790,7 +2790,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
@@ -2938,7 +2938,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         source_b_decoded_promise.get_future().share();
     std::atomic_bool source_b_decoded_once = false;
 
-    specforge::SourceCollectionPreparationAdapters dependencies =
+    specforge::SourceCollectionLoadDependencies dependencies =
         MakeFixtureLoadDependencies(cache_paths);
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
@@ -3132,7 +3132,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
         stream << "fixture";
     }
     std::array<std::atomic_int, 3> decoder_calls{};
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls](
@@ -3313,7 +3313,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
     std::promise<void> release_prefetch_promise;
     std::shared_future<void> release_prefetch =
         release_prefetch_promise.get_future().share();
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls,
@@ -3430,7 +3430,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
         release_canceled_worker_promise.get_future().share();
     std::atomic_bool entered_once = false;
     std::atomic_int64_t decoder_returned_ns = 0;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
@@ -3885,7 +3885,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     WriteFixture(folder / "zzz.csv");
 
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
@@ -4274,7 +4274,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         state_root / "workflow.json";
 
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
@@ -4428,7 +4428,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         release_external_decode_promise.get_future().share();
     std::atomic_size_t folder_loader_calls = 0;
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
@@ -4579,7 +4579,7 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
         }
     };
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
@@ -4725,7 +4725,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
 
     const auto configure_common_dependencies =
         [&cache_paths](
-            specforge::SourceCollectionPreparationAdapters& dependencies) {
+            specforge::SourceCollectionLoadDependencies& dependencies) {
         dependencies.snapshot_loader =
             [](const auto& source, std::size_t index, const auto&) {
                 return MakeSnapshot(source, index);
@@ -4742,7 +4742,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     // Persist the same folder annotation and Sample Filter context that a
     // previous application run would leave for deferred startup restore.
     {
-        specforge::SourceCollectionPreparationAdapters dependencies;
+        specforge::SourceCollectionLoadDependencies dependencies;
         dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
         configure_common_dependencies(dependencies);
         dependencies.folder_snapshot_loader =
@@ -4816,7 +4816,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     std::atomic_bool restore_cancel_was_observed = false;
     std::atomic_bool external_completion_was_signaled = false;
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     configure_common_dependencies(dependencies);
     dependencies.folder_snapshot_loader =
@@ -4956,7 +4956,7 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
     WriteFixture(preferred);
     WriteFixture(folder / "zzz.csv");
 
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
 
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
@@ -5860,7 +5860,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     std::promise<void> release_row_two_promise;
     std::shared_future<void> release_row_two =
         release_row_two_promise.get_future().share();
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_two_entered_promise, release_row_two](

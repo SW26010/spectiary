@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ui/source_collection_load_queue.h"
-#include "ui/source_collection_preparation_internal.h"
+#include "ui/source_collection_load_dependencies.h"
 
 #include <utility>
 
@@ -15,7 +15,7 @@ struct SourceCollectionLoadQueueExecutionOptions {
 
 struct SourceCollectionLoadQueueTestAccess {
     [[nodiscard]] static SourceCollectionLoadQueue Create(
-        SourceCollectionPreparationAdapters adapters,
+        SourceCollectionLoadDependencies adapters,
         SourceCollectionLoadQueueExecutionOptions options)
     {
         return SourceCollectionLoadQueue(std::move(adapters), std::move(options));
@@ -24,7 +24,7 @@ struct SourceCollectionLoadQueueTestAccess {
 
 [[nodiscard]] inline SourceCollectionLoadQueue
 MakeSourceCollectionLoadQueueForTesting(
-    SourceCollectionPreparationAdapters adapters = {},
+    SourceCollectionLoadDependencies adapters = {},
     SourceCollectionLoadQueueExecutionOptions options = {})
 {
     return SourceCollectionLoadQueueTestAccess::Create(

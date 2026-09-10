@@ -14,7 +14,7 @@
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_load_queue.h"
-#include "ui/source_collection_preparation_internal.h"
+#include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_roster.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_session_state_cache_io.h"
@@ -316,13 +316,13 @@ using SnapshotLoader = std::function<specforge::SpectrumSnapshotHandle(
     const std::filesystem::path&,
     std::size_t)>;
 
-specforge::SourceCollectionPreparationAdapters PreparationAdapters(
+specforge::SourceCollectionLoadDependencies LoadingDependencies(
     SnapshotLoader loader,
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
     const std::filesystem::path& workflow_cache)
 {
-    specforge::SourceCollectionPreparationAdapters adapters;
+    specforge::SourceCollectionLoadDependencies adapters;
     adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     SnapshotLoader folder_loader = loader;
     adapters.snapshot_loader = [loader = std::move(loader)](
@@ -375,11 +375,12 @@ public:
                   AllowPersistentOutputs,
               std::move(canonical_document_publisher),
               std::move(canonical_values_publisher)),
-          preparation_(PreparationAdapters(
-              std::move(loader),
-              navigation_cache,
-              labeling_cache,
-              workflow_cache))
+          queue_(specforge::MakeSourceCollectionLoadQueueForTesting(
+              LoadingDependencies(
+                  std::move(loader),
+                  navigation_cache,
+                  labeling_cache,
+                  workflow_cache)))
     {
         RestorePreparedSources();
     }
@@ -417,8 +418,12 @@ private:
                 LoadHintForSource(path, spectrum_index)) {
             request.reuse = std::move(hint->reuse);
         }
-        specforge::PreparedSourceCollection prepared =
-            preparation_.Prepare(next_task_id_++, request, []() {});
+        auto completion = specforge::test_support::WaitForSourceCompletion(
+            queue_, queue_.Enqueue(std::move(request)));
+        if (!completion.prepared) {
+            throw std::runtime_error(completion.error_message);
+        }
+        auto prepared = std::move(*completion.prepared);
         return OpenPreparedSource(
             std::move(prepared.path),
             prepared.spectrum_index,
@@ -517,8 +522,7 @@ private:
         FinishDeferredRestore();
     }
 
-    specforge::SourceCollectionPreparation preparation_;
-    std::uint64_t next_task_id_ = 1;
+    specforge::SourceCollectionLoadQueue queue_;
 };
 
 PreparedSession MakeSession(

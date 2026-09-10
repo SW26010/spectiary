@@ -8,8 +8,8 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
-#include <limits>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -56,29 +56,18 @@ void WriteFixture(
 // Drives the production queue; profiling observations replace injected step counters.
 class LoadingHarness {
 public:
-    explicit LoadingHarness(specforge::SourceCollectionPreparationAdapters adapters)
+    explicit LoadingHarness(specforge::SourceCollectionLoadDependencies adapters)
         : queue_(specforge::MakeSourceCollectionLoadQueueForTesting(std::move(adapters))) {}
 
-    specforge::PreparedSourceCollection Prepare(
-        std::uint64_t,
-        specforge::SourceCollectionLoadRequest request,
-        const std::function<void()>&)
+    specforge::PreparedSourceCollection Load(
+        specforge::SourceCollectionLoadRequest request)
     {
         request.latency_attempt = trace_.Begin(request.spectrum_index, specforge::LoadLatencyClock::now());
         const auto id = queue_.Enqueue(std::move(request));
-        const auto deadline = std::chrono::steady_clock::now() + 8s;
-        while (std::chrono::steady_clock::now() < deadline) {
-            auto completed = queue_.TakeCompleted();
-            if (!completed.empty()) {
-                Require(completed.size() == 1 && completed[0].task_id == id, "queue must publish the requested source");
-                if (completed[0].stale) throw specforge::SourceCollectionPreparationStale();
-                if (!completed[0].prepared) throw std::runtime_error(completed[0].error_message);
-                return std::move(*completed[0].prepared);
-            }
-            std::this_thread::sleep_for(1ms);
-        }
-        queue_.Cancel(id);
-        throw std::runtime_error("source queue did not complete before test deadline");
+        auto completion = specforge::test_support::WaitForSourceCompletion(queue_, id);
+        if (completion.stale) throw specforge::SourceCollectionPreparationStale();
+        if (!completion.prepared) throw std::runtime_error(completion.error_message);
+        return std::move(*completion.prepared);
     }
     std::size_t Scans() const {
         std::size_t count = 0;
@@ -101,8 +90,7 @@ private:
 
 void TestPartialWorkflowCachePathsAreRejected()
 {
-    specforge::SourceCollectionPreparationAdapters adapters;
-    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    specforge::SourceCollectionLoadDependencies adapters;
     adapters.workflow_cache_paths = {};
     adapters.workflow_cache_paths.labeling_state_cache_path =
         "labeling-state.json";
@@ -164,27 +152,16 @@ private:
     std::atomic_bool current_ = true;
 };
 
-specforge::SourceCollectionPreparationAdapters Adapters(
-    specforge::SourceCollectionPreparationAdapters::SnapshotLoader
+specforge::SourceCollectionLoadDependencies Adapters(
+    specforge::SourceCollectionLoadDependencies::SnapshotLoader
         loader)
 {
-    specforge::SourceCollectionPreparationAdapters adapters;
+    specforge::SourceCollectionLoadDependencies adapters;
     adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     adapters.snapshot_loader = std::move(loader);
-    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     return adapters;
 }
 
-specforge::PreparedSourceCollection Prepare(
-    LoadingHarness& preparation,
-    std::uint64_t task_id,
-    const specforge::SourceCollectionLoadRequest& request)
-{
-    return preparation.Prepare(
-        task_id,
-        request,
-        []() {});
-}
 
 void TestKnownFileReusesVerifiedContext()
 {
@@ -192,7 +169,7 @@ void TestKnownFileReusesVerifiedContext()
         UniqueTempPath("_known_file.csv");
     WriteFixture(path);
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -203,9 +180,7 @@ void TestKnownFileReusesVerifiedContext()
         std::move(adapters));
 
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = path, .spectrum_index = 1});
     Require(
         first.context_reuse_proof.has_value(),
@@ -215,9 +190,7 @@ void TestKnownFileReusesVerifiedContext()
         "initial preparation should build one context");
 
     const specforge::PreparedSourceCollection reused =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = path,
                 .spectrum_index = 1,
@@ -255,9 +228,7 @@ void TestVerifiedResidentSnapshotSkipsDecode()
             }));
 
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = path, .spectrum_index = 1});
     const specforge::SourceCollectionResidentSnapshot resident{
         1,
@@ -266,9 +237,7 @@ void TestVerifiedResidentSnapshotSkipsDecode()
         first.folder_listing_generation,
     };
     const specforge::PreparedSourceCollection reused =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = path,
                 .spectrum_index = 1,
@@ -306,9 +275,7 @@ void TestStaleResidentSnapshotFallsBackToDecode()
                 return MakeSnapshot(source, index);
             }));
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = path, .spectrum_index = 1});
     const specforge::SourceCollectionResidentSnapshot resident{
         1,
@@ -324,9 +291,7 @@ void TestStaleResidentSnapshotFallsBackToDecode()
     }
 
     const specforge::PreparedSourceCollection refreshed =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = path,
                 .spectrum_index = 1,
@@ -357,7 +322,7 @@ void TestCompanionAndAnnotationChangesMaterializeContext()
             WriteFixture(source);
             WriteFixture(dependency);
 
-            specforge::SourceCollectionPreparationAdapters
+            specforge::SourceCollectionLoadDependencies
                 adapters = Adapters(
                     [](const auto& path,
                        std::size_t index,
@@ -367,10 +332,8 @@ void TestCompanionAndAnnotationChangesMaterializeContext()
             LoadingHarness preparation(
                 std::move(adapters));
             const specforge::PreparedSourceCollection first =
-                Prepare(
-                    preparation,
-                    1,
-                    {
+                preparation.Load(
+            {
                         .path = source,
                         .annotation_paths =
                             annotation_paths,
@@ -383,10 +346,8 @@ void TestCompanionAndAnnotationChangesMaterializeContext()
                 stream << "-changed";
             }
             const specforge::PreparedSourceCollection changed =
-                Prepare(
-                    preparation,
-                    2,
-                    {
+                preparation.Load(
+            {
                         .path = source,
                         .annotation_paths =
                             annotation_paths,
@@ -503,9 +464,7 @@ void TestChangedContextPlanCarriesLiveRevision()
             }));
 
     const specforge::PreparedSourceCollection prepared =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {
                 .path = path,
                 .spectrum_index = 1,
@@ -548,9 +507,7 @@ void TestChangedFileRetriesOneStableGeneration()
             }));
 
     const specforge::PreparedSourceCollection prepared =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = path});
     Require(
         decoder_calls.load() == 2,
@@ -576,7 +533,7 @@ void TestFolderGenerationReuseAndStalePrefetch()
     auto generation =
         std::make_shared<MutableDirectoryChangeGeneration>();
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -601,9 +558,7 @@ void TestFolderGenerationReuseAndStalePrefetch()
         std::move(adapters));
 
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = folder});
     Require(
         preparation.Scans() == 1 &&
@@ -616,9 +571,7 @@ void TestFolderGenerationReuseAndStalePrefetch()
             0,
             first.folder_listing_generation);
     const specforge::PreparedSourceCollection second =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = folder,
                 .reuse = reuse,
@@ -635,9 +588,7 @@ void TestFolderGenerationReuseAndStalePrefetch()
     generation->Invalidate();
     bool stale = false;
     try {
-        (void)Prepare(
-            preparation,
-            3,
+        (void)preparation.Load(
             {
                 .path = folder,
                 .reuse = reuse,
@@ -669,7 +620,7 @@ void TestInvalidatedFolderGenerationRefreshes()
     std::atomic_int generation_requests = 0;
 
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -695,16 +646,12 @@ void TestInvalidatedFolderGenerationRefreshes()
     LoadingHarness preparation(
         std::move(adapters));
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = folder});
     initial_generation->Invalidate();
 
     const specforge::PreparedSourceCollection refreshed =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = folder,
                 .reuse =
@@ -743,7 +690,7 @@ void TestUnavailableFolderGenerationUsesFallbackScan()
             {},
         });
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -770,9 +717,7 @@ void TestUnavailableFolderGenerationUsesFallbackScan()
     LoadingHarness preparation(
         std::move(adapters));
     const specforge::PreparedSourceCollection prepared =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {
                 .path = folder,
                 .reuse =
@@ -814,7 +759,7 @@ void TestStaleFolderListingRefreshesBeforeDecode()
     }
 
     std::atomic_int decodes = 0;
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -846,10 +791,8 @@ void TestStaleFolderListingRefreshesBeforeDecode()
     unknown_identity.id = "unknown";
     LoadingHarness preparation(
         std::move(adapters));
-    (void)Prepare(
-        preparation,
-        1,
-        {
+    (void)preparation.Load(
+            {
             .path = folder,
             .reuse =
                 specforge::SourceCollectionReuseCandidate::
@@ -880,7 +823,7 @@ void TestPreferredFolderMemberResolvesAfterFirstLevelScan()
 
     std::atomic_size_t decoded_index =
         std::numeric_limits<std::size_t>::max();
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -909,9 +852,7 @@ void TestPreferredFolderMemberResolvesAfterFirstLevelScan()
     LoadingHarness preparation(
         std::move(adapters));
     const specforge::PreparedSourceCollection prepared =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {
                 .path = folder,
                 .preferred_member_path = preferred,
@@ -936,7 +877,7 @@ void TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic()
     const std::filesystem::path preferred =
         folder / "missing.fits";
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -963,9 +904,7 @@ void TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic()
     bool failed = false;
     std::string diagnostic;
     try {
-        (void)Prepare(
-            preparation,
-            1,
+        (void)preparation.Load(
             {
                 .path = folder,
                 .preferred_member_path = preferred,
@@ -995,7 +934,7 @@ void TestUnreadableFolderListingPreservesEnumerationDiagnostic()
     const std::filesystem::path preferred =
         folder / "selected.fits";
 
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -1013,9 +952,7 @@ void TestUnreadableFolderListingPreservesEnumerationDiagnostic()
     bool failed = false;
     std::string diagnostic;
     try {
-        (void)Prepare(
-            preparation,
-            1,
+        (void)preparation.Load(
             {
                 .path = folder,
                 .preferred_member_path = preferred,
@@ -1048,7 +985,7 @@ void TestChangedFolderRetriesOneStableGeneration()
 
     std::atomic_int decodes = 0;
     bool mutate_during_decode = false;
-    specforge::SourceCollectionPreparationAdapters adapters =
+    specforge::SourceCollectionLoadDependencies adapters =
         Adapters(
             [](const auto& source,
                std::size_t index,
@@ -1082,15 +1019,11 @@ void TestChangedFolderRetriesOneStableGeneration()
     LoadingHarness preparation(
         std::move(adapters));
     const specforge::PreparedSourceCollection first =
-        Prepare(
-            preparation,
-            1,
+        preparation.Load(
             {.path = folder});
     mutate_during_decode = true;
     const specforge::PreparedSourceCollection retried =
-        Prepare(
-            preparation,
-            2,
+        preparation.Load(
             {
                 .path = folder,
                 .reuse =
@@ -1123,7 +1056,7 @@ void TestPublishedGenerationInvalidatesOnPreparationDestruction()
     specforge::SourceCollectionFolderListingGenerationHandle
         published;
     {
-        specforge::SourceCollectionPreparationAdapters adapters =
+        specforge::SourceCollectionLoadDependencies adapters =
             Adapters(
                 [](const auto& source,
                    std::size_t index,
@@ -1150,10 +1083,8 @@ void TestPublishedGenerationInvalidatesOnPreparationDestruction()
         LoadingHarness preparation(
             std::move(adapters));
         published =
-            Prepare(
-                preparation,
-                1,
-                {.path = folder})
+            preparation.Load(
+            {.path = folder})
                 .folder_listing_generation;
         Require(
             published && published->IsCurrent(),
@@ -1167,106 +1098,31 @@ void TestPublishedGenerationInvalidatesOnPreparationDestruction()
 
 void TestCanceledBlockedRegistrationStopsOnDestruction()
 {
-    const std::filesystem::path folder =
-        UniqueTempPath("_registration_cancel");
+    const auto folder = UniqueTempPath("_registration_cancel");
     std::filesystem::create_directory(folder);
-    WriteFixture(folder / "sample.csv");
-    std::promise<void> registration_entered_promise;
-    std::shared_future<void> registration_entered =
-        registration_entered_promise.get_future().share();
-    std::promise<void> registration_stopped_promise;
-    std::future<void> registration_stopped =
-        registration_stopped_promise.get_future();
-    std::mutex registration_mutex;
-    std::condition_variable_any registration_condition;
-    std::stop_source canceled;
-    auto preparation =
-        std::make_unique<
-            specforge::SourceCollectionPreparation>(
-            [&]() {
-                specforge::SourceCollectionPreparationAdapters
-                    adapters = Adapters(
-                        [](const auto& source,
-                           std::size_t index,
-                           const auto&) {
-                            return MakeSnapshot(
-                                source,
-                                index,
-                                1);
-                        });
-                adapters
-                    .folder_change_generation_registration_factory =
-                    [&](const std::filesystem::path&,
-                        std::stop_token stop_token) {
-                        registration_entered_promise.set_value();
-                        std::unique_lock lock(
-                            registration_mutex);
-                        const bool released =
-                            registration_condition.wait_for(
-                                lock,
-                                stop_token,
-                                2s,
-                                []() {
-                                    return false;
-                                });
-                        Require(
-                            !released &&
-                                stop_token.stop_requested(),
-                            "monitor shutdown should stop blocked registration");
-                        registration_stopped_promise.set_value();
-                        return std::make_shared<
-                            MutableDirectoryChangeGeneration>();
-                    };
-                adapters.folder_snapshot_loader =
-                    [](const auto& path,
-                       std::size_t index,
-                       const auto& listing,
-                       const auto&) {
-                        return MakeSnapshot(
-                            path,
-                            index,
-                            listing.spectra.size());
-                    };
-                return adapters;
-            }());
-    std::promise<void> canceled_promise;
-    std::future<void> canceled_result =
-        canceled_promise.get_future();
-    std::jthread worker(
-        [&] {
-            try {
-                (void)preparation->Prepare(
-                    1,
-                    {.path = folder},
-                    [&] {
-                        if (canceled.stop_requested()) {
-                            throw specforge::
-                                SourceCollectionPreparationCanceled();
-                        }
-                    },
-                    {},
-                    canceled.get_token());
-            } catch (
-                const specforge::
-                    SourceCollectionPreparationCanceled&) {
-                canceled_promise.set_value();
-            }
-        });
-    Require(
-        registration_entered.wait_for(2s) ==
-            std::future_status::ready,
-        "registration should enter its blocking operation");
-    canceled.request_stop();
-    Require(
-        canceled_result.wait_for(2s) ==
-            std::future_status::ready,
-        "cancellation checkpoint should release preparation caller");
-    worker.join();
-    preparation.reset();
-    Require(
-        registration_stopped.wait_for(2s) ==
-            std::future_status::ready,
-        "preparation destruction should stop and join monitor registration");
+    std::promise<void> entered_promise;
+    auto entered = entered_promise.get_future();
+    std::promise<void> stopped_promise;
+    auto stopped = stopped_promise.get_future();
+    std::mutex mutex;
+    std::condition_variable_any condition;
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.folder_change_generation_registration_factory =
+        [&](const auto&, std::stop_token stop) {
+            entered_promise.set_value();
+            std::unique_lock lock(mutex);
+            condition.wait(lock, stop, [] { return false; });
+            stopped_promise.set_value();
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        };
+    {
+        auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies));
+        (void)queue.Enqueue({.path = folder});
+        Require(entered.wait_for(2s) == std::future_status::ready, "registration must start before shutdown");
+        // Destruction must cancel the caller and then stop and join registration.
+    }
+    Require(stopped.wait_for(0s) == std::future_status::ready, "queue destruction must stop the monitor");
     std::filesystem::remove_all(folder);
 }
 
@@ -1445,34 +1301,104 @@ void TestUncooperativeRegistrationBoundsWaitButDelaysShutdown()
     Require(later_calls == 0, "timed-out queued work must not run during shutdown");
 }
 
+void TestProductionQueueLoadsRealSourcesAndReusesGenerations()
+{
+    const auto folder = UniqueTempPath("_production_queue");
+    std::filesystem::create_directory(folder);
+    const auto first_path = folder / "a.csv";
+    const auto second_path = folder / "b.csv";
+    constexpr auto csv = "wav,flux\n5000,1\n5001,2\n5002,3\n";
+    WriteFixture(first_path, csv);
+    WriteFixture(second_path, csv);
+    {
+        specforge::SourceCollectionLoadQueue queue(
+            specforge::test_support::EmptyWorkflowCachePaths());
+        const auto load = [&](specforge::SourceCollectionLoadRequest request) {
+            auto completion = specforge::test_support::WaitForSourceCompletion(
+                queue, queue.Enqueue(std::move(request)));
+            Require(completion.prepared.has_value(), completion.error_message);
+            return std::move(*completion.prepared);
+        };
+        auto file = load({.path = first_path});
+        Require(file.snapshot->current_spectrum.point_count == 3 && file.context_reuse_proof,
+            "production decoder and preparation must load a real CSV");
+        auto reused = load({.path = first_path,
+            .reuse = specforge::SourceCollectionReuseCandidate::Verified(*file.context_reuse_proof, 0)});
+        Require(std::holds_alternative<specforge::PreparedSourceCollectionReuse>(reused.payload),
+            "unchanged real file must reuse its context");
+        auto initial = load({.path = folder});
+        Require(initial.snapshot->collection.spectrum_count == 2 && initial.folder_listing_generation,
+            "production folder loader must discover both real spectra");
+        auto warm = load({.path = folder, .spectrum_index = 1,
+            .reuse = specforge::SourceCollectionReuseCandidate::Verified(
+                *initial.context_reuse_proof, 0, initial.folder_listing_generation)});
+        Require(warm.snapshot->collection.current_index == 1 &&
+            warm.folder_listing_generation == initial.folder_listing_generation &&
+            std::holds_alternative<specforge::PreparedSourceCollectionReuse>(warm.payload),
+            "real folder navigation must reuse the unchanged listing and context");
+        const auto prefetch_id = queue.EnqueuePrefetch({.path = folder,
+            .reuse = specforge::SourceCollectionReuseCandidate::Verified(
+                *warm.context_reuse_proof, 0, warm.folder_listing_generation)});
+        Require(prefetch_id != 0, "real folder prefetch must be admitted");
+        auto prefetch = specforge::test_support::WaitForSourceCompletion(queue, prefetch_id);
+        Require(prefetch.prepared && prefetch.prepared->snapshot->collection.current_index == 0,
+            "production prefetch must return the requested real spectrum");
+        WriteFixture(folder / "c.csv", csv);
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (initial.folder_listing_generation->IsCurrent() &&
+            std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(1ms);
+        }
+        Require(!initial.folder_listing_generation->IsCurrent(), "native folder notification must invalidate the cached listing");
+        auto refreshed = load({.path = folder,
+            .reuse = specforge::SourceCollectionReuseCandidate::Verified(
+                *initial.context_reuse_proof, 0, initial.folder_listing_generation)});
+        Require(refreshed.snapshot->collection.spectrum_count == 3 &&
+            refreshed.folder_listing_generation != initial.folder_listing_generation,
+            "real folder refresh must include the newly added spectrum");
+        auto external = load({.source_open_request = specforge::SourceOpenRequest{
+            .source_path = second_path,
+            .origin = specforge::SourceOpenOrigin::ExternalStartup,
+            .open_external_source_as_folder = true}});
+        Require(external.path == folder && external.spectrum_index == 1,
+            "production source-open probing must resolve the external preferred member");
+        auto missing = specforge::test_support::WaitForSourceCompletion(
+            queue, queue.Enqueue({.path = folder / "missing.csv"}));
+        Require(!missing.prepared && !missing.error_message.empty(),
+            "production source failures must publish an error instead of a prepared source");
+    }
+    std::filesystem::remove_all(folder);
+}
+
 }  // namespace
 
 int main()
 {
     try {
-    TestPartialWorkflowCachePathsAreRejected();
-    TestKnownFileReusesVerifiedContext();
-    TestVerifiedResidentSnapshotSkipsDecode();
-    TestStaleResidentSnapshotFallsBackToDecode();
-    TestCompanionAndAnnotationChangesMaterializeContext();
-    TestReuseCandidateRejectsMismatchedResident();
-    TestChangedContextPlanCarriesLiveRevision();
-    TestChangedFileRetriesOneStableGeneration();
-    TestFolderGenerationReuseAndStalePrefetch();
-    TestInvalidatedFolderGenerationRefreshes();
-    TestUnavailableFolderGenerationUsesFallbackScan();
-    TestStaleFolderListingRefreshesBeforeDecode();
-    TestPreferredFolderMemberResolvesAfterFirstLevelScan();
-    TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic();
-    TestUnreadableFolderListingPreservesEnumerationDiagnostic();
-    TestChangedFolderRetriesOneStableGeneration();
-    TestPublishedGenerationInvalidatesOnPreparationDestruction();
-    TestCanceledBlockedRegistrationStopsOnDestruction();
-    TestRegistrationWaitTimesOutWithoutPollingAndClosesLateResult();
-    TestRegistrationFailureAndPreCanceledRequest();
-    TestCanceledQueuedRegistrationIsSkipped();
-    TestNativeGenerationSurvivesPreparationCallerThread();
-    TestUncooperativeRegistrationBoundsWaitButDelaysShutdown();
+        TestProductionQueueLoadsRealSourcesAndReusesGenerations();
+        TestPartialWorkflowCachePathsAreRejected();
+        TestKnownFileReusesVerifiedContext();
+        TestVerifiedResidentSnapshotSkipsDecode();
+        TestStaleResidentSnapshotFallsBackToDecode();
+        TestCompanionAndAnnotationChangesMaterializeContext();
+        TestReuseCandidateRejectsMismatchedResident();
+        TestChangedContextPlanCarriesLiveRevision();
+        TestChangedFileRetriesOneStableGeneration();
+        TestFolderGenerationReuseAndStalePrefetch();
+        TestInvalidatedFolderGenerationRefreshes();
+        TestUnavailableFolderGenerationUsesFallbackScan();
+        TestStaleFolderListingRefreshesBeforeDecode();
+        TestPreferredFolderMemberResolvesAfterFirstLevelScan();
+        TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic();
+        TestUnreadableFolderListingPreservesEnumerationDiagnostic();
+        TestChangedFolderRetriesOneStableGeneration();
+        TestPublishedGenerationInvalidatesOnPreparationDestruction();
+        TestCanceledBlockedRegistrationStopsOnDestruction();
+        TestRegistrationWaitTimesOutWithoutPollingAndClosesLateResult();
+        TestRegistrationFailureAndPreCanceledRequest();
+        TestCanceledQueuedRegistrationIsSkipped();
+        TestNativeGenerationSurvivesPreparationCallerThread();
+        TestUncooperativeRegistrationBoundsWaitButDelaysShutdown();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

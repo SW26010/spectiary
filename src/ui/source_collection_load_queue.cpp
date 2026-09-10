@@ -2,6 +2,7 @@
 
 #include "profile/source_load_latency_trace.h"
 #include "ui/source_collection_load_queue_internal.h"
+#include "ui/source_collection_preparation_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -22,7 +23,7 @@ namespace specforge {
 
 class SourceCollectionLoadQueue::Impl {
 public:
-    explicit Impl(SourceCollectionPreparationAdapters adapters,
+    explicit Impl(SourceCollectionLoadDependencies adapters,
         SourceCollectionLoadQueueExecutionOptions options)
         : preparation_(std::move(adapters)),
           foreground_limit_(options.foreground_limit == 0
@@ -938,7 +939,7 @@ private:
 };
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue()
-    : SourceCollectionLoadQueue(SourceCollectionPreparationAdapters{}, {})
+    : SourceCollectionLoadQueue(SourceCollectionLoadDependencies{}, {})
 {
 }
 
@@ -946,7 +947,7 @@ SourceCollectionLoadQueue::SourceCollectionLoadQueue(
     SampleWorkflowPreparationPaths workflow_cache_paths)
     : SourceCollectionLoadQueue(
           [&workflow_cache_paths]() {
-              SourceCollectionPreparationAdapters adapters;
+              SourceCollectionLoadDependencies adapters;
               adapters.workflow_cache_paths =
                   std::move(workflow_cache_paths);
               return adapters;
@@ -955,7 +956,7 @@ SourceCollectionLoadQueue::SourceCollectionLoadQueue(
 }
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue(
-    SourceCollectionPreparationAdapters adapters,
+    SourceCollectionLoadDependencies adapters,
     SourceCollectionLoadQueueExecutionOptions options)
     : impl_(std::make_unique<Impl>(std::move(adapters), std::move(options)))
 {

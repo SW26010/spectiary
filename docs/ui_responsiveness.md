@@ -203,6 +203,8 @@ navigation 中，keyboard Next 的 `source_revalidation_ms` p50/p95 为
 
 注册线程的生命周期、无轮询等待和取消边界见
 [ADR 0008](adr/0008-directory-change-registration-lifetime-and-wait.md)。
+加载依赖的逐项保留理由及生产接口测试边界见
+[ADR 0009](adr/0009-source-loading-dependency-boundaries.md)。
 
 - worker 在完整扫描前先建立只观察目录第一层的 generation boundary；同一 generation
   内的 listing 由 source roster 保留并随下一次请求作为 opaque cache hint 返回。

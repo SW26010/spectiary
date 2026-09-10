@@ -195,12 +195,12 @@ specforge::SourceCollectionSession MakePreparedSession(
     return session;
 }
 
-specforge::SourceCollectionPreparationAdapters
+specforge::SourceCollectionLoadDependencies
 MakeDependencies(
-    specforge::SourceCollectionPreparationAdapters::
+    specforge::SourceCollectionLoadDependencies::
         SnapshotLoader snapshot_loader)
 {
-    specforge::SourceCollectionPreparationAdapters dependencies;
+    specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         std::move(snapshot_loader);
