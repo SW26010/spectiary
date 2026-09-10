@@ -145,6 +145,7 @@ function Start-SleepingGrandchild {
             ('"' + $grandchildPath + '"'),
             ('"' + $grandchildPidPath + '"')
         ) `
+        -WindowStyle Hidden `
         -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while (-not (Test-Path -LiteralPath $grandchildPidPath)) {
@@ -418,6 +419,8 @@ throw "Unknown fixture mode '$Mode'."
         'expected failure stderr marker' `
         'Wrong-reason stderr tail'
 
+    # Allow both PowerShell generations to initialize and report their PIDs;
+    # the fixture then sleeps for 300 seconds, well beyond the bounded timeout.
     $timeoutOutput = @(
         & {
             try {
@@ -436,7 +439,7 @@ throw "Unknown fixture mode '$Mode'."
                         '-StateDirectory',
                         $testRoot
                     ) `
-                    -TimeoutSec 2 `
+                    -TimeoutSec 10 `
                     -ExpectedOutcome Success
             }
             catch {
