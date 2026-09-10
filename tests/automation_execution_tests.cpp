@@ -298,6 +298,32 @@ void LabelFailuresAndSettlement()
     Require(busy.execution.Idle() && !busy.execution.NextDeadline() && busy.terminal_count == 1,
         "shutdown settlement is idempotent and releases all observations");
 }
+
+void LabelShutdownSettlement()
+{
+    for (bool waiting_for_target : {true, false}) {
+        Fixture f;
+        f.Label(waiting_for_target);
+        const int committed_writes = waiting_for_target ? 0 : 1;
+        Require(!f.execution.Idle() && f.execution.NextDeadline() &&
+            f.writes == committed_writes && f.terminal_count == 0,
+            "shutdown fixture must retain a real label operation in the intended phase");
+        const int scheduled_frames = f.frame_requests;
+        // Match the application shutdown order: transport retires the request,
+        // then the execution owner releases its pending operation.
+        f.active["label"] = false;
+        f.execution.SettleForShutdown();
+        Require(f.execution.Idle() && !f.execution.NextDeadline(),
+            "shutdown must retire label operations and their observation deadline");
+        ++f.presented.sequence;
+        f.execution.SettleForShutdown();
+        f.Poll();
+        Require(f.execution.Idle() && !f.execution.NextDeadline() &&
+            f.writes == committed_writes && f.terminal_count == 0 &&
+            f.frame_requests == scheduled_frames,
+            "shutdown in either label phase must not write, publish or schedule again");
+    }
+}
 } // namespace
 
 int main()
@@ -309,6 +335,7 @@ int main()
         LabelLifecycle();
         ClaimedDisconnectSettlement();
         LabelFailuresAndSettlement();
+        LabelShutdownSettlement();
         std::cout << "Automation execution tests passed.\n";
         return 0;
     } catch (const std::exception& error) {
