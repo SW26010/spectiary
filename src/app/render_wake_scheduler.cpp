@@ -1,4 +1,5 @@
 #include "app/render_wake_scheduler.h"
+#include "profile/presentation_trace.h"
 
 #include <algorithm>
 
@@ -18,6 +19,7 @@ void ConsiderEarlier(
 
 void RenderWakeScheduler::RequestFrame(std::optional<Duration> settings_save_delay)
 {
+    presentation_trace::Invalidate();
     render_requested_ = true;
     if (!settings_save_delay || *settings_save_delay <= Duration::zero()) {
         return;

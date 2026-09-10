@@ -1,4 +1,5 @@
 #include "renderer/d3d11_composition_swap_chain.h"
+#include "profile/presentation_trace.h"
 #include "renderer/d3d11_sdr_swap_chain.h"
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "renderer/d3d11_renderer.h"
@@ -613,6 +614,17 @@ void TestDisplayRefreshDurationPolicy()
 
 void TestWindowPresentationLifecycleAndDeterministicFallback()
 {
+    namespace trace = specforge::presentation_trace;
+    std::vector<trace::Event> trace_events;
+    trace_events.reserve(256);
+    trace::context = &trace_events;
+    trace::enabled = [](void*) { return true; };
+    trace::callback = [](void* context, const trace::Event& event) {
+        static_cast<std::vector<trace::Event>*>(context)->push_back(event);
+    };
+    struct TraceCleanup {
+        ~TraceCleanup() { trace::callback = nullptr; trace::enabled = nullptr; trace::context = nullptr; }
+    } trace_cleanup;
     SwapChainTestWindow window;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -674,6 +686,24 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         SUCCEEDED(presentation.RefreshTarget()),
         "the selected backend should refresh its per-monitor duration policy");
     presentation.Shutdown();
+
+    bool resize_seen = false, present_seen = false, rebuild_seen = false;
+    for (const auto& event : trace_events) {
+        if (event.phase != "end") continue;
+        if (event.name == "viewport_resize") {
+            Require(event.window.hwnd == reinterpret_cast<std::uintptr_t>(window.hwnd()) &&
+                event.window.lifetime != 0 && event.window.width == 320 && event.new_width == 640 &&
+                event.result >= 0 && event.duration_ms >= 0, "real resize telemetry must preserve dimensions and result");
+            resize_seen = true;
+        }
+        if (event.name == "viewport_present") {
+            Require(event.window.lifetime != 0 && event.operation != 0 && event.result >= 0,
+                "real per-viewport Present must complete with identity");
+            present_seen = true;
+        }
+        if (event.name == "presentation_buffer_rebuild" && event.parent != 0) rebuild_seen = true;
+    }
+    Require(resize_seen && present_seen && rebuild_seen, "production renderer trace coverage missing");
 
     Require(
         SUCCEEDED(presentation.Initialize(
@@ -1094,6 +1124,17 @@ void TestRendererCapturesDefaultCompositionFrameWhenSelected()
 
 void TestImGuiViewportSwapChainLifecycle()
 {
+    namespace trace = specforge::presentation_trace;
+    std::vector<trace::Event> events;
+    events.reserve(256);
+    trace::context = &events;
+    trace::enabled = [](void*) { return true; };
+    trace::callback = [](void* context, const trace::Event& event) {
+        static_cast<std::vector<trace::Event>*>(context)->push_back(event);
+    };
+    struct TraceCleanup {
+        ~TraceCleanup() { trace::callback = nullptr; trace::enabled = nullptr; trace::context = nullptr; }
+    } trace_cleanup;
     SwapChainTestWindow window;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -1160,6 +1201,111 @@ void TestImGuiViewportSwapChainLifecycle()
 
     fixture.DestroyViewport();
     Require(!fixture.has_viewport_swap_chain(), "redocking should destroy the viewport swap chain");
+    unsigned present_completions = 0;
+    bool resize_seen = false, wait_seen = false, draw_seen = false;
+    for (const auto& event : events) {
+        if (event.phase != "end") continue;
+        if (event.name == "viewport_resize") {
+            Require(event.window.lifetime != 0 && event.new_width == 640 && event.new_height == 360,
+                "detached resize must carry the presentation lifetime and dimensions");
+            resize_seen = true;
+        }
+        if (event.name == "viewport_present" && event.result_valid && event.result == S_OK) ++present_completions;
+        if (event.name == "viewport_draw_submission") {
+            Require(event.window.lifetime != 0 && !event.result_valid,
+                "real detached draw timing must retain identity without inventing an API result");
+            draw_seen = true;
+        }
+        if (event.name == "presentation_available_wait") {
+            Require(event.timeout_ms == 0 && event.count == 3 && event.parent != 0,
+                "detached telemetry must observe the unchanged nonblocking triple-buffer wait");
+            wait_seen = true;
+        }
+    }
+    Require(resize_seen && draw_seen && present_completions == ordinary_presentations.size() + paced_presentations.size(),
+        "telemetry completions must match actual detached completion policy");
+    Require(!composition_selected || wait_seen, "composition acquire must emit actual available-event waits");
+}
+
+void TestPlatformTelemetryForwardsAndRestoresCallbacks()
+{
+    namespace trace = specforge::presentation_trace;
+    struct State {
+        bool recording = true;
+        int positions = 0, sizes = 0;
+        ImVec2 position, size;
+        std::vector<trace::Event> events;
+    } state;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    Require(SUCCEEDED(CreateTestDevice(device, context)), "platform trace fixture requires a device");
+    auto factory = GetTestFactory(device.Get());
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGui::CreateContext();
+    struct Cleanup {
+        ImGuiContext* previous;
+        ~Cleanup() {
+            trace::callback = nullptr;
+            trace::enabled = nullptr;
+            trace::context = nullptr;
+            trace::Unregister(42);
+            ImGui::DestroyContext();
+            ImGui::SetCurrentContext(previous);
+        }
+    } cleanup{previous};
+    auto& io = ImGui::GetPlatformIO();
+    const auto position_callback = +[](ImGuiViewport* viewport, ImVec2 value) {
+        auto& state = *static_cast<State*>(viewport->PlatformUserData);
+        ++state.positions;
+        state.position = value;
+    };
+    const auto size_callback = +[](ImGuiViewport* viewport, ImVec2 value) {
+        auto& state = *static_cast<State*>(viewport->PlatformUserData);
+        ++state.sizes;
+        state.size = value;
+    };
+    io.Platform_SetWindowPos = position_callback;
+    io.Platform_SetWindowSize = size_callback;
+    specforge::D3D11ImGuiViewportRenderer renderer;
+    Require(renderer.Initialize(factory.Get(), device.Get(), context.Get()), "trace wrapper should initialize");
+    ImGuiViewport viewport;
+    struct ClearViewportUserData {
+        ImGuiViewport& viewport;
+        ~ClearViewportUserData() { viewport.PlatformUserData = nullptr; }
+    } clear_viewport_user_data{viewport};
+    viewport.PlatformHandleRaw = reinterpret_cast<void*>(42);
+    viewport.PlatformUserData = &state;
+    trace::Register(42, 320, 240);
+    trace::context = &state;
+    trace::enabled = [](void* data) { return static_cast<State*>(data)->recording; };
+    trace::callback = [](void* data, const trace::Event& event) {
+        static_cast<State*>(data)->events.push_back(event);
+    };
+    {
+        trace::Span update({.name = "platform_windows_update"});
+        io.Platform_SetWindowPos(&viewport, ImVec2(-10.5f, 200.25f));
+        io.Platform_SetWindowSize(&viewport, ImVec2(640.5f, 480.25f));
+    }
+    Require(state.positions == 1 && state.sizes == 1 && state.position.x == -10.5f &&
+        state.position.y == 200.25f && state.size.x == 640.5f && state.size.y == 480.25f,
+        "instrumentation must forward each exact platform argument once");
+    Require(state.events.size() == 6 && state.events[1].parent == state.events[0].operation &&
+        state.events[3].parent == state.events[0].operation &&
+        state.events[3].window.lifetime != 0 && state.events[4].phase == "end" &&
+        !state.events[4].result_valid && state.events[4].new_width == 640,
+        "platform callbacks must emit nested durations without invented return status");
+    state.recording = false;
+    io.Platform_SetWindowSize(&viewport, ImVec2(321, 123));
+    Require(state.sizes == 2 && state.events.size() == 6 && state.size.x == 321,
+        "disabled telemetry must preserve callbacks without events");
+    renderer.Shutdown();
+    Require(io.Platform_SetWindowPos == position_callback && io.Platform_SetWindowSize == size_callback,
+        "shutdown must restore original platform handlers");
+    Require(renderer.Initialize(factory.Get(), device.Get(), context.Get()), "wrapper should reinstall");
+    io.Platform_SetWindowPos = nullptr; // Another owner replaced the handler.
+    renderer.Shutdown();
+    Require(io.Platform_SetWindowPos == nullptr && io.Platform_SetWindowSize == size_callback,
+        "shutdown must not overwrite a later handler owner");
 }
 
 void TestImGuiViewportFixtureCleansUpDuringExceptionUnwind()
@@ -1207,6 +1353,7 @@ struct TestCase {
 int main()
 {
     constexpr TestCase tests[] = {
+        {"TestPlatformTelemetryForwardsAndRestoresCallbacks", TestPlatformTelemetryForwardsAndRestoresCallbacks},
         {
             "TestSdrSwapChainUsesModernSrgbPresentationContract",
             TestSdrSwapChainUsesModernSrgbPresentationContract,

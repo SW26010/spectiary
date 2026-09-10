@@ -1,3 +1,4 @@
+#include "profile/presentation_trace.h"
 #include "renderer/d3d11_window_presentation.h"
 
 #include <utility>
@@ -76,47 +77,54 @@ HRESULT D3D11WindowPresentation::Initialize(
     device_ = device;
     device_context_ = device_context;
     hwnd_ = hwnd;
+    presentation_trace::Register(reinterpret_cast<std::uintptr_t>(hwnd), width, height);
     width_ = width;
     height_ = height;
-    tearing_supported_ = DxgiFactorySupportsTearing(factory);
+    return presentation_trace::Measure(
+        presentation_trace::Event{
+            .name = "viewport_initialize",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_))},
+        [&]() -> HRESULT {
+            tearing_supported_ = DxgiFactorySupportsTearing(factory);
 
-    const HRESULT refresh_result = QueryWin32DisplayRefreshState(
-        hwnd_,
-        refresh_state_);
-    if (composition_policy == D3D11CompositionPolicy::Prefer &&
-        SUCCEEDED(refresh_result)) {
-        const HRESULT composition_result = composition_.Initialize(
-            device_,
-            hwnd_,
-            width_,
-            height_,
-            refresh_state_);
-        if (SUCCEEDED(composition_result)) {
-            backend_ = D3D11PresentationBackend::Composition;
-            transition_ = {
-                D3D11PresentationBackend::None,
-                backend_,
-                S_OK,
-                "D3D11CompositionSwapChain::Initialize",
-            };
-            return S_OK;
-        }
-        return ActivateDxgiFallback(
-            composition_result,
-            composition_.last_error_operation(),
-            width_,
-            height_);
-    }
+            const HRESULT refresh_result = QueryWin32DisplayRefreshState(
+                hwnd_,
+                refresh_state_);
+            if (composition_policy == D3D11CompositionPolicy::Prefer &&
+                SUCCEEDED(refresh_result)) {
+                const HRESULT composition_result = composition_.Initialize(
+                    device_,
+                    hwnd_,
+                    width_,
+                    height_,
+                    refresh_state_);
+                if (SUCCEEDED(composition_result)) {
+                    backend_ = D3D11PresentationBackend::Composition;
+                    transition_ = {
+                        D3D11PresentationBackend::None,
+                        backend_,
+                        S_OK,
+                        "D3D11CompositionSwapChain::Initialize",
+                    };
+                    return S_OK;
+                }
+                return ActivateDxgiFallback(
+                    composition_result,
+                    composition_.last_error_operation(),
+                    width_,
+                    height_);
+            }
 
-    return ActivateDxgiFallback(
-        composition_policy == D3D11CompositionPolicy::Prefer
-            ? refresh_result
-            : S_FALSE,
-        composition_policy == D3D11CompositionPolicy::Prefer
-            ? "QueryWin32DisplayRefreshState"
-            : "composition disabled by presentation options",
-        width_,
-        height_);
+            return ActivateDxgiFallback(
+                composition_policy == D3D11CompositionPolicy::Prefer
+                    ? refresh_result
+                    : S_FALSE,
+                composition_policy == D3D11CompositionPolicy::Prefer
+                    ? "QueryWin32DisplayRefreshState"
+                    : "composition disabled by presentation options",
+                width_,
+                height_);
+        });
 }
 
 void D3D11WindowPresentation::Shutdown() noexcept
@@ -129,6 +137,7 @@ void D3D11WindowPresentation::Shutdown() noexcept
     factory_ = nullptr;
     device_ = nullptr;
     device_context_ = nullptr;
+    presentation_trace::Unregister(reinterpret_cast<std::uintptr_t>(hwnd_));
     hwnd_ = nullptr;
     width_ = 0;
     height_ = 0;
@@ -141,45 +150,58 @@ void D3D11WindowPresentation::Shutdown() noexcept
 
 HRESULT D3D11WindowPresentation::Resize(UINT width, UINT height)
 {
-    if (width == 0 || height == 0 || device_ == nullptr ||
-        device_context_ == nullptr) {
-        return RecordFailure(
-            "D3D11WindowPresentation::Resize arguments",
-            E_INVALIDARG);
-    }
-    width_ = width;
-    height_ = height;
-    frame_active_ = false;
+    return presentation_trace::Measure(
+        presentation_trace::Event{
+            .name = "viewport_resize",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
+            .new_width = width,
+            .new_height = height,
+            .backend = D3D11PresentationBackendName(backend_)},
+        [&]() -> HRESULT {
+            if (width == 0 || height == 0 || device_ == nullptr ||
+                device_context_ == nullptr) {
+                return RecordFailure(
+                    "D3D11WindowPresentation::Resize arguments",
+                    E_INVALIDARG);
+            }
+            if (auto it = presentation_trace::windows.find(reinterpret_cast<std::uintptr_t>(hwnd_)); it != presentation_trace::windows.end()) {
+                it->second.width = width;
+                it->second.height = height;
+            }
+            width_ = width;
+            height_ = height;
+            frame_active_ = false;
 
-    if (backend_ == D3D11PresentationBackend::Composition) {
-        const HRESULT result = composition_.Resize(
-            device_,
-            device_context_,
-            width_,
-            height_);
-        if (FAILED(result)) {
-            return ActivateDxgiFallback(
-                result,
-                composition_.last_error_operation(),
-                width_,
-                height_);
-        }
-        last_error_operation_ = {};
-        return S_OK;
-    }
-    if (backend_ == D3D11PresentationBackend::Dxgi) {
-        const HRESULT result = dxgi_.Resize(
-            device_,
-            device_context_,
-            width_,
-            height_);
-        if (FAILED(result)) {
-            return RecordFailure(dxgi_.last_error_operation(), result);
-        }
-        last_error_operation_ = {};
-        return S_OK;
-    }
-    return RecordFailure("D3D11WindowPresentation::Resize backend", E_FAIL);
+            if (backend_ == D3D11PresentationBackend::Composition) {
+                const HRESULT result = composition_.Resize(
+                    device_,
+                    device_context_,
+                    width_,
+                    height_);
+                if (FAILED(result)) {
+                    return ActivateDxgiFallback(
+                        result,
+                        composition_.last_error_operation(),
+                        width_,
+                        height_);
+                }
+                last_error_operation_ = {};
+                return S_OK;
+            }
+            if (backend_ == D3D11PresentationBackend::Dxgi) {
+                const HRESULT result = dxgi_.Resize(
+                    device_,
+                    device_context_,
+                    width_,
+                    height_);
+                if (FAILED(result)) {
+                    return RecordFailure(dxgi_.last_error_operation(), result);
+                }
+                last_error_operation_ = {};
+                return S_OK;
+            }
+            return RecordFailure("D3D11WindowPresentation::Resize backend", E_FAIL);
+        });
 }
 
 HRESULT D3D11WindowPresentation::RefreshTarget()
@@ -210,82 +232,98 @@ HRESULT D3D11WindowPresentation::BeginFrame(
     bool clear,
     DWORD availability_timeout_ms)
 {
-    frame_active_ = false;
-    if (device_context_ == nullptr || (clear && clear_color == nullptr)) {
-        return RecordFailure(
-            "D3D11WindowPresentation::BeginFrame arguments",
-            E_INVALIDARG);
-    }
-    if (backend_ == D3D11PresentationBackend::Composition) {
-        const HRESULT result = composition_.BeginFrame(
-            device_context_,
-            clear_color,
-            clear,
-            availability_timeout_ms);
-        if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
-            last_error_operation_ = {};
-            return result;
-        }
-        if (FAILED(result)) {
-            const HRESULT fallback_result = ActivateDxgiFallback(
-                result,
-                composition_.last_error_operation(),
-                width_,
-                height_);
-            if (FAILED(fallback_result)) {
-                return fallback_result;
+    return presentation_trace::Measure(
+        presentation_trace::Event{
+            .name = "viewport_acquire",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
+            .backend = D3D11PresentationBackendName(backend_),
+            .timeout_ms = availability_timeout_ms},
+        [&]() -> HRESULT {
+            frame_active_ = false;
+            if (device_context_ == nullptr || (clear && clear_color == nullptr)) {
+                return RecordFailure(
+                    "D3D11WindowPresentation::BeginFrame arguments",
+                    E_INVALIDARG);
             }
-            dxgi_.Bind(device_context_);
-            if (clear) {
-                dxgi_.Clear(device_context_, clear_color);
+            if (backend_ == D3D11PresentationBackend::Composition) {
+                const HRESULT result = composition_.BeginFrame(
+                    device_context_,
+                    clear_color,
+                    clear,
+                    availability_timeout_ms);
+                if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
+                    last_error_operation_ = {};
+                    return result;
+                }
+                if (FAILED(result)) {
+                    const HRESULT fallback_result = ActivateDxgiFallback(
+                        result,
+                        composition_.last_error_operation(),
+                        width_,
+                        height_);
+                    if (FAILED(fallback_result)) {
+                        return fallback_result;
+                    }
+                    dxgi_.Bind(device_context_);
+                    if (clear) {
+                        dxgi_.Clear(device_context_, clear_color);
+                    }
+                    frame_active_ = true;
+                    return S_FALSE;
+                }
+                last_error_operation_ = {};
+                frame_active_ = true;
+                return S_OK;
             }
-            frame_active_ = true;
-            return S_FALSE;
-        }
-        last_error_operation_ = {};
-        frame_active_ = true;
-        return S_OK;
-    }
-    if (backend_ == D3D11PresentationBackend::Dxgi) {
-        dxgi_.Bind(device_context_);
-        if (clear) {
-            dxgi_.Clear(device_context_, clear_color);
-        }
-        last_error_operation_ = {};
-        frame_active_ = true;
-        return S_OK;
-    }
-    return RecordFailure("D3D11WindowPresentation::BeginFrame backend", E_FAIL);
+            if (backend_ == D3D11PresentationBackend::Dxgi) {
+                dxgi_.Bind(device_context_);
+                if (clear) {
+                    dxgi_.Clear(device_context_, clear_color);
+                }
+                last_error_operation_ = {};
+                frame_active_ = true;
+                return S_OK;
+            }
+            return RecordFailure("D3D11WindowPresentation::BeginFrame backend", E_FAIL);
+        });
 }
 
 HRESULT D3D11WindowPresentation::Present(D3D11PresentMode mode)
 {
-    frame_active_ = false;
-    if (backend_ == D3D11PresentationBackend::Composition) {
-        const HRESULT result = composition_.Present(device_context_);
-        if (FAILED(result)) {
-            const HRESULT fallback_result = ActivateDxgiFallback(
-                result,
-                composition_.last_error_operation(),
-                width_,
-                height_);
-            return FAILED(fallback_result) ? fallback_result : S_FALSE;
-        }
-        last_error_operation_ = {};
-        return S_OK;
-    }
-    if (backend_ == D3D11PresentationBackend::Dxgi) {
-        const UINT sync_interval =
-            D3D11PresentSyncInterval(mode, tearing_supported_);
-        const UINT flags = D3D11PresentFlags(mode, tearing_supported_);
-        const HRESULT result = dxgi_.Present(sync_interval, flags);
-        if (FAILED(result)) {
-            return RecordFailure(dxgi_.last_error_operation(), result);
-        }
-        last_error_operation_ = {};
-        return result;
-    }
-    return RecordFailure("D3D11WindowPresentation::Present backend", E_FAIL);
+    return presentation_trace::Measure(
+        presentation_trace::Event{
+            .name = "viewport_present",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
+            .backend = D3D11PresentationBackendName(backend_),
+            .present_mode = D3D11PresentModeName(mode)},
+        [&]() -> HRESULT {
+            frame_active_ = false;
+            if (backend_ == D3D11PresentationBackend::Composition) {
+                const HRESULT result = composition_.Present(device_context_);
+                if (FAILED(result)) {
+                    const HRESULT fallback_result = ActivateDxgiFallback(
+                        result,
+                        composition_.last_error_operation(),
+                        width_,
+                        height_);
+                    return FAILED(fallback_result) ? fallback_result : S_FALSE;
+                }
+                last_error_operation_ = {};
+                return S_OK;
+            }
+            if (backend_ == D3D11PresentationBackend::Dxgi) {
+                const UINT sync_interval =
+                    D3D11PresentSyncInterval(mode, tearing_supported_);
+                const UINT flags = D3D11PresentFlags(mode, tearing_supported_);
+                const HRESULT result = dxgi_.Present(sync_interval, flags);
+                if (FAILED(result)) {
+                    return RecordFailure(dxgi_.last_error_operation(), result);
+                }
+                last_error_operation_ = {};
+                return result;
+            }
+            return RecordFailure("D3D11WindowPresentation::Present backend", E_FAIL);
+        });
 }
 
 ID3D11Texture2D*

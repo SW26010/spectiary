@@ -1,3 +1,4 @@
+#include "profile/presentation_trace.h"
 #include "renderer/d3d11_composition_swap_chain.h"
 
 #include <atomic>
@@ -311,11 +312,20 @@ HRESULT D3D11CompositionSwapChain::BeginFrame(
     for (std::size_t index = 0; index < buffers_.size(); ++index) {
         available_events[index] = buffers_[index].available_event;
     }
-    const DWORD wait_result = WaitForMultipleObjects(
+    DWORD wait_error = ERROR_SUCCESS;
+    auto wait_event = presentation_trace::current;
+    wait_event.name = "presentation_available_wait";
+    wait_event.timeout_ms = availability_timeout_ms;
+    wait_event.count = available_events.size();
+    const DWORD wait_result = presentation_trace::Measure(wait_event, [&]() {
+        const DWORD result = WaitForMultipleObjects(
         static_cast<DWORD>(available_events.size()),
         available_events.data(),
         FALSE,
         availability_timeout_ms);
+        if (result == WAIT_FAILED) wait_error = GetLastError();
+        return result;
+    });
     if (wait_result == WAIT_TIMEOUT) {
         ++feedback_.buffer_acquire_skipped;
         last_error_operation_ = {};
@@ -323,7 +333,7 @@ HRESULT D3D11CompositionSwapChain::BeginFrame(
     }
     if (wait_result >= WAIT_OBJECT_0 + available_events.size()) {
         const DWORD error = wait_result == WAIT_FAILED
-                                      ? GetLastError()
+                                      ? wait_error
                                       : ERROR_GEN_FAILURE;
         const HRESULT result = HRESULT_FROM_WIN32(
             error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE);
@@ -399,68 +409,78 @@ HRESULT D3D11CompositionSwapChain::CreateBuffers(
     UINT width,
     UINT height)
 {
-    if (device == nullptr || manager_ == nullptr || presentation_surface_ == nullptr ||
-        width == 0 || height == 0) {
-        return RecordFailure(
-            "D3D11CompositionSwapChain::CreateBuffers arguments",
-            E_INVALIDARG);
-    }
+    return presentation_trace::Measure("presentation_buffer_rebuild", "composition", [&]() -> HRESULT {
+        if (device == nullptr || manager_ == nullptr || presentation_surface_ == nullptr ||
+            width == 0 || height == 0) {
+            return RecordFailure(
+                "D3D11CompositionSwapChain::CreateBuffers arguments",
+                E_INVALIDARG);
+        }
 
-    ResetBuffers();
-    width_ = width;
-    height_ = height;
-    const RECT source_rect = {
-        0,
-        0,
-        static_cast<LONG>(width),
-        static_cast<LONG>(height),
-    };
-    HRESULT result = presentation_surface_->SetSourceRect(&source_rect);
-    if (FAILED(result)) {
-        return RecordFailure("IPresentationSurface::SetSourceRect", result);
-    }
+        {
+            auto event = presentation_trace::current; event.name = "presentation_buffer_reset";
+            presentation_trace::Span span(event);
+            ResetBuffers();
+        }
+        width_ = width;
+        height_ = height;
+        const RECT source_rect = {
+            0,
+            0,
+            static_cast<LONG>(width),
+            static_cast<LONG>(height),
+        };
+        HRESULT result = presentation_trace::Measure("presentation_source_rect", [&] {
+            return presentation_surface_->SetSourceRect(&source_rect);
+        });
+        if (FAILED(result)) {
+            return RecordFailure("IPresentationSurface::SetSourceRect", result);
+        }
 
-    for (Buffer& buffer : buffers_) {
-        D3D11_TEXTURE2D_DESC description = {};
-        description.Width = width;
-        description.Height = height;
-        description.MipLevels = 1;
-        description.ArraySize = 1;
-        description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        description.SampleDesc.Count = 1;
-        description.Usage = D3D11_USAGE_DEFAULT;
-        description.BindFlags =
-            D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-        description.MiscFlags =
-            D3D11_RESOURCE_MISC_SHARED |
-            D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
-            D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
-        result = device->CreateTexture2D(
-            &description,
-            nullptr,
-            buffer.texture.GetAddressOf());
-        if (FAILED(result)) {
-            return RecordFailure("ID3D11Device::CreateTexture2D(displayable)", result);
-        }
-        result = device->CreateRenderTargetView(
-            buffer.texture.Get(),
-            nullptr,
-            buffer.render_target.GetAddressOf());
-        if (FAILED(result)) {
-            return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
-        }
-        result = manager_->AddBufferFromResource(
-            buffer.texture.Get(),
-            buffer.presentation.GetAddressOf());
-        if (FAILED(result)) {
-            return RecordFailure("IPresentationManager::AddBufferFromResource", result);
-        }
-        result = buffer.presentation->GetAvailableEvent(&buffer.available_event);
-        if (FAILED(result)) {
-            return RecordFailure("IPresentationBuffer::GetAvailableEvent", result);
-        }
-    }
-    return S_OK;
+        return presentation_trace::Measure("presentation_buffer_allocation", [&]() -> HRESULT {
+            for (Buffer& buffer : buffers_) {
+                D3D11_TEXTURE2D_DESC description = {};
+                description.Width = width;
+                description.Height = height;
+                description.MipLevels = 1;
+                description.ArraySize = 1;
+                description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                description.SampleDesc.Count = 1;
+                description.Usage = D3D11_USAGE_DEFAULT;
+                description.BindFlags =
+                    D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+                description.MiscFlags =
+                    D3D11_RESOURCE_MISC_SHARED |
+                    D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+                    D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
+                result = device->CreateTexture2D(
+                    &description,
+                    nullptr,
+                    buffer.texture.GetAddressOf());
+                if (FAILED(result)) {
+                    return RecordFailure("ID3D11Device::CreateTexture2D(displayable)", result);
+                }
+                result = device->CreateRenderTargetView(
+                    buffer.texture.Get(),
+                    nullptr,
+                    buffer.render_target.GetAddressOf());
+                if (FAILED(result)) {
+                    return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
+                }
+                result = manager_->AddBufferFromResource(
+                    buffer.texture.Get(),
+                    buffer.presentation.GetAddressOf());
+                if (FAILED(result)) {
+                    return RecordFailure("IPresentationManager::AddBufferFromResource", result);
+                }
+                result = buffer.presentation->GetAvailableEvent(&buffer.available_event);
+                if (FAILED(result)) {
+                    return RecordFailure("IPresentationBuffer::GetAvailableEvent", result);
+                }
+            }
+            return S_OK;
+        });
+    });
 }
 
 void D3D11CompositionSwapChain::ResetBuffers() noexcept

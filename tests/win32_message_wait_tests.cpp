@@ -1,4 +1,5 @@
 #include "app/render_wake_scheduler.h"
+#include "profile/presentation_trace.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_message_wait.h"
 #include "platform/win32_touchpad_gesture_source.h"
@@ -450,6 +451,23 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
 
 int main()
 {
+    {
+        namespace trace = specforge::presentation_trace;
+        TestWindow window;
+        specforge::RenderWakeScheduler scheduler;
+        specforge::Win32MessageRenderObserver observer;
+        Require(observer.Start(&RequestFrame, &scheduler), "size-move hook must start");
+        const auto hwnd = reinterpret_cast<std::uintptr_t>(window.hwnd());
+        trace::Register(hwnd, 320, 240);
+        SendMessageW(window.hwnd(), WM_ENTERSIZEMOVE, 0, 0);
+        const auto entered = trace::Lookup(hwnd);
+        Require(entered.in_size_move && entered.size_move != 0, "real enter message must be observed");
+        SendMessageW(window.hwnd(), WM_EXITSIZEMOVE, 0, 0);
+        Require(!trace::Lookup(hwnd).in_size_move && trace::Lookup(hwnd).size_move == entered.size_move,
+            "real exit message must close the same size-move session");
+        observer.Stop();
+        trace::Unregister(hwnd);
+    }
     TestQueuedWindowMessageRequestsFrame();
     TestSecondaryWindowKeyMessagePreservesCorrelationPayload();
     TestQueuedHitTestDoesNotCreateRenderFeedback();

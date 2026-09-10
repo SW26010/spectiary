@@ -1,4 +1,5 @@
 #include "platform/win32_message_render_observer.h"
+#include "profile/presentation_trace.h"
 
 #include <Windows.h>
 
@@ -22,6 +23,12 @@ struct Win32MessageRenderObserver::Impl {
         Impl* observer = active;
         if (code >= 0 && observer != nullptr && observer->callback != nullptr) {
             const auto* message = reinterpret_cast<const CWPSTRUCT*>(lparam);
+            if (message != nullptr && (message->message == WM_ENTERSIZEMOVE ||
+                                       message->message == WM_EXITSIZEMOVE)) {
+                presentation_trace::SizeMove(
+                    reinterpret_cast<std::uintptr_t>(message->hwnd),
+                    message->message == WM_ENTERSIZEMOVE);
+            }
             if (message != nullptr && Win32MessageCanInvalidateRender(
                                           message->message,
                                           observer->permission_only_message)) {

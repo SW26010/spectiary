@@ -987,6 +987,11 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_presentation_trace_tests
+    tests/presentation_trace_tests.cpp
+    specforge_core
+)
+specforge_add_test(
     specforge_profile_settings_tests
     tests/profile_settings_tests.cpp
     specforge_core
@@ -1692,7 +1697,17 @@ set_tests_properties(
 # Keep the developer feedback model intentionally small: every root test must
 # belong to exactly one of these two explicit lists. The contract test validates
 # the configured CTest model so a new unclassified test fails visibly.
+add_test(
+    NAME specforge_presentation_profile_schema_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/presentation_profile_schema_tests.ps1"
+        -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-presentation-profile.ps1"
+)
+set_tests_properties(specforge_presentation_profile_schema_tests specforge_presentation_trace_tests
+    PROPERTIES TIMEOUT 15)
 set(SPECFORGE_FAST_TESTS
+    specforge_presentation_trace_tests
+    specforge_presentation_profile_schema_tests
     specforge_sdr_swap_chain_tests
     specforge_win32_application_icon_tests
     specforge_local_user_state_tests

@@ -68,6 +68,8 @@ private:
     static void SetViewportWindowSize(ImGuiViewport* viewport, ImVec2 size);
     static void RenderViewportWindow(ImGuiViewport* viewport, void* render_argument);
     static void SwapViewportBuffers(ImGuiViewport* viewport, void* render_argument);
+    static void TracePlatformWindowPosition(ImGuiViewport* viewport, ImVec2 position);
+    static void TracePlatformWindowSize(ImGuiViewport* viewport, ImVec2 size);
 
     void RecordFailure(HRESULT result, std::string_view operation) noexcept;
     void CollectPresentationUpdate(
@@ -75,6 +77,8 @@ private:
         D3D11WindowPresentation& presentation);
 
     static D3D11ImGuiViewportRenderer* active_instance_;
+    void (*platform_set_position_)(ImGuiViewport*, ImVec2) = nullptr;
+    void (*platform_set_size_)(ImGuiViewport*, ImVec2) = nullptr;
 
     Microsoft::WRL::ComPtr<IDXGIFactory2> factory_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;

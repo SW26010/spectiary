@@ -399,3 +399,5 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 ## ImGui widget regression tests
 
 See [ImGui widget regression tests](widget_testing.md) for the headless real-widget harness, focused commands, and its boundary with business automation and presentation diagnostics.
+
+Live-resize 的 instrumentation event、字段和机器验收见 [presentation telemetry](presentation/telemetry.md)。这些诊断不改变 resize/presentation policy。#56 的范围、实验结论与下一步统一见 [调查入口](presentation/live-resize/README.md)。

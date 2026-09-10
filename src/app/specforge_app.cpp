@@ -1,4 +1,5 @@
 #include "app/specforge_app.h"
+#include "profile/presentation_trace_fields.h"
 
 #include "app/initial_source.h"
 #include "app/native_window_title.h"
@@ -387,29 +388,35 @@ int SpecForgeApp::Run(
         return deadline;
     };
     while (running_) {
-        while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
-            if (message.message == WM_QUIT) {
-                running_ = false;
-                break;
+        std::uint64_t message_count = 0;
+        {
+            presentation_trace::Span message_batch({.name = "message_pump_batch"});
+            while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
+                ++message_count;
+                if (message.message == WM_QUIT) {
+                    running_ = false;
+                    break;
+                }
+                const bool direct_manipulation_attached = touchpad_gestures_.OwnsWindow(
+                    reinterpret_cast<std::uintptr_t>(message.hwnd));
+                const Win32TouchpadQueuedMessageAction touchpad_message_action =
+                    ClassifyWin32TouchpadQueuedMessage(
+                        message.message,
+                        direct_manipulation_attached);
+                if (touchpad_message_action ==
+                    Win32TouchpadQueuedMessageAction::InvalidateRender) {
+                    message_render_observer_.ObserveQueuedMessage(Win32ObservedMessage{
+                        reinterpret_cast<std::uintptr_t>(message.hwnd),
+                        message.message,
+                        static_cast<std::uintptr_t>(message.wParam),
+                        static_cast<std::intptr_t>(message.lParam)});
+                } else {
+                    render_wake_scheduler_.RequestTouchpadUpdate();
+                }
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
             }
-            const bool direct_manipulation_attached = touchpad_gestures_.OwnsWindow(
-                reinterpret_cast<std::uintptr_t>(message.hwnd));
-            const Win32TouchpadQueuedMessageAction touchpad_message_action =
-                ClassifyWin32TouchpadQueuedMessage(
-                    message.message,
-                    direct_manipulation_attached);
-            if (touchpad_message_action ==
-                Win32TouchpadQueuedMessageAction::InvalidateRender) {
-                message_render_observer_.ObserveQueuedMessage(Win32ObservedMessage{
-                    reinterpret_cast<std::uintptr_t>(message.hwnd),
-                    message.message,
-                    static_cast<std::uintptr_t>(message.wParam),
-                    static_cast<std::intptr_t>(message.lParam)});
-            } else {
-                render_wake_scheduler_.RequestTouchpadUpdate();
-            }
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            message_batch.Count(message_count);
         }
 
         if (!running_) {
@@ -609,6 +616,26 @@ void SpecForgeApp::Initialize(
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {
         (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
     });
+    presentation_trace::context = this;
+    presentation_trace::main_hwnd = reinterpret_cast<std::uintptr_t>(window_.hwnd());
+    presentation_trace::enabled = [](void* context) {
+        return static_cast<SpecForgeApp*>(context)->profile_.is_frame_recording_active();
+    };
+    presentation_trace::callback = [](void* context, const presentation_trace::Event& event) {
+        auto* app = static_cast<SpecForgeApp*>(context);
+        std::uint64_t viewport_id = 0;
+        if (event.window.hwnd != 0 && ImGui::GetCurrentContext() != nullptr) {
+            for (const ImGuiViewport* viewport : ImGui::GetPlatformIO().Viewports) {
+                const auto handle = viewport->PlatformHandleRaw ? viewport->PlatformHandleRaw : viewport->PlatformHandle;
+                if (reinterpret_cast<std::uintptr_t>(handle) == event.window.hwnd) {
+                    viewport_id = viewport->ID;
+                    break;
+                }
+            }
+        }
+        WritePresentationTrace(app->profile_, event,
+            presentation_trace::Role(event.window), viewport_id);
+    };
     ui_.RegisterSourceLoadCompletionReadyCallback([completion_window = window_.hwnd()]() noexcept {
         PostSourceLoadCompletionReady(completion_window);
     });
@@ -860,7 +887,12 @@ void SpecForgeApp::Shutdown()
     fullscreen_restore_.reset();
     immersive_plot_entered_fullscreen_ = false;
     profile_.SetStateChangeCallback({});
+    presentation_trace::CancelInvalidation();
     profile_.Stop();
+    presentation_trace::callback = nullptr;
+    presentation_trace::enabled = nullptr;
+    presentation_trace::context = nullptr;
+    presentation_trace::main_hwnd = 0;
     window_.ClearMessageHandler();
     window_.Destroy();
     shutdown_complete_ = true;
@@ -868,11 +900,13 @@ void SpecForgeApp::Shutdown()
 
 RenderFrameOutcome SpecForgeApp::RenderFrame()
 {
+    presentation_trace::RenderFrame(frame_index_ + 1);
     profile_.BeginFrame();
     struct ProfileFrameFinalizationGuard {
         ProfileSink& sink;
-        ~ProfileFrameFinalizationGuard() { sink.CompleteFrameFinalization(); }
+        ~ProfileFrameFinalizationGuard() { presentation_trace::frame = 0; sink.CompleteFrameFinalization(); }
     } profile_frame_finalization{profile_};
+    presentation_trace::Span render_frame_span({.name = "render_frame"});
 
     ApplyPendingResize();
     ApplyPendingApplicationSettings(
@@ -981,7 +1015,11 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
             throw std::runtime_error(
                 HResultMessage(renderer_.last_error_operation(), begin_result));
         }
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        {
+            presentation_trace::Span draw({.name = "viewport_draw_submission",
+                .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(window_.hwnd()))});
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
         if (frame_capture_.ShouldCapture(
                 frame_index_)) {
             CaptureRequestedFrame();
@@ -990,8 +1028,14 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         const ImGuiIO& io = ImGui::GetIO();
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             viewport_renderer_.SetCompositorClockPaced(compositor_clock_.boost_active());
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
+            {
+                presentation_trace::Span update({.name = "platform_windows_update"});
+                ImGui::UpdatePlatformWindows();
+            }
+            {
+                presentation_trace::Span render({.name = "platform_windows_render"});
+                ImGui::RenderPlatformWindowsDefault();
+            }
             const D3D11RendererError viewport_error = viewport_renderer_.TakeLastError();
             if (FAILED(viewport_error.result)) {
                 throw std::runtime_error(HResultMessage(viewport_error.operation, viewport_error.result));

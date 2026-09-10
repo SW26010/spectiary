@@ -1,4 +1,5 @@
 #include "renderer/d3d11_imgui_viewport_renderer.h"
+#include "profile/presentation_trace.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -47,6 +48,10 @@ bool D3D11ImGuiViewportRenderer::Initialize(
     active_instance_ = this;
 
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    platform_set_position_ = platform_io.Platform_SetWindowPos;
+    platform_set_size_ = platform_io.Platform_SetWindowSize;
+    if (platform_set_position_) platform_io.Platform_SetWindowPos = TracePlatformWindowPosition;
+    if (platform_set_size_) platform_io.Platform_SetWindowSize = TracePlatformWindowSize;
     platform_io.Renderer_CreateWindow = CreateViewportWindow;
     platform_io.Renderer_DestroyWindow = DestroyViewportWindow;
     platform_io.Renderer_SetWindowSize = SetViewportWindowSize;
@@ -58,8 +63,17 @@ bool D3D11ImGuiViewportRenderer::Initialize(
 void D3D11ImGuiViewportRenderer::Shutdown() noexcept
 {
     if (active_instance_ == this) {
+        if (ImGui::GetCurrentContext() != nullptr) {
+            auto& platform_io = ImGui::GetPlatformIO();
+            if (platform_io.Platform_SetWindowPos == TracePlatformWindowPosition)
+                platform_io.Platform_SetWindowPos = platform_set_position_;
+            if (platform_io.Platform_SetWindowSize == TracePlatformWindowSize)
+                platform_io.Platform_SetWindowSize = platform_set_size_;
+        }
         active_instance_ = nullptr;
     }
+    platform_set_position_ = nullptr;
+    platform_set_size_ = nullptr;
     device_context_.Reset();
     device_.Reset();
     factory_.Reset();
@@ -74,6 +88,24 @@ void D3D11ImGuiViewportRenderer::SetClearColor(
     const std::array<float, 4>& clear_color) noexcept
 {
     clear_color_ = clear_color;
+}
+
+void D3D11ImGuiViewportRenderer::TracePlatformWindowPosition(ImGuiViewport* viewport, ImVec2 position)
+{
+    auto* instance = active_instance_;
+    presentation_trace::Span span({.name = "platform_window_position",
+        .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(ViewportWindowHandle(*viewport)))});
+    instance->platform_set_position_(viewport, position);
+}
+
+void D3D11ImGuiViewportRenderer::TracePlatformWindowSize(ImGuiViewport* viewport, ImVec2 size)
+{
+    auto* instance = active_instance_;
+    presentation_trace::Span span({.name = "platform_window_size",
+        .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(ViewportWindowHandle(*viewport))),
+        .new_width = size.x > 0 ? static_cast<unsigned>(size.x) : 0,
+        .new_height = size.y > 0 ? static_cast<unsigned>(size.y) : 0});
+    instance->platform_set_size_(viewport, size);
 }
 
 void D3D11ImGuiViewportRenderer::SetNativeWindowThemeCallback(
@@ -247,7 +279,11 @@ void D3D11ImGuiViewportRenderer::RenderViewportWindow(ImGuiViewport* viewport, v
         return;
     }
     data->frame_acquired = true;
-    ImGui_ImplDX11_RenderDrawData(viewport->DrawData);
+    {
+        presentation_trace::Span draw({.name = "viewport_draw_submission",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(ViewportWindowHandle(*viewport)))});
+        ImGui_ImplDX11_RenderDrawData(viewport->DrawData);
+    }
     instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 

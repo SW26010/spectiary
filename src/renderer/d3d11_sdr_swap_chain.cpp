@@ -1,3 +1,4 @@
+#include "profile/presentation_trace.h"
 #include "renderer/d3d11_sdr_swap_chain.h"
 
 namespace specforge {
@@ -116,29 +117,40 @@ HRESULT D3D11SdrSwapChain::Resize(
     UINT width,
     UINT height)
 {
-    last_error_operation_ = {};
-    if (device == nullptr || device_context == nullptr || swap_chain_ == nullptr || width == 0 || height == 0) {
-        return RecordFailure("D3D11SdrSwapChain::Resize arguments", E_INVALIDARG);
-    }
-
-    device_context->OMSetRenderTargets(0, nullptr, nullptr);
-    render_target_.Reset();
-    render_texture_.Reset();
-    const UINT flags = tearing_supported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0U;
-    HRESULT result = swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, flags);
-    if (FAILED(result)) {
-        return RecordFailure("IDXGISwapChain3::ResizeBuffers", result);
-    }
-
-    result = ApplySdrColorSpace();
-    if (FAILED(result)) {
-        return result;
-    }
-    result = CreateRenderTarget(device);
-    if (SUCCEEDED(result)) {
+    return presentation_trace::Measure("presentation_buffer_rebuild", "dxgi", [&]() -> HRESULT {
         last_error_operation_ = {};
-    }
-    return result;
+        if (device == nullptr || device_context == nullptr || swap_chain_ == nullptr || width == 0 || height == 0) {
+            return RecordFailure("D3D11SdrSwapChain::Resize arguments", E_INVALIDARG);
+        }
+
+        device_context->OMSetRenderTargets(0, nullptr, nullptr);
+        {
+        auto event = presentation_trace::current;
+        event.name = "presentation_buffer_reset";
+        presentation_trace::Span reset(event);
+        render_target_.Reset();
+        render_texture_.Reset();
+        }
+        const UINT flags = tearing_supported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0U;
+        HRESULT result = presentation_trace::Measure("presentation_buffer_allocation", [&] {
+            return swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, flags);
+        });
+        if (FAILED(result)) {
+            return RecordFailure("IDXGISwapChain3::ResizeBuffers", result);
+        }
+
+        result = ApplySdrColorSpace();
+        if (FAILED(result)) {
+            return result;
+        }
+        result = presentation_trace::Measure("presentation_render_target", [&] {
+            return CreateRenderTarget(device);
+        });
+        if (SUCCEEDED(result)) {
+            last_error_operation_ = {};
+        }
+        return result;
+    });
 }
 
 void D3D11SdrSwapChain::Bind(ID3D11DeviceContext* device_context) const noexcept
