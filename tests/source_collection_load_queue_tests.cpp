@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/source_collection_load_queue_internal.h"
 
@@ -141,20 +142,12 @@ specforge::SourceCollectionContextReuseProof MakeFolderReuseProof(
 }
 
 specforge::SourceCollectionPreparationAdapters Dependencies(
-    specforge::SourceCollectionPreparationAdapters::SnapshotLoader loader,
-    std::atomic_int* cache_loads = nullptr)
+    specforge::SourceCollectionPreparationAdapters::SnapshotLoader loader)
 {
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = std::move(loader);
-    dependencies.workflow_cache_loader =
-        [cache_loads](const auto&, const std::function<void()>& checkpoint) {
-            checkpoint();
-            if (cache_loads != nullptr) {
-                ++*cache_loads;
-            }
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     return dependencies;
 }
 
@@ -245,7 +238,6 @@ void TestBatchLoadsWorkflowCachesOnce()
     const std::filesystem::path second = UniqueTempPath("_batch_b.csv");
     WriteFixture(first);
     WriteFixture(second);
-    std::atomic_int cache_loads = 0;
     std::atomic_int decoder_entries = 0;
     std::promise<void> both_decoders_entered_promise;
     std::shared_future<void> both_decoders_entered =
@@ -263,8 +255,7 @@ void TestBatchLoadsWorkflowCachesOnce()
                 canceled,
                 "timed out waiting to release the batch decoders");
             return MakeSnapshot(path, index);
-        },
-        &cache_loads), {.foreground_limit = 2});
+        }), {.foreground_limit = 2});
 
     const auto ids = queue.EnqueueBatch({
         {.path = first},
@@ -279,7 +270,11 @@ void TestBatchLoadsWorkflowCachesOnce()
     Require(
         completions[0].prepared && completions[1].prepared,
         "every batch source should produce a prepared result");
-    Require(cache_loads.load() == 1, "one restore batch should share one immutable cache snapshot");
+    const auto& first_plan = std::get<specforge::PreparedSourceCollectionPlan>(completions[0].prepared->payload);
+    const auto& second_plan = std::get<specforge::PreparedSourceCollectionPlan>(completions[1].prepared->payload);
+    Require(first_plan.workflow.preparation_cache &&
+        first_plan.workflow.preparation_cache == second_plan.workflow.preparation_cache,
+        "one restore batch should share one immutable cache snapshot");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
 }

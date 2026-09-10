@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "legacy_annotation_fixture_io.h"
 #include "legacy_labeling_test_support.h"
 #include "ui/shell_ui.h"
@@ -685,16 +686,12 @@ specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
     const SourceSessionCachePaths& cache_paths)
 {
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
            const auto&) {
             return MakeSnapshot(source, index);
-        };
-    dependencies.workflow_cache_loader =
-        [](const auto&, const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
         };
     dependencies.workflow_cache_paths = {
         cache_paths.labeling,
@@ -1097,22 +1094,15 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
 
     const auto make_dependencies = []() {
         specforge::
-            SourceCollectionPreparationAdapters
-                dependencies;
+            SourceCollectionPreparationAdapters dependencies;
+            dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
         dependencies.snapshot_loader =
             [](const std::filesystem::path& source,
                std::size_t index,
                const auto&) {
                 return MakeSnapshot(source, index);
             };
-        dependencies.workflow_cache_loader =
-            [](const auto&,
-               const std::function<void()>& checkpoint) {
-                checkpoint();
-                return specforge::
-                    SampleWorkflowPreparationCacheBundle{};
-            };
-        dependencies.workflow_cache_paths = {{}, {}};
+        dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
         return dependencies;
     };
 
@@ -1252,16 +1242,12 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
 
     specforge::SourceCollectionSession session({}, {}, {}, {});
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&, const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -1383,12 +1369,13 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
 
     specforge::SourceCollectionSession session({}, {}, {}, {});
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path&, std::size_t, const auto&)
             -> specforge::SpectrumSnapshotHandle {
             throw std::runtime_error("synthetic decode failure");
         };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -1442,6 +1429,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_one_entered_promise,
          &row_two_entered_promise,
@@ -1464,11 +1452,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -1608,14 +1592,12 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
     }
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -1682,14 +1664,12 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
     }
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -1817,6 +1797,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
 
     std::atomic_int decoder_calls = 0;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [&decoder_calls](
                                        const std::filesystem::path& source,
                                        std::size_t index,
@@ -1825,11 +1806,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
         std::this_thread::sleep_for(12ms);
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2032,14 +2009,12 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
     }
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2141,14 +2116,12 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
         "source A should be active before navigation");
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2217,14 +2190,12 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
     }
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2297,6 +2268,8 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     std::shared_future<void> release_row_two = release_row_two_promise.get_future().share();
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [stale_snapshot_destroyed_promise,
          &row_two_entered_promise,
@@ -2319,11 +2292,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2411,6 +2380,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     std::promise<void> release_decoder_promise;
     std::shared_future<void> release_decoder = release_decoder_promise.get_future().share();
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_entered_promise,
          release_decoder](
@@ -2424,11 +2394,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
                 "timed out waiting to release the stale-plan decoder");
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path, "older-context"),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2540,6 +2506,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
     std::atomic_bool initial_open_failed = false;
     std::atomic_int row_one_decode_count = 0;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&first_decode_entered_promise,
          release_first_decode,
@@ -2579,11 +2546,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -2720,20 +2683,14 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             0,
             {{}, {}});
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
            const auto&) {
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     specforge::SourceCollectionActivationTransaction activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
@@ -2834,17 +2791,15 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
     }
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path&,
            std::size_t,
            const auto&) -> specforge::SpectrumSnapshotHandle {
             throw std::runtime_error("expected deferred restore follow-up failure");
         };
-    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-        checkpoint();
-        return specforge::SampleWorkflowPreparationCacheBundle{};
-    };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
@@ -3178,6 +3133,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
     }
     std::array<std::atomic_int, 3> decoder_calls{};
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls](
             const std::filesystem::path& source,
@@ -3186,14 +3142,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
             ++decoder_calls.at(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
@@ -3365,6 +3314,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
     std::shared_future<void> release_prefetch =
         release_prefetch_promise.get_future().share();
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls,
          &prefetch_entered_promise,
@@ -3382,14 +3332,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
@@ -3488,6 +3431,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
     std::atomic_bool entered_once = false;
     std::atomic_int64_t decoder_returned_ns = 0;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
             std::size_t index,
@@ -3514,14 +3458,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
@@ -3949,6 +3886,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
 
     std::vector<std::size_t> folder_decode_indices;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -3965,12 +3903,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
                 source,
                 index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&, const auto& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
 
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
@@ -4342,6 +4275,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
 
     std::vector<std::size_t> folder_decode_indices;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4355,20 +4289,6 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
             (void)listing;
             folder_decode_indices.push_back(index);
             return MakeSnapshot(source, index);
-        };
-    dependencies.workflow_cache_loader =
-        [&workflow_cache_path, &state_root](
-            const auto&,
-            const auto& checkpoint) {
-            return specforge::LoadSampleWorkflowPreparationCacheBundle(
-                specforge::SampleWorkflowPreparationPaths{
-                    .labeling_state_cache_path =
-                        state_root / "labeling.json",
-                    .workflow_state_cache_path =
-                        workflow_cache_path,
-                    .navigation_state_cache_path =
-                        state_root / "navigation.json"},
-                checkpoint);
         };
     dependencies.workflow_cache_paths = {
         .labeling_state_cache_path =
@@ -4509,6 +4429,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
     std::atomic_size_t folder_loader_calls = 0;
     std::vector<std::size_t> folder_decode_indices;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4539,13 +4460,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
             folder_decode_indices.push_back(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
 
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
@@ -4665,6 +4580,8 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
     };
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4677,13 +4594,7 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
             (void)listing;
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.source_open_probe =
         [&probe_entered_promise,
          &probe_canceled_promise,
@@ -4819,20 +4730,6 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
             [](const auto& source, std::size_t index, const auto&) {
                 return MakeSnapshot(source, index);
             };
-        dependencies.workflow_cache_loader =
-            [&cache_paths](
-                const auto&,
-                const auto& checkpoint) {
-                return specforge::LoadSampleWorkflowPreparationCacheBundle(
-                    specforge::SampleWorkflowPreparationPaths{
-                        .labeling_state_cache_path =
-                            cache_paths.labeling,
-                        .workflow_state_cache_path =
-                            cache_paths.workflow,
-                        .navigation_state_cache_path =
-                            cache_paths.navigation},
-                    checkpoint);
-            };
         dependencies.workflow_cache_paths = {
             .labeling_state_cache_path =
                 cache_paths.labeling,
@@ -4846,6 +4743,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     // previous application run would leave for deferred startup restore.
     {
         specforge::SourceCollectionPreparationAdapters dependencies;
+        dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
         configure_common_dependencies(dependencies);
         dependencies.folder_snapshot_loader =
             [](const auto& source,
@@ -4919,6 +4817,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     std::atomic_bool external_completion_was_signaled = false;
     std::vector<std::size_t> folder_decode_indices;
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     configure_common_dependencies(dependencies);
     dependencies.folder_snapshot_loader =
         [&restore_decode_entered_promise,
@@ -5058,6 +4957,8 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
     WriteFixture(folder / "zzz.csv");
 
     specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -5070,13 +4971,7 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
             (void)listing;
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
 
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
@@ -5966,6 +5861,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     std::shared_future<void> release_row_two =
         release_row_two_promise.get_future().share();
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_two_entered_promise, release_row_two](
             const std::filesystem::path& source,
@@ -5979,13 +5875,6 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
                     "timed out waiting to cancel the stale maintenance follow-up");
             }
             return MakeSnapshot(source, index);
-        };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
         };
     dependencies.workflow_cache_paths = paths;
     std::unique_ptr<specforge::ShellUi> shell =

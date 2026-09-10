@@ -35,24 +35,14 @@ struct SourceCollectionPreparationAdapters {
     using SourceOpenProbe = std::function<SourceOpenFilesystemProbe(
         const SourceOpenRequest&,
         const SourceCollectionCancellationCheckpoint&)>;
-    using FolderChangeGenerationFactory =
-        std::function<DirectoryChangeGenerationHandle(
-            const std::filesystem::path&,
-            const SourceCollectionCancellationCheckpoint&)>;
-    using WorkflowCacheLoader =
-        std::function<SampleWorkflowPreparationCacheBundle(
-            const SampleWorkflowPreparationPaths&,
-            const std::function<void()>&)>;
 
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
     SourceOpenProbe source_open_probe;
-    FolderChangeGenerationFactory folder_change_generation_factory;
-    // Lower-level lifecycle seam for the default monitor. Ignored when a
-    // complete folder_change_generation_factory is injected.
+    // OS registration boundary: deterministic cancellation, timeout and
+    // late-result lifetime tests (ADR 0008).
     DirectoryChangeGenerationMonitor::RegistrationFactory
         folder_change_generation_registration_factory;
-    WorkflowCacheLoader workflow_cache_loader;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };
 

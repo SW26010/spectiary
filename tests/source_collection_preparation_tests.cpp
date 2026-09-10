@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/source_collection_load_queue_internal.h"
 
@@ -101,6 +102,8 @@ private:
 void TestPartialWorkflowCachePathsAreRejected()
 {
     specforge::SourceCollectionPreparationAdapters adapters;
+    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    adapters.workflow_cache_paths = {};
     adapters.workflow_cache_paths.labeling_state_cache_path =
         "labeling-state.json";
 
@@ -166,15 +169,9 @@ specforge::SourceCollectionPreparationAdapters Adapters(
         loader)
 {
     specforge::SourceCollectionPreparationAdapters adapters;
+    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     adapters.snapshot_loader = std::move(loader);
-    adapters.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    adapters.workflow_cache_paths = {{}, {}};
+    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     return adapters;
 }
 
@@ -586,9 +583,8 @@ void TestFolderGenerationReuseAndStalePrefetch()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [generation](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [generation](const auto&, std::stop_token) {
             return generation;
         };
     adapters.folder_snapshot_loader =
@@ -680,9 +676,8 @@ void TestInvalidatedFolderGenerationRefreshes()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [&](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [&](const auto&, std::stop_token) {
             return generation_requests.fetch_add(1) == 0
                 ? initial_generation
                 : replacement_generation;
@@ -755,10 +750,9 @@ void TestUnavailableFolderGenerationUsesFallbackScan()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [](const auto&, const auto& checkpoint)
-            -> specforge::DirectoryChangeGenerationHandle {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [](const auto&, std::stop_token)
+            -> std::shared_ptr<specforge::DirectoryChangeGeneration> {
             return {};
         };
     adapters.folder_snapshot_loader =
@@ -827,9 +821,8 @@ void TestStaleFolderListingRefreshesBeforeDecode()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [](const auto&, std::stop_token) {
             return std::make_shared<
                 MutableDirectoryChangeGeneration>();
         };
@@ -908,9 +901,8 @@ void TestPreferredFolderMemberResolvesAfterFirstLevelScan()
                 index,
                 listing.spectra.size());
         };
-    adapters.folder_change_generation_factory =
-        [](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [](const auto&, std::stop_token) {
             return std::make_shared<
                 MutableDirectoryChangeGeneration>();
         };
@@ -961,9 +953,8 @@ void TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic()
                 index,
                 listing.spectra.size());
         };
-    adapters.folder_change_generation_factory =
-        [](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [](const auto&, std::stop_token) {
             return std::make_shared<
                 MutableDirectoryChangeGeneration>();
         };
@@ -1011,9 +1002,8 @@ void TestUnreadableFolderListingPreservesEnumerationDiagnostic()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [&folder](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [&folder](const auto&, std::stop_token) {
             std::filesystem::remove(folder);
             return std::make_shared<MutableDirectoryChangeGeneration>();
         };
@@ -1065,9 +1055,8 @@ void TestChangedFolderRetriesOneStableGeneration()
                const auto&) {
                 return MakeSnapshot(source, index, 1);
             });
-    adapters.folder_change_generation_factory =
-        [&](const auto&, const auto& checkpoint) {
-            checkpoint();
+    adapters.folder_change_generation_registration_factory =
+        [&](const auto&, std::stop_token) {
             if (generation_requests.fetch_add(1) == 0) {
                 return initial_generation;
             }

@@ -130,8 +130,6 @@ SourceCollectionPreparationAdapters DefaultAdapters(
         LoadFolderSpectrumSnapshotFromListingCancelable;
     adapters.source_open_probe =
         ProbeSourceOpenRequest;
-    adapters.workflow_cache_loader =
-        LoadSampleWorkflowPreparationCacheBundle;
     if (AllWorkflowCachePathsEmpty(workflow_cache_paths)) {
         workflow_cache_paths = {
             DefaultSampleLabelingStateCachePath(),
@@ -169,10 +167,6 @@ void FillMissingAdapters(
     if (!adapters.source_open_probe) {
         adapters.source_open_probe =
             std::move(defaults.source_open_probe);
-    }
-    if (!adapters.workflow_cache_loader) {
-        adapters.workflow_cache_loader =
-            std::move(defaults.workflow_cache_loader);
     }
     adapters.workflow_cache_paths =
         std::move(defaults.workflow_cache_paths);
@@ -288,21 +282,9 @@ public:
         : adapters_(std::move(adapters))
     {
         FillMissingAdapters(adapters_);
-        if (!adapters_.folder_change_generation_factory) {
-            if (adapters_
-                    .folder_change_generation_registration_factory) {
-                directory_change_generation_monitor_ =
-                    std::make_unique<
-                        DirectoryChangeGenerationMonitor>(
-                        std::move(
-                            adapters_
-                                .folder_change_generation_registration_factory));
-            } else {
-                directory_change_generation_monitor_ =
-                    std::make_unique<
-                        DirectoryChangeGenerationMonitor>();
-            }
-        }
+        directory_change_generation_monitor_ =
+            std::make_unique<DirectoryChangeGenerationMonitor>(
+                std::move(adapters_.folder_change_generation_registration_factory));
     }
 
     struct Work {
@@ -321,7 +303,7 @@ public:
     {
         return std::make_shared<
             SampleWorkflowPreparationCacheBundle>(
-            adapters_.workflow_cache_loader(
+            LoadSampleWorkflowPreparationCacheBundle(
                 adapters_.workflow_cache_paths,
                 checkpoint));
     }
@@ -642,10 +624,8 @@ private:
         std::stop_token cancellation_token)
     {
         DirectoryChangeGenerationHandle change_generation =
-            directory_change_generation_monitor_
-                ? directory_change_generation_monitor_->Begin(
-                      path, checkpoint, cancellation_token)
-                : adapters_.folder_change_generation_factory(path, checkpoint);
+            directory_change_generation_monitor_->Begin(
+                path, checkpoint, cancellation_token);
         SourceCollectionFolderListing listing =
             ScanSourceCollectionFolder(path, {}, checkpoint);
         return std::make_shared<

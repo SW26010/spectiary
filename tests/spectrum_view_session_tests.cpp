@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "ui/spectrum_view_session.h"
 
 #include "ui/immersive_context_overlay.h"
@@ -1370,8 +1371,9 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
     old_snapshot.reset();
     old_y_values.reset();
 
-    specforge::SourceCollectionPreparationAdapters
-        dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
+
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
@@ -1380,14 +1382,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
                 source,
                 index);
         };
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     specforge::SourceCollectionActivationTransaction
         activation(
             source_session,

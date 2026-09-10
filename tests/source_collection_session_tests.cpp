@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "legacy_annotation_fixture_io.h"
 #include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
@@ -322,6 +323,7 @@ specforge::SourceCollectionPreparationAdapters PreparationAdapters(
     const std::filesystem::path& workflow_cache)
 {
     specforge::SourceCollectionPreparationAdapters adapters;
+    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     SnapshotLoader folder_loader = loader;
     adapters.snapshot_loader = [loader = std::move(loader)](
                                    const std::filesystem::path& path,

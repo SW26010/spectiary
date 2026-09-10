@@ -1,3 +1,4 @@
+#include "helpers/source_load_test_support.h"
 #include "domain/source_collection_manifest.h"
 #include "profile/navigation_latency_trace.h"
 #include "profile/profile_sink.h"
@@ -200,16 +201,10 @@ MakeDependencies(
         SnapshotLoader snapshot_loader)
 {
     specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         std::move(snapshot_loader);
-    dependencies.workflow_cache_loader =
-        [](const auto&,
-           const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::
-                SampleWorkflowPreparationCacheBundle{};
-        };
-    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
     return dependencies;
 }
 
