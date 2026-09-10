@@ -126,17 +126,17 @@ void WritePersistedWorkflowSourceId(std::ostream& stream, std::string_view sourc
     WriteJsonString(stream, source_id);
 }
 
-std::optional<std::string> ReadPersistedWorkflowSourceId(const JsonValue& value)
+std::optional<std::string> ReadPersistedWorkflowSourceId(const nlohmann::json& value)
 {
-    if (value.kind == JsonValue::Kind::String) {
-        return value.string_value.empty() ? std::nullopt : std::optional<std::string>{value.string_value};
+    if (value.type() == nlohmann::json::value_t::string) {
+        return value.get_ref<const std::string&>().empty() ? std::nullopt : std::optional<std::string>{value.get_ref<const std::string&>()};
     }
-    if (value.kind != JsonValue::Kind::Object) {
+    if (value.type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
 
     const std::optional<std::string> source_kind = ReadJsonStringMember(value, "source_kind");
-    const JsonValue* path = JsonObjectMember(value, "path");
+    const nlohmann::json* path = JsonObjectMember(value, "path");
     if (!source_kind || *source_kind != kSourceKindAnnotationPath || path == nullptr) {
         return std::nullopt;
     }
@@ -275,33 +275,33 @@ void WriteAnnotationDisplayNames(
     wrote_member = true;
 }
 
-std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source_object)
+std::vector<SampleFilterCondition> ParseFilterConditions(const nlohmann::json& source_object)
 {
     std::vector<SampleFilterCondition> conditions;
-    const JsonValue* filters = JsonObjectMember(source_object, "filters");
-    if (filters == nullptr || filters->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* filters = JsonObjectMember(source_object, "filters");
+    if (filters == nullptr || filters->type() != nlohmann::json::value_t::array) {
         return conditions;
     }
 
-    for (const JsonValue& condition_object : filters->array) {
-        if (condition_object.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& condition_object : (*filters)) {
+        if (condition_object.type() != nlohmann::json::value_t::object) {
             continue;
         }
-        const JsonValue* source_id_value = JsonObjectMember(condition_object, "source_id");
+        const nlohmann::json* source_id_value = JsonObjectMember(condition_object, "source_id");
         std::optional<std::string> source_id =
             source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         if (!source_id || source_id->empty()) {
             continue;
         }
-        const JsonValue* values = JsonObjectMember(condition_object, "allowed_values");
-        if (values == nullptr || values->kind != JsonValue::Kind::Array) {
+        const nlohmann::json* values = JsonObjectMember(condition_object, "allowed_values");
+        if (values == nullptr || values->type() != nlohmann::json::value_t::array) {
             continue;
         }
 
         std::unordered_set<std::string> allowed_values;
-        for (const JsonValue& value : values->array) {
-            if (value.kind == JsonValue::Kind::String && !value.string_value.empty()) {
-                allowed_values.insert(value.string_value);
+        for (const nlohmann::json& value : (*values)) {
+            if (value.type() == nlohmann::json::value_t::string && !value.get_ref<const std::string&>().empty()) {
+                allowed_values.insert(value.get_ref<const std::string&>());
             }
         }
         if (!allowed_values.empty()) {
@@ -314,14 +314,14 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source
     return conditions;
 }
 
-std::vector<std::string> ParseSourceIdArrayMember(const JsonValue& source_object, const char* name)
+std::vector<std::string> ParseSourceIdArrayMember(const nlohmann::json& source_object, const char* name)
 {
     std::vector<std::string> values;
-    const JsonValue* array = JsonObjectMember(source_object, name);
-    if (array == nullptr || array->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* array = JsonObjectMember(source_object, name);
+    if (array == nullptr || array->type() != nlohmann::json::value_t::array) {
         return values;
     }
-    for (const JsonValue& value : array->array) {
+    for (const nlohmann::json& value : (*array)) {
         if (std::optional<std::string> source_id = ReadPersistedWorkflowSourceId(value)) {
             values.push_back(std::move(*source_id));
         }
@@ -329,20 +329,20 @@ std::vector<std::string> ParseSourceIdArrayMember(const JsonValue& source_object
     return UniqueStrings(std::move(values));
 }
 
-std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(const JsonValue& source_object)
+std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(const nlohmann::json& source_object)
 {
     std::vector<SampleAnnotationDisplayNameOverride> display_names;
-    const JsonValue* array = JsonObjectMember(source_object, "annotation_display_names");
-    if (array == nullptr || array->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* array = JsonObjectMember(source_object, "annotation_display_names");
+    if (array == nullptr || array->type() != nlohmann::json::value_t::array) {
         return display_names;
     }
 
     std::unordered_set<std::string> seen;
-    for (const JsonValue& value : array->array) {
-        if (value.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& value : (*array)) {
+        if (value.type() != nlohmann::json::value_t::object) {
             continue;
         }
-        const JsonValue* source_id_value = JsonObjectMember(value, "source_id");
+        const nlohmann::json* source_id_value = JsonObjectMember(value, "source_id");
         std::optional<std::string> source_id =
             source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         std::optional<std::string> display_name = ReadJsonStringMember(value, "display_name");
@@ -356,13 +356,13 @@ std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(con
     return display_names;
 }
 
-void ParseSortState(const JsonValue& source_object, SampleWorkflowSourceState& state)
+void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceState& state)
 {
-    const JsonValue* sorting = JsonObjectMember(source_object, "sorting");
-    if (sorting == nullptr || sorting->kind != JsonValue::Kind::Object) {
+    const nlohmann::json* sorting = JsonObjectMember(source_object, "sorting");
+    if (sorting == nullptr || sorting->type() != nlohmann::json::value_t::object) {
         return;
     }
-    const JsonValue* source_id_value = JsonObjectMember(*sorting, "source_id");
+    const nlohmann::json* source_id_value = JsonObjectMember(*sorting, "source_id");
     if (std::optional<std::string> source_id =
             source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         source_id && !source_id->empty()) {
@@ -398,15 +398,15 @@ SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(
         return load;
     }
 
-    const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
-    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* sources = JsonObjectMember(result.document->root, "sources");
+    if (sources == nullptr || sources->type() != nlohmann::json::value_t::array) {
         return load;
     }
-    for (const JsonValue& source_object : sources->array) {
+    for (const nlohmann::json& source_object : (*sources)) {
         if (cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        if (source_object.kind != JsonValue::Kind::Object) {
+        if (source_object.type() != nlohmann::json::value_t::object) {
             continue;
         }
         std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");

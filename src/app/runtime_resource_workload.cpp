@@ -69,7 +69,7 @@ EnvironmentPath(const wchar_t* name)
 }
 
 std::optional<std::size_t> RequiredSizeMember(
-    const JsonValue& root,
+    const nlohmann::json& root,
     std::string_view name,
     std::string& error)
 {
@@ -111,7 +111,7 @@ bool SamePath(
                right.lexically_normal().c_str()) == 0;
 }
 
-JsonValue ActivityJson(
+nlohmann::json ActivityJson(
     const ShellRuntimeResourceObservation& observation,
     bool measurement_baseline_recorded,
     std::uint64_t measured_start_cancellations,
@@ -122,45 +122,45 @@ JsonValue ActivityJson(
     const std::uint64_t retired_objects =
         activity.retired_prepared_count +
         activity.retired_resource_count;
-    return JsonObjectValue({
+    return nlohmann::json::object({
         {"active_task_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.active_task_count))},
         {"completed_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.completed_count))},
         {"worker_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.worker_count))},
         {"pending_load_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  observation.pending_load_count))},
         {"retirement_queued_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.retirement_queued_count))},
         {"retirement_in_flight_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.retirement_in_flight_count))},
         {"cancellation_request_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.cancellation_request_count))},
         {"successful_cancellation_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.successful_cancellation_count))},
         {"runtime_resource_cancellation_checkpoint_waiting",
-         JsonBoolValue(
+         nlohmann::json(
              activity
                  .runtime_resource_cancellation_checkpoint_waiting)},
         {"successful_cancellation_delta",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  measurement_baseline_recorded
                  ? activity.successful_cancellation_count -
@@ -169,15 +169,15 @@ JsonValue ActivityJson(
                            measured_start_cancellations)
                  : 0))},
         {"retired_prepared_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.retired_prepared_count))},
         {"retired_resource_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  activity.retired_resource_count))},
         {"retired_object_delta",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  measurement_baseline_recorded
                  ? retired_objects -
@@ -185,7 +185,7 @@ JsonValue ActivityJson(
                            retired_objects,
                            measured_start_retired_objects)
                  : 0))},
-        {"idle", JsonBoolValue(observation.idle())},
+        {"idle", nlohmann::json(observation.idle())},
     });
 }
 
@@ -210,10 +210,10 @@ LoadRuntimeResourceWorkloadConfiguration(
         return result;
     }
 
-    const JsonValue& root = loaded.document->root;
+    const nlohmann::json& root = loaded.document->root;
     const std::optional<std::string> status_path =
         ReadJsonStringMember(root, "status_path");
-    const JsonValue* sources =
+    const nlohmann::json* sources =
         JsonObjectMember(root, "source_paths");
     if (!status_path || status_path->empty()) {
         result.error_message =
@@ -221,8 +221,8 @@ LoadRuntimeResourceWorkloadConfiguration(
         return result;
     }
     if (sources == nullptr ||
-        sources->kind != JsonValue::Kind::Array ||
-        sources->array.size() < 2) {
+        sources->type() != nlohmann::json::value_t::array ||
+        (*sources).size() < 2) {
         result.error_message =
             "Runtime resource workload member 'source_paths' must contain at least two paths.";
         return result;
@@ -231,15 +231,15 @@ LoadRuntimeResourceWorkloadConfiguration(
     RuntimeResourceWorkloadConfiguration configuration;
     configuration.status_path =
         Utf8Path(*status_path);
-    for (const JsonValue& source : sources->array) {
-        if (source.kind != JsonValue::Kind::String ||
-            source.string_value.empty()) {
+    for (const nlohmann::json& source : (*sources)) {
+        if (source.type() != nlohmann::json::value_t::string ||
+            source.get_ref<const std::string&>().empty()) {
             result.error_message =
                 "Every runtime resource workload source path must be a non-empty string.";
             return result;
         }
         std::filesystem::path source_path =
-            Utf8Path(source.string_value);
+            Utf8Path(source.get_ref<const std::string&>());
         std::error_code canonical_error;
         source_path = std::filesystem::weakly_canonical(
             source_path,
@@ -248,7 +248,7 @@ LoadRuntimeResourceWorkloadConfiguration(
             !std::filesystem::exists(source_path)) {
             result.error_message =
                 "Runtime resource workload source does not exist: " +
-                source.string_value;
+                source.get_ref<const std::string&>();
             return result;
         }
         configuration.source_paths.push_back(
@@ -870,87 +870,87 @@ bool RuntimeResourceWorkload::WriteStatus(
               Clock::now() - started_at_)
               .count();
 
-    JsonValue unexpected_graphics_messages =
-        JsonArrayValue({});
-    unexpected_graphics_messages.array.reserve(
+    nlohmann::json unexpected_graphics_messages =
+        nlohmann::json::array({});
+    unexpected_graphics_messages.get_ref<nlohmann::json::array_t&>().reserve(
         graphics_unexpected_messages_.size());
     for (const std::string& message :
          graphics_unexpected_messages_) {
-        unexpected_graphics_messages.array.push_back(
-            JsonStringValue(message));
+        unexpected_graphics_messages.push_back(
+            nlohmann::json(message));
     }
 
-    JsonValue graphics = JsonObjectValue({
+    nlohmann::json graphics = nlohmann::json::object({
         {"requested",
-         JsonBoolValue(
+         nlohmann::json(
              configuration_.enable_graphics_debug)},
         {"report_recorded",
-         JsonBoolValue(graphics_report_recorded_)},
+         nlohmann::json(graphics_report_recorded_)},
         {"available",
-         JsonBoolValue(graphics_available_)},
+         nlohmann::json(graphics_available_)},
         {"allowed_live_object_messages",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  graphics_allowed_live_objects_))},
         {"unexpected_live_object_messages",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  graphics_unexpected_live_objects_))},
         {"unexpected_messages",
          std::move(unexpected_graphics_messages)},
-        {"detail", JsonStringValue(graphics_detail_)},
+        {"detail", nlohmann::json(graphics_detail_)},
     });
 
     const auto presentation_evidence_json =
         [](const PresentationEvidence& evidence) {
-            return JsonObjectValue({
+            return nlohmann::json::object({
                 {"source_index",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.source_index))},
                 {"source_id",
-                 JsonStringValue(evidence.source_id)},
+                 nlohmann::json(evidence.source_id)},
                 {"source_path",
-                 JsonStringValue(
+                 nlohmann::json(
                      PathToUtf8(
                          evidence.source_path))},
                 {"spectrum_index",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.spectrum_index))},
                 {"presentation_sequence",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.presentation_sequence))},
                 {"source_load_id",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.source_load_id))},
                 {"activation_frame",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.activation_frame))},
                 {"viewport_id",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence.viewport_id))},
                 {"render_target_resize_sequence",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          evidence
                              .render_target_resize_sequence))},
             });
         };
-    JsonValue measured_cycle_presentations =
-        JsonArrayValue({});
-    measured_cycle_presentations.array.reserve(
+    nlohmann::json measured_cycle_presentations =
+        nlohmann::json::array({});
+    measured_cycle_presentations.get_ref<nlohmann::json::array_t&>().reserve(
         measured_cycle_presentations_.size());
     for (const MeasuredCyclePresentationEvidence& cycle :
          measured_cycle_presentations_) {
-        measured_cycle_presentations.array.push_back(
-            JsonObjectValue({
+        measured_cycle_presentations.push_back(
+            nlohmann::json::object({
                 {"measured_cycle",
-                 JsonIntegerValue(
+                 nlohmann::json(
                      static_cast<std::int64_t>(
                          cycle.measured_cycle))},
                 {"stress",
@@ -965,88 +965,88 @@ bool RuntimeResourceWorkload::WriteStatus(
     const SourceCollectionActivationTransaction::
         PresentedSourceLoadObservation& last_presentation =
             observation.presented_source_load;
-    JsonValue presentation = JsonObjectValue({
+    nlohmann::json presentation = nlohmann::json::object({
         {"successful_source_load_present_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  last_presentation.sequence))},
         {"last_source_load_id",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  last_presentation.source_load_id))},
         {"last_activation_frame",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  last_presentation.activation_frame))},
         {"last_viewport_id",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  last_presentation.viewport_id))},
         {"render_target_resize_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  render_target_resize_count_))},
     });
 
-    const JsonValue body = JsonObjectValue({
-        {"state", JsonStringValue(StateName())},
-        {"phase", JsonStringValue(PhaseName())},
+    const nlohmann::json body = nlohmann::json::object({
+        {"state", nlohmann::json(StateName())},
+        {"phase", nlohmann::json(PhaseName())},
         {"process_id",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(process_id_))},
-        {"elapsed_ms", JsonIntegerValue(elapsed_ms)},
+        {"elapsed_ms", nlohmann::json(elapsed_ms)},
         {"warmup_cycles",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  configuration_.warmup_cycles))},
         {"measured_cycles",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  configuration_.measured_cycles))},
         {"configured_source_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  configuration_.source_paths.size()))},
         {"preconditioned_source_count",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  preconditioned_source_count_))},
         {"measurement_baseline_recorded",
-         JsonBoolValue(
+         nlohmann::json(
              measurement_baseline_recorded_)},
         {"measured_cycles_with_cancellation",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  measured_cycles_with_cancellation_))},
         {"measured_cycles_with_retirement",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  measured_cycles_with_retirement_))},
         {"completed_cycles",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  completed_cycles_))},
         {"completed_measured_cycles",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  CompletedMeasuredCycles()))},
         {"total_cycles",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  TotalCycleCount()))},
         {"stress_source_index",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  CurrentStressSourceIndex()))},
         {"preconditioning_source_index",
-         JsonIntegerValue(
+         nlohmann::json(
              static_cast<std::int64_t>(
                  CurrentPreconditioningSourceIndex()))},
         {"active_source_path",
-         JsonStringValue(
+         nlohmann::json(
              PathToUtf8(
                  observation.active_source_path))},
-        {"failure", JsonStringValue(failure_message_)},
+        {"failure", nlohmann::json(failure_message_)},
         {"measured_cycle_presentations",
          std::move(measured_cycle_presentations)},
         {"presentation", std::move(presentation)},

@@ -25,9 +25,8 @@ struct AtomicFileWriteOptions {
     std::ios::openmode open_mode = std::ios::trunc;
     std::string_view target_description = "file";
     AtomicFileReplaceRetryPolicy replace_retry_policy;
-    // Test-only interruption seam.  It runs after the temporary file is
-    // closed and before the target is replaced; production callers leave it
-    // empty.
+    // Validation/interruption checkpoint after the temporary file is closed
+    // and before the target is replaced. Throwing preserves the old target.
     AtomicFileWriteCheckpoint before_replace;
 };
 

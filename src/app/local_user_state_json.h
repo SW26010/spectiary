@@ -2,6 +2,8 @@
 
 #include "platform/atomic_file.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
@@ -19,23 +21,11 @@
 
 namespace specforge {
 
-struct JsonValue {
-    enum class Kind {
-        Null,
-        Object,
-        Array,
-        String,
-        Bool,
-        Integer,
-    };
+inline constexpr std::size_t kMaxJsonInputBytes = 64U * 1024U * 1024U;
+inline constexpr std::size_t kMaxJsonNestingDepth = 64U;
+inline constexpr std::size_t kMaxJsonNodes = 2U * 1024U * 1024U;
 
-    Kind kind = Kind::Null;
-    std::unordered_map<std::string, JsonValue> object;
-    std::vector<JsonValue> array;
-    std::string string_value;
-    bool bool_value = false;
-    std::int64_t integer_value = 0;
-};
+[[nodiscard]] bool JsonIsInt64(const nlohmann::json& value);
 
 using JsonCancellationCheckpoint = std::function<void()>;
 
@@ -43,30 +33,18 @@ using JsonCancellationCheckpoint = std::function<void()>;
     std::istream& stream,
     std::string& contents,
     const JsonCancellationCheckpoint& cancellation_checkpoint = {});
-[[nodiscard]] std::optional<JsonValue> ParseJson(
+[[nodiscard]] std::optional<nlohmann::json> ParseJson(
     std::string_view text,
     std::string& error,
     const JsonCancellationCheckpoint& cancellation_checkpoint = {});
-[[nodiscard]] const JsonValue* JsonObjectMember(const JsonValue& value, std::string_view key);
-[[nodiscard]] std::optional<std::string> ReadJsonStringMember(const JsonValue& value, std::string_view key);
-[[nodiscard]] std::optional<std::size_t> ReadJsonSizeMember(const JsonValue& value, std::string_view key);
-[[nodiscard]] std::optional<int> ReadJsonIntMember(const JsonValue& value, std::string_view key);
-[[nodiscard]] bool ReadJsonBoolMember(const JsonValue& value, std::string_view key, bool fallback);
+[[nodiscard]] const nlohmann::json* JsonObjectMember(const nlohmann::json& value, std::string_view key);
+[[nodiscard]] std::optional<std::string> ReadJsonStringMember(const nlohmann::json& value, std::string_view key);
+[[nodiscard]] std::optional<std::size_t> ReadJsonSizeMember(const nlohmann::json& value, std::string_view key);
+[[nodiscard]] std::optional<int> ReadJsonIntMember(const nlohmann::json& value, std::string_view key);
+[[nodiscard]] bool ReadJsonBoolMember(const nlohmann::json& value, std::string_view key, bool fallback);
 
 [[nodiscard]] std::string JsonEscape(std::string_view value);
 void WriteJsonString(std::ostream& stream, std::string_view value);
-
-[[nodiscard]] JsonValue JsonNullValue();
-[[nodiscard]] JsonValue JsonObjectValue(
-    std::initializer_list<std::pair<std::string, JsonValue>>
-        members = {});
-[[nodiscard]] JsonValue JsonArrayValue(
-    std::initializer_list<JsonValue> values = {});
-[[nodiscard]] JsonValue JsonStringValue(
-    std::string_view value);
-[[nodiscard]] JsonValue JsonBoolValue(bool value);
-[[nodiscard]] JsonValue JsonIntegerValue(
-    std::int64_t value);
 
 template <typename AssociativeContainer>
 [[nodiscard]] std::vector<std::string> SortedCacheKeys(const AssociativeContainer& values)
@@ -82,7 +60,7 @@ template <typename AssociativeContainer>
 }
 
 struct VersionedJsonCacheDocument {
-    JsonValue root;
+    nlohmann::json root;
     int schema_version = 0;
 };
 
@@ -127,7 +105,7 @@ using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string
     std::string_view format_kind,
     int schema_version,
     std::string_view description,
-    const JsonValue& body,
+    const nlohmann::json& body,
     std::string* error_message = nullptr,
     AtomicFileReplaceRetryPolicy replace_retry_policy = {});
 

@@ -26,7 +26,7 @@ enum class MetadataSchemaRequirement {
 };
 
 std::optional<std::string> ReadRequiredMetadataString(
-    const JsonValue& root,
+    const nlohmann::json& root,
     std::string_view key)
 {
     std::optional<std::string> value =
@@ -39,24 +39,24 @@ std::optional<std::string> ReadRequiredMetadataString(
 }
 
 std::optional<std::optional<std::string>> ReadNullableStringMember(
-    const JsonValue& root,
+    const nlohmann::json& root,
     std::string_view key)
 {
-    const JsonValue* member = JsonObjectMember(root, key);
+    const nlohmann::json* member = JsonObjectMember(root, key);
     if (member == nullptr) {
         return std::nullopt;
     }
-    if (member->kind == JsonValue::Kind::Null) {
+    if (member->type() == nlohmann::json::value_t::null) {
         return std::optional<std::string>{};
     }
-    if (member->kind != JsonValue::Kind::String) {
+    if (member->type() != nlohmann::json::value_t::string) {
         return std::nullopt;
     }
     if (!metadata_validation::IsRequiredMetadataString(
-            member->string_value)) {
+            member->get_ref<const std::string&>())) {
         return std::nullopt;
     }
-    return member->string_value;
+    return member->get_ref<const std::string&>();
 }
 
 bool MatchesSourceRevision(
@@ -101,18 +101,18 @@ std::string MetadataError(
 }
 
 BuildMetadataReadResult ReadBuildMetadata(
-    const JsonValue& root,
+    const nlohmann::json& root,
     int schema_version,
     const BuildIdentity& expected_identity)
 {
-    const JsonValue* product = &root;
-    const JsonValue* build = &root;
+    const nlohmann::json* product = &root;
+    const nlohmann::json* build = &root;
     std::optional<std::string> product_name = std::string("SpecForge");
     if (schema_version >= kSchema4Version) {
         product = JsonObjectMember(root, "product");
         build = JsonObjectMember(root, "build");
-        if (product == nullptr || product->kind != JsonValue::Kind::Object ||
-            build == nullptr || build->kind != JsonValue::Kind::Object) {
+        if (product == nullptr || product->type() != nlohmann::json::value_t::object ||
+            build == nullptr || build->type() != nlohmann::json::value_t::object) {
             return {};
         }
         product_name = ReadRequiredMetadataString(*product, "name");
@@ -151,7 +151,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     // cfitsio was added after schema 5 had already shipped. A missing member
     // denotes the legacy schema 5 shape and is completed from the executable's
     // generated build identity. A present member must remain fully valid.
-    const JsonValue* cfitsio_member = JsonObjectMember(*build, "cfitsio");
+    const nlohmann::json* cfitsio_member = JsonObjectMember(*build, "cfitsio");
     const std::optional<std::string> cfitsio =
         schema_version == metadata_contract::kSchema5Version &&
             cfitsio_member != nullptr
@@ -161,7 +161,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     // therefore denotes the legacy schema 5 shape and is completed from the
     // executable's generated build identity.  If the member is present it must
     // still satisfy the ordinary required-string contract.
-    const JsonValue* yaml_cpp_member = JsonObjectMember(*build, "yaml_cpp");
+    const nlohmann::json* yaml_cpp_member = JsonObjectMember(*build, "yaml_cpp");
     const std::optional<std::string> yaml_cpp =
         schema_version == metadata_contract::kSchema5Version &&
             yaml_cpp_member != nullptr
@@ -174,16 +174,16 @@ BuildMetadataReadResult ReadBuildMetadata(
     if (schema_version == metadata_contract::kSchema5Version) {
         const std::optional<std::string> completed_at_utc =
             ReadRequiredMetadataString(*build, "completed_at_utc");
-        const JsonValue* artifact_value =
+        const nlohmann::json* artifact_value =
             JsonObjectMember(root, "artifact");
         const std::optional<std::string> artifact_file =
             artifact_value != nullptr &&
-                artifact_value->kind == JsonValue::Kind::Object
+                artifact_value->type() == nlohmann::json::value_t::object
             ? ReadRequiredMetadataString(*artifact_value, "file")
             : std::nullopt;
         const std::optional<std::string> artifact_sha256 =
             artifact_value != nullptr &&
-                artifact_value->kind == JsonValue::Kind::Object
+                artifact_value->type() == nlohmann::json::value_t::object
             ? ReadRequiredMetadataString(*artifact_value, "sha256")
             : std::nullopt;
         if (completed_at_utc && artifact_file && artifact_sha256) {
@@ -274,7 +274,7 @@ BuildMetadataReadResult ReadBuildMetadata(
 }
 
 std::optional<std::string> ReadDeployment(
-    const JsonValue& root,
+    const nlohmann::json& root,
     int schema_version,
     DeploymentMetadata& deployment)
 {
@@ -295,12 +295,12 @@ std::optional<std::string> ReadDeployment(
         return "schema 3 release_profile must be exactly Portable or Installed";
     }
 
-    const JsonValue* deployment_value =
+    const nlohmann::json* deployment_value =
         JsonObjectMember(root, "deployment");
     if (deployment_value == nullptr) {
         return std::nullopt;
     }
-    if (deployment_value->kind != JsonValue::Kind::Object) {
+    if (deployment_value->type() != nlohmann::json::value_t::object) {
         return "deployment must be an object";
     }
 
@@ -451,8 +451,8 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
     }
 
     std::string parse_error;
-    std::optional<JsonValue> root = ParseJson(contents, parse_error);
-    if (!root || root->kind != JsonValue::Kind::Object) {
+    std::optional<nlohmann::json> root = ParseJson(contents, parse_error);
+    if (!root || root->type() != nlohmann::json::value_t::object) {
         result.startup_error = MetadataError(
             path,
             parse_error.empty()

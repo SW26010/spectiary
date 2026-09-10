@@ -37,9 +37,9 @@ ProfileSettingsLoadResult LoadProfileSettings(
         return loaded;
     }
 
-    const JsonValue* output_directory =
+    const nlohmann::json* output_directory =
         JsonObjectMember(result.document->root, "output_directory");
-    if (output_directory != nullptr && output_directory->kind != JsonValue::Kind::Null) {
+    if (output_directory != nullptr && output_directory->type() != nlohmann::json::value_t::null) {
         std::optional<std::filesystem::path> parsed =
             ReadPersistedPathReference(*output_directory);
         if (!parsed) {
@@ -59,17 +59,17 @@ bool SaveProfileSettings(
     const ProfileSettings& settings,
     std::string* error_message)
 {
-    const JsonValue output_directory =
+    const nlohmann::json output_directory =
         settings.output_directory
         ? PersistedPathReferenceJson(
               *settings.output_directory)
-        : JsonNullValue();
+        : nlohmann::json();
     return WriteVersionedJsonCacheDocument(
         path,
         kSettingsFormatKind,
         kSettingsSchemaVersion,
         "performance profile settings",
-        JsonObjectValue({
+        nlohmann::json::object({
             {"output_directory", output_directory},
         }),
         error_message);

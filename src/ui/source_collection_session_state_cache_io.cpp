@@ -39,17 +39,17 @@ LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
 
     load.cache.active_source_index =
         ReadJsonSizeMember(result.document->root, "active_source_index");
-    const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
-    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* sources = JsonObjectMember(result.document->root, "sources");
+    if (sources == nullptr || sources->type() != nlohmann::json::value_t::array) {
         return load;
     }
 
-    for (const JsonValue& source_object : sources->array) {
-        if (source_object.kind != JsonValue::Kind::Object ||
+    for (const nlohmann::json& source_object : (*sources)) {
+        if (source_object.type() != nlohmann::json::value_t::object ||
             load.cache.sources.size() >= kMaxRestoredSources) {
             continue;
         }
-        const JsonValue* path_value = JsonObjectMember(source_object, "path");
+        const nlohmann::json* path_value = JsonObjectMember(source_object, "path");
         if (path_value == nullptr) {
             continue;
         }
@@ -62,9 +62,9 @@ LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
         SourceCollectionSavedSource source;
         source.path = std::move(*path_reference);
         source.last_spectrum_index = ReadJsonSizeMember(source_object, "last_index").value_or(0);
-        const JsonValue* annotation_paths = JsonObjectMember(source_object, "annotation_paths");
-        if (annotation_paths != nullptr && annotation_paths->kind == JsonValue::Kind::Array) {
-            for (const JsonValue& annotation_path_value : annotation_paths->array) {
+        const nlohmann::json* annotation_paths = JsonObjectMember(source_object, "annotation_paths");
+        if (annotation_paths != nullptr && annotation_paths->type() == nlohmann::json::value_t::array) {
+            for (const nlohmann::json& annotation_path_value : (*annotation_paths)) {
                 std::optional<std::filesystem::path> annotation_path =
                     ReadPersistedPathReference(annotation_path_value);
                 if (!annotation_path || annotation_path->empty()) {

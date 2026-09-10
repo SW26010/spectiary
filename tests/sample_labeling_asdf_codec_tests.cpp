@@ -73,162 +73,125 @@ bool ContainsText(
            bytes.end();
 }
 
-specforge::JsonValue ReadJsonFile(const std::filesystem::path& path)
+nlohmann::json ReadJsonFile(const std::filesystem::path& path)
 {
     const std::vector<unsigned char> bytes = ReadAllBytes(path);
     const std::string text(
         reinterpret_cast<const char*>(bytes.data()), bytes.size());
     std::string error;
-    std::optional<specforge::JsonValue> parsed =
+    std::optional<nlohmann::json> parsed =
         specforge::ParseJson(text, error);
     Require(parsed.has_value(), "JSON fixture should parse");
     return std::move(*parsed);
 }
 
-bool JsonEquals(
-    const specforge::JsonValue& left,
-    const specforge::JsonValue& right)
+bool JsonEquals(const nlohmann::json& left, const nlohmann::json& right)
 {
-    if (left.kind != right.kind) {
-        return false;
-    }
-    switch (left.kind) {
-    case specforge::JsonValue::Kind::Null:
-        return true;
-    case specforge::JsonValue::Kind::Object:
-        if (left.object.size() != right.object.size()) {
-            return false;
-        }
-        for (const auto& [key, value] : left.object) {
-            const auto found = right.object.find(key);
-            if (found == right.object.end() ||
-                !JsonEquals(value, found->second)) {
-                return false;
-            }
-        }
-        return true;
-    case specforge::JsonValue::Kind::Array:
-        if (left.array.size() != right.array.size()) {
-            return false;
-        }
-        for (std::size_t index = 0; index < left.array.size(); ++index) {
-            if (!JsonEquals(left.array[index], right.array[index])) {
-                return false;
-            }
-        }
-        return true;
-    case specforge::JsonValue::Kind::String:
-        return left.string_value == right.string_value;
-    case specforge::JsonValue::Kind::Bool:
-        return left.bool_value == right.bool_value;
-    case specforge::JsonValue::Kind::Integer:
-        return left.integer_value == right.integer_value;
-    }
-    return false;
+    return left == right;
 }
 
-specforge::JsonValue SemanticSummary(
+nlohmann::json SemanticSummary(
     const specforge::SampleLabelingDocument& document)
 {
-    specforge::JsonValue sample_names = specforge::JsonArrayValue();
-    sample_names.array.reserve(document.source.roster.sample_names.size());
+    nlohmann::json sample_names = nlohmann::json::array();
+    sample_names.get_ref<nlohmann::json::array_t&>().reserve(document.source.roster.sample_names.size());
     for (const std::string& name : document.source.roster.sample_names) {
-        sample_names.array.push_back(specforge::JsonStringValue(name));
+        sample_names.push_back(nlohmann::json(name));
     }
 
-    specforge::JsonValue labels = specforge::JsonArrayValue();
-    labels.array.reserve(document.labeling.labels.size());
+    nlohmann::json labels = nlohmann::json::array();
+    labels.get_ref<nlohmann::json::array_t&>().reserve(document.labeling.labels.size());
     for (const specforge::SampleLabelingDocumentLabel& label :
         document.labeling.labels) {
-        labels.array.push_back(specforge::JsonObjectValue({
-            {"code", specforge::JsonIntegerValue(label.code)},
-            {"name", specforge::JsonStringValue(label.name)},
-            {"shortcut", specforge::JsonStringValue(label.shortcut)},
+        labels.push_back(nlohmann::json::object({
+            {"code", nlohmann::json(label.code)},
+            {"name", nlohmann::json(label.name)},
+            {"shortcut", nlohmann::json(label.shortcut)},
         }));
     }
 
-    specforge::JsonValue values = specforge::JsonArrayValue();
-    values.array.reserve(document.annotation.values.size());
+    nlohmann::json values = nlohmann::json::array();
+    values.get_ref<nlohmann::json::array_t&>().reserve(document.annotation.values.size());
     for (const std::int32_t value : document.annotation.values) {
-        values.array.push_back(specforge::JsonIntegerValue(value));
+        values.push_back(nlohmann::json(value));
     }
 
-    specforge::JsonValue origin_annotation = specforge::JsonNullValue();
+    nlohmann::json origin_annotation = nlohmann::json();
     if (document.labeling.canonical_metadata.origin.annotation) {
         const specforge::SampleLabelingAnnotationOrigin& annotation =
             *document.labeling.canonical_metadata.origin.annotation;
-        origin_annotation = specforge::JsonObjectValue({
-            {"name", specforge::JsonStringValue(annotation.name)},
-            {"format", specforge::JsonStringValue(annotation.format)},
+        origin_annotation = nlohmann::json::object({
+            {"name", nlohmann::json(annotation.name)},
+            {"format", nlohmann::json(annotation.format)},
             {"fingerprint", annotation.fingerprint
-                 ? specforge::JsonStringValue(*annotation.fingerprint)
-                 : specforge::JsonNullValue()},
+                 ? nlohmann::json(*annotation.fingerprint)
+                 : nlohmann::json()},
         });
     }
-    specforge::JsonValue authors = specforge::JsonArrayValue();
+    nlohmann::json authors = nlohmann::json::array();
     for (const specforge::SampleLabelingAuthor& author :
         document.labeling.canonical_metadata.authors) {
-        specforge::JsonValue summary = specforge::JsonObjectValue({
-            {"name", specforge::JsonStringValue(author.name)},
+        nlohmann::json summary = nlohmann::json::object({
+            {"name", nlohmann::json(author.name)},
             {"identifier", author.identifier
-                 ? specforge::JsonStringValue(*author.identifier)
-                 : specforge::JsonNullValue()},
+                 ? nlohmann::json(*author.identifier)
+                 : nlohmann::json()},
         });
         if (author.email) {
-            summary.object.emplace(
-                "email", specforge::JsonStringValue(*author.email));
+            summary.get_ref<nlohmann::json::object_t&>().emplace(
+                "email", nlohmann::json(*author.email));
         }
-        authors.array.push_back(std::move(summary));
+        authors.push_back(std::move(summary));
     }
 
-    return specforge::JsonObjectValue({
-        {"format_kind", specforge::JsonStringValue(document.format_kind)},
-        {"schema_version", specforge::JsonStringValue(document.schema_version)},
-        {"build_source_mode", specforge::JsonStringValue(
+    return nlohmann::json::object({
+        {"format_kind", nlohmann::json(document.format_kind)},
+        {"schema_version", nlohmann::json(document.schema_version)},
+        {"build_source_mode", nlohmann::json(
              document.build_source.source_mode)},
         {"build_source_revision", document.build_source.source_revision
-             ? specforge::JsonStringValue(
+             ? nlohmann::json(
                    *document.build_source.source_revision)
-             : specforge::JsonNullValue()},
-        {"source_kind", specforge::JsonStringValue(document.source.kind)},
-        {"source_name", specforge::JsonStringValue(document.source.name)},
-        {"source_identity", specforge::JsonStringValue(document.source.base_identity)},
-        {"source_fingerprint", specforge::JsonStringValue(document.source.fingerprint)},
-        {"sample_count", specforge::JsonIntegerValue(
+             : nlohmann::json()},
+        {"source_kind", nlohmann::json(document.source.kind)},
+        {"source_name", nlohmann::json(document.source.name)},
+        {"source_identity", nlohmann::json(document.source.base_identity)},
+        {"source_fingerprint", nlohmann::json(document.source.fingerprint)},
+        {"sample_count", nlohmann::json(
              static_cast<std::int64_t>(document.source.sample_count))},
-        {"roster_identity_kind", specforge::JsonStringValue(
+        {"roster_identity_kind", nlohmann::json(
              document.source.roster.identity_kind)},
         {"sample_names", std::move(sample_names)},
-        {"annotation_kind", specforge::JsonStringValue(document.annotation.kind)},
-        {"alignment_mode", specforge::JsonStringValue(
+        {"annotation_kind", nlohmann::json(document.annotation.kind)},
+        {"alignment_mode", nlohmann::json(
              document.annotation.alignment.mode)},
-        {"alignment_target", specforge::JsonStringValue(
+        {"alignment_target", nlohmann::json(
              document.annotation.alignment.target)},
-        {"missing_semantic", specforge::JsonStringValue(
+        {"missing_semantic", nlohmann::json(
              document.annotation.missing.semantic)},
-        {"missing_value", specforge::JsonIntegerValue(
+        {"missing_value", nlohmann::json(
              document.annotation.missing.value)},
-        {"task_id", specforge::JsonStringValue(document.labeling.id)},
-        {"task_name", specforge::JsonStringValue(document.labeling.name)},
-        {"created_at", specforge::JsonStringValue(
+        {"task_id", nlohmann::json(document.labeling.id)},
+        {"task_name", nlohmann::json(document.labeling.name)},
+        {"created_at", nlohmann::json(
              specforge::FormatCanonicalTimestamp(
                  document.labeling.canonical_metadata.created_at))},
-        {"modified_at", specforge::JsonStringValue(
+        {"modified_at", nlohmann::json(
              specforge::FormatCanonicalTimestamp(
                  document.labeling.canonical_metadata.modified_at))},
-        {"origin_kind", specforge::JsonStringValue(
+        {"origin_kind", nlohmann::json(
              document.labeling.canonical_metadata.origin.kind)},
         {"origin_annotation", std::move(origin_annotation)},
         {"description", document.labeling.canonical_metadata.description
-             ? specforge::JsonStringValue(
+             ? nlohmann::json(
                    *document.labeling.canonical_metadata.description)
-             : specforge::JsonNullValue()},
+             : nlohmann::json()},
         {"authors", std::move(authors)},
         {"labels", std::move(labels)},
         {"values", std::move(values)},
-        {"values_dtype", specforge::JsonStringValue("int32")},
-        {"values_shape", specforge::JsonArrayValue({
-             specforge::JsonIntegerValue(static_cast<std::int64_t>(
+        {"values_dtype", nlohmann::json("int32")},
+        {"values_shape", nlohmann::json::array({
+             nlohmann::json(static_cast<std::int64_t>(
                  document.annotation.values.size()))})},
     });
 }
@@ -899,9 +862,9 @@ void TestExactReadDistinguishesTruncationFromIoFailure()
 
 void TestReadsApprovedPythonFixtures()
 {
-    const specforge::JsonValue manifest =
+    const nlohmann::json manifest =
         ReadJsonFile(FixturePath("manifest.json"));
-    const specforge::JsonValue* reference =
+    const nlohmann::json* reference =
         specforge::JsonObjectMember(manifest, "reference");
     Require(
         reference != nullptr &&
@@ -912,15 +875,15 @@ void TestReadsApprovedPythonFixtures()
                 *reference, "schema_version") ==
                 specforge::kSampleLabelingDocumentSchemaVersion,
         "fixture manifest should pin the approved ASDF oracle and standard");
-    const specforge::JsonValue* fixtures =
+    const nlohmann::json* fixtures =
         specforge::JsonObjectMember(manifest, "fixtures");
     Require(
         fixtures != nullptr &&
-            fixtures->kind == specforge::JsonValue::Kind::Array,
+            fixtures->type() == nlohmann::json::value_t::array,
         "fixture manifest should contain fixture records");
 
     std::size_t approved_count = 0;
-    for (const specforge::JsonValue& fixture : fixtures->array) {
+    for (const nlohmann::json& fixture : (*fixtures)) {
         const std::optional<std::string> path =
             specforge::ReadJsonStringMember(fixture, "path");
         const std::optional<std::string> expected_hash =
@@ -956,7 +919,7 @@ void TestReadsApprovedPythonFixtures()
         const specforge::SampleLabelingAsdfReadResult result =
             specforge::ReadSampleLabelingAsdfDocument(FixturePath(*path));
         Require(result.succeeded(), "approved Python ASDF fixture should read");
-        const specforge::JsonValue expected =
+        const nlohmann::json expected =
             ReadJsonFile(FixturePath(*semantic_path));
         Require(
             JsonEquals(SemanticSummary(*result.document), expected),
@@ -969,33 +932,33 @@ void TestReadsApprovedPythonFixtures()
 
 void TestRejectsManifestSemanticViolationsWithControlledErrors()
 {
-    const specforge::JsonValue manifest =
+    const nlohmann::json manifest =
         ReadJsonFile(FixturePath("manifest.json"));
-    const specforge::JsonValue* fixtures =
+    const nlohmann::json* fixtures =
         specforge::JsonObjectMember(manifest, "fixtures");
     Require(
         fixtures != nullptr &&
-            fixtures->kind == specforge::JsonValue::Kind::Array,
+            fixtures->type() == nlohmann::json::value_t::array,
         "fixture manifest should contain fixture records");
 
     std::size_t semantic_invalid_count = 0;
-    for (const specforge::JsonValue& fixture : fixtures->array) {
-        const specforge::JsonValue* structurally_valid_member =
+    for (const nlohmann::json& fixture : (*fixtures)) {
+        const nlohmann::json* structurally_valid_member =
             specforge::JsonObjectMember(fixture, "structurally_valid");
-        const specforge::JsonValue* semantically_valid_member =
+        const nlohmann::json* semantically_valid_member =
             specforge::JsonObjectMember(fixture, "semantically_valid");
         Require(
             structurally_valid_member != nullptr &&
-                structurally_valid_member->kind ==
-                    specforge::JsonValue::Kind::Bool &&
+                structurally_valid_member->type() ==
+                    nlohmann::json::value_t::boolean &&
                 semantically_valid_member != nullptr &&
-                semantically_valid_member->kind ==
-                    specforge::JsonValue::Kind::Bool,
+                semantically_valid_member->type() ==
+                    nlohmann::json::value_t::boolean,
             "every fixture must explicitly classify structural and semantic validity");
         const bool structurally_valid =
-            structurally_valid_member->bool_value;
+            structurally_valid_member->get<bool>();
         const bool semantically_valid =
-            semantically_valid_member->bool_value;
+            semantically_valid_member->get<bool>();
         if (!structurally_valid) {
             Require(
                 !semantically_valid,
@@ -3063,7 +3026,7 @@ void TestReaderCompatibilityProfileCannotBecomeDurableVerbatim()
 
     const specforge::SampleLabelingAsdfReadResult read =
         specforge::ReadSampleLabelingAsdfDocument(path);
-    const specforge::JsonValue expected =
+    const nlohmann::json expected =
         ReadJsonFile(FixturePath("folder_roster.semantic.json"));
     Require(
         read.succeeded() &&

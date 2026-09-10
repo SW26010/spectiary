@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -370,6 +371,91 @@ void TestAtomicReplaceDoesNotRetryByDefault()
         "default atomic replacement should not retry or wait");
 }
 
+void TestJsonSyntaxAndSchemaBoundaries()
+{
+    std::string error;
+    for (const std::string_view malformed : {
+             "", "[1,]", "{\"a\":}", "true false", "01", "-01",
+             "\"\\uD800\"", "\"\\uDC00\"", "\"\\uD800\\u0041\"",
+             "\"\\uZZZZ\"", "\"\\x20\"", "\"\n\"",
+             "{\"a\":1,\"a\":2}", "{\"a\":1,\"\\u0061\":2}",
+             "{\"a\":[{\"b\":0,\"b\":1}]}"}) {
+        Require(!specforge::ParseJson(malformed, error) && !error.empty(),
+                "malformed JSON and duplicate decoded keys must fail");
+    }
+    Require(!specforge::ParseJson(std::string("\"\xC0\xAF\""), error),
+            "invalid UTF-8 must fail");
+    const auto unicode = specforge::ParseJson(R"({"text":"\u4e2d\uD83D\uDE00\u0000"})", error);
+    Require(unicode && error.empty() &&
+            specforge::ReadJsonStringMember(*unicode, "text") == std::string("\xE4\xB8\xAD\xF0\x9F\x98\x80\0", 8),
+            "Unicode escapes and embedded NUL must decode");
+    Require(specforge::ParseJson(R"([{"a":1},{"a":2,"child":{"a":3}}])", error).has_value(),
+            "keys in distinct objects must not conflict");
+
+    for (const std::string_view number : {"1.5", "1e2", "1.0", "true", "\"1\"",
+             "18446744073709551616", "-9223372036854775809"}) {
+        const auto value = specforge::ParseJson("{\"n\":" + std::string(number) + "}", error);
+        Require(value.has_value(), "ordinary JSON syntax must parse independently of integer schemas");
+        Require(!specforge::ReadJsonIntMember(*value, "n") && !specforge::ReadJsonSizeMember(*value, "n"),
+                "non-integer storage and overflow must not convert to schema integers");
+    }
+    const auto bounds = specforge::ParseJson(
+        R"({"min":-2147483648,"max":2147483647,"over":2147483648,"under":-2147483649,"huge":18446744073709551615,"negative":-1})", error);
+    Require(bounds && specforge::ReadJsonIntMember(*bounds, "min") == (std::numeric_limits<int>::min)() &&
+            specforge::ReadJsonIntMember(*bounds, "max") == (std::numeric_limits<int>::max)() &&
+            !specforge::ReadJsonIntMember(*bounds, "over") && !specforge::ReadJsonIntMember(*bounds, "under") &&
+            !specforge::ReadJsonIntMember(*bounds, "huge") && !specforge::ReadJsonSizeMember(*bounds, "negative") &&
+            !specforge::JsonIsInt64(bounds->at("huge")), "integer boundary checks must fail closed");
+    const auto signed_bounds = specforge::ParseJson("[-9223372036854775808,9223372036854775807]", error);
+    Require(signed_bounds && specforge::JsonIsInt64(signed_bounds->at(0)) &&
+            specforge::JsonIsInt64(signed_bounds->at(1)), "signed int64 endpoints must remain valid");
+    Require(specforge::ParseJson(unicode->dump(), error) == unicode,
+            "library serialization must preserve semantic values");
+}
+
+void TestJsonResourceBoundsAndCancellation()
+{
+    std::string error;
+    const std::string at_depth = std::string(specforge::kMaxJsonNestingDepth, '[') + "0" +
+        std::string(specforge::kMaxJsonNestingDepth, ']');
+    Require(specforge::ParseJson(at_depth, error).has_value(), "maximum supported depth must parse");
+    Require(!specforge::ParseJson("[" + at_depth + "]", error), "excess depth must fail");
+    const std::string too_large(specforge::kMaxJsonInputBytes + 1, ' ');
+    Require(!specforge::ParseJson(too_large, error), "oversized input must fail before parsing");
+    std::istringstream oversized_stream(too_large);
+    std::string contents;
+    Require(!specforge::ReadTextStreamCancelable(oversized_stream, contents) && contents.empty(),
+            "stream reads must enforce the byte limit");
+    std::string nodes = "[";
+    for (std::size_t i = 0; i < specforge::kMaxJsonNodes; ++i) nodes += "0,";
+    nodes.back() = ']';
+    Require(!specforge::ParseJson(nodes, error) && error.find("node count") != std::string::npos,
+            "shallow node abuse must be bounded");
+    struct Canceled {};
+    for (const std::string& input : {
+             "\"" + std::string(20000, 'a') + "\"",
+             std::string(20000, ' ') + "null",
+             "1" + std::string(20000, '0')}) {
+        int checkpoints = 0;
+        bool canceled = false;
+        try {
+            (void)specforge::ParseJson(input, error, [&] {
+                if (++checkpoints == 3) throw Canceled{};
+            });
+        } catch (const Canceled&) { canceled = true; }
+        Require(canceled && checkpoints == 3, "long tokens must allow cancellation during parsing");
+    }
+    int reads = 0;
+    bool canceled = false;
+    std::istringstream stream(std::string(200000, ' '));
+    try {
+        (void)specforge::ReadTextStreamCancelable(stream, contents, [&] {
+            if (++reads == 2) throw Canceled{};
+        });
+    } catch (const Canceled&) { canceled = true; }
+    Require(canceled && contents.size() <= 65536, "reads must allow cancellation between bounded chunks");
+}
+
 void TestVersionedJsonCacheShellRoundTripsDocument()
 {
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_json_cache_tests";
@@ -378,15 +464,15 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     std::filesystem::remove_all(root, cleanup_error);
 
     std::string error;
-    const specforge::JsonValue body =
-        specforge::JsonObjectValue({
+    const nlohmann::json body =
+        nlohmann::json::object({
             {"items",
-             specforge::JsonArrayValue({
-                 specforge::JsonObjectValue({
+             nlohmann::json::array({
+                 nlohmann::json::object({
                      {"value",
-                      specforge::JsonIntegerValue(7)},
+                      nlohmann::json(7)},
                      {"name",
-                      specforge::JsonStringValue(
+                      nlohmann::json(
                           "alpha")},
                  }),
              })},
@@ -400,20 +486,16 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
             body,
             &error),
         error.empty() ? "versioned cache write failed" : error);
-    const std::string expected =
-        "{\n"
-        "  \"format_kind\": \"specforge.test.cache\",\n"
-        "  \"schema_version\": 2,\n"
-        "  \"items\": [\n"
-        "    {\n"
-        "      \"name\": \"alpha\",\n"
-        "      \"value\": 7\n"
-        "    }\n"
-        "  ]\n"
-        "}\n";
-    Require(
-        ReadTextFile(path) == expected,
-        "structured cache output should be stable and ordered");
+    const std::string expected = ReadTextFile(path);
+    auto expected_document = body;
+    expected_document["format_kind"] = "specforge.test.cache";
+    expected_document["schema_version"] = 2;
+    Require(nlohmann::json::parse(expected) == expected_document,
+            "structured output should round-trip semantically");
+    Require(expected.find("\"format_kind\"") < expected.find("\"items\"") &&
+            expected.find("\"items\"") < expected.find("\"schema_version\""),
+            "object members should be sorted");
+
     Require(
         specforge::WriteVersionedJsonCacheDocument(
             path,
@@ -430,14 +512,14 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     Require(loaded.warning.empty(), loaded.warning);
     Require(loaded.document.has_value(), "versioned cache should load");
     Require(loaded.document->schema_version == 2, "versioned cache should report the parsed schema");
-    const specforge::JsonValue* items = specforge::JsonObjectMember(loaded.document->root, "items");
-    Require(items != nullptr && items->kind == specforge::JsonValue::Kind::Array, "versioned cache should expose body fields");
-    Require(items->array.size() == 1, "versioned cache should preserve array items");
+    const nlohmann::json* items = specforge::JsonObjectMember(loaded.document->root, "items");
+    Require(items != nullptr && items->type() == nlohmann::json::value_t::array, "versioned cache should expose body fields");
+    Require((*items).size() == 1, "versioned cache should preserve array items");
     Require(
-        specforge::ReadJsonStringMember(items->array.front(), "name").value_or("") == "alpha",
+        specforge::ReadJsonStringMember((*items).front(), "name").value_or("") == "alpha",
         "versioned cache should parse item strings");
     Require(
-        specforge::ReadJsonIntMember(items->array.front(), "value").value_or(0) == 7,
+        specforge::ReadJsonIntMember((*items).front(), "value").value_or(0) == 7,
         "versioned cache should parse item integers");
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -459,7 +541,7 @@ void TestStructuredJsonCacheRejectsInvalidBody()
             "specforge.test.cache",
             1,
             "test cache",
-            specforge::JsonStringValue("invalid"),
+            nlohmann::json("invalid"),
             &error),
         "structured cache should reject a non-object body");
     Require(
@@ -467,6 +549,33 @@ void TestStructuredJsonCacheRejectsInvalidBody()
             ReadTextFile(path) == "stable",
         "invalid body should preserve the existing target");
     std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestJsonWriteLimitsPreserveDurableState()
+{
+    const auto path = std::filesystem::temp_directory_path() /
+        "specforge_json_write_limits.json";
+    WriteTextFile(path, "previous durable state");
+    std::string error;
+    nlohmann::json nested = 0;
+    for (std::size_t i = 0; i < specforge::kMaxJsonNestingDepth; ++i) {
+        nested = nlohmann::json::array({std::move(nested)});
+    }
+    Require(!specforge::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
+                nlohmann::json::object({{"nested", std::move(nested)}}), &error),
+            "a write beyond the read depth must fail");
+    Require(ReadTextFile(path) == "previous durable state", "failed write must preserve the old generation");
+    Require(!specforge::WriteVersionedJsonCacheFile(path, "test", 1, "test cache",
+                [](std::ostream& stream, std::string&) {
+                    stream << ",\"duplicate\":1,\"duplicate\":2";
+                    return true;
+                }, &error), "streaming cache writers must also produce readable JSON");
+    Require(ReadTextFile(path) == "previous durable state", "malformed streamed output must not replace state");
+    Require(!specforge::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
+                nlohmann::json::object({{"text", std::string("\xFF")}}), &error),
+            "invalid UTF-8 serialization must fail safely");
+    Require(ReadTextFile(path) == "previous durable state", "serialization errors must preserve state");
+    std::filesystem::remove(path);
 }
 
 void TestVersionedJsonCacheShellReportsCorruptCacheWarning()
@@ -1220,8 +1329,8 @@ void TestCancelableTextStreamReadStopsBetweenChunks()
     Require(canceled, "text stream read should propagate cooperative cancellation");
     Require(cancellation_checks == 2, "text stream read should check cancellation before every chunk");
     Require(
-        contents.size() == kReadChunkBytes,
-        "text stream cancellation should stop before consuming the second chunk");
+        !contents.empty() && contents.size() <= kReadChunkBytes,
+        "text stream cancellation should stop after at most one bounded chunk");
 }
 
 }  // namespace
@@ -1235,8 +1344,11 @@ int main()
         TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
         TestAtomicReplaceRetriesTransientSharingViolation();
         TestAtomicReplaceDoesNotRetryByDefault();
+        TestJsonSyntaxAndSchemaBoundaries();
+        TestJsonResourceBoundsAndCancellation();
         TestVersionedJsonCacheShellRoundTripsDocument();
         TestStructuredJsonCacheRejectsInvalidBody();
+        TestJsonWriteLimitsPreserveDurableState();
         TestVersionedJsonCacheShellReportsCorruptCacheWarning();
         TestVersionedJsonCacheShellRejectsUnsupportedSchema();
         TestVersionedJsonCacheDiagnosticsUseUtf8Paths();

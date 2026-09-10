@@ -70,21 +70,21 @@ AutomationClientMessageParseResult ParseFailure(
 
 std::optional<AutomationSpectrumTarget>
 ParseSpectrumTarget(
-    const JsonValue& params,
+    const nlohmann::json& params,
     std::string& error_message)
 {
-    const JsonValue* target =
+    const nlohmann::json* target =
         JsonObjectMember(params, "target");
     if (target == nullptr ||
-        target->kind != JsonValue::Kind::Object) {
+        target->type() != nlohmann::json::value_t::object) {
         error_message =
             "Automation spectrum targets require an object 'target'.";
         return std::nullopt;
     }
 
-    const JsonValue* index =
+    const nlohmann::json* index =
         JsonObjectMember(*target, "index");
-    const JsonValue* name =
+    const nlohmann::json* name =
         JsonObjectMember(*target, "name");
     if ((index == nullptr) == (name == nullptr)) {
         error_message =
@@ -115,11 +115,11 @@ ParseSpectrumTarget(
 
 std::optional<AutomationCommandParameters>
 ParseCommandParameters(
-    const JsonValue& root,
+    const nlohmann::json& root,
     AutomationCommandKind command,
     std::string& error_message)
 {
-    const JsonValue* params =
+    const nlohmann::json* params =
         JsonObjectMember(root, "params");
     const bool requires_params =
         command == AutomationCommandKind::SettingGet ||
@@ -132,13 +132,13 @@ ParseCommandParameters(
         command == AutomationCommandKind::FrameCapture;
     if (!requires_params) {
         if (params != nullptr &&
-            params->kind != JsonValue::Kind::Object) {
+            params->type() != nlohmann::json::value_t::object) {
             error_message =
                 "Automation request params must be a JSON object.";
             return std::nullopt;
         }
         if (params != nullptr &&
-            !params->object.empty()) {
+            !params->get_ref<const nlohmann::json::object_t&>().empty()) {
             error_message =
                 "Parameterless automation commands accept only an omitted or empty object 'params'.";
             return std::nullopt;
@@ -146,7 +146,7 @@ ParseCommandParameters(
         return AutomationCommandParameters{};
     }
     if (params == nullptr ||
-        params->kind != JsonValue::Kind::Object) {
+        params->type() != nlohmann::json::value_t::object) {
         error_message =
             "Automation business commands require an object 'params'.";
         return std::nullopt;
@@ -168,7 +168,7 @@ ParseCommandParameters(
     case AutomationCommandKind::SettingSet: {
         const std::optional<std::string> name =
             ReadJsonStringMember(*params, "name");
-        const JsonValue* value =
+        const nlohmann::json* value =
             JsonObjectMember(*params, "value");
         if (!name || name->empty()) {
             error_message =
@@ -182,19 +182,25 @@ ParseCommandParameters(
         }
 
         AutomationSettingValue setting_value;
-        switch (value->kind) {
-        case JsonValue::Kind::String:
-            setting_value = value->string_value;
+        switch (value->type()) {
+        case nlohmann::json::value_t::string:
+            setting_value = value->get_ref<const std::string&>();
             break;
-        case JsonValue::Kind::Integer:
-            setting_value = value->integer_value;
+        case nlohmann::json::value_t::number_integer:
+        case nlohmann::json::value_t::number_unsigned:
+            if (!JsonIsInt64(*value)) {
+                error_message = "setting.set integer is out of range.";
+                return std::nullopt;
+            }
+            setting_value = value->get<std::int64_t>();
             break;
-        case JsonValue::Kind::Bool:
-            setting_value = value->bool_value;
+        case nlohmann::json::value_t::boolean:
+            setting_value = value->get<bool>();
             break;
-        case JsonValue::Kind::Null:
-        case JsonValue::Kind::Object:
-        case JsonValue::Kind::Array:
+        case nlohmann::json::value_t::null:
+        case nlohmann::json::value_t::object:
+        case nlohmann::json::value_t::array:
+        default:
             error_message =
                 "setting.set value must be a string, integer or boolean.";
             return std::nullopt;
@@ -219,7 +225,7 @@ ParseCommandParameters(
     case AutomationCommandKind::PanelSet: {
         const std::optional<std::string> name =
             ReadJsonStringMember(*params, "name");
-        const JsonValue* visible =
+        const nlohmann::json* visible =
             JsonObjectMember(*params, "visible");
         if (!name || name->empty()) {
             error_message =
@@ -227,14 +233,14 @@ ParseCommandParameters(
             return std::nullopt;
         }
         if (visible == nullptr ||
-            visible->kind != JsonValue::Kind::Bool) {
+            visible->type() != nlohmann::json::value_t::boolean) {
             error_message =
                 "panel.set requires a boolean visible value.";
             return std::nullopt;
         }
         return AutomationPanelSetParameters{
             .name = *name,
-            .visible = visible->bool_value,
+            .visible = visible->get<bool>(),
         };
     }
     case AutomationCommandKind::SourceOpen: {
@@ -452,9 +458,9 @@ ParseAutomationClientMessage(std::string_view json)
     }
 
     std::string parse_error;
-    const std::optional<JsonValue> parsed =
+    const std::optional<nlohmann::json> parsed =
         ParseJson(json, parse_error);
-    if (!parsed || parsed->kind != JsonValue::Kind::Object) {
+    if (!parsed || parsed->type() != nlohmann::json::value_t::object) {
         return ParseFailure(
             "invalid_json",
             parse_error.empty()
@@ -579,9 +585,9 @@ ParseAutomationServerMessage(std::string_view json)
         };
     }
     std::string parse_error;
-    const std::optional<JsonValue> parsed =
+    const std::optional<nlohmann::json> parsed =
         ParseJson(json, parse_error);
-    if (!parsed || parsed->kind != JsonValue::Kind::Object) {
+    if (!parsed || parsed->type() != nlohmann::json::value_t::object) {
         return {
             .error_message = parse_error.empty()
                 ? "Automation server message must be a JSON object."
@@ -591,14 +597,14 @@ ParseAutomationServerMessage(std::string_view json)
 
     const std::optional<std::string> type =
         ReadJsonStringMember(*parsed, "type");
-    const JsonValue* request_id =
+    const nlohmann::json* request_id =
         JsonObjectMember(*parsed, "request_id");
     const std::optional<std::string> status =
         ReadJsonStringMember(*parsed, "status");
     if (!type ||
         request_id == nullptr ||
-        (request_id->kind != JsonValue::Kind::String &&
-         request_id->kind != JsonValue::Kind::Null) ||
+        (request_id->type() != nlohmann::json::value_t::string &&
+         request_id->type() != nlohmann::json::value_t::null) ||
         !status) {
         return {
             .error_message =
@@ -608,9 +614,9 @@ ParseAutomationServerMessage(std::string_view json)
 
     AutomationServerMessage message;
     message.type = *type;
-    if (request_id->kind == JsonValue::Kind::String) {
+    if (request_id->type() == nlohmann::json::value_t::string) {
         message.request_id =
-            request_id->string_value;
+            request_id->get_ref<const std::string&>();
     }
     message.status = *status;
     message.command_name =
@@ -623,10 +629,10 @@ ParseAutomationServerMessage(std::string_view json)
         ReadJsonStringMember(*parsed, "instance_id")
             .value_or("");
 
-    if (const JsonValue* error =
+    if (const nlohmann::json* error =
             JsonObjectMember(*parsed, "error");
         error != nullptr &&
-        error->kind == JsonValue::Kind::Object) {
+        error->type() == nlohmann::json::value_t::object) {
         message.error_code =
             ReadJsonStringMember(*error, "code")
                 .value_or("");

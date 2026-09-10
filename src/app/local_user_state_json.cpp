@@ -1,697 +1,204 @@
 #include "app/local_user_state_json.h"
 
 #include "app/local_user_state.h"
-#include "platform/atomic_file.h"
 
-#include <algorithm>
-#include <cstdint>
-#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
-#include <optional>
+#include <set>
 #include <sstream>
-#include <string>
-#include <string_view>
+#include <stdexcept>
 #include <system_error>
-#include <utility>
 
 namespace specforge {
 namespace {
 
-constexpr std::size_t kMaxJsonNestingDepth = 64U;
-
-class JsonParser {
-public:
-    JsonParser(std::string_view text, JsonCancellationCheckpoint cancellation_checkpoint)
-        : text_(text),
-          cancellation_checkpoint_(std::move(cancellation_checkpoint))
-    {
-    }
-
-    std::optional<JsonValue> Parse(std::string& error)
-    {
-        JsonValue value;
-        if (!ParseValue(value, error, 0U)) {
-            return std::nullopt;
-        }
-        SkipWhitespace();
-        if (position_ != text_.size()) {
-            error = "unexpected trailing JSON content";
-            return std::nullopt;
-        }
-        return value;
-    }
-
-private:
-    void Checkpoint()
-    {
-        if (!cancellation_checkpoint_ || position_ - last_checkpoint_position_ < 4096U) {
-            return;
-        }
-        last_checkpoint_position_ = position_;
-        cancellation_checkpoint_();
-    }
-
-    void SkipWhitespace()
-    {
-        while (position_ < text_.size()) {
-            const char character = text_[position_];
-            if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
-                break;
-            }
-            ++position_;
-            Checkpoint();
-        }
-    }
-
-    bool ParseValue(
-        JsonValue& value,
-        std::string& error,
-        std::size_t nesting_depth)
-    {
-        SkipWhitespace();
-        if (position_ >= text_.size()) {
-            error = "unexpected end of JSON";
-            return false;
-        }
-
-        const char character = text_[position_];
-        if (character == '{') {
-            if (nesting_depth >=
-                kMaxJsonNestingDepth) {
-                error =
-                    "JSON nesting depth exceeds the supported limit";
-                return false;
-            }
-            return ParseObject(
-                value,
-                error,
-                nesting_depth + 1U);
-        }
-        if (character == '[') {
-            if (nesting_depth >=
-                kMaxJsonNestingDepth) {
-                error =
-                    "JSON nesting depth exceeds the supported limit";
-                return false;
-            }
-            return ParseArray(
-                value,
-                error,
-                nesting_depth + 1U);
-        }
-        if (character == '"') {
-            value.kind = JsonValue::Kind::String;
-            return ParseString(value.string_value, error);
-        }
-        if (StartsWith("true")) {
-            position_ += 4;
-            value.kind = JsonValue::Kind::Bool;
-            value.bool_value = true;
-            return true;
-        }
-        if (StartsWith("false")) {
-            position_ += 5;
-            value.kind = JsonValue::Kind::Bool;
-            value.bool_value = false;
-            return true;
-        }
-        if (StartsWith("null")) {
-            position_ += 4;
-            value.kind = JsonValue::Kind::Null;
-            return true;
-        }
-        if (character == '-' || (character >= '0' && character <= '9')) {
-            return ParseInteger(value, error);
-        }
-
-        error = "unexpected JSON token";
-        return false;
-    }
-
-    bool ParseObject(
-        JsonValue& value,
-        std::string& error,
-        std::size_t nesting_depth)
-    {
-        value.kind = JsonValue::Kind::Object;
-        ++position_;
-        SkipWhitespace();
-        if (Consume('}')) {
-            return true;
-        }
-
-        for (;;) {
-            Checkpoint();
-            std::string key;
-            if (!ParseString(key, error)) {
-                return false;
-            }
-            SkipWhitespace();
-            if (!Consume(':')) {
-                error = "expected ':' after JSON object key";
-                return false;
-            }
-
-            JsonValue member;
-            if (!ParseValue(
-                    member,
-                    error,
-                    nesting_depth)) {
-                return false;
-            }
-            const std::string key_for_error = key;
-            const auto insertion = value.object.emplace(
-                std::move(key),
-                std::move(member));
-            if (!insertion.second) {
-                error =
-                    "duplicate JSON object member \"" +
-                    key_for_error +
-                    "\"";
-                return false;
-            }
-
-            SkipWhitespace();
-            if (Consume('}')) {
-                return true;
-            }
-            if (!Consume(',')) {
-                error = "expected ',' or '}' in JSON object";
-                return false;
-            }
-            SkipWhitespace();
-        }
-    }
-
-    bool ParseArray(
-        JsonValue& value,
-        std::string& error,
-        std::size_t nesting_depth)
-    {
-        value.kind = JsonValue::Kind::Array;
-        ++position_;
-        SkipWhitespace();
-        if (Consume(']')) {
-            return true;
-        }
-
-        for (;;) {
-            Checkpoint();
-            JsonValue item;
-            if (!ParseValue(
-                    item,
-                    error,
-                    nesting_depth)) {
-                return false;
-            }
-            value.array.push_back(std::move(item));
-
-            SkipWhitespace();
-            if (Consume(']')) {
-                return true;
-            }
-            if (!Consume(',')) {
-                error = "expected ',' or ']' in JSON array";
-                return false;
-            }
-        }
-    }
-
-    static int HexDigit(char value)
-    {
-        if (value >= '0' && value <= '9') {
-            return value - '0';
-        }
-        if (value >= 'a' && value <= 'f') {
-            return value - 'a' + 10;
-        }
-        if (value >= 'A' && value <= 'F') {
-            return value - 'A' + 10;
-        }
-        return -1;
-    }
-
-    static void AppendUtf8(std::string& value, char32_t code_point)
-    {
-        if (code_point <= 0x7F) {
-            value.push_back(static_cast<char>(code_point));
-            return;
-        }
-        if (code_point <= 0x7FF) {
-            value.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
-            value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-            return;
-        }
-        if (code_point <= 0xFFFF) {
-            value.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
-            value.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-            value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-            return;
-        }
-        value.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
-        value.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
-        value.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-        value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-    }
-
-    bool ParseUnicodeEscape(char32_t& code_point, std::string& error)
-    {
-        if (position_ + 4 > text_.size()) {
-            error = "short JSON unicode escape";
-            return false;
-        }
-
-        code_point = 0;
-        for (int index = 0; index < 4; ++index) {
-            const int digit = HexDigit(text_[position_++]);
-            if (digit < 0) {
-                error = "invalid JSON unicode escape";
-                return false;
-            }
-            code_point = (code_point << 4) | static_cast<char32_t>(digit);
-        }
-        return true;
-    }
-
-    bool ParseString(std::string& value, std::string& error)
-    {
-        SkipWhitespace();
-        if (!Consume('"')) {
-            error = "expected JSON string";
-            return false;
-        }
-
-        value.clear();
-        while (position_ < text_.size()) {
-            Checkpoint();
-            const char character = text_[position_++];
-            if (character == '"') {
-                return true;
-            }
-            if (static_cast<unsigned char>(character) < 0x20) {
-                error = "unescaped control character in JSON string";
-                return false;
-            }
-            if (character != '\\') {
-                value.push_back(character);
-                continue;
-            }
-            if (position_ >= text_.size()) {
-                error = "unterminated JSON string escape";
-                return false;
-            }
-            const char escaped = text_[position_++];
-            switch (escaped) {
-            case '"':
-            case '\\':
-            case '/':
-                value.push_back(escaped);
-                break;
-            case 'b':
-                value.push_back('\b');
-                break;
-            case 'f':
-                value.push_back('\f');
-                break;
-            case 'n':
-                value.push_back('\n');
-                break;
-            case 'r':
-                value.push_back('\r');
-                break;
-            case 't':
-                value.push_back('\t');
-                break;
-            case 'u': {
-                char32_t code_point = 0;
-                if (!ParseUnicodeEscape(code_point, error)) {
-                    return false;
-                }
-                if (code_point >= 0xD800 && code_point <= 0xDBFF) {
-                    const bool has_low_surrogate =
-                        position_ + 6 <= text_.size() && text_[position_] == '\\' &&
-                        text_[position_ + 1] == 'u';
-                    if (!has_low_surrogate) {
-                        error = "expected JSON low surrogate";
-                        return false;
-                    }
-                    position_ += 2;
-                    char32_t low_surrogate = 0;
-                    if (!ParseUnicodeEscape(low_surrogate, error)) {
-                        return false;
-                    }
-                    if (low_surrogate < 0xDC00 || low_surrogate > 0xDFFF) {
-                        error = "invalid JSON low surrogate";
-                        return false;
-                    }
-                    code_point =
-                        0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
-                } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
-                    error = "unexpected JSON low surrogate";
-                    return false;
-                }
-                AppendUtf8(value, code_point);
-                break;
-            }
-            default:
-                error = "unsupported JSON string escape";
-                return false;
-            }
-        }
-
-        error = "unterminated JSON string";
-        return false;
-    }
-
-    bool ParseInteger(JsonValue& value, std::string& error)
-    {
-        bool negative = false;
-        if (position_ < text_.size() && text_[position_] == '-') {
-            negative = true;
-            ++position_;
-        }
-        if (position_ >= text_.size() || text_[position_] < '0' || text_[position_] > '9') {
-            error = "invalid JSON number";
-            return false;
-        }
-
-        const std::uint64_t limit = negative
-            ? static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1U
-            : static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
-        std::uint64_t magnitude = 0;
-        while (position_ < text_.size() && text_[position_] >= '0' && text_[position_] <= '9') {
-            Checkpoint();
-            const auto digit = static_cast<std::uint64_t>(text_[position_] - '0');
-            if (magnitude > (limit - digit) / 10U) {
-                error = "JSON integer is out of range";
-                return false;
-            }
-            magnitude = magnitude * 10U + digit;
-            ++position_;
-        }
-        value.kind = JsonValue::Kind::Integer;
-        if (negative) {
-            if (magnitude == limit) {
-                value.integer_value = std::numeric_limits<std::int64_t>::min();
-            } else {
-                value.integer_value = -static_cast<std::int64_t>(magnitude);
-            }
-        } else {
-            value.integer_value = static_cast<std::int64_t>(magnitude);
-        }
-        return true;
-    }
-
-    bool Consume(char expected)
-    {
-        if (position_ >= text_.size() || text_[position_] != expected) {
-            return false;
-        }
-        ++position_;
-        return true;
-    }
-
-    bool StartsWith(std::string_view value) const
-    {
-        return text_.substr(position_, value.size()) == value;
-    }
-
-    std::string_view text_;
-    std::size_t position_ = 0;
-    std::size_t last_checkpoint_position_ = 0;
-    JsonCancellationCheckpoint cancellation_checkpoint_;
+struct JsonLimitError : std::runtime_error {
+    using std::runtime_error::runtime_error;
 };
 
-bool SupportsSchema(int schema_version, std::initializer_list<int> supported_schema_versions)
+// A byte iterator keeps cancellation responsive even inside one long string,
+// number, or whitespace token. JSON grammar remains entirely library-owned.
+class CancelableJsonIterator {
+public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = char;
+    using difference_type = std::ptrdiff_t;
+    using pointer = const char*;
+    using reference = const char&;
+
+    CancelableJsonIterator(std::string_view text, std::size_t position,
+                           const JsonCancellationCheckpoint& checkpoint)
+        : text_(text), position_(position), checkpoint_(&checkpoint) {}
+    reference operator*() const { return text_[position_]; }
+    CancelableJsonIterator& operator++()
+    {
+        ++position_;
+        if (position_ % 4096U == 0 && *checkpoint_) {
+            (*checkpoint_)();
+        }
+        return *this;
+    }
+    CancelableJsonIterator operator++(int)
+    {
+        auto previous = *this;
+        ++*this;
+        return previous;
+    }
+    bool operator==(const CancelableJsonIterator& other) const
+    {
+        return position_ == other.position_;
+    }
+private:
+    std::string_view text_;
+    std::size_t position_;
+    const JsonCancellationCheckpoint* checkpoint_;
+};
+
+bool SupportsSchema(int version, std::initializer_list<int> supported)
 {
-    return std::find(supported_schema_versions.begin(), supported_schema_versions.end(), schema_version) !=
-           supported_schema_versions.end();
+    return std::find(supported.begin(), supported.end(), version) != supported.end();
 }
 
-char JsonHexNibble(unsigned char value)
+void ValidateWrittenCache(const std::filesystem::path& temporary_path,
+                          const std::filesystem::path&)
 {
-    return static_cast<char>(value < 10 ? ('0' + value) : ('A' + value - 10));
-}
-
-void WriteJsonIndent(
-    std::ostream& stream,
-    std::size_t level)
-{
-    for (std::size_t index = 0; index < level; ++index) {
-        stream << "  ";
+    // Never report a durable save that this same build cannot read back under
+    // its resource limits. The atomic-file owner retains the old generation
+    // and removes the temporary file if this checkpoint throws.
+    std::ifstream stream(temporary_path, std::ios::binary);
+    std::string contents;
+    std::string error;
+    if (!ReadTextStreamCancelable(stream, contents)) {
+        throw JsonLimitError("written JSON cache exceeds the input limit or could not be read");
+    }
+    if (!ParseJson(contents, error)) {
+        throw JsonLimitError("written JSON cache is not readable: " + error);
     }
 }
 
-void WriteStructuredJsonValue(
-    std::ostream& stream,
-    const JsonValue& value,
-    std::size_t level)
-{
-    switch (value.kind) {
-    case JsonValue::Kind::Null:
-        stream << "null";
-        return;
-    case JsonValue::Kind::String:
-        WriteJsonString(stream, value.string_value);
-        return;
-    case JsonValue::Kind::Bool:
-        stream << (value.bool_value ? "true" : "false");
-        return;
-    case JsonValue::Kind::Integer:
-        stream << value.integer_value;
-        return;
-    case JsonValue::Kind::Object: {
-        if (value.object.empty()) {
-            stream << "{}";
-            return;
-        }
-        stream << "{\n";
-        const std::vector<std::string> keys =
-            SortedCacheKeys(value.object);
-        for (std::size_t index = 0;
-             index < keys.size();
-             ++index) {
-            WriteJsonIndent(stream, level + 1);
-            WriteJsonString(stream, keys[index]);
-            stream << ": ";
-            WriteStructuredJsonValue(
-                stream,
-                value.object.at(keys[index]),
-                level + 1);
-            stream << (index + 1 < keys.size()
-                           ? ",\n"
-                           : "\n");
-        }
-        WriteJsonIndent(stream, level);
-        stream << "}";
-        return;
-    }
-    case JsonValue::Kind::Array:
-        if (value.array.empty()) {
-            stream << "[]";
-            return;
-        }
-        stream << "[\n";
-        for (std::size_t index = 0;
-             index < value.array.size();
-             ++index) {
-            WriteJsonIndent(stream, level + 1);
-            WriteStructuredJsonValue(
-                stream,
-                value.array[index],
-                level + 1);
-            stream << (index + 1 < value.array.size()
-                           ? ",\n"
-                           : "\n");
-        }
-        WriteJsonIndent(stream, level);
-        stream << "]";
-        return;
-    }
-}
-
-}  // namespace
+} // namespace
 
 bool ReadTextStreamCancelable(
-    std::istream& stream,
-    std::string& contents,
+    std::istream& stream, std::string& contents,
     const JsonCancellationCheckpoint& cancellation_checkpoint)
 {
     contents.clear();
-    constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
-    std::vector<char> read_buffer(kReadChunkBytes);
+    std::vector<char> buffer(64U * 1024U);
     while (stream.good()) {
-        if (cancellation_checkpoint) {
-            cancellation_checkpoint();
+        if (cancellation_checkpoint) cancellation_checkpoint();
+        stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const auto count = static_cast<std::size_t>(stream.gcount());
+        if (count > kMaxJsonInputBytes - contents.size()) {
+            contents.clear();
+            return false;
         }
-        stream.read(read_buffer.data(), static_cast<std::streamsize>(read_buffer.size()));
-        const std::streamsize read_count = stream.gcount();
-        if (read_count > 0) {
-            contents.append(read_buffer.data(), static_cast<std::size_t>(read_count));
-        }
+        contents.append(buffer.data(), count);
     }
-    return stream.eof();
+    return stream.eof() && !stream.bad();
 }
 
-std::optional<JsonValue> ParseJson(
-    std::string_view text,
-    std::string& error,
+std::optional<nlohmann::json> ParseJson(
+    std::string_view text, std::string& error,
     const JsonCancellationCheckpoint& cancellation_checkpoint)
 {
-    if (cancellation_checkpoint) {
-        cancellation_checkpoint();
-    }
-    JsonParser parser(text, cancellation_checkpoint);
-    return parser.Parse(error);
-}
-
-const JsonValue* JsonObjectMember(const JsonValue& value, std::string_view key)
-{
-    if (value.kind != JsonValue::Kind::Object) {
-        return nullptr;
-    }
-    const auto match = value.object.find(std::string(key));
-    return match == value.object.end() ? nullptr : &match->second;
-}
-
-std::optional<std::string> ReadJsonStringMember(const JsonValue& value, std::string_view key)
-{
-    const JsonValue* member = JsonObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::String) {
+    error.clear();
+    if (cancellation_checkpoint) cancellation_checkpoint();
+    if (text.size() > kMaxJsonInputBytes) {
+        error = "JSON input exceeds the supported byte limit";
         return std::nullopt;
     }
-    return member->string_value;
+    // Ordered sets bound duplicate detection even for adversarial key hashes.
+    std::vector<std::set<std::string>> object_keys;
+    std::size_t nodes = 0;
+    auto callback = [&](int depth, nlohmann::json::parse_event_t event,
+                        nlohmann::json& parsed) {
+        using Event = nlohmann::json::parse_event_t;
+        if (event == Event::object_start || event == Event::array_start || event == Event::value) {
+            if (++nodes > kMaxJsonNodes) throw JsonLimitError("JSON node count exceeds the supported limit");
+        }
+        if (event == Event::object_start || event == Event::array_start) {
+            if (depth >= static_cast<int>(kMaxJsonNestingDepth))
+                throw JsonLimitError("JSON nesting depth exceeds the supported limit");
+        }
+        if (event == Event::object_start) object_keys.emplace_back();
+        if (event == Event::object_end) object_keys.pop_back();
+        if (event == Event::key &&
+            !object_keys.back().insert(parsed.get_ref<const std::string&>()).second) {
+            throw JsonLimitError("duplicate JSON object member");
+        }
+        return true;
+    };
+    try {
+        auto value = nlohmann::json::parse(
+            CancelableJsonIterator(text, 0, cancellation_checkpoint),
+            CancelableJsonIterator(text, text.size(), cancellation_checkpoint), callback);
+        if (cancellation_checkpoint) cancellation_checkpoint();
+        return value;
+    } catch (const JsonLimitError& exception) {
+        error = exception.what();
+    } catch (const nlohmann::json::exception& exception) {
+        error = exception.what();
+    }
+    // Cancellation exceptions deliberately propagate to the caller.
+    return std::nullopt;
 }
 
-std::optional<std::size_t> ReadJsonSizeMember(const JsonValue& value, std::string_view key)
+const nlohmann::json* JsonObjectMember(const nlohmann::json& value, std::string_view key)
 {
-    const JsonValue* member = JsonObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Integer || member->integer_value < 0) {
-        return std::nullopt;
-    }
-    const auto unsigned_value = static_cast<std::uint64_t>(member->integer_value);
-    if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-        return std::nullopt;
-    }
-    return static_cast<std::size_t>(unsigned_value);
+    if (!value.is_object()) return nullptr;
+    const auto found = value.find(key);
+    return found == value.end() ? nullptr : &*found;
 }
 
-std::optional<int> ReadJsonIntMember(const JsonValue& value, std::string_view key)
+bool JsonIsInt64(const nlohmann::json& value)
 {
-    const JsonValue* member = JsonObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Integer ||
-        member->integer_value < std::numeric_limits<int>::min() ||
-        member->integer_value > std::numeric_limits<int>::max()) {
-        return std::nullopt;
-    }
-    return static_cast<int>(member->integer_value);
+    return value.is_number_integer() &&
+        (!value.is_number_unsigned() ||
+         value.get<std::uint64_t>() <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
 }
 
-bool ReadJsonBoolMember(const JsonValue& value, std::string_view key, bool fallback)
+std::optional<std::string> ReadJsonStringMember(const nlohmann::json& value, std::string_view key)
 {
-    const JsonValue* member = JsonObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Bool) {
-        return fallback;
-    }
-    return member->bool_value;
+    const auto* member = JsonObjectMember(value, key);
+    if (!member || !member->is_string()) return std::nullopt;
+    return member->get<std::string>();
+}
+
+std::optional<std::size_t> ReadJsonSizeMember(const nlohmann::json& value, std::string_view key)
+{
+    const auto* member = JsonObjectMember(value, key);
+    if (!member || !member->is_number_integer()) return std::nullopt;
+    if (!member->is_number_unsigned() && member->get<std::int64_t>() < 0) return std::nullopt;
+    const auto number = member->get<std::uint64_t>();
+    if (number > std::numeric_limits<std::size_t>::max()) return std::nullopt;
+    return static_cast<std::size_t>(number);
+}
+
+std::optional<int> ReadJsonIntMember(const nlohmann::json& value, std::string_view key)
+{
+    const auto* member = JsonObjectMember(value, key);
+    if (!member || !JsonIsInt64(*member)) return std::nullopt;
+    const auto number = member->get<std::int64_t>();
+    if (number < std::numeric_limits<int>::min() || number > std::numeric_limits<int>::max()) return std::nullopt;
+    return static_cast<int>(number);
+}
+
+bool ReadJsonBoolMember(const nlohmann::json& value, std::string_view key, bool fallback)
+{
+    const auto* member = JsonObjectMember(value, key);
+    return member && member->is_boolean() ? member->get<bool>() : fallback;
 }
 
 std::string JsonEscape(std::string_view value)
 {
-    std::string escaped;
-    escaped.reserve(value.size() + 2);
-    for (const char character : value) {
-        switch (character) {
-        case '"':
-            escaped += "\\\"";
-            break;
-        case '\\':
-            escaped += "\\\\";
-            break;
-        case '\b':
-            escaped += "\\b";
-            break;
-        case '\f':
-            escaped += "\\f";
-            break;
-        case '\n':
-            escaped += "\\n";
-            break;
-        case '\r':
-            escaped += "\\r";
-            break;
-        case '\t':
-            escaped += "\\t";
-            break;
-        default:
-            if (static_cast<unsigned char>(character) < 0x20) {
-                const auto byte = static_cast<unsigned char>(character);
-                escaped += "\\u00";
-                escaped.push_back(JsonHexNibble((byte >> 4) & 0x0F));
-                escaped.push_back(JsonHexNibble(byte & 0x0F));
-            } else {
-                escaped.push_back(character);
-            }
-            break;
-        }
-    }
-    return escaped;
+    const std::string quoted = nlohmann::json(value).dump();
+    return quoted.substr(1, quoted.size() - 2);
 }
 
 void WriteJsonString(std::ostream& stream, std::string_view value)
 {
-    stream << '"' << JsonEscape(value) << '"';
-}
-
-JsonValue JsonNullValue()
-{
-    return {};
-}
-
-JsonValue JsonObjectValue(
-    std::initializer_list<
-        std::pair<std::string, JsonValue>> members)
-{
-    JsonValue value;
-    value.kind = JsonValue::Kind::Object;
-    for (const auto& [name, member] : members) {
-        value.object.insert_or_assign(name, member);
-    }
-    return value;
-}
-
-JsonValue JsonArrayValue(
-    std::initializer_list<JsonValue> values)
-{
-    JsonValue value;
-    value.kind = JsonValue::Kind::Array;
-    value.array.assign(values.begin(), values.end());
-    return value;
-}
-
-JsonValue JsonStringValue(std::string_view text)
-{
-    JsonValue value;
-    value.kind = JsonValue::Kind::String;
-    value.string_value = text;
-    return value;
-}
-
-JsonValue JsonBoolValue(bool state)
-{
-    JsonValue value;
-    value.kind = JsonValue::Kind::Bool;
-    value.bool_value = state;
-    return value;
-}
-
-JsonValue JsonIntegerValue(std::int64_t integer)
-{
-    JsonValue value;
-    value.kind = JsonValue::Kind::Integer;
-    value.integer_value = integer;
-    return value;
+    stream << nlohmann::json(value).dump();
 }
 
 VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
@@ -747,8 +254,8 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     }
 
     std::string parse_error;
-    std::optional<JsonValue> root = ParseJson(contents, parse_error, cancellation_checkpoint);
-    if (!root || root->kind != JsonValue::Kind::Object) {
+    std::optional<nlohmann::json> root = ParseJson(contents, parse_error, cancellation_checkpoint);
+    if (!root || !root->is_object()) {
         result.warning = "Ignored " + std::string(description) + ": " + parse_error;
         result.issue_kind =
             VersionedJsonCacheLoadIssueKind::InvalidDocument;
@@ -803,7 +310,11 @@ bool WriteVersionedJsonCacheFile(
 {
     AtomicFileWriteOptions options;
     options.target_description = description;
-    options.before_replace = std::move(before_replace);
+    options.before_replace = [checkpoint = std::move(before_replace)](
+        const std::filesystem::path& temporary, const std::filesystem::path& target) {
+        ValidateWrittenCache(temporary, target);
+        if (checkpoint) checkpoint(temporary, target);
+    };
     return WriteFileAtomically(path, options, [&](std::ostream& stream, std::string& error) {
         stream << "{\n";
         stream << "  \"format_kind\": ";
@@ -824,19 +335,19 @@ bool WriteVersionedJsonCacheDocument(
     std::string_view format_kind,
     int schema_version,
     std::string_view description,
-    const JsonValue& body,
+    const nlohmann::json& body,
     std::string* error_message,
     AtomicFileReplaceRetryPolicy replace_retry_policy)
 {
-    if (body.kind != JsonValue::Kind::Object) {
+    if (!body.is_object()) {
         if (error_message != nullptr) {
             *error_message =
                 "The structured JSON cache body must be an object.";
         }
         return false;
     }
-    if (body.object.contains("format_kind") ||
-        body.object.contains("schema_version")) {
+    if (body.contains("format_kind") ||
+        body.contains("schema_version")) {
         if (error_message != nullptr) {
             *error_message =
                 "The structured JSON cache body contains a reserved member.";
@@ -847,32 +358,23 @@ bool WriteVersionedJsonCacheDocument(
     AtomicFileWriteOptions options;
     options.target_description = description;
     options.replace_retry_policy = replace_retry_policy;
+    options.before_replace = ValidateWrittenCache;
     return WriteFileAtomically(
         path,
         options,
-        [&](std::ostream& stream, std::string&) {
-            stream << "{\n";
-            stream << "  \"format_kind\": ";
-            WriteJsonString(stream, format_kind);
-            stream << ",\n";
-            stream << "  \"schema_version\": "
-                   << schema_version;
-            const std::vector<std::string> keys =
-                SortedCacheKeys(body.object);
-            for (const std::string& key : keys) {
-                stream << ",\n";
-                WriteJsonIndent(stream, 1);
-                WriteJsonString(stream, key);
-                stream << ": ";
-                WriteStructuredJsonValue(
-                    stream,
-                    body.object.at(key),
-                    1);
+        [&](std::ostream& stream, std::string& error) {
+            try {
+                nlohmann::json document = body;
+                document["format_kind"] = format_kind;
+                document["schema_version"] = schema_version;
+                stream << document.dump(2) << '\n';
+                return true;
+            } catch (const nlohmann::json::exception& exception) {
+                error = exception.what();
+                return false;
             }
-            stream << "\n}\n";
-            return true;
         },
         error_message);
 }
 
-}  // namespace specforge
+} // namespace specforge

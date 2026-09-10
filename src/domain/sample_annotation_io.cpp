@@ -236,21 +236,21 @@ bool MetadataReferenceMatchesResult(
     return PathsReferToSameFile(metadata_path.parent_path() / reference_path, result_path);
 }
 
-std::optional<int> ReadIntMember(const JsonValue& value, std::string_view key)
+std::optional<int> ReadIntMember(const nlohmann::json& value, std::string_view key)
 {
     return ReadJsonIntMember(value, key);
 }
 
-SampleLabelSet ParseMetadataLabelSet(const JsonValue& root)
+SampleLabelSet ParseMetadataLabelSet(const nlohmann::json& root)
 {
     SampleLabelSet label_set;
-    const JsonValue* labels = JsonObjectMember(root, "labels");
-    if (labels == nullptr || labels->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* labels = JsonObjectMember(root, "labels");
+    if (labels == nullptr || labels->type() != nlohmann::json::value_t::array) {
         return label_set;
     }
 
-    for (const JsonValue& label_object : labels->array) {
-        if (label_object.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& label_object : (*labels)) {
+        if (label_object.type() != nlohmann::json::value_t::object) {
             continue;
         }
         const std::optional<int> code = ReadIntMember(label_object, "code");
@@ -266,10 +266,10 @@ SampleLabelSet ParseMetadataLabelSet(const JsonValue& root)
     return label_set;
 }
 
-std::optional<SampleLabelResultMetadataSource> ParseMetadataSource(const JsonValue& root)
+std::optional<SampleLabelResultMetadataSource> ParseMetadataSource(const nlohmann::json& root)
 {
-    const JsonValue* source = JsonObjectMember(root, "source_collection");
-    if (source == nullptr || source->kind != JsonValue::Kind::Object) {
+    const nlohmann::json* source = JsonObjectMember(root, "source_collection");
+    if (source == nullptr || source->type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
 
@@ -317,8 +317,8 @@ SampleLabelResultMetadataLoadResult ReadLabelMetadata(
     }
 
     std::string parse_error;
-    std::optional<JsonValue> root = ParseJson(contents, parse_error, cancellation_checkpoint);
-    if (!root || root->kind != JsonValue::Kind::Object) {
+    std::optional<nlohmann::json> root = ParseJson(contents, parse_error, cancellation_checkpoint);
+    if (!root || root->type() != nlohmann::json::value_t::object) {
         result.warning = parse_error.empty() ? "invalid sample label result metadata" : parse_error;
         return result;
     }

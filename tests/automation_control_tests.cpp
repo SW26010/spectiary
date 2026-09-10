@@ -518,16 +518,16 @@ void SendRequest(
         error);
 }
 
-const specforge::JsonValue& RequireObjectMember(
-    const specforge::JsonValue& object,
+const nlohmann::json& RequireObjectMember(
+    const nlohmann::json& object,
     std::string_view name)
 {
-    const specforge::JsonValue* member =
+    const nlohmann::json* member =
         specforge::JsonObjectMember(object, name);
     Require(
         member != nullptr &&
-            member->kind ==
-                specforge::JsonValue::Kind::Object,
+            member->type() ==
+                nlohmann::json::value_t::object,
         "expected JSON object member");
     return *member;
 }
@@ -748,6 +748,13 @@ void TestProtocolAndStableState()
             R"({"type":"request","request_id":"bad-setting-value","command":"setting.set","params":{"name":"ui.scale","value":{"nested":true}}})")
                 .error_code == "invalid_params",
         "setting.set should reject non-scalar values before dispatch");
+    for (const std::string_view value : {"1.0", "1e2", "9223372036854775808", "18446744073709551615"}) {
+        const std::string request =
+            R"({"type":"request","request_id":"invalid-integer","command":"setting.set","params":{"name":"ui.scale","value":)" +
+            std::string(value) + "}}";
+        Require(specforge::ParseAutomationClientMessage(request).error_code == "invalid_params",
+                "setting.set must reject floating-point values and unsigned overflow at the schema boundary");
+    }
     const auto panel_get_request =
         specforge::ParseAutomationClientMessage(
             specforge::SerializeAutomationCommandRequest(

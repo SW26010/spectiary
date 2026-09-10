@@ -34,27 +34,27 @@ namespace {
 constexpr const char* kStateFormatKind = "specforge.sample_labeling_tasks.cache";
 constexpr int kStateSchemaVersion = 4;
 
-const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
+const nlohmann::json* ObjectMember(const nlohmann::json& value, std::string_view key)
 {
     return JsonObjectMember(value, key);
 }
 
-std::optional<std::string> ReadStringMember(const JsonValue& value, std::string_view key)
+std::optional<std::string> ReadStringMember(const nlohmann::json& value, std::string_view key)
 {
     return ReadJsonStringMember(value, key);
 }
 
-std::optional<std::size_t> ReadSizeMember(const JsonValue& value, std::string_view key)
+std::optional<std::size_t> ReadSizeMember(const nlohmann::json& value, std::string_view key)
 {
     return ReadJsonSizeMember(value, key);
 }
 
-std::optional<int> ReadIntMember(const JsonValue& value, std::string_view key)
+std::optional<int> ReadIntMember(const nlohmann::json& value, std::string_view key)
 {
     return ReadJsonIntMember(value, key);
 }
 
-bool ReadBoolMember(const JsonValue& value, std::string_view key, bool fallback)
+bool ReadBoolMember(const nlohmann::json& value, std::string_view key, bool fallback)
 {
     return ReadJsonBoolMember(value, key, fallback);
 }
@@ -167,11 +167,11 @@ std::string_view OutputFormatText(
 }
 
 bool ParseTaskOutput(
-    const JsonValue& task_object,
+    const nlohmann::json& task_object,
     SampleLabelingTask& task)
 {
-    const JsonValue* output = ObjectMember(task_object, "output");
-    if (output == nullptr || output->kind != JsonValue::Kind::Object) {
+    const nlohmann::json* output = ObjectMember(task_object, "output");
+    if (output == nullptr || output->type() != nlohmann::json::value_t::object) {
         return false;
     }
     const std::optional<std::string> format_text =
@@ -184,12 +184,12 @@ bool ParseTaskOutput(
     if (!format) {
         return false;
     }
-    const JsonValue* output_path = ObjectMember(*output, "path");
+    const nlohmann::json* output_path = ObjectMember(*output, "path");
     if (output_path == nullptr) {
         return false;
     }
     if (*format == SampleLabelingOutputArtifactFormat::None) {
-        if (output_path->kind != JsonValue::Kind::Null) {
+        if (output_path->type() != nlohmann::json::value_t::null) {
             return false;
         }
         task.persistence.output_format = *format;
@@ -207,24 +207,24 @@ bool ParseTaskOutput(
 
 bool ApplyPendingValues(
     SampleLabelingTask& task,
-    const JsonValue& task_object,
+    const nlohmann::json& task_object,
     const std::function<void()>& cancellation_checkpoint)
 {
-    const JsonValue* pending_values = ObjectMember(task_object, "pending_values");
+    const nlohmann::json* pending_values = ObjectMember(task_object, "pending_values");
     if (pending_values == nullptr) {
         return true;
     }
-    if (pending_values->kind != JsonValue::Kind::Array) {
+    if (pending_values->type() != nlohmann::json::value_t::array) {
         return false;
     }
 
     bool valid = true;
-    for (std::size_t index = 0; index < pending_values->array.size(); ++index) {
+    for (std::size_t index = 0; index < (*pending_values).size(); ++index) {
         if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const JsonValue& pending_object = pending_values->array[index];
-        if (pending_object.kind != JsonValue::Kind::Object) {
+        const nlohmann::json& pending_object = (*pending_values)[index];
+        if (pending_object.type() != nlohmann::json::value_t::object) {
             valid = false;
             continue;
         }
@@ -241,32 +241,32 @@ bool ApplyPendingValues(
 }
 
 SampleLabelSet ParseLabelSet(
-    const JsonValue& task_object,
+    const nlohmann::json& task_object,
     const std::function<void()>& cancellation_checkpoint,
     bool* valid_out)
 {
     bool valid = true;
     SampleLabelSet label_set;
-    const JsonValue* labels = ObjectMember(task_object, "labels");
+    const nlohmann::json* labels = ObjectMember(task_object, "labels");
     if (labels == nullptr) {
         if (valid_out != nullptr) {
             *valid_out = true;
         }
         return label_set;
     }
-    if (labels->kind != JsonValue::Kind::Array) {
+    if (labels->type() != nlohmann::json::value_t::array) {
         if (valid_out != nullptr) {
             *valid_out = false;
         }
         return label_set;
     }
 
-    for (std::size_t index = 0; index < labels->array.size(); ++index) {
+    for (std::size_t index = 0; index < (*labels).size(); ++index) {
         if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const JsonValue& label_object = labels->array[index];
-        if (label_object.kind != JsonValue::Kind::Object) {
+        const nlohmann::json& label_object = (*labels)[index];
+        if (label_object.type() != nlohmann::json::value_t::object) {
             valid = false;
             continue;
         }
@@ -277,7 +277,7 @@ SampleLabelSet ParseLabelSet(
             valid = false;
             continue;
         }
-        const JsonValue* shortcut_value =
+        const nlohmann::json* shortcut_value =
             ObjectMember(label_object, "shortcut");
         if (shortcut_value != nullptr &&
             (!shortcut_text || shortcut_text->size() > 1)) {
@@ -338,11 +338,11 @@ bool IsCanonicalAnnotationFingerprint(std::string_view value)
 }
 
 std::optional<SampleLabelingTaskCanonicalMetadata>
-ParseCanonicalMetadata(const JsonValue& task_object)
+ParseCanonicalMetadata(const nlohmann::json& task_object)
 {
-    const JsonValue* value =
+    const nlohmann::json* value =
         ObjectMember(task_object, "canonical_metadata");
-    if (value == nullptr || value->kind != JsonValue::Kind::Object) {
+    if (value == nullptr || value->type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
     const std::optional<std::string> created_text =
@@ -360,9 +360,9 @@ ParseCanonicalMetadata(const JsonValue& task_object)
         return std::nullopt;
     }
 
-    const JsonValue* origin_value = ObjectMember(*value, "origin");
+    const nlohmann::json* origin_value = ObjectMember(*value, "origin");
     if (origin_value == nullptr ||
-        origin_value->kind != JsonValue::Kind::Object) {
+        origin_value->type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
     const std::optional<std::string> origin_kind =
@@ -375,10 +375,10 @@ ParseCanonicalMetadata(const JsonValue& task_object)
     metadata.created_at = *created_at;
     metadata.modified_at = *modified_at;
     metadata.origin.kind = *origin_kind;
-    if (const JsonValue* annotation =
+    if (const nlohmann::json* annotation =
             ObjectMember(*origin_value, "annotation");
-        annotation != nullptr && annotation->kind != JsonValue::Kind::Null) {
-        if (annotation->kind != JsonValue::Kind::Object) {
+        annotation != nullptr && annotation->type() != nlohmann::json::value_t::null) {
+        if (annotation->type() != nlohmann::json::value_t::object) {
             return std::nullopt;
         }
         const std::optional<std::string> name =
@@ -391,10 +391,10 @@ ParseCanonicalMetadata(const JsonValue& task_object)
         SampleLabelingAnnotationOrigin parsed_annotation{
             .name = *name,
             .format = *format};
-        if (const JsonValue* fingerprint =
+        if (const nlohmann::json* fingerprint =
                 ObjectMember(*annotation, "fingerprint");
             fingerprint != nullptr &&
-            fingerprint->kind != JsonValue::Kind::Null) {
+            fingerprint->type() != nlohmann::json::value_t::null) {
             parsed_annotation.fingerprint =
                 ReadStringMember(*annotation, "fingerprint");
             if (!parsed_annotation.fingerprint) {
@@ -419,23 +419,23 @@ ParseCanonicalMetadata(const JsonValue& task_object)
         return std::nullopt;
     }
 
-    if (const JsonValue* description =
+    if (const nlohmann::json* description =
             ObjectMember(*value, "description");
-        description != nullptr && description->kind != JsonValue::Kind::Null) {
+        description != nullptr && description->type() != nlohmann::json::value_t::null) {
         metadata.description = ReadStringMember(*value, "description");
         if (!metadata.description ||
             !IsValidUtf8(*metadata.description)) {
             return std::nullopt;
         }
     }
-    if (const JsonValue* authors = ObjectMember(*value, "authors");
-        authors != nullptr && authors->kind != JsonValue::Kind::Null) {
-        if (authors->kind != JsonValue::Kind::Array) {
+    if (const nlohmann::json* authors = ObjectMember(*value, "authors");
+        authors != nullptr && authors->type() != nlohmann::json::value_t::null) {
+        if (authors->type() != nlohmann::json::value_t::array) {
             return std::nullopt;
         }
-        metadata.authors.reserve(authors->array.size());
-        for (const JsonValue& author_value : authors->array) {
-            if (author_value.kind != JsonValue::Kind::Object) {
+        metadata.authors.reserve((*authors).size());
+        for (const nlohmann::json& author_value : (*authors)) {
+            if (author_value.type() != nlohmann::json::value_t::object) {
                 return std::nullopt;
             }
             const std::optional<std::string> name =
@@ -444,10 +444,10 @@ ParseCanonicalMetadata(const JsonValue& task_object)
                 return std::nullopt;
             }
             SampleLabelingAuthor author{.name = *name};
-            if (const JsonValue* identifier =
+            if (const nlohmann::json* identifier =
                     ObjectMember(author_value, "identifier");
                 identifier != nullptr &&
-                identifier->kind != JsonValue::Kind::Null) {
+                identifier->type() != nlohmann::json::value_t::null) {
                 author.identifier =
                     ReadStringMember(author_value, "identifier");
                 if (!author.identifier) {
@@ -458,10 +458,10 @@ ParseCanonicalMetadata(const JsonValue& task_object)
                     return std::nullopt;
                 }
             }
-            if (const JsonValue* email =
+            if (const nlohmann::json* email =
                     ObjectMember(author_value, "email");
                 email != nullptr) {
-                if (email->kind != JsonValue::Kind::String) {
+                if (email->type() != nlohmann::json::value_t::string) {
                     return std::nullopt;
                 }
                 author.email =
@@ -478,12 +478,12 @@ ParseCanonicalMetadata(const JsonValue& task_object)
 }
 
 ParsedTask ParseTask(
-    const JsonValue& task_object,
+    const nlohmann::json& task_object,
     std::size_t sample_count,
     const std::function<void()>& cancellation_checkpoint,
     bool hydrate_persistent_output)
 {
-    if (task_object.kind != JsonValue::Kind::Object) {
+    if (task_object.type() != nlohmann::json::value_t::object) {
         return {};
     }
 
@@ -524,26 +524,26 @@ ParsedTask ParseTask(
         cancellation_checkpoint,
         &labels_valid);
     malformed = malformed || !labels_valid;
-    if (const JsonValue* auto_advance =
+    if (const nlohmann::json* auto_advance =
             ObjectMember(task_object, "auto_advance");
         auto_advance != nullptr &&
-        auto_advance->kind != JsonValue::Kind::Bool) {
+        auto_advance->type() != nlohmann::json::value_t::boolean) {
         malformed = true;
     }
     task.session.auto_advance = ReadBoolMember(task_object, "auto_advance", false);
-    if (const JsonValue* skip_labeled =
+    if (const nlohmann::json* skip_labeled =
             ObjectMember(
                 task_object,
                 "skip_labeled_on_advance");
         skip_labeled != nullptr &&
-        skip_labeled->kind != JsonValue::Kind::Bool) {
+        skip_labeled->type() != nlohmann::json::value_t::boolean) {
         malformed = true;
     }
     task.session.skip_labeled_on_advance = ReadBoolMember(task_object, "skip_labeled_on_advance", false);
-    if (const JsonValue* remembered_value =
+    if (const nlohmann::json* remembered_value =
             ObjectMember(task_object, "remembered_position");
         remembered_value != nullptr &&
-        remembered_value->kind != JsonValue::Kind::Null) {
+        remembered_value->type() != nlohmann::json::value_t::null) {
         const std::optional<std::size_t> remembered =
             ReadSizeMember(
                 task_object,
@@ -555,13 +555,13 @@ ParsedTask ParseTask(
         }
     }
     malformed = !ParseTaskOutput(task_object, task) || malformed;
-    if (const JsonValue* initial_publication_pending =
+    if (const nlohmann::json* initial_publication_pending =
             ObjectMember(
                 task_object,
                 "initial_publication_pending");
         initial_publication_pending != nullptr &&
-        initial_publication_pending->kind !=
-            JsonValue::Kind::Bool) {
+        initial_publication_pending->type() !=
+            nlohmann::json::value_t::boolean) {
         malformed = true;
     }
     task.persistence.initial_publication_pending =
@@ -635,30 +635,30 @@ ParsedTask ParseTask(
                 cancellation_checkpoint) ||
             malformed;
     } else {
-        const JsonValue* values = ObjectMember(task_object, "values");
+        const nlohmann::json* values = ObjectMember(task_object, "values");
         if (values == nullptr) {
             malformed = true;
         } else {
             bool values_valid =
-                values->kind == JsonValue::Kind::Array &&
-                values->array.size() == sample_count;
-            if (values->kind == JsonValue::Kind::Array && values->array.size() == sample_count) {
+                values->type() == nlohmann::json::value_t::array &&
+                (*values).size() == sample_count;
+            if (values->type() == nlohmann::json::value_t::array && (*values).size() == sample_count) {
                 std::vector<int> parsed_values;
-                parsed_values.reserve(values->array.size());
+                parsed_values.reserve((*values).size());
                 bool all_ints = true;
-                for (std::size_t index = 0; index < values->array.size(); ++index) {
+                for (std::size_t index = 0; index < (*values).size(); ++index) {
                     if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
                         cancellation_checkpoint();
                     }
-                    const JsonValue& value = values->array[index];
-                    if (value.kind != JsonValue::Kind::Integer ||
-                        value.integer_value < std::numeric_limits<int>::min() ||
-                        value.integer_value > std::numeric_limits<int>::max()) {
+                    const nlohmann::json& value = (*values)[index];
+                    if (!specforge::JsonIsInt64(value) ||
+                        value.get<std::int64_t>() < std::numeric_limits<int>::min() ||
+                        value.get<std::int64_t>() > std::numeric_limits<int>::max()) {
                         all_ints = false;
                         values_valid = false;
                         break;
                     }
-                    parsed_values.push_back(static_cast<int>(value.integer_value));
+                    parsed_values.push_back(static_cast<int>(value.get<std::int64_t>()));
                 }
                 if (all_ints) {
                     task.values.Complete() = std::move(parsed_values);
@@ -669,7 +669,7 @@ ParsedTask ParseTask(
     }
     task.persistence.save_state.kind = task.persistence.output_path ? SampleLabelSaveStateKind::AutosavedToOutput
                                             : SampleLabelSaveStateKind::InternalDraftOnly;
-    if (const JsonValue* save_state_value =
+    if (const nlohmann::json* save_state_value =
             ObjectMember(task_object, "save_state");
         save_state_value != nullptr) {
         const std::optional<std::string> save_state =
@@ -686,7 +686,7 @@ ParsedTask ParseTask(
                 ParseSaveStateKind(*save_state);
         }
     }
-    if (const JsonValue* save_message_value =
+    if (const nlohmann::json* save_message_value =
             ObjectMember(task_object, "save_message");
         save_message_value != nullptr) {
         const std::optional<std::string> save_message =
@@ -700,7 +700,7 @@ ParsedTask ParseTask(
                 *save_message;
         }
     }
-    if (const JsonValue* save_message_kind_value =
+    if (const nlohmann::json* save_message_kind_value =
             ObjectMember(
                 task_object,
                 "save_message_kind");
@@ -732,10 +732,10 @@ ParsedTask ParseTask(
             LegacySaveMessageKind(
                 task.persistence.save_state.message);
     }
-    if (const JsonValue* metadata_pending =
+    if (const nlohmann::json* metadata_pending =
             ObjectMember(task_object, "metadata_pending");
         metadata_pending != nullptr &&
-        metadata_pending->kind != JsonValue::Kind::Bool) {
+        metadata_pending->type() != nlohmann::json::value_t::boolean) {
         malformed = true;
     }
     task.persistence.metadata_save_pending =
@@ -1348,8 +1348,8 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
         return result;
     }
 
-    const JsonValue* sources = ObjectMember(cache.document->root, "sources");
-    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* sources = ObjectMember(cache.document->root, "sources");
+    if (sources == nullptr || sources->type() != nlohmann::json::value_t::array) {
         result.warning =
             "Ignored invalid sample-labeling task record.";
         result.issue_kind =
@@ -1360,12 +1360,12 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
         return result;
     }
 
-    for (std::size_t source_index = 0; source_index < sources->array.size(); ++source_index) {
+    for (std::size_t source_index = 0; source_index < (*sources).size(); ++source_index) {
         if (cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        const JsonValue& source_object = sources->array[source_index];
-        if (source_object.kind != JsonValue::Kind::Object) {
+        const nlohmann::json& source_object = (*sources)[source_index];
+        if (source_object.type() != nlohmann::json::value_t::object) {
             result.warning =
                 "Ignored invalid sample-labeling task record entries.";
             result.issue_kind =
@@ -1412,10 +1412,10 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
                  std::string_view{"source_fingerprint"},
                  std::string_view{"context_fingerprint"},
                  std::string_view{"active_task_id"}}) {
-            const JsonValue* member =
+            const nlohmann::json* member =
                 ObjectMember(source_object, field);
             if (member != nullptr &&
-                member->kind != JsonValue::Kind::String) {
+                member->type() != nlohmann::json::value_t::string) {
                 mark_malformed_source_field(field);
             }
         }
@@ -1431,10 +1431,10 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
             state.active_task_id = std::move(*active_task_id);
         }
         std::unordered_set<std::string> parsed_task_ids;
-        const JsonValue* tasks = ObjectMember(source_object, "tasks");
+        const nlohmann::json* tasks = ObjectMember(source_object, "tasks");
         if (tasks == nullptr) {
             mark_malformed_source_field("tasks");
-        } else if (tasks->kind != JsonValue::Kind::Array) {
+        } else if (tasks->type() != nlohmann::json::value_t::array) {
                 result.warning =
                     "Ignored invalid sample-labeling task record entries.";
                 result.issue_kind =
@@ -1445,7 +1445,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
                         "tasks must be an array";
                 }
         } else {
-            for (const JsonValue& task_object : tasks->array) {
+            for (const nlohmann::json& task_object : (*tasks)) {
                     if (cancellation_checkpoint) {
                         cancellation_checkpoint();
                     }

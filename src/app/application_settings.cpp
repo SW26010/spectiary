@@ -112,8 +112,8 @@ bool SaveStoredUiLanguage(
         kUiLanguageSettingsFormatKind,
         kSettingsSchemaVersion,
         "UI language settings",
-        JsonObjectValue({
-            {"language", JsonStringValue(stable_value)},
+        nlohmann::json::object({
+            {"language", nlohmann::json(stable_value)},
         }),
         error_message);
 }
@@ -192,9 +192,9 @@ bool SaveStoredThemeSelection(
             kAppearanceSettingsFormatKind,
             kSettingsSchemaVersion,
             "appearance settings",
-            JsonObjectValue({
+            nlohmann::json::object({
                 {kThemeSelectionPolicyMember,
-                 JsonStringValue(
+                 nlohmann::json(
                      kFollowSystemThemePolicyValue)},
             }),
             error_message);
@@ -205,11 +205,11 @@ bool SaveStoredThemeSelection(
         kAppearanceSettingsFormatKind,
         kSettingsSchemaVersion,
         "appearance settings",
-        JsonObjectValue({
+        nlohmann::json::object({
             {kThemeSelectionPolicyMember,
-             JsonStringValue(kExplicitThemePolicyValue)},
+             nlohmann::json(kExplicitThemePolicyValue)},
             {kExplicitThemeIdMember,
-             JsonStringValue(
+             nlohmann::json(
                  selection.explicit_theme_id.value())},
         }),
         error_message);
@@ -262,8 +262,8 @@ bool SaveStoredUiScale(
         kUiScaleSettingsFormatKind,
         kSettingsSchemaVersion,
         "UI scale settings",
-        JsonObjectValue({
-            {"percentage", JsonIntegerValue(percentage)},
+        nlohmann::json::object({
+            {"percentage", nlohmann::json(percentage)},
         }),
         error_message);
 }
@@ -285,19 +285,19 @@ StoredBooleanLoadResult LoadStoredLiveNumericNavigation(
         return loaded;
     }
 
-    const JsonValue* live_numeric_navigation =
+    const nlohmann::json* live_numeric_navigation =
         JsonObjectMember(
             cache.document->root,
             kLiveNumericNavigationMember);
     if (live_numeric_navigation == nullptr ||
-        live_numeric_navigation->kind != JsonValue::Kind::Bool) {
+        live_numeric_navigation->type() != nlohmann::json::value_t::boolean) {
         loaded.warning =
             "Ignored input settings: "
             "live_numeric_navigation must be boolean.";
         return loaded;
     }
 
-    loaded.value = live_numeric_navigation->bool_value;
+    loaded.value = live_numeric_navigation->get<bool>();
     return loaded;
 }
 
@@ -311,9 +311,9 @@ bool SaveStoredLiveNumericNavigation(
         kInputSettingsFormatKind,
         kSettingsSchemaVersion,
         "input settings",
-        JsonObjectValue({
+        nlohmann::json::object({
             {kLiveNumericNavigationMember,
-             JsonBoolValue(enabled)},
+             nlohmann::json(enabled)},
         }),
         error_message);
 }
@@ -335,7 +335,7 @@ StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
         return loaded;
     }
 
-    const JsonValue* open_external_source_as_folder =
+    const nlohmann::json* open_external_source_as_folder =
         JsonObjectMember(
             cache.document->root,
             kOpenExternalSourceAsFolderMember);
@@ -348,8 +348,8 @@ StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
         setting_member = kLegacyOpenExternalFitsAsFolderMember;
     }
     if (open_external_source_as_folder == nullptr ||
-        open_external_source_as_folder->kind !=
-            JsonValue::Kind::Bool) {
+        open_external_source_as_folder->type() !=
+            nlohmann::json::value_t::boolean) {
         loaded.warning =
             "Ignored external source settings: "
             + std::string(setting_member) +
@@ -357,7 +357,7 @@ StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
         return loaded;
     }
 
-    loaded.value = open_external_source_as_folder->bool_value;
+    loaded.value = open_external_source_as_folder->get<bool>();
     return loaded;
 }
 
@@ -371,9 +371,9 @@ bool SaveStoredOpenExternalSourceAsFolder(
         kExternalSourceSettingsFormatKind,
         kSettingsSchemaVersion,
         "external source settings",
-        JsonObjectValue({
+        nlohmann::json::object({
             {kOpenExternalSourceAsFolderMember,
-             JsonBoolValue(enabled)},
+             nlohmann::json(enabled)},
         }),
         error_message);
 }

@@ -49,6 +49,7 @@ $env:VCPKG_ROOT
 - `implot`
 - `cfitsio[pthreads]`（`default-features=false`，后台并发加载要求 reentrant build）
 - `yaml-cpp`
+- `nlohmann-json` (header-only; native JSON DOM, parsing and deterministic serialization)
 - `zlib`
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
@@ -62,6 +63,14 @@ FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
 `yaml-cpp` 用于 production ASDF sample-labeling 文档的受限 YAML metadata
 解析；`zlib` 用于该 codec 的固定压缩 profile，以及受限 `.fits.gz`
 单光谱读取路径。
+
+`nlohmann-json` 通过原生 DOM 处理本地 JSON 状态及 automation 消息；
+`local_user_state_json` 只保留缓存与 schema 边界。解析最多接受 64 MiB、
+64 层容器及 2,097,152 个值/容器，拒绝重复的解码后对象键。读取每 64 KiB、
+解析每 4096 字节检查取消（包括单个长 token）；取消异常交回调用方。
+JSON 浮点语法合法，但整数 schema 字段显式检查类型和范围。
+对象按键排序输出，测试验证语义及确定性，不固定空白或转义拼写。
+缓存临时文件在原子替换前通过相同的读取限制，避免保存无法重新加载的状态。
 
 ## SDR 色彩与 presentation 契约
 

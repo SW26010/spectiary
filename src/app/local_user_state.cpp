@@ -175,17 +175,17 @@ std::string UserPathDisplayText(const std::filesystem::path& path)
     return LocalUserStatePathToUtf8(path);
 }
 
-std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value)
+std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value)
 {
-    if (value.kind == JsonValue::Kind::String) {
-        std::filesystem::path legacy_path = PathFromUtf8(value.string_value);
+    if (value.type() == nlohmann::json::value_t::string) {
+        std::filesystem::path legacy_path = PathFromUtf8(value.get_ref<const std::string&>());
         if (std::optional<std::filesystem::path> rebased = TryRebaseLegacyPackagePath(legacy_path)) {
             return rebased;
         }
         return legacy_path;
     }
 
-    if (value.kind != JsonValue::Kind::Object) {
+    if (value.type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
 
@@ -212,23 +212,23 @@ std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue&
     return std::nullopt;
 }
 
-JsonValue PersistedPathReferenceJson(
+nlohmann::json PersistedPathReferenceJson(
     const std::filesystem::path& path)
 {
     std::filesystem::path relative_path;
     if (TryMakePackageRelativePath(path, relative_path)) {
-        return JsonObjectValue({
+        return nlohmann::json::object({
             {"path_kind",
-             JsonStringValue(kPathKindPackageRelative)},
+             nlohmann::json(kPathKindPackageRelative)},
             {"path",
-             JsonStringValue(
+             nlohmann::json(
                  LocalUserStatePathToUtf8(relative_path))},
         });
     }
-    return JsonObjectValue({
-        {"path_kind", JsonStringValue(kPathKindAbsolute)},
+    return nlohmann::json::object({
+        {"path_kind", nlohmann::json(kPathKindAbsolute)},
         {"path",
-         JsonStringValue(
+         nlohmann::json(
              LocalUserStatePathToUtf8(path))},
     });
 }

@@ -1165,7 +1165,7 @@ void TestCorruptCacheIsWarningOnly()
 void TestDuplicateJsonObjectKeysAreRejected()
 {
     std::string error;
-    const std::optional<specforge::JsonValue> parsed = specforge::ParseJson(
+    const std::optional<nlohmann::json> parsed = specforge::ParseJson(
         R"json({
   "catalogs": {
     "specforge.public": {},

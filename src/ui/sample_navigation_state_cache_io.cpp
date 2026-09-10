@@ -36,12 +36,12 @@ LoadSampleNavigationStateCache(const std::filesystem::path& path)
         return load;
     }
 
-    const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
-    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
+    const nlohmann::json* sources = JsonObjectMember(result.document->root, "sources");
+    if (sources == nullptr || sources->type() != nlohmann::json::value_t::array) {
         return load;
     }
-    for (const JsonValue& source_object : sources->array) {
-        if (source_object.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& source_object : (*sources)) {
+        if (source_object.type() != nlohmann::json::value_t::object) {
             continue;
         }
         const std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");

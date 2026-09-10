@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -10,8 +12,6 @@
 #include <vector>
 
 namespace specforge {
-
-struct JsonValue;
 
 struct LocalUserStatePersistenceStatus {
     bool retrying = false;
@@ -79,8 +79,8 @@ void AppendLocalUserStateHealth(
 [[nodiscard]] std::string LocalUserStatePathToUtf8(
     const std::filesystem::path& path);
 [[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
-[[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value);
-[[nodiscard]] JsonValue PersistedPathReferenceJson(
+[[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value);
+[[nodiscard]] nlohmann::json PersistedPathReferenceJson(
     const std::filesystem::path& path);
 void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path);
 

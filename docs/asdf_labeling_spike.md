@@ -242,10 +242,11 @@ carries dtype and shape in standard ndarray tags instead of application fields.
 Those are the measured and semantic reasons to retain ASDF, not a claim that
 JSON is intrinsically slow.
 
-The implementation comparison is not free for either candidate. SpecForge has
-an in-tree JSON parser, but its generic `JsonValue` model materializes an object
-per array integer and would need a bounded streaming/specialized path for this
-workload. The promoted production ASDF codec is direct-to-vector and implements
+The implementation comparison is not free for either candidate. At the time of
+this spike, SpecForge used an in-tree JSON parser and DOM. Issue #88 replaces
+them with `nlohmann::json`; that general DOM still stores a value per array
+integer and would need a bounded streaming/specialized path for this workload.
+The promoted production ASDF codec is direct-to-vector and implements
 native zlib read/write plus preservation/copying of encoded unchanged blocks.
 Its compressed writer, reader, and block-reuse paths pass the Python
 interoperability matrix. The atomic document store now owns durable-base and

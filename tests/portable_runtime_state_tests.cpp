@@ -168,7 +168,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
         package_display.find("source.npy") != std::string::npos,
         "package-contained user paths should display their file name");
 
-    const specforge::JsonValue package_reference =
+    const nlohmann::json package_reference =
         specforge::PersistedPathReferenceJson(package_path);
     Require(
         specforge::ReadJsonStringMember(
@@ -185,7 +185,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
         specforge::UserPathDisplayText(
             roots.runtime_paths.package_root) == ".",
         "the package root should display as the current package-relative directory");
-    const specforge::JsonValue package_root_reference =
+    const nlohmann::json package_root_reference =
         specforge::PersistedPathReferenceJson(
             roots.runtime_paths.package_root);
     Require(

@@ -65,23 +65,23 @@ MarkerReference MakeReference(const CatalogIdentity& identity, std::string marke
     return reference;
 }
 
-const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
+const nlohmann::json* ObjectMember(const nlohmann::json& value, std::string_view key)
 {
     return JsonObjectMember(value, key);
 }
 
-std::string ReadStringMember(const JsonValue& value, std::string_view key)
+std::string ReadStringMember(const nlohmann::json& value, std::string_view key)
 {
     return ReadJsonStringMember(value, key).value_or(std::string{});
 }
 
-bool ReadBoolMember(const JsonValue& value, std::string_view key, bool fallback)
+bool ReadBoolMember(const nlohmann::json& value, std::string_view key, bool fallback)
 {
     return ReadJsonBoolMember(value, key, fallback);
 }
 
 std::optional<double> ParseFiniteDouble(
-    const JsonValue& object,
+    const nlohmann::json& object,
     std::string_view key)
 {
     const std::optional<std::string> text =
@@ -128,7 +128,7 @@ bool EncodedColorChannelIsUsable(
 }
 
 GeneratedNameSource ReadGeneratedNameSource(
-    const JsonValue& value)
+    const nlohmann::json& value)
 {
     const std::string source =
         ReadStringMember(value, "name_source");
@@ -145,7 +145,7 @@ GeneratedNameSource ReadGeneratedNameSource(
 }
 
 GeneratedNameMetadata ReadGeneratedNameMetadata(
-    const JsonValue& value)
+    const nlohmann::json& value)
 {
     GeneratedNameMetadata result;
     result.source = ReadGeneratedNameSource(value);
@@ -163,32 +163,32 @@ GeneratedNameMetadata ReadGeneratedNameMetadata(
 }
 
 std::string_view JsonKindDescription(
-    JsonValue::Kind kind)
+    nlohmann::json::value_t kind)
 {
     switch (kind) {
-    case JsonValue::Kind::Null:
+    case nlohmann::json::value_t::null:
         return "null";
-    case JsonValue::Kind::Object:
+    case nlohmann::json::value_t::object:
         return "an object";
-    case JsonValue::Kind::Array:
+    case nlohmann::json::value_t::array:
         return "an array";
-    case JsonValue::Kind::String:
+    case nlohmann::json::value_t::string:
         return "a string";
-    case JsonValue::Kind::Bool:
+    case nlohmann::json::value_t::boolean:
         return "a boolean";
-    case JsonValue::Kind::Integer:
+    case nlohmann::json::value_t::number_integer:
         return "an integer";
     }
     return "the expected JSON type";
 }
 
 std::optional<std::string> ValidateRequiredMemberKind(
-    const JsonValue& object,
+    const nlohmann::json& object,
     std::string_view member_name,
-    JsonValue::Kind expected_kind,
+    nlohmann::json::value_t expected_kind,
     std::string_view object_path)
 {
-    const JsonValue* member =
+    const nlohmann::json* member =
         ObjectMember(object, member_name);
     const std::string member_path =
         std::string(object_path) + "." +
@@ -196,7 +196,8 @@ std::optional<std::string> ValidateRequiredMemberKind(
     if (member == nullptr) {
         return member_path + " is missing";
     }
-    if (member->kind != expected_kind) {
+    if ((expected_kind == nlohmann::json::value_t::number_integer
+            ? !JsonIsInt64(*member) : member->type() != expected_kind)) {
         return member_path + " must be " +
             std::string(
                    JsonKindDescription(
@@ -206,17 +207,18 @@ std::optional<std::string> ValidateRequiredMemberKind(
 }
 
 std::optional<std::string> ValidateOptionalMemberKind(
-    const JsonValue& object,
+    const nlohmann::json& object,
     std::string_view member_name,
-    JsonValue::Kind expected_kind,
+    nlohmann::json::value_t expected_kind,
     std::string_view object_path)
 {
-    const JsonValue* member =
+    const nlohmann::json* member =
         ObjectMember(object, member_name);
     if (member == nullptr) {
         return std::nullopt;
     }
-    if (member->kind != expected_kind) {
+    if ((expected_kind == nlohmann::json::value_t::number_integer
+            ? !JsonIsInt64(*member) : member->type() != expected_kind)) {
         return std::string(object_path) + "." +
             std::string(member_name) +
             " must be " +
@@ -229,25 +231,25 @@ std::optional<std::string> ValidateOptionalMemberKind(
 
 std::optional<std::string>
 ValidateGeneratedNameMetadataShape(
-    const JsonValue& object,
+    const nlohmann::json& object,
     std::string_view object_path)
 {
     if (std::optional<std::string> issue =
             ValidateOptionalMemberKind(
                 object,
                 "name_source",
-                JsonValue::Kind::String,
+                nlohmann::json::value_t::string,
                 object_path)) {
         return issue;
     }
-    if (const JsonValue* source =
+    if (const nlohmann::json* source =
             ObjectMember(object, "name_source");
         source != nullptr &&
-        source->string_value !=
+        source->get_ref<const std::string&>() !=
             "catalog_grouping_view" &&
-        source->string_value !=
+        source->get_ref<const std::string&>() !=
             "default_grouping_view" &&
-        source->string_value !=
+        source->get_ref<const std::string&>() !=
             "default_group") {
         return std::string(object_path) +
             ".name_source has an unsupported value";
@@ -259,16 +261,16 @@ ValidateGeneratedNameMetadataShape(
                 ValidateOptionalMemberKind(
                     object,
                     member_name,
-                    JsonValue::Kind::Integer,
+                    nlohmann::json::value_t::number_integer,
                     object_path)) {
             return issue;
         }
-        if (const JsonValue* member =
+        if (const nlohmann::json* member =
                 ObjectMember(
                     object,
                     member_name);
             member != nullptr &&
-            member->integer_value < 0) {
+            member->get<std::int64_t>() < 0) {
             return std::string(object_path) +
                 "." +
                 std::string(member_name) +
@@ -276,12 +278,12 @@ ValidateGeneratedNameMetadataShape(
         }
         if (member_name ==
                 "generated_copy_count") {
-            if (const JsonValue* member =
+            if (const nlohmann::json* member =
                     ObjectMember(
                         object,
                         member_name);
                 member != nullptr &&
-                member->integer_value >
+                member->get<std::int64_t>() >
                     static_cast<std::int64_t>(
                         kMaximumGeneratedNameCopyCount)) {
                 return std::string(object_path) +
@@ -294,34 +296,34 @@ ValidateGeneratedNameMetadataShape(
     return ValidateOptionalMemberKind(
         object,
         "generated_copy_base_name",
-        JsonValue::Kind::String,
+        nlohmann::json::value_t::string,
         object_path);
 }
 
 std::optional<std::string> ValidateStringArrayShape(
-    const JsonValue& value,
+    const nlohmann::json& value,
     std::string_view array_path,
     bool require_unique = false)
 {
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return std::string(array_path) +
             " must be an array";
     }
     std::unordered_set<std::string> values;
     for (std::size_t index = 0;
-         index < value.array.size();
+         index < value.size();
          ++index) {
-        if (value.array[index].kind !=
-            JsonValue::Kind::String) {
+        if (value[index].type() !=
+            nlohmann::json::value_t::string) {
             return std::string(array_path) +
                 "[" + std::to_string(index) +
                 "] must be a string";
         }
         if (require_unique &&
-            !values.insert(value.array[index].string_value).second) {
+            !values.insert(value[index].get_ref<const std::string&>()).second) {
             return std::string(array_path) +
                 " contains duplicate identity " +
-                value.array[index].string_value;
+                value[index].get_ref<const std::string&>();
         }
     }
     return std::nullopt;
@@ -329,27 +331,27 @@ std::optional<std::string> ValidateStringArrayShape(
 
 std::optional<std::string>
 ValidateMarkerReferencesShape(
-    const JsonValue& value,
+    const nlohmann::json& value,
     std::string_view references_path)
 {
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return std::string(references_path) +
             " must be an array";
     }
     for (std::size_t index = 0;
-         index < value.array.size();
+         index < value.size();
          ++index) {
-        const JsonValue& reference =
-            value.array[index];
+        const nlohmann::json& reference =
+            value[index];
         const std::string reference_path =
             std::string(references_path) + "[" +
             std::to_string(index) + "]";
-        if (reference.kind ==
-            JsonValue::Kind::String) {
+        if (reference.type() ==
+            nlohmann::json::value_t::string) {
             continue;
         }
-        if (reference.kind !=
-            JsonValue::Kind::Object) {
+        if (reference.type() !=
+            nlohmann::json::value_t::object) {
             return reference_path +
                 " must be a string or an object";
         }
@@ -357,7 +359,7 @@ ValidateMarkerReferencesShape(
                 ValidateRequiredMemberKind(
                     reference,
                     "marker_id",
-                    JsonValue::Kind::String,
+                    nlohmann::json::value_t::string,
                     reference_path)) {
             return issue;
         }
@@ -365,7 +367,7 @@ ValidateMarkerReferencesShape(
                 ValidateOptionalMemberKind(
                     reference,
                     "catalog_identity",
-                    JsonValue::Kind::String,
+                    nlohmann::json::value_t::string,
                     reference_path)) {
             return issue;
         }
@@ -374,23 +376,23 @@ ValidateMarkerReferencesShape(
 }
 
 std::optional<std::string> ValidateUserGroupsShape(
-    const JsonValue& value,
+    const nlohmann::json& value,
     std::string_view groups_path,
     bool require_unassigned_flag)
 {
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return std::string(groups_path) +
             " must be an array";
     }
     for (std::size_t index = 0;
-         index < value.array.size();
+         index < value.size();
          ++index) {
-        const JsonValue& group = value.array[index];
+        const nlohmann::json& group = value[index];
         const std::string group_path =
             std::string(groups_path) + "[" +
             std::to_string(index) + "]";
-        if (group.kind !=
-            JsonValue::Kind::Object) {
+        if (group.type() !=
+            nlohmann::json::value_t::object) {
             return group_path +
                 " must be an object";
         }
@@ -400,7 +402,7 @@ std::optional<std::string> ValidateUserGroupsShape(
                     ValidateRequiredMemberKind(
                         group,
                         member_name,
-                        JsonValue::Kind::String,
+                        nlohmann::json::value_t::string,
                         group_path)) {
                 return issue;
             }
@@ -410,12 +412,12 @@ std::optional<std::string> ValidateUserGroupsShape(
                      ? ValidateRequiredMemberKind(
                            group,
                            "is_unassigned",
-                           JsonValue::Kind::Bool,
+                           nlohmann::json::value_t::boolean,
                            group_path)
                      : ValidateOptionalMemberKind(
                            group,
                            "is_unassigned",
-                           JsonValue::Kind::Bool,
+                           nlohmann::json::value_t::boolean,
                            group_path))) {
             return issue;
         }
@@ -425,7 +427,7 @@ std::optional<std::string> ValidateUserGroupsShape(
                     group_path)) {
             return issue;
         }
-        const JsonValue* references =
+        const nlohmann::json* references =
             ObjectMember(
                 group,
                 "marker_references");
@@ -446,23 +448,23 @@ std::optional<std::string> ValidateUserGroupsShape(
 
 std::optional<std::string>
 ValidateGroupingViewsShape(
-    const JsonValue& value,
+    const nlohmann::json& value,
     std::string_view views_path,
     bool require_unassigned_flag)
 {
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return std::string(views_path) +
             " must be an array";
     }
     for (std::size_t index = 0;
-         index < value.array.size();
+         index < value.size();
          ++index) {
-        const JsonValue& view = value.array[index];
+        const nlohmann::json& view = value[index];
         const std::string view_path =
             std::string(views_path) + "[" +
             std::to_string(index) + "]";
-        if (view.kind !=
-            JsonValue::Kind::Object) {
+        if (view.type() !=
+            nlohmann::json::value_t::object) {
             return view_path +
                 " must be an object";
         }
@@ -472,7 +474,7 @@ ValidateGroupingViewsShape(
                     ValidateRequiredMemberKind(
                         view,
                         member_name,
-                        JsonValue::Kind::String,
+                        nlohmann::json::value_t::string,
                         view_path)) {
                 return issue;
             }
@@ -481,7 +483,7 @@ ValidateGroupingViewsShape(
                 ValidateOptionalMemberKind(
                     view,
                     "read_only",
-                    JsonValue::Kind::Bool,
+                    nlohmann::json::value_t::boolean,
                     view_path)) {
             return issue;
         }
@@ -491,7 +493,7 @@ ValidateGroupingViewsShape(
                     view_path)) {
             return issue;
         }
-        const JsonValue* groups =
+        const nlohmann::json* groups =
             ObjectMember(view, "groups");
         if (groups == nullptr) {
             return view_path +
@@ -510,20 +512,20 @@ ValidateGroupingViewsShape(
 
 std::optional<std::string>
 ValidateCatalogCacheBodyShape(
-    const JsonValue& catalogs,
-    const JsonValue* panel_state,
+    const nlohmann::json& catalogs,
+    const nlohmann::json* panel_state,
     bool require_unassigned_flag,
     bool require_marker_colors)
 {
     for (const auto& [identity_id, catalog] :
-         catalogs.object) {
+         catalogs.get_ref<const nlohmann::json::object_t&>()) {
         if (identity_id.empty()) {
             return "catalogs contains an empty catalog identity key";
         }
         const std::string catalog_path =
             "catalogs[" + identity_id + "]";
-        if (catalog.kind !=
-            JsonValue::Kind::Object) {
+        if (catalog.type() !=
+            nlohmann::json::value_t::object) {
             return catalog_path +
                 " must be an object";
         }
@@ -531,11 +533,11 @@ ValidateCatalogCacheBodyShape(
                 ValidateRequiredMemberKind(
                     catalog,
                     "active_view_id",
-                    JsonValue::Kind::String,
+                    nlohmann::json::value_t::string,
                     catalog_path)) {
             return issue;
         }
-        const JsonValue* marker_visibility =
+        const nlohmann::json* marker_visibility =
             ObjectMember(
                 catalog,
                 "marker_visibility");
@@ -543,33 +545,33 @@ ValidateCatalogCacheBodyShape(
             return catalog_path +
                 ".marker_visibility is missing";
         }
-        if (marker_visibility->kind !=
-            JsonValue::Kind::Object) {
+        if (marker_visibility->type() !=
+            nlohmann::json::value_t::object) {
             return catalog_path +
                 ".marker_visibility must be an object";
         }
         for (const auto& [marker_id, visible] :
-             marker_visibility->object) {
-            if (visible.kind !=
-                JsonValue::Kind::Bool) {
+             marker_visibility->get_ref<const nlohmann::json::object_t&>()) {
+            if (visible.type() !=
+                nlohmann::json::value_t::boolean) {
                 return catalog_path +
                     ".marker_visibility[" +
                     marker_id +
                     "] must be a boolean";
             }
         }
-        const JsonValue* marker_colors =
+        const nlohmann::json* marker_colors =
             ObjectMember(catalog, "marker_colors");
         if (marker_colors == nullptr && require_marker_colors) {
             return catalog_path + ".marker_colors is missing";
         }
         if (marker_colors != nullptr) {
-            if (marker_colors->kind != JsonValue::Kind::Object) {
+            if (marker_colors->type() != nlohmann::json::value_t::object) {
                 return catalog_path +
                     ".marker_colors must be an object";
             }
             for (const auto& [marker_id, encoded] :
-                 marker_colors->object) {
+                 marker_colors->get_ref<const nlohmann::json::object_t&>()) {
                 const std::string color_path =
                     catalog_path + ".marker_colors[" +
                     marker_id + "]";
@@ -577,7 +579,7 @@ ValidateCatalogCacheBodyShape(
                     return catalog_path +
                         ".marker_colors contains an empty marker identity key";
                 }
-                if (encoded.kind != JsonValue::Kind::Object) {
+                if (encoded.type() != nlohmann::json::value_t::object) {
                     return color_path + " must be an object";
                 }
                 const std::optional<std::string> mode =
@@ -603,7 +605,7 @@ ValidateCatalogCacheBodyShape(
                 }
             }
         }
-        if (const JsonValue* expanded =
+        if (const nlohmann::json* expanded =
                 ObjectMember(
                     catalog,
                     "expanded_group_ids");
@@ -616,7 +618,7 @@ ValidateCatalogCacheBodyShape(
                 return issue;
             }
         }
-        const JsonValue* grouping_views =
+        const nlohmann::json* grouping_views =
             ObjectMember(
                 catalog,
                 "grouping_views");
@@ -638,19 +640,19 @@ ValidateCatalogCacheBodyShape(
         return std::nullopt;
     }
     for (const auto& [identity_id, panel] :
-         panel_state->object) {
+         panel_state->get_ref<const nlohmann::json::object_t&>()) {
         if (identity_id.empty()) {
             return "catalog_panel_state contains an empty catalog identity key";
         }
         const std::string panel_path =
             "catalog_panel_state[" +
             identity_id + "]";
-        if (panel.kind !=
-            JsonValue::Kind::Object) {
+        if (panel.type() !=
+            nlohmann::json::value_t::object) {
             return panel_path +
                 " must be an object";
         }
-        const JsonValue* expanded =
+        const nlohmann::json* expanded =
             ObjectMember(
                 panel,
                 "expanded_group_ids");
@@ -715,41 +717,41 @@ void WriteGeneratedNameMetadataMembers(
 }
 
 std::optional<MarkerReference> ReadMarkerReference(
-    const JsonValue& value,
+    const nlohmann::json& value,
     const CatalogIdentity& fallback_identity)
 {
-    if (value.kind == JsonValue::Kind::String) {
-        return MakeReference(fallback_identity, value.string_value);
+    if (value.type() == nlohmann::json::value_t::string) {
+        return MakeReference(fallback_identity, value.get_ref<const std::string&>());
     }
-    if (value.kind != JsonValue::Kind::Object) {
+    if (value.type() != nlohmann::json::value_t::object) {
         return std::nullopt;
     }
 
-    const JsonValue* marker_id = ObjectMember(value, "marker_id");
-    if (marker_id == nullptr || marker_id->kind != JsonValue::Kind::String) {
+    const nlohmann::json* marker_id = ObjectMember(value, "marker_id");
+    if (marker_id == nullptr || marker_id->type() != nlohmann::json::value_t::string) {
         return std::nullopt;
     }
     CatalogIdentity identity = fallback_identity;
-    if (const JsonValue* identity_id =
+    if (const nlohmann::json* identity_id =
             ObjectMember(value, "catalog_identity");
         identity_id != nullptr &&
-        identity_id->kind == JsonValue::Kind::String) {
-        identity.id = identity_id->string_value;
+        identity_id->type() == nlohmann::json::value_t::string) {
+        identity.id = identity_id->get_ref<const std::string&>();
         identity.display_name =
             DisplayNameForCatalogIdentity(identity.id);
     }
-    return MakeReference(identity, marker_id->string_value);
+    return MakeReference(identity, marker_id->get_ref<const std::string&>());
 }
 
 std::vector<MarkerReference> ReadMarkerReferences(
-    const JsonValue& value,
+    const nlohmann::json& value,
     const CatalogIdentity& fallback_identity)
 {
     std::vector<MarkerReference> references;
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return references;
     }
-    for (const JsonValue& item : value.array) {
+    for (const nlohmann::json& item : value) {
         if (std::optional<MarkerReference> reference = ReadMarkerReference(item, fallback_identity)) {
             references.push_back(std::move(*reference));
         }
@@ -758,16 +760,16 @@ std::vector<MarkerReference> ReadMarkerReferences(
 }
 
 std::vector<UserGroup> ReadUserGroups(
-    const JsonValue& value,
+    const nlohmann::json& value,
     const CatalogIdentity& identity,
     bool read_generated_name_metadata)
 {
     std::vector<UserGroup> groups;
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return groups;
     }
-    for (const JsonValue& item : value.array) {
-        if (item.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& item : value) {
+        if (item.type() != nlohmann::json::value_t::object) {
             continue;
         }
         UserGroup group;
@@ -779,7 +781,7 @@ std::vector<UserGroup> ReadUserGroups(
         }
         group.is_unassigned =
             ReadBoolMember(item, "is_unassigned", false);
-        if (const JsonValue* references = ObjectMember(item, "marker_references")) {
+        if (const nlohmann::json* references = ObjectMember(item, "marker_references")) {
             group.marker_references = ReadMarkerReferences(*references, identity);
         }
         groups.push_back(std::move(group));
@@ -788,16 +790,16 @@ std::vector<UserGroup> ReadUserGroups(
 }
 
 std::vector<GroupingView> ReadGroupingViews(
-    const JsonValue& value,
+    const nlohmann::json& value,
     const CatalogIdentity& identity,
     bool read_generated_name_metadata)
 {
     std::vector<GroupingView> views;
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return views;
     }
-    for (const JsonValue& item : value.array) {
-        if (item.kind != JsonValue::Kind::Object) {
+    for (const nlohmann::json& item : value) {
+        if (item.type() != nlohmann::json::value_t::object) {
             continue;
         }
         GroupingView view;
@@ -808,7 +810,7 @@ std::vector<GroupingView> ReadGroupingViews(
                 ReadGeneratedNameMetadata(item);
         }
         view.read_only = ReadBoolMember(item, "read_only", false);
-        if (const JsonValue* groups = ObjectMember(item, "groups")) {
+        if (const nlohmann::json* groups = ObjectMember(item, "groups")) {
             view.groups =
                 ReadUserGroups(
                     *groups,
@@ -820,56 +822,56 @@ std::vector<GroupingView> ReadGroupingViews(
     return views;
 }
 
-std::unordered_set<std::string> ReadExpandedGroupIds(const JsonValue& value)
+std::unordered_set<std::string> ReadExpandedGroupIds(const nlohmann::json& value)
 {
     std::unordered_set<std::string> expanded;
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return expanded;
     }
-    for (const JsonValue& item : value.array) {
-        if (item.kind == JsonValue::Kind::String) {
-            expanded.insert(item.string_value);
+    for (const nlohmann::json& item : value) {
+        if (item.type() == nlohmann::json::value_t::string) {
+            expanded.insert(item.get_ref<const std::string&>());
         }
     }
     return expanded;
 }
 
-std::unordered_set<std::string> ReadStringSet(const JsonValue& value)
+std::unordered_set<std::string> ReadStringSet(const nlohmann::json& value)
 {
     std::unordered_set<std::string> result;
-    if (value.kind != JsonValue::Kind::Array) {
+    if (value.type() != nlohmann::json::value_t::array) {
         return result;
     }
-    for (const JsonValue& item : value.array) {
-        if (item.kind == JsonValue::Kind::String) {
-            result.insert(item.string_value);
+    for (const nlohmann::json& item : value) {
+        if (item.type() == nlohmann::json::value_t::string) {
+            result.insert(item.get_ref<const std::string&>());
         }
     }
     return result;
 }
 
-std::unordered_map<std::string, bool> ReadMarkerVisibility(const JsonValue& value)
+std::unordered_map<std::string, bool> ReadMarkerVisibility(const nlohmann::json& value)
 {
     std::unordered_map<std::string, bool> visibility;
-    if (value.kind != JsonValue::Kind::Object) {
+    if (value.type() != nlohmann::json::value_t::object) {
         return visibility;
     }
-    for (const auto& [marker_id, item] : value.object) {
-        if (item.kind == JsonValue::Kind::Bool) {
-            visibility.emplace(marker_id, item.bool_value);
+    for (const auto& [marker_id, item] : value.get_ref<const nlohmann::json::object_t&>()) {
+        if (item.type() == nlohmann::json::value_t::boolean) {
+            visibility.emplace(marker_id, item.get<bool>());
         }
     }
     return visibility;
 }
 
 std::unordered_map<std::string, PlotSeriesColor>
-ReadMarkerColors(const JsonValue& value)
+ReadMarkerColors(const nlohmann::json& value)
 {
     std::unordered_map<std::string, PlotSeriesColor> colors;
-    if (value.kind != JsonValue::Kind::Object) {
+    if (value.type() != nlohmann::json::value_t::object) {
         return colors;
     }
-    for (const auto& [marker_id, encoded] : value.object) {
+    for (const auto& [marker_id, encoded] : value.get_ref<const nlohmann::json::object_t&>()) {
         const std::optional<double> red =
             ParseFiniteDouble(encoded, "red");
         const std::optional<double> green =
@@ -1045,8 +1047,8 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
     }
     result.schema_version = cache.document->schema_version;
 
-    const JsonValue* catalogs = ObjectMember(cache.document->root, "catalogs");
-    if (catalogs == nullptr || catalogs->kind != JsonValue::Kind::Object) {
+    const nlohmann::json* catalogs = ObjectMember(cache.document->root, "catalogs");
+    if (catalogs == nullptr || catalogs->type() != nlohmann::json::value_t::object) {
         result.issue_kind =
             CatalogUserStateCacheLoadIssueKind::
                 InvalidDocument;
@@ -1058,12 +1060,12 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
             "Ignored invalid spectral-line user-state cache.";
         return result;
     }
-    const JsonValue* panel_state =
+    const nlohmann::json* panel_state =
         ObjectMember(
             cache.document->root,
             "catalog_panel_state");
     if (panel_state != nullptr &&
-        panel_state->kind != JsonValue::Kind::Object) {
+        panel_state->type() != nlohmann::json::value_t::object) {
         result.issue_kind =
             CatalogUserStateCacheLoadIssueKind::
                 InvalidDocument;
@@ -1092,8 +1094,8 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         cache.document->schema_version <
         kCacheSchemaVersion;
 
-    for (const auto& [identity_id, catalog_value] : catalogs->object) {
-        if (identity_id.empty() || catalog_value.kind != JsonValue::Kind::Object) {
+    for (const auto& [identity_id, catalog_value] : catalogs->get_ref<const nlohmann::json::object_t&>()) {
+        if (identity_id.empty() || catalog_value.type() != nlohmann::json::value_t::object) {
             continue;
         }
 
@@ -1102,23 +1104,23 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         identity.display_name = DisplayNameForCatalogIdentity(identity_id);
         CatalogUserState state;
         state.catalog_identity = identity;
-        if (const JsonValue* active_view_id =
+        if (const nlohmann::json* active_view_id =
                 ObjectMember(catalog_value, "active_view_id");
             active_view_id != nullptr &&
-            active_view_id->kind == JsonValue::Kind::String) {
-            state.active_view_id = active_view_id->string_value;
+            active_view_id->type() == nlohmann::json::value_t::string) {
+            state.active_view_id = active_view_id->get_ref<const std::string&>();
         }
-        if (const JsonValue* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
+        if (const nlohmann::json* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
             state.marker_visibility = ReadMarkerVisibility(*marker_visibility);
         }
-        if (const JsonValue* marker_colors =
+        if (const nlohmann::json* marker_colors =
                 ObjectMember(catalog_value, "marker_colors")) {
             state.marker_colors = ReadMarkerColors(*marker_colors);
         }
-        if (const JsonValue* expanded = ObjectMember(catalog_value, "expanded_group_ids")) {
+        if (const nlohmann::json* expanded = ObjectMember(catalog_value, "expanded_group_ids")) {
             result.cache.catalog_panel_state[identity_id].expanded_group_ids = ReadExpandedGroupIds(*expanded);
         }
-        if (const JsonValue* grouping_views = ObjectMember(catalog_value, "grouping_views")) {
+        if (const nlohmann::json* grouping_views = ObjectMember(catalog_value, "grouping_views")) {
             state.grouping_views =
                 ReadGroupingViews(
                     *grouping_views,
@@ -1128,12 +1130,12 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         result.cache.catalogs.emplace(identity_id, std::move(state));
     }
     if (panel_state != nullptr) {
-        if (panel_state->kind == JsonValue::Kind::Object) {
-            for (const auto& [identity_id, panel_value] : panel_state->object) {
-                if (identity_id.empty() || panel_value.kind != JsonValue::Kind::Object) {
+        if (panel_state->type() == nlohmann::json::value_t::object) {
+            for (const auto& [identity_id, panel_value] : panel_state->get_ref<const nlohmann::json::object_t&>()) {
+                if (identity_id.empty() || panel_value.type() != nlohmann::json::value_t::object) {
                     continue;
                 }
-                if (const JsonValue* expanded = ObjectMember(panel_value, "expanded_group_ids")) {
+                if (const nlohmann::json* expanded = ObjectMember(panel_value, "expanded_group_ids")) {
                     result.cache.catalog_panel_state[identity_id].expanded_group_ids = ReadExpandedGroupIds(*expanded);
                 }
             }

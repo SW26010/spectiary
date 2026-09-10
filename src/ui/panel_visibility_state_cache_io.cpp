@@ -34,19 +34,19 @@ LoadPanelVisibilityStateCache(
         return loaded;
     }
 
-    const JsonValue& root = result.document->root;
+    const nlohmann::json& root = result.document->root;
     PanelVisibilityState& state = loaded.state;
     std::string invalid_fields;
     const auto read_visibility =
         [&root, &invalid_fields](
             std::string_view key,
             bool& visible) {
-            const JsonValue* member =
+            const nlohmann::json* member =
                 JsonObjectMember(root, key);
             if (member == nullptr) {
                 return;
             }
-            if (member->kind != JsonValue::Kind::Bool) {
+            if (member->type() != nlohmann::json::value_t::boolean) {
                 if (!invalid_fields.empty()) {
                     invalid_fields += ", ";
                 }
@@ -55,7 +55,7 @@ LoadPanelVisibilityStateCache(
                 invalid_fields += "'";
                 return;
             }
-            visible = member->bool_value;
+            visible = member->get<bool>();
         };
     read_visibility("files", state.files);
     read_visibility("navigation", state.navigation);
@@ -89,22 +89,22 @@ bool SavePanelVisibilityStateCache(
         kStateFormatKind,
         kStateSchemaVersion,
         "panel visibility state cache",
-        JsonObjectValue({
-            {"files", JsonBoolValue(state.files)},
+        nlohmann::json::object({
+            {"files", nlohmann::json(state.files)},
             {"navigation",
-             JsonBoolValue(state.navigation)},
+             nlohmann::json(state.navigation)},
             {"annotations",
-             JsonBoolValue(state.annotations)},
+             nlohmann::json(state.annotations)},
             {"labeling",
-             JsonBoolValue(state.labeling)},
-            {"filters", JsonBoolValue(state.filters)},
-            {"sorting", JsonBoolValue(state.sorting)},
+             nlohmann::json(state.labeling)},
+            {"filters", nlohmann::json(state.filters)},
+            {"sorting", nlohmann::json(state.sorting)},
             {"smoothing",
-             JsonBoolValue(state.smoothing)},
+             nlohmann::json(state.smoothing)},
             {"information",
-             JsonBoolValue(state.information)},
+             nlohmann::json(state.information)},
             {"spectral_lines",
-             JsonBoolValue(state.spectral_lines)},
+             nlohmann::json(state.spectral_lines)},
         }));
 }
 

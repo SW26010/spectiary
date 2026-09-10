@@ -47,7 +47,7 @@ bool LimitsAreUsable(const PlotViewLimits& limits)
 }
 
 std::optional<double> ParseFiniteDouble(
-    const JsonValue& root,
+    const nlohmann::json& root,
     std::string_view key)
 {
     const std::optional<std::string> text =
@@ -93,13 +93,13 @@ bool ColorChannelIsUsable(double value)
            value <= 1.0;
 }
 
-std::optional<JsonValue> EncodePlotSeriesColor(
+std::optional<nlohmann::json> EncodePlotSeriesColor(
     const PlotSeriesColor& selection)
 {
     if (selection.mode() ==
         PlotSeriesColorMode::Auto) {
-        return JsonObjectValue({
-            {"mode", JsonStringValue(kAutoColorMode)},
+        return nlohmann::json::object({
+            {"mode", nlohmann::json(kAutoColorMode)},
         });
     }
 
@@ -122,26 +122,26 @@ std::optional<JsonValue> EncodePlotSeriesColor(
     if (!red || !green || !blue || !alpha) {
         return std::nullopt;
     }
-    return JsonObjectValue({
-        {"mode", JsonStringValue(kExplicitColorMode)},
-        {"red", JsonStringValue(*red)},
-        {"green", JsonStringValue(*green)},
-        {"blue", JsonStringValue(*blue)},
-        {"alpha", JsonStringValue(*alpha)},
+    return nlohmann::json::object({
+        {"mode", nlohmann::json(kExplicitColorMode)},
+        {"red", nlohmann::json(*red)},
+        {"green", nlohmann::json(*green)},
+        {"blue", nlohmann::json(*blue)},
+        {"alpha", nlohmann::json(*alpha)},
     });
 }
 
 PlotSeriesColor ParsePlotSeriesColor(
-    const JsonValue& colors,
+    const nlohmann::json& colors,
     std::string_view stable_series_id,
     std::string& warning)
 {
-    const JsonValue* encoded =
+    const nlohmann::json* encoded =
         JsonObjectMember(colors, stable_series_id);
     const std::optional<std::string> mode = encoded
         ? ReadJsonStringMember(*encoded, "mode")
         : std::nullopt;
-    if (!encoded || encoded->kind != JsonValue::Kind::Object ||
+    if (!encoded || encoded->type() != nlohmann::json::value_t::object ||
         !mode) {
         AppendWarning(
             warning,
@@ -184,27 +184,27 @@ PlotSeriesColor ParsePlotSeriesColor(
     });
 }
 
-std::optional<JsonValue> EncodeSpectrumPlotColors(
+std::optional<nlohmann::json> EncodeSpectrumPlotColors(
     const SpectrumPlotColors& colors)
 {
-    std::optional<JsonValue> raw =
+    std::optional<nlohmann::json> raw =
         EncodePlotSeriesColor(colors.raw_spectrum);
-    std::optional<JsonValue> gaussian =
+    std::optional<nlohmann::json> gaussian =
         EncodePlotSeriesColor(colors.gaussian_smoothing);
-    std::optional<JsonValue> median =
+    std::optional<nlohmann::json> median =
         EncodePlotSeriesColor(colors.median_smoothing);
     if (!raw || !gaussian || !median) {
         return std::nullopt;
     }
 
-    JsonValue encoded = JsonObjectValue();
-    encoded.object.emplace(
+    nlohmann::json encoded = nlohmann::json::object();
+    encoded.get_ref<nlohmann::json::object_t&>().emplace(
         std::string(kRawSpectrumPlotSeriesId),
         std::move(*raw));
-    encoded.object.emplace(
+    encoded.get_ref<nlohmann::json::object_t&>().emplace(
         std::string(kGaussianSmoothingPlotSeriesId),
         std::move(*gaussian));
-    encoded.object.emplace(
+    encoded.get_ref<nlohmann::json::object_t&>().emplace(
         std::string(kMedianSmoothingPlotSeriesId),
         std::move(*median));
     return encoded;
@@ -235,11 +235,11 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
         return loaded;
     }
 
-    const JsonValue& root = result.document->root;
-    const JsonValue* series_colors =
+    const nlohmann::json& root = result.document->root;
+    const nlohmann::json* series_colors =
         JsonObjectMember(root, kSeriesColorsMember);
     if (series_colors != nullptr &&
-        series_colors->kind == JsonValue::Kind::Object) {
+        series_colors->type() == nlohmann::json::value_t::object) {
         loaded.state.plot_colors.raw_spectrum =
             ParsePlotSeriesColor(
                 *series_colors,
@@ -261,16 +261,16 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
             "Saved spectrum series colors were invalid; Auto colors were used.");
     }
 
-    const JsonValue* locked =
+    const nlohmann::json* locked =
         JsonObjectMember(root, "locked");
     if (locked == nullptr ||
-        locked->kind != JsonValue::Kind::Bool) {
+        locked->type() != nlohmann::json::value_t::boolean) {
         AppendWarning(
             loaded.warning,
             "Spectrum view state cache member 'locked' must be boolean; automatic range was used.");
         return loaded;
     }
-    if (!locked->bool_value) {
+    if (!locked->get<bool>()) {
         return loaded;
     }
 
@@ -326,7 +326,7 @@ bool SaveSpectrumViewStateCache(
         return false;
     }
 
-    const std::optional<JsonValue> series_colors =
+    const std::optional<nlohmann::json> series_colors =
         EncodeSpectrumPlotColors(state.plot_colors);
     if (!series_colors) {
         if (error_message != nullptr) {
@@ -346,8 +346,8 @@ bool SaveSpectrumViewStateCache(
         return false;
     }
 
-    JsonValue body = JsonObjectValue({
-        {"locked", JsonBoolValue(state.locked)},
+    nlohmann::json body = nlohmann::json::object({
+        {"locked", nlohmann::json(state.locked)},
         {std::string(kSeriesColorsMember), *series_colors},
     });
     if (state.locked) {
@@ -366,14 +366,14 @@ bool SaveSpectrumViewStateCache(
             }
             return false;
         }
-        body.object.emplace(
+        body.get_ref<nlohmann::json::object_t&>().emplace(
             "source_collection_identity",
-            JsonStringValue(
+            nlohmann::json(
                 state.source_collection_identity));
-        body.object.emplace("x_min", JsonStringValue(*x_min));
-        body.object.emplace("x_max", JsonStringValue(*x_max));
-        body.object.emplace("y_min", JsonStringValue(*y_min));
-        body.object.emplace("y_max", JsonStringValue(*y_max));
+        body.get_ref<nlohmann::json::object_t&>().emplace("x_min", nlohmann::json(*x_min));
+        body.get_ref<nlohmann::json::object_t&>().emplace("x_max", nlohmann::json(*x_max));
+        body.get_ref<nlohmann::json::object_t&>().emplace("y_min", nlohmann::json(*y_min));
+        body.get_ref<nlohmann::json::object_t&>().emplace("y_max", nlohmann::json(*y_max));
     }
 
     return WriteVersionedJsonCacheDocument(
