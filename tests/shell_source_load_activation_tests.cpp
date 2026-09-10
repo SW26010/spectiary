@@ -3644,6 +3644,43 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
     std::filesystem::remove(path);
 }
 
+void TestAutomationSourceObservationHidesActivationToken()
+{
+    using Access = specforge::ShellUiTestAccess;
+    using State = specforge::ShellAutomationSourceOutcome::State;
+    const auto path = UniqueTempPath("_automation_source_observation.csv");
+    WriteFixture(path);
+    auto shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            MakeFixtureLoadDependencies({{}, {}, {}, {}})));
+    auto observe = shell->BeginSourceOpenForAutomation(path);
+    Require(DrainAllSourceLoads(*shell), "source observation fixture should finish loading");
+    Require(observe().state == State::Pending,
+        "source observation must remain pending until successful presentation");
+    Access::SubmitSpectrumDraw(*shell, 400,
+        Access::Session(*shell).CurrentSampleSnapshot(), 17);
+    shell->PresentFrame(400, {});
+    Require(observe().state == State::Pending,
+        "failed Present must not complete the opaque source operation");
+    const specforge::NavigationLatencyPresentation wrong{
+        18, specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(400, std::span(&wrong, 1));
+    Require(observe().state == State::Pending,
+        "another viewport cannot complete the opaque source operation");
+    const specforge::NavigationLatencyPresentation presented{
+        17, specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(400, std::span(&presented, 1));
+    const auto outcome = observe();
+    Require(outcome.state == State::Succeeded && outcome.source_path == path &&
+        outcome.source_id == shell->AutomationView().source_id &&
+        outcome.spectrum_count == 3 && outcome.spectrum_index == 0,
+        "source observation should expose only the completed source and sample facts");
+    observe = {};
+    shell.reset();
+    std::filesystem::remove(path);
+}
+
 void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
 {
     using Access = specforge::ShellUiTestAccess;
@@ -6589,6 +6626,7 @@ int main()
         TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices();
         TestNewActivationSupersedesAnUnpresentedOlderTrace();
         TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation();
+        TestAutomationSourceObservationHidesActivationToken();
         TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent();
         TestSameFrameSourceSwitchSupersedesActivatedNavigation();
         TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation();

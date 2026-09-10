@@ -251,6 +251,18 @@ struct ShellAutomationLabelAssignmentResult {
     bool navigation_pending = false;
 };
 
+// Automation observes completion without interpreting activation transaction tokens.
+struct ShellAutomationSourceOutcome {
+    enum class State { Pending, Succeeded, Failed, Canceled };
+    State state = State::Pending;
+    std::filesystem::path source_path;
+    std::string source_id;
+    std::size_t spectrum_count = 0;
+    std::size_t spectrum_index = 0;
+    std::string spectrum_name;
+};
+using ShellAutomationSourceOperation = std::function<ShellAutomationSourceOutcome()>;
+
 class ShellUi {
 public:
     ShellUi(
@@ -277,6 +289,8 @@ public:
         SourceOpenOperation
     OpenSourceForAutomation(
         const std::filesystem::path& path);
+    [[nodiscard]] ShellAutomationSourceOperation
+    BeginSourceOpenForAutomation(const std::filesystem::path& path);
     [[nodiscard]] SourceCollectionActivationTransaction::
         SourceOpenOperationOutcome
     ObserveSourceOpenForAutomation(

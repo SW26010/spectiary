@@ -1469,6 +1469,27 @@ ShellUi::ObserveSourceOpenForAutomation(
         ObserveSourceOpenOperation(operation);
 }
 
+ShellAutomationSourceOperation ShellUi::BeginSourceOpenForAutomation(
+    const std::filesystem::path& path)
+{
+    const auto operation = OpenSourceForAutomation(path);
+    return [this, operation]() {
+        const auto outcome = ObserveSourceOpenForAutomation(operation);
+        using InternalState = SourceCollectionActivationTransaction::SourceOpenOperationState;
+        using State = ShellAutomationSourceOutcome::State;
+        State state = State::Pending;
+        switch (outcome.state) {
+        case InternalState::Pending: state = State::Pending; break;
+        case InternalState::Succeeded: state = State::Succeeded; break;
+        case InternalState::Failed: state = State::Failed; break;
+        case InternalState::Canceled: state = State::Canceled; break;
+        }
+        return ShellAutomationSourceOutcome{state, outcome.source_path,
+            outcome.source_id, outcome.spectrum_count, outcome.spectrum_index,
+            outcome.spectrum_name};
+    };
+}
+
 const SourceCollectionActivationTransaction::
     PresentedSpectrumObservation&
 ShellUi::PresentedSpectrumForAutomation() const noexcept
