@@ -27,6 +27,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(cfitsio CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
 set(SPECFORGE_BUILD_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
@@ -119,6 +120,12 @@ specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
 specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)
 specforge_read_vcpkg_package_version(pthreads SPECFORGE_PTHREADS_VERSION)
 specforge_read_vcpkg_package_version(yaml-cpp SPECFORGE_YAML_CPP_VERSION)
+specforge_read_vcpkg_package_version(nlohmann-json SPECFORGE_NLOHMANN_JSON_VERSION)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "nlohmann/json"
+    "nlohmann/json ${SPECFORGE_NLOHMANN_JSON_VERSION}"
+)
 specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
 specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
@@ -311,6 +318,7 @@ target_include_directories(specforge_core PRIVATE
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
 target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp CFITSIO::cfitsio ZLIB::ZLIB bcrypt)
+target_link_libraries(specforge_core PUBLIC nlohmann_json::nlohmann_json)
 if(MSVC)
     # Cancellation-stage tests resolve optimized and inlined source locations
     # at runtime, so retain line tables for the production code they exercise.
