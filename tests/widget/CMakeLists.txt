@@ -18,9 +18,21 @@ add_library(specforge_widget_imgui STATIC
 )
 target_include_directories(specforge_widget_imgui PUBLIC ${specforge_widget_imgui_source_SOURCE_DIR})
 target_compile_definitions(specforge_widget_imgui PRIVATE IMGUI_ENABLE_TEST_ENGINE)
-add_executable(specforge_widget_tests imgui_widget_harness.cpp settings_widget_tests.cpp)
-target_compile_definitions(specforge_widget_tests PRIVATE IMGUI_ENABLE_TEST_ENGINE)
-target_link_libraries(specforge_widget_tests PRIVATE specforge_widget_imgui specforge_desktop_ui dwmapi)
+add_library(specforge_widget_harness STATIC imgui_widget_harness.cpp)
+target_include_directories(specforge_widget_harness PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(specforge_widget_harness PUBLIC IMGUI_ENABLE_TEST_ENGINE)
+target_link_libraries(specforge_widget_harness PUBLIC specforge_widget_imgui)
+specforge_enable_warnings(specforge_widget_harness)
+
+# Keep the instrumented implementation ahead of the transitive production ImGui
+# dependency. Only opt-in test executables may use this helper.
+function(specforge_add_widget_suite target source)
+    add_executable(${target} ${source})
+    target_link_libraries(${target} PRIVATE specforge_widget_harness specforge_desktop_ui dwmapi)
+    specforge_enable_warnings(${target})
+endfunction()
+
+specforge_add_widget_suite(specforge_widget_tests settings_widget_tests.cpp)
 specforge_enable_warnings(specforge_widget_tests)
 add_test(NAME specforge_widget_failures_tests COMMAND specforge_widget_tests failures)
 add_test(NAME specforge_widget_input_tests COMMAND specforge_widget_tests input)
