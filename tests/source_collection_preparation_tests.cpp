@@ -1467,6 +1467,63 @@ void TestNativeGenerationSurvivesPreparationCallerThread()
     std::filesystem::remove_all(folder);
 }
 
+void TestUncooperativeRegistrationBoundsWaitButDelaysShutdown()
+{
+    std::promise<void> entered_promise;
+    auto entered = entered_promise.get_future();
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool release = false;
+    std::atomic_int later_calls = 0;
+    auto late = std::make_shared<MutableDirectoryChangeGeneration>();
+    auto monitor = std::make_unique<specforge::DirectoryChangeGenerationMonitor>(
+        [&](const auto& path, std::stop_token) {
+            if (path == "uncooperative") {
+                entered_promise.set_value();
+                std::unique_lock lock(mutex);
+                // Deliberately ignore stop_token, like the production Win32 call.
+                // A finite escape keeps failed assertions from hanging the suite.
+                condition.wait_for(lock, 15s, [&] { return release; });
+                return late;
+            }
+            ++later_calls;
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        });
+    std::stop_source canceled;
+    auto caller = std::async(std::launch::async, [&] {
+        return monitor->Begin("uncooperative", [] {}, canceled.get_token());
+    });
+    Require(entered.wait_for(2s) == std::future_status::ready, "uncooperative registration must start");
+    canceled.request_stop();
+    Require(caller.wait_for(1s) == std::future_status::ready, "caller cancellation must not depend on native cooperation");
+    Require(!caller.get(), "canceled caller must receive no generation");
+
+    const auto start = std::chrono::steady_clock::now();
+    Require(!monitor->Begin("queued", [] {}), "later requests must time out behind a stuck registration");
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    Require(elapsed >= 5s && elapsed < 8s, "later caller must retain the five-second bound");
+    Require(later_calls == 0, "a single registration worker cannot bypass an in-flight call");
+
+    std::promise<void> shutdown_entered_promise;
+    auto shutdown_entered = shutdown_entered_promise.get_future();
+    auto shutdown = std::async(std::launch::async, [&] {
+        shutdown_entered_promise.set_value();
+        monitor.reset();
+    });
+    shutdown_entered.wait();
+    const bool shutdown_waited = shutdown.wait_for(100ms) == std::future_status::timeout;
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    condition.notify_all();
+    Require(shutdown.wait_for(2s) == std::future_status::ready, "shutdown must finish once registration returns");
+    shutdown.get();
+    Require(shutdown_waited, "documented shutdown limitation must remain explicit");
+    Require(!late->IsCurrent(), "late result must close before shutdown completes");
+    Require(later_calls == 0, "timed-out queued work must not run during shutdown");
+}
+
 }  // namespace
 
 int main()
@@ -1493,5 +1550,6 @@ int main()
     TestRegistrationFailureAndPreCanceledRequest();
     TestCanceledQueuedRegistrationIsSkipped();
     TestNativeGenerationSurvivesPreparationCallerThread();
+    TestUncooperativeRegistrationBoundsWaitButDelaysShutdown();
     return 0;
 }

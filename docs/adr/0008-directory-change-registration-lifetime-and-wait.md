@@ -10,6 +10,10 @@ and lifetime scope of [issue #89](https://github.com/SW26010/SpecForge/issues/89
 
 ## Evidence
 
+The repeatable probe, additional uncooperative-registration test, platform
+documentation, and remaining SMB coverage gap are recorded in
+[Directory Registration Validation](../directory_registration_validation.md).
+
 On the development Windows machine on 2026-09-10, a real Win32 probe registered
 first-level directory notifications with `FindFirstChangeNotificationW` and
 observed them with `WaitForSingleObject`:
