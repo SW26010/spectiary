@@ -595,6 +595,7 @@ add_custom_target(specforge_metadata
 )
 
 enable_testing()
+option(SPECFORGE_BUILD_WIDGET_TESTS "Build the isolated ImGui widget regression harness" OFF)
 
 function(specforge_set_test_tier test_name tier)
     if(NOT tier STREQUAL "fast" AND NOT tier STREQUAL "extended")
@@ -1798,3 +1799,7 @@ set_property(
     TEST ${SPECFORGE_EXTENDED_TESTS}
     APPEND PROPERTY LABELS extended
 )
+
+if(SPECFORGE_BUILD_WIDGET_TESTS)
+    add_subdirectory(tests/widget)
+endif()
