@@ -693,12 +693,48 @@ specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
            const auto&) {
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = {
-        cache_paths.labeling,
-        cache_paths.workflow,
-        cache_paths.navigation,
-    };
+    if (!cache_paths.labeling.empty() ||
+        !cache_paths.workflow.empty() ||
+        !cache_paths.navigation.empty()) {
+        dependencies.workflow_cache_paths = {
+            cache_paths.labeling,
+            cache_paths.workflow,
+            cache_paths.navigation,
+        };
+    }
     return dependencies;
+}
+
+void TestFixtureLoadDependenciesPreserveCacheIsolation()
+{
+    const auto isolated = MakeFixtureLoadDependencies({}).workflow_cache_paths;
+    const auto independent = MakeFixtureLoadDependencies({}).workflow_cache_paths;
+    Require(
+        !isolated.labeling_state_cache_path.empty() &&
+            !isolated.workflow_state_cache_path.empty() &&
+            !isolated.navigation_state_cache_path.empty() &&
+            isolated.labeling_state_cache_path != independent.labeling_state_cache_path &&
+            isolated.workflow_state_cache_path != independent.workflow_state_cache_path &&
+            isolated.navigation_state_cache_path != independent.navigation_state_cache_path,
+        "empty fixture paths must select independent explicit caches, never process defaults");
+
+    const auto explicit_paths = MakeFixtureLoadDependencies({
+        {}, isolated.navigation_state_cache_path,
+        isolated.labeling_state_cache_path, isolated.workflow_state_cache_path}).workflow_cache_paths;
+    Require(
+        explicit_paths.labeling_state_cache_path == isolated.labeling_state_cache_path &&
+            explicit_paths.workflow_state_cache_path == isolated.workflow_state_cache_path &&
+            explicit_paths.navigation_state_cache_path == isolated.navigation_state_cache_path,
+        "explicit fixture caches must remain unchanged");
+
+    bool rejected = false;
+    try {
+        (void)specforge::MakeSourceCollectionLoadQueueForTesting(
+            MakeFixtureLoadDependencies({{}, {}, isolated.labeling_state_cache_path, {}}));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    Require(rejected, "partial fixture caches must be rejected instead of mixing state roots");
 }
 
 std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
@@ -6364,6 +6400,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
 int main()
 {
     try {
+        RUN_SHELL_TEST(TestFixtureLoadDependenciesPreserveCacheIsolation);
         RUN_SHELL_TEST(TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence);
         RUN_SHELL_TEST(TestExplicitOpenTracesAcceptedPathThroughFirstPresent);
         RUN_SHELL_TEST(TestSupersededExternalPreferredTraceUsesResolvedMemberIndex);
