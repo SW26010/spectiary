@@ -32,9 +32,6 @@ struct SourceCollectionPreparationAdapters {
         std::size_t,
         const SourceCollectionFolderListing&,
         const CancellationCheck&)>;
-    using FolderScanner = std::function<SourceCollectionFolderListing(
-        const std::filesystem::path&,
-        const SourceCollectionCancellationCheckpoint&)>;
     using SourceOpenProbe = std::function<SourceOpenFilesystemProbe(
         const SourceOpenRequest&,
         const SourceCollectionCancellationCheckpoint&)>;
@@ -46,18 +43,9 @@ struct SourceCollectionPreparationAdapters {
         std::function<SampleWorkflowPreparationCacheBundle(
             const SampleWorkflowPreparationPaths&,
             const std::function<void()>&)>;
-    using FileContextBuilder = std::function<SourceCollectionContext(
-        const SpectrumSnapshot&,
-        const SourceCollectionSingleFileState&,
-        const SourceCollectionCancellationCheckpoint&)>;
-    using FolderContextBuilder = std::function<SourceCollectionContext(
-        const SpectrumSnapshot&,
-        const SourceCollectionFolderListing&,
-        const SourceCollectionCancellationCheckpoint&)>;
 
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
-    FolderScanner folder_scanner;
     SourceOpenProbe source_open_probe;
     FolderChangeGenerationFactory folder_change_generation_factory;
     // Lower-level lifecycle seam for the default monitor. Ignored when a
@@ -65,8 +53,6 @@ struct SourceCollectionPreparationAdapters {
     DirectoryChangeGenerationMonitor::RegistrationFactory
         folder_change_generation_registration_factory;
     WorkflowCacheLoader workflow_cache_loader;
-    FileContextBuilder file_context_builder;
-    FolderContextBuilder folder_context_builder;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };
 

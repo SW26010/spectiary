@@ -696,17 +696,6 @@ specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
             checkpoint();
             return specforge::SampleWorkflowPreparationCacheBundle{};
         };
-    dependencies.file_context_builder =
-        [](const specforge::SpectrumSnapshot& snapshot,
-           const specforge::SourceCollectionSingleFileState& file_state,
-           const specforge::SourceCollectionCancellationCheckpoint& checkpoint) {
-            checkpoint();
-            specforge::SourceCollectionContext context;
-            context.identity =
-                specforge::BuildSourceCollectionIdentity(snapshot, file_state);
-            context.manifest.sample_names = {"alpha", "beta", "gamma"};
-            return context;
-        };
     dependencies.workflow_cache_paths = {
         cache_paths.labeling,
         cache_paths.workflow,
@@ -3976,28 +3965,6 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
                 source,
                 index);
         };
-    dependencies.file_context_builder =
-        [](const auto& snapshot,
-           const auto& state,
-           const auto& checkpoint) {
-            checkpoint();
-            specforge::SourceCollectionContext context;
-            context.identity =
-                specforge::BuildSourceCollectionIdentity(
-                    snapshot,
-                    state);
-            context.manifest.sample_names = {"file"};
-            return context;
-        };
-    dependencies.folder_context_builder =
-        [](const auto& snapshot,
-           const auto& listing,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::BuildFolderSourceCollectionContext(
-                snapshot,
-                listing);
-        };
     dependencies.workflow_cache_loader =
         [](const auto&, const auto& checkpoint) {
             checkpoint();
@@ -4389,31 +4356,6 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
             folder_decode_indices.push_back(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.file_context_builder =
-        [](const auto& snapshot,
-           const auto& state,
-           const auto& checkpoint) {
-            checkpoint();
-            specforge::SourceCollectionContext context;
-            context.identity =
-                specforge::BuildSourceCollectionIdentity(
-                    snapshot,
-                    state);
-            context.manifest.sample_names = {
-                "first",
-                "selected",
-                "zzz"};
-            return context;
-        };
-    dependencies.folder_context_builder =
-        [](const auto& snapshot,
-           const auto& listing,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::BuildFolderSourceCollectionContext(
-                snapshot,
-                listing);
-        };
     dependencies.workflow_cache_loader =
         [&workflow_cache_path, &state_root](
             const auto&,
@@ -4597,31 +4539,6 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
             folder_decode_indices.push_back(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.file_context_builder =
-        [](const auto& snapshot,
-           const auto& state,
-           const auto& checkpoint) {
-            checkpoint();
-            specforge::SourceCollectionContext context;
-            context.identity =
-                specforge::BuildSourceCollectionIdentity(
-                    snapshot,
-                    state);
-            context.manifest.sample_names = {
-                "first",
-                "selected",
-                "zzz"};
-            return context;
-        };
-    dependencies.folder_context_builder =
-        [](const auto& snapshot,
-           const auto& listing,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::BuildFolderSourceCollectionContext(
-                snapshot,
-                listing);
-        };
     dependencies.workflow_cache_loader =
         [](const auto&,
            const auto& checkpoint) {
@@ -4759,30 +4676,6 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
            const auto&) {
             (void)listing;
             return MakeSnapshot(source, index);
-        };
-    dependencies.file_context_builder =
-        [](const auto& snapshot,
-           const auto& state,
-           const auto& checkpoint) {
-            checkpoint();
-            specforge::SourceCollectionContext context;
-            context.identity =
-                specforge::BuildSourceCollectionIdentity(
-                    snapshot,
-                    state);
-            context.manifest.sample_names = {
-                "first",
-                "selected"};
-            return context;
-        };
-    dependencies.folder_context_builder =
-        [](const auto& snapshot,
-           const auto& listing,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::BuildFolderSourceCollectionContext(
-                snapshot,
-                listing);
         };
     dependencies.workflow_cache_loader =
         [](const auto&,
@@ -4925,31 +4818,6 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
         dependencies.snapshot_loader =
             [](const auto& source, std::size_t index, const auto&) {
                 return MakeSnapshot(source, index);
-            };
-        dependencies.file_context_builder =
-            [](const auto& snapshot,
-               const auto& state,
-               const auto& checkpoint) {
-                checkpoint();
-                specforge::SourceCollectionContext context;
-                context.identity =
-                    specforge::BuildSourceCollectionIdentity(
-                        snapshot,
-                        state);
-                context.manifest.sample_names = {
-                    "first",
-                    "selected",
-                    "zzz"};
-                return context;
-            };
-        dependencies.folder_context_builder =
-            [](const auto& snapshot,
-               const auto& listing,
-               const auto& checkpoint) {
-                checkpoint();
-                return specforge::BuildFolderSourceCollectionContext(
-                    snapshot,
-                    listing);
             };
         dependencies.workflow_cache_loader =
             [&cache_paths](
@@ -5201,15 +5069,6 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
            const auto&) {
             (void)listing;
             return MakeSnapshot(source, index);
-        };
-    dependencies.folder_context_builder =
-        [](const auto& snapshot,
-           const auto& listing,
-           const auto& checkpoint) {
-            checkpoint();
-            return specforge::BuildFolderSourceCollectionContext(
-                snapshot,
-                listing);
         };
     dependencies.workflow_cache_loader =
         [](const auto&,

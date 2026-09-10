@@ -128,36 +128,10 @@ SourceCollectionPreparationAdapters DefaultAdapters(
         LoadSpectrumSnapshotFromPathCancelable;
     adapters.folder_snapshot_loader =
         LoadFolderSpectrumSnapshotFromListingCancelable;
-    adapters.folder_scanner =
-        [](const std::filesystem::path& path,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return ScanSourceCollectionFolder(
-                path,
-                {},
-                checkpoint);
-        };
     adapters.source_open_probe =
         ProbeSourceOpenRequest;
     adapters.workflow_cache_loader =
         LoadSampleWorkflowPreparationCacheBundle;
-    adapters.file_context_builder =
-        [](const SpectrumSnapshot& snapshot,
-           const SourceCollectionSingleFileState& file_state,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return LoadSourceCollectionContextCancelable(
-                snapshot,
-                file_state,
-                checkpoint);
-        };
-    adapters.folder_context_builder =
-        [](const SpectrumSnapshot& snapshot,
-           const SourceCollectionFolderListing& listing,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return BuildFolderSourceCollectionContextCancelable(
-                snapshot,
-                listing,
-                checkpoint);
-        };
     if (AllWorkflowCachePathsEmpty(workflow_cache_paths)) {
         workflow_cache_paths = {
             DefaultSampleLabelingStateCachePath(),
@@ -192,10 +166,6 @@ void FillMissingAdapters(
         adapters.folder_snapshot_loader =
             std::move(defaults.folder_snapshot_loader);
     }
-    if (!adapters.folder_scanner) {
-        adapters.folder_scanner =
-            std::move(defaults.folder_scanner);
-    }
     if (!adapters.source_open_probe) {
         adapters.source_open_probe =
             std::move(defaults.source_open_probe);
@@ -203,14 +173,6 @@ void FillMissingAdapters(
     if (!adapters.workflow_cache_loader) {
         adapters.workflow_cache_loader =
             std::move(defaults.workflow_cache_loader);
-    }
-    if (!adapters.file_context_builder) {
-        adapters.file_context_builder =
-            std::move(defaults.file_context_builder);
-    }
-    if (!adapters.folder_context_builder) {
-        adapters.folder_context_builder =
-            std::move(defaults.folder_context_builder);
     }
     adapters.workflow_cache_paths =
         std::move(defaults.workflow_cache_paths);
@@ -685,7 +647,7 @@ private:
                       path, checkpoint, cancellation_token)
                 : adapters_.folder_change_generation_factory(path, checkpoint);
         SourceCollectionFolderListing listing =
-            adapters_.folder_scanner(path, checkpoint);
+            ScanSourceCollectionFolder(path, {}, checkpoint);
         return std::make_shared<
             const SourceCollectionFolderListingGeneration>(
             SourceCollectionFolderListingGeneration{
@@ -929,7 +891,7 @@ private:
                     throw SourceCollectionPreparationStale();
                 }
                 context.emplace(
-                    adapters_.folder_context_builder(
+                    BuildFolderSourceCollectionContextCancelable(
                         *snapshot,
                         listing,
                         work.checkpoint));
@@ -1119,7 +1081,7 @@ private:
                     throw SourceCollectionPreparationStale();
                 }
                 context.emplace(
-                    adapters_.file_context_builder(
+                    LoadSourceCollectionContextCancelable(
                         *snapshot,
                         initial_state,
                         work.checkpoint));
