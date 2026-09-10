@@ -71,7 +71,7 @@ if (-not $serviceAutomation.Success -or
 
 $settingSet = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::ServiceAutomationSettingSet\(.*?(?=void SpecForgeApp::BeginAutomationSourceOpen\()',
+    'void SpecForgeApp::ServiceAutomationSettingSet\(.*?(?=\r?\nvoid SpecForgeApp::)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $settingSet.Success -or
