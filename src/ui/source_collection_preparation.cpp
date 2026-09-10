@@ -340,14 +340,6 @@ public:
                     std::make_unique<
                         DirectoryChangeGenerationMonitor>();
             }
-            adapters_.folder_change_generation_factory =
-                [monitor =
-                     directory_change_generation_monitor_.get()](
-                    const std::filesystem::path& path,
-                    const SourceCollectionCancellationCheckpoint&
-                        checkpoint) {
-                    return monitor->Begin(path, checkpoint);
-                };
         }
     }
 
@@ -358,6 +350,7 @@ public:
         const SourceCollectionWorkflowCacheProvider&
             workflow_cache_provider;
         std::size_t spectrum_index = 0;
+        std::stop_token cancellation_token;
     };
 
     std::shared_ptr<const SampleWorkflowPreparationCacheBundle>
@@ -376,7 +369,8 @@ public:
         const SourceCollectionLoadRequest& request,
         const SourceCollectionCancellationCheckpoint& checkpoint,
         const SourceCollectionWorkflowCacheProvider&
-            workflow_cache_provider)
+            workflow_cache_provider,
+        std::stop_token cancellation_token)
     {
         checkpoint();
         SourceCollectionLoadRequest resolved_request =
@@ -410,6 +404,7 @@ public:
             checkpoint,
             workflow_cache_provider,
             request.spectrum_index,
+            cancellation_token,
         };
         std::error_code directory_error;
         const bool is_directory =
@@ -681,12 +676,14 @@ private:
     SourceCollectionFolderListingGenerationHandle
     ScanFolderListingGeneration(
         const std::filesystem::path& path,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
+        const SourceCollectionCancellationCheckpoint& checkpoint,
+        std::stop_token cancellation_token)
     {
         DirectoryChangeGenerationHandle change_generation =
-            adapters_.folder_change_generation_factory(
-                path,
-                checkpoint);
+            directory_change_generation_monitor_
+                ? directory_change_generation_monitor_->Begin(
+                      path, checkpoint, cancellation_token)
+                : adapters_.folder_change_generation_factory(path, checkpoint);
         SourceCollectionFolderListing listing =
             adapters_.folder_scanner(path, checkpoint);
         return std::make_shared<
@@ -743,7 +740,8 @@ private:
                 listing_generation =
                     ScanFolderListingGeneration(
                         work.request.path,
-                        work.checkpoint);
+                        work.checkpoint,
+                        work.cancellation_token);
                 listing_scan_performed = true;
             }
             const SourceCollectionFolderListing& listing =
@@ -956,7 +954,8 @@ private:
                 verified_generation =
                     ScanFolderListingGeneration(
                         work.request.path,
-                        work.checkpoint);
+                        work.checkpoint,
+                        work.cancellation_token);
                 if (work.request.latency_attempt) {
                     work.request.latency_attempt
                         ->MarkFolderListingScanPerformed();
@@ -1201,13 +1200,15 @@ PreparedSourceCollection SourceCollectionPreparation::Prepare(
     const SourceCollectionLoadRequest& request,
     const SourceCollectionCancellationCheckpoint& checkpoint,
     const SourceCollectionWorkflowCacheProvider&
-        workflow_cache_provider)
+        workflow_cache_provider,
+    std::stop_token cancellation_token)
 {
     return impl_->Prepare(
         task_id,
         request,
         checkpoint,
-        workflow_cache_provider);
+        workflow_cache_provider,
+        cancellation_token);
 }
 
 }  // namespace specforge

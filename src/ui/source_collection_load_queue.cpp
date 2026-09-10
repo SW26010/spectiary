@@ -48,7 +48,7 @@ public:
 
     struct BatchCompletionSlot {
         std::uint64_t task_id = 0;
-        std::shared_ptr<std::atomic_bool> canceled;
+        std::shared_ptr<std::stop_source> canceled;
         bool terminal = false;
         std::optional<SourceCollectionLoadCompletion> completion;
     };
@@ -65,7 +65,7 @@ public:
     struct Task {
         std::uint64_t id = 0;
         SourceCollectionLoadRequest request;
-        std::shared_ptr<std::atomic_bool> canceled;
+        std::shared_ptr<std::stop_source> canceled;
         std::shared_ptr<BatchState> batch;
         std::size_t batch_index = 0;
         std::shared_ptr<BatchCompletionSlot> ordered_completion;
@@ -180,7 +180,7 @@ public:
                 for (const std::uint64_t id : ids) {
                     const auto match = cancellation_.find(id);
                     if (match != cancellation_.end()) {
-                        match->second->store(true, std::memory_order_relaxed);
+                        match->second->request_stop();
                         cancellation_.erase(match);
                     }
                 }
@@ -204,9 +204,7 @@ public:
             if (match == cancellation_.end()) {
                 return false;
             }
-            if (!match->second->exchange(
-                    true,
-                    std::memory_order_relaxed)) {
+            if (match->second->request_stop()) {
                 ++successful_cancellation_count_;
             }
             found = true;
@@ -362,7 +360,7 @@ private:
         if (request.latency_attempt) {
             request.latency_attempt->MarkSourceTaskId(id);
         }
-        auto canceled = std::make_shared<std::atomic_bool>(false);
+        auto canceled = std::make_shared<std::stop_source>();
         auto finished = std::make_shared<std::atomic_bool>(false);
         const std::filesystem::path failure_path = request.path;
         const std::size_t failure_spectrum_index = request.spectrum_index;
@@ -485,7 +483,7 @@ private:
             workers.reserve(workers_.size());
             for (const auto& [id, canceled] : cancellation_) {
                 (void)id;
-                canceled->store(true, std::memory_order_relaxed);
+                canceled->request_stop();
             }
             for (Worker& worker : workers_) {
                 worker.thread.request_stop();
@@ -501,7 +499,7 @@ private:
         std::stop_token stop_token) const
     {
         return [canceled = task.canceled, stop_token]() {
-            if (stop_token.stop_requested() || canceled->load(std::memory_order_relaxed)) {
+            if (stop_token.stop_requested() || canceled->stop_requested()) {
                 throw SourceCollectionPreparationCanceled();
             }
         };
@@ -538,13 +536,14 @@ private:
                 const SourceCollectionCancellationCheckpoint&
                     cache_checkpoint) {
                 return WorkflowCache(task, cache_checkpoint);
-            });
+            },
+            task.canceled->get_token());
     }
 
     void PublishCompletion(BatchCompletionSlot& slot)
     {
         const bool canceled =
-            slot.canceled && slot.canceled->load(std::memory_order_relaxed);
+            slot.canceled && slot.canceled->stop_requested();
         if (slot.completion) {
             if (!canceled) {
                 if (slot.completion->latency_attempt) {
@@ -579,7 +578,7 @@ private:
         BatchState& batch,
         std::size_t batch_index,
         std::uint64_t task_id,
-        std::shared_ptr<std::atomic_bool> canceled,
+        std::shared_ptr<std::stop_source> canceled,
         std::optional<SourceCollectionLoadCompletion> completion)
     {
         BatchCompletionSlot& slot = batch.completions[batch_index];
@@ -613,7 +612,7 @@ private:
     void FinishOrderedTask(
         BatchCompletionSlot& slot,
         std::uint64_t task_id,
-        std::shared_ptr<std::atomic_bool> canceled,
+        std::shared_ptr<std::stop_source> canceled,
         std::optional<SourceCollectionLoadCompletion> completion)
     {
         slot.task_id = task_id;
@@ -636,11 +635,11 @@ private:
 
     void FinishUnorderedTask(
         std::uint64_t task_id,
-        const std::shared_ptr<std::atomic_bool>& canceled,
+        const std::shared_ptr<std::stop_source>& canceled,
         std::optional<SourceCollectionLoadCompletion> completion)
     {
         const bool task_canceled =
-            canceled && canceled->load(std::memory_order_relaxed);
+            canceled && canceled->stop_requested();
         if (completion) {
             if (!task_canceled || completion->canceled) {
                 if (completion->latency_attempt) {
@@ -663,8 +662,7 @@ private:
     {
         const bool task_canceled =
             task.canceled &&
-            task.canceled->load(
-                std::memory_order_relaxed);
+            task.canceled->stop_requested();
         if (task.prefetch && task_canceled &&
             (!completion || !completion->canceled)) {
             if (completion && completion->prepared) {
@@ -706,7 +704,7 @@ private:
             if (task.batch) {
                 FinishBatchTask(
                     task,
-                    task.canceled->load(std::memory_order_relaxed)
+                    task.canceled->stop_requested()
                         ? std::nullopt
                         : std::optional<SourceCollectionLoadCompletion>{std::move(completion)});
             } else if (task.ordered_completion) {
@@ -812,13 +810,12 @@ private:
                 lock,
                 stop_token,
                 [&task]() {
-                    return task.canceled->load(
-                        std::memory_order_relaxed);
+                    return task.canceled->stop_requested();
                 });
             runtime_resource_cancellation_checkpoint_waiting_ =
                 false;
         }
-        if (task.canceled->load(std::memory_order_relaxed)) {
+        if (task.canceled->stop_requested()) {
             FinishCanceledTask(task);
             return;
         }
@@ -923,7 +920,7 @@ private:
     std::deque<std::shared_ptr<BatchCompletionSlot>> ordered_completions_;
     std::deque<PreparedSourceCollection> retired_prepared_;
     std::deque<BackgroundRetirementHandle> retired_resources_;
-    std::unordered_map<std::uint64_t, std::shared_ptr<std::atomic_bool>> cancellation_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<std::stop_source>> cancellation_;
     std::uint64_t next_task_id_ = 1;
     std::size_t active_task_count_ = 0;
     std::size_t active_prefetch_task_count_ = 0;

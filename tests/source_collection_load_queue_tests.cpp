@@ -1226,6 +1226,36 @@ void TestDestructionStopsEverySourceThread()
     std::filesystem::remove(second);
 }
 
+void TestCancelWakesBlockedDirectoryRegistration()
+{
+    const auto folder = UniqueTempPath("_blocked_registration");
+    std::filesystem::create_directory(folder);
+    std::promise<void> entered_promise;
+    auto entered = entered_promise.get_future();
+    std::mutex mutex;
+    std::condition_variable_any condition;
+    auto dependencies = Dependencies([](const auto& path, std::size_t index, const auto&) {
+        return MakeSnapshot(path, index);
+    });
+    dependencies.folder_change_generation_registration_factory =
+        [&](const auto&, std::stop_token stop) -> std::shared_ptr<specforge::DirectoryChangeGeneration> {
+            entered_promise.set_value();
+            std::unique_lock lock(mutex);
+            condition.wait(lock, stop, [] { return false; });
+            return {};
+        };
+    {
+        auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies));
+        const auto id = queue.Enqueue({.path = folder});
+        Require(entered.wait_for(2s) == std::future_status::ready, "native registration seam must be entered");
+        Require(queue.Cancel(id), "blocked source must accept cancellation");
+        Require(WaitUntil([&] { return queue.ActivitySnapshot().active_task_count == 0; }),
+            "cancel must wake registration wait before its five-second timeout");
+        Require(queue.TakeCompleted().empty(), "canceled registration must not publish a source");
+    }
+    std::filesystem::remove_all(folder);
+}
+
 struct DestructionProbe {
     std::promise<std::thread::id>* destroyed = nullptr;
 
@@ -1287,6 +1317,7 @@ int main()
         TestCancelStopsOnlyItsSourceThread();
         TestFailureIsReported();
         TestDestructionStopsEverySourceThread();
+        TestCancelWakesBlockedDirectoryRegistration();
         TestRetirementRunsOnWorker();
         return 0;
     } catch (const std::exception& error) {

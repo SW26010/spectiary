@@ -1258,7 +1258,7 @@ void TestCanceledBlockedRegistrationStopsOnDestruction()
         registration_stopped_promise.get_future();
     std::mutex registration_mutex;
     std::condition_variable_any registration_condition;
-    std::atomic_bool canceled = false;
+    std::stop_source canceled;
     auto preparation =
         std::make_unique<
             specforge::SourceCollectionPreparation>(
@@ -1318,12 +1318,13 @@ void TestCanceledBlockedRegistrationStopsOnDestruction()
                     1,
                     {.path = folder},
                     [&] {
-                        if (canceled.load(
-                                std::memory_order_relaxed)) {
+                        if (canceled.stop_requested()) {
                             throw specforge::
                                 SourceCollectionPreparationCanceled();
                         }
-                    });
+                    },
+                    {},
+                    canceled.get_token());
             } catch (
                 const specforge::
                     SourceCollectionPreparationCanceled&) {
@@ -1334,7 +1335,7 @@ void TestCanceledBlockedRegistrationStopsOnDestruction()
         registration_entered.wait_for(2s) ==
             std::future_status::ready,
         "registration should enter its blocking operation");
-    canceled.store(true, std::memory_order_relaxed);
+    canceled.request_stop();
     Require(
         canceled_result.wait_for(2s) ==
             std::future_status::ready,
@@ -1345,6 +1346,124 @@ void TestCanceledBlockedRegistrationStopsOnDestruction()
         registration_stopped.wait_for(2s) ==
             std::future_status::ready,
         "preparation destruction should stop and join monitor registration");
+    std::filesystem::remove_all(folder);
+}
+
+void TestRegistrationWaitTimesOutWithoutPollingAndClosesLateResult()
+{
+    std::mutex mutex;
+    std::condition_variable_any condition;
+    bool release = false;
+    auto late = std::make_shared<MutableDirectoryChangeGeneration>();
+    specforge::DirectoryChangeGenerationMonitor monitor(
+        [&](const auto& path, std::stop_token stop) {
+            if (path == "blocked") {
+                std::unique_lock lock(mutex);
+                condition.wait(lock, stop, [&] { return release; });
+                return late;
+            }
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        });
+    int checkpoints = 0;
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = monitor.Begin("blocked", [&] { ++checkpoints; });
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    Require(!result, "timed-out registration must use the unavailable fallback");
+    Require(elapsed >= 5s && elapsed < 8s, "registration wait must retain its five-second deadline");
+    Require(checkpoints == 2, "idle registration must not periodically poll cancellation");
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    condition.notify_all();
+    Require(monitor.Begin("next", [] {}) != nullptr, "monitor must accept work after late completion");
+    Require(!late->IsCurrent(), "abandoned registration must close even when another owner retains it");
+}
+
+void TestRegistrationFailureAndPreCanceledRequest()
+{
+    int calls = 0;
+    specforge::DirectoryChangeGenerationMonitor monitor(
+        [&](const auto& path, std::stop_token) -> std::shared_ptr<specforge::DirectoryChangeGeneration> {
+            ++calls;
+            if (path == "throw") {
+                throw std::runtime_error("registration failed");
+            }
+            return {};
+        });
+    Require(!monitor.Begin("unavailable", [] {}), "registration failure must remain unavailable");
+    bool threw = false;
+    try {
+        (void)monitor.Begin("throw", [] {});
+    } catch (const std::runtime_error& error) {
+        threw = std::string_view(error.what()) == "registration failed";
+    }
+    Require(threw, "factory exceptions must reach the caller");
+    std::stop_source canceled;
+    canceled.request_stop();
+    Require(!monitor.Begin("canceled", [] {}, canceled.get_token()), "pre-canceled registration must not publish a generation");
+    Require(calls == 2, "pre-canceled registration must not call the factory");
+}
+
+void TestCanceledQueuedRegistrationIsSkipped()
+{
+    std::promise<void> entered_promise;
+    auto entered = entered_promise.get_future();
+    std::mutex mutex;
+    std::condition_variable_any condition;
+    bool release = false;
+    std::atomic_int unwanted_calls = 0;
+    specforge::DirectoryChangeGenerationMonitor monitor(
+        [&](const auto& path, std::stop_token stop) {
+            if (path == "first") {
+                entered_promise.set_value();
+                std::unique_lock lock(mutex);
+                condition.wait_for(lock, stop, 3s, [&] { return release; });
+            } else if (path == "canceled") {
+                ++unwanted_calls;
+            }
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        });
+    auto first = std::async(std::launch::async, [&] { return monitor.Begin("first", [] {}); });
+    Require(entered.wait_for(2s) == std::future_status::ready, "first registration must occupy the worker");
+    std::stop_source canceled;
+    auto queued = std::async(std::launch::async, [&] {
+        return monitor.Begin("canceled", [] {}, canceled.get_token());
+    });
+    Require(queued.wait_for(50ms) == std::future_status::timeout, "second registration must wait behind the first");
+    canceled.request_stop();
+    Require(queued.wait_for(1s) == std::future_status::ready, "queued cancellation must wake without waiting for the active factory");
+    Require(!queued.get(), "canceled queued registration must not publish a result");
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    condition.notify_all();
+    Require(first.get() != nullptr, "canceling queued work must not cancel active registration");
+    Require(monitor.Begin("barrier", [] {}) != nullptr, "worker must drain the abandoned request");
+    Require(unwanted_calls == 0, "abandoned queued work must never call the factory");
+}
+
+void TestNativeGenerationSurvivesPreparationCallerThread()
+{
+    const auto folder = UniqueTempPath("_native_monitor_lifetime");
+    std::filesystem::create_directory(folder);
+    specforge::DirectoryChangeGenerationHandle generation;
+    {
+        specforge::DirectoryChangeGenerationMonitor monitor;
+        std::jthread caller([&] { generation = monitor.Begin(folder, [] {}); });
+        caller.join();
+        Require(generation && generation->IsCurrent(), "native generation must remain current after the requesting thread exits");
+        WriteFixture(folder / "added.csv");
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (generation->IsCurrent() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(1ms);
+        }
+        Require(!generation->IsCurrent(), "native generation must detect a real directory change");
+        generation = monitor.Begin(folder, [] {});
+        Require(generation && generation->IsCurrent(), "replacement generation must start current");
+    }
+    Require(!generation->IsCurrent(), "monitor shutdown must invalidate surviving native leases");
     std::filesystem::remove_all(folder);
 }
 
@@ -1370,5 +1489,9 @@ int main()
     TestChangedFolderRetriesOneStableGeneration();
     TestPublishedGenerationInvalidatesOnPreparationDestruction();
     TestCanceledBlockedRegistrationStopsOnDestruction();
+    TestRegistrationWaitTimesOutWithoutPollingAndClosesLateResult();
+    TestRegistrationFailureAndPreCanceledRequest();
+    TestCanceledQueuedRegistrationIsSkipped();
+    TestNativeGenerationSurvivesPreparationCallerThread();
     return 0;
 }

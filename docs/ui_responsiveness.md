@@ -201,6 +201,9 @@ navigation 中，keyboard Next 的 `source_revalidation_ms` p50/p95 为
 
 第二阶段修复把 immutable listing 与一次性 directory-change generation 绑定：
 
+注册线程的生命周期、无轮询等待和取消边界见
+[ADR 0008](adr/0008-directory-change-registration-lifetime-and-wait.md)。
+
 - worker 在完整扫描前先建立只观察目录第一层的 generation boundary；同一 generation
   内的 listing 由 source roster 保留并随下一次请求作为 opaque cache hint 返回。
 - Windows generation 由 change notification 提供，文件/目录名、attributes、size、

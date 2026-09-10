@@ -18,7 +18,6 @@ void DirectoryChangeGenerationMonitor::CloseRegistration(
 #include <condition_variable>
 #include <deque>
 #include <exception>
-#include <future>
 #include <mutex>
 #include <stop_token>
 #include <thread>
@@ -113,41 +112,57 @@ public:
 
     [[nodiscard]] DirectoryChangeGenerationHandle Begin(
         const std::filesystem::path& path,
-        const std::function<void()>& cancellation_checkpoint)
+        const std::function<void()>& cancellation_checkpoint,
+        std::stop_token cancellation_token)
     {
         cancellation_checkpoint();
+        if (cancellation_token.stop_requested()) {
+            return {};
+        }
         auto request = std::make_shared<Request>();
         request->path = path;
-        std::future<DirectoryChangeGenerationHandle> result =
-            request->result.get_future();
         {
             std::lock_guard lock(mutex_);
             if (worker_.get_stop_token().stop_requested()) {
                 return {};
             }
-            requests_.push_back(std::move(request));
+            requests_.push_back(request);
         }
         condition_.notify_one();
 
         constexpr auto kRegistrationTimeout = 5s;
-        constexpr auto kCancellationPollInterval = 2ms;
         const auto deadline =
             std::chrono::steady_clock::now() + kRegistrationTimeout;
-        while (result.wait_for(kCancellationPollInterval) !=
-               std::future_status::ready) {
+        std::unique_lock lock(request->mutex);
+        const bool completed = request->condition.wait_until(
+            lock, cancellation_token, deadline, [&request]() {
+                return request->completed;
+            });
+        if (!completed || cancellation_token.stop_requested()) {
+            request->abandoned = true;
+            lock.unlock();
             cancellation_checkpoint();
-            if (std::chrono::steady_clock::now() >= deadline) {
-                return {};
-            }
+            return {};
         }
+        auto result = std::move(request->result);
+        auto error = request->error;
+        lock.unlock();
         cancellation_checkpoint();
-        return result.get();
+        if (error) {
+            std::rethrow_exception(error);
+        }
+        return result;
     }
 
 private:
     struct Request {
         std::filesystem::path path;
-        std::promise<DirectoryChangeGenerationHandle> result;
+        std::mutex mutex;
+        std::condition_variable_any condition;
+        DirectoryChangeGenerationHandle result;
+        std::exception_ptr error;
+        bool completed = false;
+        bool abandoned = false;
     };
 
     void ReapUnusedRegistrations()
@@ -191,22 +206,44 @@ private:
                 }
             }
             for (const std::shared_ptr<Request>& canceled : canceled_requests) {
-                canceled->result.set_value({});
+                {
+                    std::lock_guard lock(canceled->mutex);
+                    canceled->completed = true;
+                }
+                canceled->condition.notify_all();
             }
             if (stop_token.stop_requested()) {
                 CloseRegistrationsForShutdown();
                 return;
             }
             try {
+                {
+                    std::lock_guard lock(request->mutex);
+                    if (request->abandoned) {
+                        continue;
+                    }
+                }
                 std::shared_ptr<DirectoryChangeGeneration> registration =
                     registration_factory_(request->path, stop_token);
-                if (registration) {
-                    registrations_.push_back(registration);
+                std::lock_guard lock(request->mutex);
+                if (request->abandoned) {
+                    if (registration) {
+                        DirectoryChangeGenerationMonitor::CloseRegistration(
+                            *registration);
+                    }
+                } else {
+                    if (registration) {
+                        registrations_.push_back(registration);
+                    }
+                    request->result = std::move(registration);
                 }
-                request->result.set_value(std::move(registration));
+                request->completed = true;
             } catch (...) {
-                request->result.set_exception(std::current_exception());
+                std::lock_guard lock(request->mutex);
+                request->error = std::current_exception();
+                request->completed = true;
             }
+            request->condition.notify_all();
             request.reset();
             ReapUnusedRegistrations();
         }
@@ -240,9 +277,10 @@ DirectoryChangeGenerationMonitor::~DirectoryChangeGenerationMonitor() = default;
 
 DirectoryChangeGenerationHandle DirectoryChangeGenerationMonitor::Begin(
     const std::filesystem::path& path,
-    const std::function<void()>& cancellation_checkpoint)
+    const std::function<void()>& cancellation_checkpoint,
+    std::stop_token cancellation_token)
 {
-    return impl_->Begin(path, cancellation_checkpoint);
+    return impl_->Begin(path, cancellation_checkpoint, cancellation_token);
 }
 
 }  // namespace specforge
@@ -259,7 +297,8 @@ public:
 
     [[nodiscard]] DirectoryChangeGenerationHandle Begin(
         const std::filesystem::path&,
-        const std::function<void()>& cancellation_checkpoint) const
+        const std::function<void()>& cancellation_checkpoint,
+        std::stop_token) const
     {
         cancellation_checkpoint();
         return {};
@@ -281,9 +320,10 @@ DirectoryChangeGenerationMonitor::~DirectoryChangeGenerationMonitor() = default;
 
 DirectoryChangeGenerationHandle DirectoryChangeGenerationMonitor::Begin(
     const std::filesystem::path& path,
-    const std::function<void()>& cancellation_checkpoint)
+    const std::function<void()>& cancellation_checkpoint,
+    std::stop_token cancellation_token)
 {
-    return impl_->Begin(path, cancellation_checkpoint);
+    return impl_->Begin(path, cancellation_checkpoint, cancellation_token);
 }
 
 }  // namespace specforge

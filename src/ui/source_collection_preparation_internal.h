@@ -95,12 +95,15 @@ public:
         const SampleWorkflowPreparationCacheBundle>
     LoadWorkflowCache(
         const SourceCollectionCancellationCheckpoint& checkpoint);
+    // Pair a cancellable checkpoint with its token so native registration
+    // waits can wake without periodically invoking the checkpoint.
     [[nodiscard]] PreparedSourceCollection Prepare(
         std::uint64_t task_id,
         const SourceCollectionLoadRequest& request,
         const SourceCollectionCancellationCheckpoint& checkpoint,
         const SourceCollectionWorkflowCacheProvider&
-            workflow_cache_provider = {});
+            workflow_cache_provider = {},
+        std::stop_token cancellation_token = {});
 
 private:
     class Impl;
