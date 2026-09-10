@@ -1549,6 +1549,10 @@ specforge_add_test(
     specforge_desktop_ui
 )
 target_link_libraries(specforge_shell_source_load_activation_tests PRIVATE dwmapi)
+set_tests_properties(
+    specforge_shell_source_load_activation_tests
+    PROPERTIES TIMEOUT 120
+)
 specforge_add_test(
     specforge_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp

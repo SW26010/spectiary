@@ -6607,47 +6607,53 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
 
 }  // namespace
 
+#define RUN_SHELL_TEST(test) do { \
+    std::fprintf(stderr, "Running %s\n", #test); \
+    std::fflush(stderr); \
+    test(); \
+} while (false)
+
 int main()
 {
     try {
-        TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence();
-        TestExplicitOpenTracesAcceptedPathThroughFirstPresent();
-        TestSupersededExternalPreferredTraceUsesResolvedMemberIndex();
-        TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback();
-        TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter();
-        TestSourceOpenResolutionRunsOnWorkerAndCancels();
-        TestExternalStartupPreservesDeferredRestoreAnnotationContext();
-        TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect();
-        TestFailedExplicitOpenProducesTerminalSourceLoadReport();
-        TestRealDrainCommitsOnlyTheLatestRapidNavigation();
-        TestAcceptedNavigationUsesLatestMatchingRawKeyInput();
-        TestGenericRowLocationDoesNotStartPreviousNextTrace();
-        TestWorkflowAutoAdvanceStartsExplicitTrace();
-        TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices();
-        TestNewActivationSupersedesAnUnpresentedOlderTrace();
-        TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation();
-        TestAutomationSourceObservationHidesActivationToken();
-        TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent();
-        TestSameFrameSourceSwitchSupersedesActivatedNavigation();
-        TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation();
-        TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits();
-        TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread();
-        TestShellShutdownFlushPersistsLockedViewport();
-        TestDeferredRestoreReusesOnlyMatchingLockedViewport();
-        TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket();
-        TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry();
-        TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion();
-        TestIdlePrefetchIsConsumedBySecondForwardNavigation();
-        TestPublishedPrefetchBecomesStaleAfterQueryInput();
-        TestCanceledPrefetchReportsOnlyAfterWorkerExit();
-        TestAutomationSettingsUseApplicationSettingsOwner();
-        TestAutomationPanelProjectionRequiresExactNormalShellPresent();
-        TestMaintenanceResynchronizesRetainedNavigationTopology();
-        TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip();
-        TestShellWorkflowResetPreservesSameFrameLabelingIssue();
-        TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState();
-        TestShellFlushResultNamesEveryFailedOwner();
-        TestRealShellFlushAndHealthKeepIndependentSettingsOwners();
+        RUN_SHELL_TEST(TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence);
+        RUN_SHELL_TEST(TestExplicitOpenTracesAcceptedPathThroughFirstPresent);
+        RUN_SHELL_TEST(TestSupersededExternalPreferredTraceUsesResolvedMemberIndex);
+        RUN_SHELL_TEST(TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback);
+        RUN_SHELL_TEST(TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter);
+        RUN_SHELL_TEST(TestSourceOpenResolutionRunsOnWorkerAndCancels);
+        RUN_SHELL_TEST(TestExternalStartupPreservesDeferredRestoreAnnotationContext);
+        RUN_SHELL_TEST(TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect);
+        RUN_SHELL_TEST(TestFailedExplicitOpenProducesTerminalSourceLoadReport);
+        RUN_SHELL_TEST(TestRealDrainCommitsOnlyTheLatestRapidNavigation);
+        RUN_SHELL_TEST(TestAcceptedNavigationUsesLatestMatchingRawKeyInput);
+        RUN_SHELL_TEST(TestGenericRowLocationDoesNotStartPreviousNextTrace);
+        RUN_SHELL_TEST(TestWorkflowAutoAdvanceStartsExplicitTrace);
+        RUN_SHELL_TEST(TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices);
+        RUN_SHELL_TEST(TestNewActivationSupersedesAnUnpresentedOlderTrace);
+        RUN_SHELL_TEST(TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation);
+        RUN_SHELL_TEST(TestAutomationSourceObservationHidesActivationToken);
+        RUN_SHELL_TEST(TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent);
+        RUN_SHELL_TEST(TestSameFrameSourceSwitchSupersedesActivatedNavigation);
+        RUN_SHELL_TEST(TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation);
+        RUN_SHELL_TEST(TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits);
+        RUN_SHELL_TEST(TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread);
+        RUN_SHELL_TEST(TestShellShutdownFlushPersistsLockedViewport);
+        RUN_SHELL_TEST(TestDeferredRestoreReusesOnlyMatchingLockedViewport);
+        RUN_SHELL_TEST(TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket);
+        RUN_SHELL_TEST(TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry);
+        RUN_SHELL_TEST(TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion);
+        RUN_SHELL_TEST(TestIdlePrefetchIsConsumedBySecondForwardNavigation);
+        RUN_SHELL_TEST(TestPublishedPrefetchBecomesStaleAfterQueryInput);
+        RUN_SHELL_TEST(TestCanceledPrefetchReportsOnlyAfterWorkerExit);
+        RUN_SHELL_TEST(TestAutomationSettingsUseApplicationSettingsOwner);
+        RUN_SHELL_TEST(TestAutomationPanelProjectionRequiresExactNormalShellPresent);
+        RUN_SHELL_TEST(TestMaintenanceResynchronizesRetainedNavigationTopology);
+        RUN_SHELL_TEST(TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip);
+        RUN_SHELL_TEST(TestShellWorkflowResetPreservesSameFrameLabelingIssue);
+        RUN_SHELL_TEST(TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState);
+        RUN_SHELL_TEST(TestShellFlushResultNamesEveryFailedOwner);
+        RUN_SHELL_TEST(TestRealShellFlushAndHealthKeepIndependentSettingsOwners);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
