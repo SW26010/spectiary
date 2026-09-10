@@ -66,3 +66,7 @@ set_property(TEST
     specforge_widget_recording_tests
     APPEND PROPERTY LABELS widget
 )
+
+get_target_property(workflow_libraries specforge_sample_workflow_shortcut_tests LINK_LIBRARIES)
+set_property(TARGET specforge_sample_workflow_shortcut_tests PROPERTY LINK_LIBRARIES
+    specforge_widget_harness ${workflow_libraries})

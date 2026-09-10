@@ -1366,11 +1366,13 @@ specforge_add_test(
     tests/sample_navigation_sequence_tests.cpp
     specforge_sessions
 )
+if(SPECFORGE_BUILD_WIDGET_TESTS)
 specforge_add_test(
     specforge_sample_workflow_shortcut_tests
     tests/sample_workflow_shortcut_tests.cpp
     specforge_desktop_ui
 )
+endif()
 specforge_add_test(
     specforge_sample_labeling_filename_tests
     tests/sample_labeling_filename_tests.cpp
@@ -1791,6 +1793,9 @@ set(SPECFORGE_EXTENDED_TESTS
     specforge_shell_source_load_activation_tests
     specforge_spectral_lines_panel_controller_tests
 )
+if(NOT SPECFORGE_BUILD_WIDGET_TESTS)
+    list(REMOVE_ITEM SPECFORGE_FAST_TESTS specforge_sample_workflow_shortcut_tests)
+endif()
 set_property(
     TEST ${SPECFORGE_FAST_TESTS}
     APPEND PROPERTY LABELS fast
@@ -1802,4 +1807,5 @@ set_property(
 
 if(SPECFORGE_BUILD_WIDGET_TESTS)
     add_subdirectory(tests/widget)
+    set_property(TEST specforge_sample_workflow_shortcut_tests APPEND PROPERTY LABELS widget)
 endif()

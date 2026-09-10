@@ -3,7 +3,8 @@
 #include "ui/sample_workflow_shortcut.h"
 
 #include <imgui.h>
-#include <imgui_internal.h>
+#include "imgui_widget_harness.h"
+#include <memory>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,16 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+namespace {
+std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::string_view scope = {})
+{
+    const auto item = specforge::test::WidgetHarness::Current().Observe(label, scope);
+    if (!item) return std::nullopt;
+    return std::array<float, 4>{item->bounds.Min.x, item->bounds.Min.y,
+        item->bounds.Max.x, item->bounds.Max.y};
+}
+}
 
 namespace specforge {
 
@@ -119,23 +130,8 @@ struct SampleWorkflowPanelUiTestAccess {
             RecoveryDraftRowToken(view, draft_index));
     }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingSelectorRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_selector_rect_;
-    }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingTaskNameRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_task_name_rect_;
-    }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingTaskIdCopyRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_task_id_copy_rect_;
-    }
 
     [[nodiscard]] static std::string_view TaskNameEditTaskId(
         const SampleWorkflowPanelUi& panel)
@@ -170,17 +166,7 @@ struct SampleWorkflowPanelUiTestAccess {
             task_name);
     }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingPauseRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_pause_rect_;
-    }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingDeleteRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_delete_rect_;
-    }
 
     [[nodiscard]] static std::optional<std::array<float, 4>>
     LabelingRecoveryRect(const SampleWorkflowPanelUi& panel)
@@ -188,17 +174,7 @@ struct SampleWorkflowPanelUiTestAccess {
         return panel.labeling_recovery_rect_;
     }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    TemporaryLabelingActionRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.temporary_labeling_action_rect_;
-    }
 
-    [[nodiscard]] static std::optional<std::array<float, 4>>
-    LabelingDeleteConfirmationRect(const SampleWorkflowPanelUi& panel)
-    {
-        return panel.labeling_delete_confirmation_rect_;
-    }
 
     [[nodiscard]] static std::optional<std::array<float, 4>>
     RecoveryActionRect(
@@ -336,6 +312,9 @@ public:
         int font_height = 0;
         io.Fonts->GetTexDataAsRGBA32(&font_pixels, &font_width, &font_height);
         Require(font_pixels != nullptr && font_width > 0 && font_height > 0, "ImGui font atlas should build");
+        harness_ = std::make_unique<specforge::test::WidgetHarness>(
+            [] { throw std::runtime_error("No frame driver installed"); },
+            specforge::test::WidgetHarness::FrameMode::ExistingContext);
         ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
         platform_io.Platform_ClipboardUserData = &clipboard_text_;
         platform_io.Platform_SetClipboardTextFn =
@@ -348,6 +327,7 @@ public:
 
     ~ScopedImGuiContext()
     {
+        harness_.reset();
         ImGui::DestroyContext();
     }
 
@@ -358,13 +338,14 @@ public:
 
 private:
     std::string clipboard_text_;
+    std::unique_ptr<specforge::test::WidgetHarness> harness_;
 };
 
 void BeginFrame()
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
-    io.DisplaySize = ImVec2(800.0f, 600.0f);
+    io.DisplaySize = ImVec2(1600.0f, 1200.0f);
     ImGui::NewFrame();
 }
 
@@ -740,8 +721,7 @@ void FocusLabelingTaskNameField(
 {
     (void)RenderLabelingTaskNameFrame(panel, view);
     const auto field_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingTaskNameRect(panel);
+        WidgetBounds("##labeling_task_name");
     Require(
         field_rect.has_value(),
         "an active task should expose its task-name field rectangle");
@@ -2024,7 +2004,7 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
         RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, true);
 
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "integration fixture should expose a deterministic labeling task selector rectangle");
@@ -2049,7 +2029,7 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
         activated_view,
         false);
     const auto temporary_action_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "integration fixture should expose a deterministic temporary task action rectangle");
@@ -2105,7 +2085,7 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
                 activated_view,
                 true);
         const auto selector_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+            WidgetBounds("##labeling_task_selector");
         Require(
             selector_rect.has_value(),
             "single-draft resume fixture should expose a deterministic selector rectangle");
@@ -2154,7 +2134,7 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
             activated_view,
             false);
         const auto temporary_action_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+            WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
         Require(
             temporary_action_rect.has_value(),
             "single-draft resume fixture should expose a deterministic generic action rectangle");
@@ -2527,8 +2507,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             specforge::UiLanguage::English,
             compact_window_size);
         const auto confirm_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingDeleteConfirmationRect(panel);
+            WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
         Require(
             confirm_rect.has_value(),
             "Delete draft fixture should expose a deterministic confirmation rectangle");
@@ -2865,7 +2844,7 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
             view,
             true);
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "multiple-draft fixture should expose a deterministic selector rectangle");
@@ -2910,7 +2889,7 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
         "multiple-draft fixture should open the task selector");
 
     const auto temporary_action_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
     const bool generic_resume_hovered = temporary_action_rect.has_value();
     Require(
         !generic_resume_hovered && observation.submission_count == 0,
@@ -2995,7 +2974,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         specforge::UiLanguage::English,
         window_size);
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "a formal/temp duplicate ID should expose a selector rectangle");
@@ -3044,7 +3023,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         specforge::UiLanguage::English,
         window_size);
     const auto temporary_action_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "a formal/temp duplicate ID should expose the disabled Resume rectangle");
@@ -3198,20 +3177,18 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
                 specforge::UiLanguage::English,
                 window_size);
             const auto selector_rect =
-                specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingSelectorRect(panel);
+                WidgetBounds("##labeling_task_selector");
             const auto pause_rect =
-                specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingPauseRect(panel);
+                WidgetBounds("SpecForgePauseLabelingTask");
             const auto delete_rect =
-                specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingDeleteRect(panel);
+                WidgetBounds("SpecForgeDeleteLabelingTask");
             const auto recovery_rect =
                 specforge::SampleWorkflowPanelUiTestAccess::
                     LabelingRecoveryRect(panel);
-            Require(
-                selector_rect && pause_rect && delete_rect && recovery_rect,
-                "labeling layout fixture should expose all first-row and recovery rectangles");
+            Require(selector_rect.has_value(), "layout: selector must be observed");
+            Require(pause_rect.has_value(), "layout: Pause must be observed");
+            Require(delete_rect.has_value(), "layout: Delete must be observed");
+            Require(recovery_rect.has_value(), "layout: recovery must be observed");
             Require(
                 std::fabs((*selector_rect)[1] - (*pause_rect)[1]) <= 1.0f &&
                     std::fabs((*pause_rect)[1] - (*delete_rect)[1]) <= 1.0f,
@@ -3264,7 +3241,7 @@ void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
 
     (void)render_active_frame(true);
     const auto delete_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingDeleteRect(panel);
+        WidgetBounds("SpecForgeDeleteLabelingTask");
     Require(
         delete_rect.has_value(),
         "active delete integration fixture should expose a deterministic delete rectangle");
@@ -3309,7 +3286,7 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
 
     (void)render_active_frame();
     const auto delete_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingDeleteRect(panel);
+        WidgetBounds("SpecForgeDeleteLabelingTask");
     Require(
         delete_rect.has_value(),
         "cross-frame delete fixture should expose a deterministic delete rectangle");
@@ -3331,8 +3308,7 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
     latest_view.labeling.source_identity = "source/new";
     latest_view.labeling.task_id = "task-new";
     const auto confirm_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingDeleteConfirmationRect(panel);
+        WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
     Require(
         confirm_rect.has_value(),
         "cross-frame delete fixture should expose a deterministic confirmation rectangle");
@@ -3439,8 +3415,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             true);
 
         const auto confirm_rect =
-            specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingDeleteConfirmationRect(panel);
+            WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
         Require(
             confirm_rect.has_value(),
             "editing-state fixture should expose a deterministic recovery confirmation rectangle");
@@ -3583,11 +3558,9 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
         RenderLabelingTaskNameFrame(panel, view, true);
     Require(
         formal.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingTaskNameRect(panel)
+            WidgetBounds("##labeling_task_name")
                 .has_value() &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingTaskIdCopyRect(panel)
+            WidgetBounds("SpecForgeCopyLabelingTaskId")
                 .has_value(),
         "a formal task should always render the name editor and task ID copy control");
     Require(
@@ -3607,8 +3580,7 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
         RenderLabelingTaskNameFrame(panel, view, true);
     Require(
         draft.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                    LabelingTaskNameRect(panel)
+            WidgetBounds("##labeling_task_name")
                 .has_value() &&
             specforge::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == "Draft triage",
@@ -3643,8 +3615,7 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
         specforge::UiLanguage::English,
         window_size);
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "the active draft should expose its task selector rectangle");
@@ -3729,8 +3700,7 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
         specforge::UiLanguage::English,
         window_size);
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "the formal task should expose its task selector rectangle");
@@ -3846,8 +3816,7 @@ void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
         "editing before blur must not emit a rename");
 
     const auto copy_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingTaskIdCopyRect(panel);
+        WidgetBounds("SpecForgeCopyLabelingTaskId");
     Require(
         copy_rect.has_value(),
         "the full task ID should have a copy button beside it");
@@ -3927,8 +3896,7 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
     const LabelingTaskNameFrameObservation typed =
         RenderLabelingTaskNameFrame(panel, view);
     const auto copy_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingTaskIdCopyRect(panel);
+        WidgetBounds("SpecForgeCopyLabelingTaskId");
     Require(
         typed.submission_count == 0 &&
             copy_rect.has_value(),
@@ -3974,11 +3942,9 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
             settled.submission_count == 0,
         "a zero-match filter should allow the deferred blur rename to submit exactly once");
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingTaskNameRect(panel)
+        WidgetBounds("##labeling_task_name")
                 .has_value() &&
-            specforge::SampleWorkflowPanelUiTestAccess::
-                LabelingTaskIdCopyRect(panel)
+            WidgetBounds("SpecForgeCopyLabelingTaskId")
                 .has_value() &&
             specforge::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) ==
@@ -4054,8 +4020,7 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
             false,
             narrow_size);
     const auto copy_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::
-            LabelingTaskIdCopyRect(panel);
+        WidgetBounds("SpecForgeCopyLabelingTaskId");
     Require(
         copy_rect.has_value() &&
             (*copy_rect)[0] >= window_x &&
@@ -4446,7 +4411,7 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
             conflict_message);
 
     const auto selector_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+        WidgetBounds("##labeling_task_selector");
     Require(
         selector_rect.has_value(),
         "message integration fixture should expose a deterministic selector rectangle");
@@ -4499,7 +4464,7 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
         false,
         conflict_message);
     const auto temporary_action_rect =
-        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "message integration fixture should expose a deterministic labeling action rectangle");

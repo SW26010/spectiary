@@ -191,19 +191,12 @@ private:
     std::unordered_set<std::string> retained_recovery_drafts_;
     std::unordered_map<std::string, std::string>
         recovery_draft_fingerprints_;
-    std::optional<std::array<float, 4>> labeling_selector_rect_;
-    std::optional<std::array<float, 4>> labeling_task_name_rect_;
-    std::optional<std::array<float, 4>> labeling_task_id_copy_rect_;
-    std::optional<std::array<float, 4>> labeling_pause_rect_;
-    std::optional<std::array<float, 4>> labeling_delete_rect_;
     std::optional<std::array<float, 4>> labeling_recovery_rect_;
     std::optional<std::array<float, 4>>
         labeling_output_action_rect_;
     std::optional<std::array<float, 4>> labeling_export_rect_;
     std::optional<std::array<float, 4>>
         labeling_export_format_rect_;
-    std::optional<std::array<float, 4>> temporary_labeling_action_rect_;
-    std::optional<std::array<float, 4>> labeling_delete_confirmation_rect_;
     std::unordered_map<std::string, std::array<float, 4>>
         recovery_action_rects_;
     std::unordered_map<std::string, std::array<float, 4>>

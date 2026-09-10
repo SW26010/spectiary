@@ -1372,12 +1372,6 @@ void SampleWorkflowPanelUi::RenderTaskNameEditor(
         "##labeling_task_name",
         &task_name_edit_buffer_,
         ImGuiInputTextFlags_EnterReturnsTrue);
-    const ImRect task_name_rect = GImGui->LastItemData.Rect;
-    labeling_task_name_rect_ = {
-        task_name_rect.Min.x,
-        task_name_rect.Min.y,
-        task_name_rect.Max.x,
-        task_name_rect.Max.y};
     const bool deactivated_after_edit =
         ImGui::IsItemDeactivatedAfterEdit();
     RecordTaskNameEdit(
@@ -1414,12 +1408,6 @@ void SampleWorkflowPanelUi::RenderTaskNameEditor(
     if (ImGui::Button(copy_task_id_label.c_str())) {
         ImGui::SetClipboardText(labeling_view.task_id.c_str());
     }
-    const ImRect copy_rect = GImGui->LastItemData.Rect;
-    labeling_task_id_copy_rect_ = {
-        copy_rect.Min.x,
-        copy_rect.Min.y,
-        copy_rect.Max.x,
-        copy_rect.Max.y};
     ImGui::PopID();
 }
 
@@ -1541,17 +1529,10 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
-    labeling_selector_rect_.reset();
-    labeling_task_name_rect_.reset();
-    labeling_task_id_copy_rect_.reset();
-    labeling_pause_rect_.reset();
-    labeling_delete_rect_.reset();
     labeling_recovery_rect_.reset();
     labeling_output_action_rect_.reset();
     labeling_export_rect_.reset();
     labeling_export_format_rect_.reset();
-    temporary_labeling_action_rect_.reset();
-    labeling_delete_confirmation_rect_.reset();
     recovery_action_rects_.clear();
     recovery_identity_rects_.clear();
     const auto capture_result = [this, language](
@@ -2214,12 +2195,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::EndPopup();
             return true;
         }
-        const ImRect delete_confirmation_rect = GImGui->LastItemData.Rect;
-        labeling_delete_confirmation_rect_ = {
-            delete_confirmation_rect.Min.x,
-            delete_confirmation_rect.Min.y,
-            delete_confirmation_rect.Max.x,
-            delete_confirmation_rect.Max.y};
         ImGui::SameLine();
         const std::string cancel_delete_task_label =
             StableUiLabel(
@@ -2323,11 +2298,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGuiComboFlags_CustomPreview);
     const ImRect selector_rect = GImGui->LastItemData.Rect;
     const ImGuiID selector_id = GImGui->LastItemData.ID;
-    labeling_selector_rect_ = {
-        selector_rect.Min.x,
-        selector_rect.Min.y,
-        selector_rect.Max.x,
-        selector_rect.Max.y};
     if (selector_open) {
         const bool temporary_selected =
             labeling_view.has_active_task && labeling_view.active_task_is_temporary;
@@ -2392,11 +2362,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
                                 StartOrResumeTemporaryLabelingTask()));
                 }
             }
-            temporary_labeling_action_rect_ = {
-                temporary_action.rect.Min.x,
-                temporary_action.rect.Min.y,
-                temporary_action.rect.Max.x,
-                temporary_action.rect.Max.y};
             if (temporary_action_disabled &&
                 temporary_action.hovered) {
                     const std::string_view tooltip =
@@ -2498,12 +2463,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::End();
             return;
         }
-        const ImRect pause_rect = GImGui->LastItemData.Rect;
-        labeling_pause_rect_ = {
-            pause_rect.Min.x,
-            pause_rect.Min.y,
-            pause_rect.Max.x,
-            pause_rect.Max.y};
         if (!labeling_view.can_deactivate_task) {
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -2532,12 +2491,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::OpenPopup(
                 delete_labeling_task_popup.c_str());
         }
-        const ImRect delete_rect = GImGui->LastItemData.Rect;
-        labeling_delete_rect_ = {
-            delete_rect.Min.x,
-            delete_rect.Min.y,
-            delete_rect.Max.x,
-            delete_rect.Max.y};
         if (!labeling_view.can_delete_task) {
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
