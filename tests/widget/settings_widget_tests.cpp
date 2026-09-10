@@ -47,6 +47,36 @@ void TestInputCheckbox()
     Require(f.intents == 2, "Checkbox interactions must emit exactly one intent each");
 }
 
+void TestGeneralAndLanguageControls()
+{
+    SettingsFixture f;
+    f.ui.Click("SpecForgeSettingsGeneral");
+    f.ui.Click("SpecForgeOpenExternalSourceAsFolder");
+    Require(f.settings.View().open_external_source_as_folder && f.intents == 1,
+        "External source checkbox must update the owner exactly once");
+    const auto placeholder = f.ui.Find("SpecForgeIncludeExternalSubfolders");
+    Require(placeholder.disabled, "Deferred subfolder control must stay disabled");
+    try {
+        f.ui.Click("SpecForgeIncludeExternalSubfolders");
+        throw std::runtime_error("Disabled placeholder accepted input");
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()) == "Disabled widget: SpecForgeIncludeExternalSubfolders",
+            "Disabled placeholder must reject widget input");
+    }
+    Require(f.intents == 1, "Disabled placeholder must not emit an intent");
+    f.ui.Click("SpecForgeSettingsLanguage");
+    f.ui.Click("SpecForgeApplicationLanguage");
+    f.ui.Click("SpecForgeUiLanguageSimplifiedChinese");
+    Require(f.settings.View().language == UiLanguage::SimplifiedChinese && f.intents == 2,
+        "Language selector must update the owner exactly once");
+    f.ui.Click("SpecForgeSettingsAppearance");
+    (void)f.settings.Apply(ApplicationSettingsIntent::SetUiScale(125), {});
+    f.ui.Frames(2);
+    f.ui.Click("SpecForgeUiScaleReset");
+    Require(f.settings.View().ui_scale_percentage == 100 && f.intents == 3,
+        "Localized scale Reset must preserve its identity and submit once");
+}
+
 void TestThemeCombo()
 {
     SettingsFixture f;
@@ -150,7 +180,7 @@ int main(int argc, char** argv)
         Require(name == "all" || name == "failures" || name == "input" ||
                 name == "theme" || name == "scale" || name == "recording", "Unknown widget test case");
         if (name == "all" || name == "failures") TestBoundedFailures();
-        if (name == "all" || name == "input") TestInputCheckbox();
+        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); }
         if (name == "all" || name == "theme") TestThemeCombo();
         if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();
         if (name == "all" || name == "recording") TestRecordingDisablesDirectoryReset();

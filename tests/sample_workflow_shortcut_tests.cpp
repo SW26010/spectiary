@@ -3,7 +3,10 @@
 #include "ui/sample_workflow_shortcut.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 #include "imgui_widget_harness.h"
+#endif
 #include <memory>
 
 #include <algorithm>
@@ -20,6 +23,7 @@
 #include <vector>
 
 namespace {
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::string_view scope = {})
 {
     const auto item = specforge::test::WidgetHarness::Current().Observe(label, scope);
@@ -27,6 +31,7 @@ std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::st
     return std::array<float, 4>{item->bounds.Min.x, item->bounds.Min.y,
         item->bounds.Max.x, item->bounds.Max.y};
 }
+#endif
 }
 
 namespace specforge {
@@ -233,12 +238,15 @@ struct SampleWorkflowPanelUiTestAccess {
 
 namespace {
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> OutputWidgetBounds()
 {
     const auto save = WidgetBounds("SpecForgeSaveLabelingTaskTo");
     return save ? save : WidgetBounds("SpecForgeMigrateLabelingTaskToAsdf");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> RecoveryWidgetBounds(
     const specforge::SourceCollectionSessionView& view, std::size_t draft_index,
     std::string_view stable_id)
@@ -246,6 +254,7 @@ std::optional<std::array<float, 4>> RecoveryWidgetBounds(
     const auto scope = specforge::SampleWorkflowPanelUiTestAccess::RecoveryDraftRowToken(view, draft_index) + "#row";
     return WidgetBounds(stable_id, scope);
 }
+#endif
 
 void Require(bool condition, std::string_view message)
 {
@@ -269,9 +278,11 @@ public:
         int font_height = 0;
         io.Fonts->GetTexDataAsRGBA32(&font_pixels, &font_width, &font_height);
         Require(font_pixels != nullptr && font_width > 0 && font_height > 0, "ImGui font atlas should build");
+#ifdef IMGUI_ENABLE_TEST_ENGINE
         harness_ = std::make_unique<specforge::test::WidgetHarness>(
             [] { throw std::runtime_error("No frame driver installed"); },
             specforge::test::WidgetHarness::FrameMode::ExistingContext);
+#endif
         ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
         platform_io.Platform_ClipboardUserData = &clipboard_text_;
         platform_io.Platform_SetClipboardTextFn =
@@ -284,7 +295,9 @@ public:
 
     ~ScopedImGuiContext()
     {
+#ifdef IMGUI_ENABLE_TEST_ENGINE
         harness_.reset();
+#endif
         ImGui::DestroyContext();
     }
 
@@ -295,7 +308,9 @@ public:
 
 private:
     std::string clipboard_text_;
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     std::unique_ptr<specforge::test::WidgetHarness> harness_;
+#endif
 };
 
 void BeginFrame()
@@ -672,6 +687,7 @@ ImVec2 RectCenter(const std::array<float, 4>& rect)
         (rect[1] + rect[3]) * 0.5f);
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void FocusLabelingTaskNameField(
     specforge::SampleWorkflowPanelUi& panel,
     const specforge::SourceCollectionSessionView& view)
@@ -681,6 +697,7 @@ void FocusLabelingTaskNameField(
         (void)RenderLabelingTaskNameFrame(panel, view);
     });
 }
+#endif
 
 void ReplaceFocusedText(
     specforge::SampleWorkflowPanelUi& panel,
@@ -773,6 +790,7 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
     return observation;
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void SelectLabelExportFormatThroughUi(
     specforge::SampleWorkflowPanelUi& panel,
     const specforge::SourceCollectionSessionView& view,
@@ -792,6 +810,7 @@ void SelectLabelExportFormatThroughUi(
         specforge::SampleWorkflowPanelUiTestAccess::LabelingExportFormat(panel) == format,
         "choosing an export format must update the preference without exporting");
 }
+#endif
 
 struct LabelingTaskSwitchFrameObservation {
     specforge::SampleWorkflowShortcut shortcut;
@@ -1288,6 +1307,7 @@ void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
         "canonical owner should not expose another ownership migration action");
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
 {
     ScopedImGuiContext context;
@@ -1330,7 +1350,9 @@ void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
             submitted.submitted_path == "user-entered.final",
         "Save to should suggest a safe ASDF name while forwarding the user's chosen path unchanged");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
 {
     ScopedImGuiContext context;
@@ -1401,7 +1423,9 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
             !structural.submitted_workflow_kind,
         "Export Labels should be hidden for a structural canonical task without authoritative values");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
 {
     ScopedImGuiContext context;
@@ -1521,7 +1545,9 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
                 specforge::SampleLabelExportFormat::Npy,
         "folder NPY override should drive both the chooser and export intent");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
 {
     struct MatrixCase {
@@ -1638,6 +1664,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
             "the selected matrix format must reach both the path chooser and export intent");
     }
 }
+#endif
 
 void TestLabelExportFormatControlsDefaultExtension()
 {
@@ -1839,6 +1866,7 @@ void TestLabelingPanelRoutesTheLatestSessionProjection()
         "Labeling Panel should register shortcuts from the latest session projection after a mutation");
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
 {
     ScopedImGuiContext context;
@@ -1905,7 +1933,9 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
             observation.shortcut.label_code == 8,
         "the first new shortcut after a task switch should be routed without a settling frame");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelUsesIdentityForSingleDraftResume()
 {
     const specforge::SourceCollectionSessionView stale_view =
@@ -2069,7 +2099,9 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
                 stale_view.labeling.recovery_drafts.front().task_id,
         "a formalized single draft must submit identity-checked recovery");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
 {
     const specforge::SourceCollectionSessionView recovery_view =
@@ -2416,7 +2448,9 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             "Delete target changes should use delete-specific feedback");
     }
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
 {
     ScopedImGuiContext context;
@@ -2558,7 +2592,9 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
             IsRecoveryDraftRetainedAt(panel, duplicate_view, 0),
         "a removed duplicate row should clear its own acknowledgement");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
 {
     const specforge::SourceCollectionSessionView duplicate_view =
@@ -2650,7 +2686,9 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
     assert_ambiguous_action_is_blocked(
         "SpecForgeDeleteTemporaryDraft");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
 {
     ScopedImGuiContext context;
@@ -2738,7 +2776,9 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
         !generic_resume_hovered && observation.submission_count == 0,
         "multiple recovery drafts must not expose an identity-free Resume labeling draft action");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
 {
     const specforge::SourceCollectionSessionView ambiguous_view =
@@ -2899,7 +2939,9 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         resume_released.submission_count == 0,
         "a formal/temp duplicate ID should disable generic Resume");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
 {
     ScopedImGuiContext context;
@@ -2965,6 +3007,7 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
             opened.logged_text.find("source/recovery") != std::string::npos,
         "recovery delete confirmation should show the selected draft name and identity");
 }
+#endif
 
 void TestLabelingPanelPlacesSelectorBeforeRecoveryList()
 {
@@ -2996,6 +3039,7 @@ void TestLabelingPanelPlacesSelectorBeforeRecoveryList()
         "the labeling selector should be rendered before the recovery list");
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
 {
     const std::array<ImVec2, 2> window_sizes = {
@@ -3036,7 +3080,11 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
                     (*pause_rect)[0] >= 20.0f &&
                     (*delete_rect)[2] <= 20.0f + window_size.x,
                 "selector row controls should remain inside the labeling window");
-            (void)expect_recovery_action;
+            if (expect_recovery_action) {
+                const auto recovery = RecoveryWidgetBounds(view, 0, "SpecForgeRecoverTemporaryDraft");
+                Require(recovery && (*recovery)[1] > (*delete_rect)[3],
+                    "recovery actions must remain below the complete selector row");
+            }
             (void)rendered;
         }
     };
@@ -3048,7 +3096,9 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
         MakeFormalTaskWithRecoveryDraftView(),
         true);
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
 {
     ScopedImGuiContext context;
@@ -3092,7 +3142,9 @@ void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
         rendered.popup_open,
         "the current-task delete path should render one confirmation modal");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
 {
     ScopedImGuiContext context;
@@ -3167,7 +3219,9 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
                     specforge::UiTextId::LabelingDeleteTargetChanged),
         "a current-task delete confirmation must reject a changed source/task identity");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
 {
     const auto make_view = []() {
@@ -3329,7 +3383,9 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             "a rejected unrelated recovery deletion must preserve active-task editing state");
     }
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
 {
     ScopedImGuiContext context;
@@ -3369,7 +3425,9 @@ void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
             "narrow recovery actions should remain inside the dock");
     }
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
 {
     ScopedImGuiContext context;
@@ -3421,7 +3479,9 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
                 std::string::npos,
         "the draft selector should show its persisted name rather than a fixed temporary-task label");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelOpenSelectorUsesRealDraftName()
 {
     ScopedImGuiContext context;
@@ -3498,7 +3558,9 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
                 std::string::npos,
         "the open selector should use the real draft name as its selectable label and show temporary ownership separately");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelOpenSelectorUsesRealFormalName()
 {
     ScopedImGuiContext context;
@@ -3579,7 +3641,9 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
             selectable_name != std::string::npos,
         "the open selector should render a formal task name containing ## or ### verbatim");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
 {
     ScopedImGuiContext context;
@@ -3624,7 +3688,9 @@ void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
             settled.submission_count == 0,
         "the Enter release and ordinary refresh must not duplicate a rename");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
 {
     ScopedImGuiContext context;
@@ -3674,7 +3740,9 @@ void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
         context.clipboard_text() == view.labeling.task_id,
         "the copy control should copy the complete task UUID");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
 {
     ScopedImGuiContext context;
@@ -3703,7 +3771,9 @@ void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
             reopened.submission_count == 0,
         "collapsing or hiding the panel should settle one pending task-name edit without duplicating it on reopen");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
 {
     ScopedImGuiContext context;
@@ -3779,7 +3849,9 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
                 TaskNameEditBuffer(panel) == requested_name,
         "an active task should retain its task-name and task-ID controls when filters match no samples");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
 {
     ScopedImGuiContext context;
@@ -3826,7 +3898,9 @@ void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
                 TaskNameEditTaskId(stale_panel).empty(),
         "hidden-panel finalization should discard the edit when the expected task ID is stale");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
 {
     ScopedImGuiContext context;
@@ -3887,7 +3961,9 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
         context.clipboard_text() == view.labeling.task_id,
         "the visible narrow-dock Copy ID button should copy the complete UUID");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
 {
     ScopedImGuiContext context;
@@ -3985,7 +4061,9 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
                     "Must not rename formal task",
         "the switched task should discard the old task's pending edit buffer");
 }
+#endif
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
 {
     ScopedImGuiContext context;
@@ -4050,6 +4128,7 @@ void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
                 TaskNameEditBaseline(panel) == "Second task",
         "switching tasks should discard the old edit buffer without targeting either task");
 }
+#endif
 
 void TestLabelingPanelLocalizesBuiltInRecoveryPresentation()
 {
@@ -4194,6 +4273,7 @@ void TestLabelingPanelShowsPausedDraftSaveFailure()
         "a no-active-task recovery view should render state save/load diagnostics");
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelSurfacesRejectedWorkflowMessage()
 {
     ScopedImGuiContext context;
@@ -4319,6 +4399,7 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
                 conflict_message,
         "rejected labeling outcome should remain visibly available in the panel that submitted it");
 }
+#endif
 
 void TestLabelingPanelClearsNoticeAfterActionOnlySuccess()
 {
@@ -4708,10 +4789,18 @@ int main()
 {
     TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
     TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRoutesExportLabelsAsASeparateIntent();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsFormatOverrideUntilSourceChanges();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelExportFormatMatrixRoutesToChooserAndIntent();
+#endif
     TestLabelExportFormatControlsDefaultExtension();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
@@ -4721,35 +4810,85 @@ int main()
     TestShortcutConflictRequiresTheSameKeyTwice();
     TestNavigationAndLabelCommandsShareOneRouter();
     TestLabelingPanelRoutesTheLatestSessionProjection();
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelUsesIdentityForSingleDraftResume();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRoutesTemporaryDraftRecoveryActions();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelDeleteModalShowsRecoveryIdentity();
+#endif
     TestLabelingPanelPlacesSelectorBeforeRecoveryList();
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRendersCurrentTaskDeleteModalOnce();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRejectsCrossFrameCurrentTaskDelete();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelOpenSelectorUsesRealDraftName();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelOpenSelectorUsesRealFormalName();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelSubmitsTaskNameOnlyOnEnter();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelSettlesTaskNameWhenWindowCollapses();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelFinalizesTaskNameWhenRenderingStops();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsCopyIdReachableInNarrowDock();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName();
+#endif
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch();
+#endif
     TestLabelingPanelLocalizesBuiltInRecoveryPresentation();
     TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip();
     TestLabelingPanelShowsPausedDraftSaveFailure();
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelSurfacesRejectedWorkflowMessage();
+#endif
     TestLabelingPanelLocalizesLeaseNotices();
     TestLabelingPanelLocalizesMigrationNotices();
     TestLabelingPanelClearsNoticeAfterActionOnlySuccess();

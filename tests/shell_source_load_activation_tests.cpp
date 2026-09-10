@@ -1,3 +1,6 @@
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+#include "imgui_widget_harness.h"
+#endif
 #include "helpers/source_load_test_support.h"
 #include "legacy_annotation_fixture_io.h"
 #include "legacy_labeling_test_support.h"
@@ -447,6 +450,7 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 class ScopedImGuiContext {
 public:
     ScopedImGuiContext()
@@ -508,6 +512,8 @@ void RenderShellFileMenuFrame(
     ImGui::End();
     ImGui::EndFrame();
 }
+
+#endif
 
 template <typename Future, typename CancellationCheck>
 void WaitForRelease(
@@ -4126,6 +4132,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
             .applied(),
         "external CSV folder setting should be re-enabled for origin checks");
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     folder_decode_indices.clear();
     bool file_picker_called = false;
     {
@@ -4135,92 +4142,12 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
                 file_picker_called = true;
                 return csv_preferred;
             };
-        RenderShellFileMenuFrame(*shell, choose_source_file);
-        ImGuiWindow* host_window = ImGui::FindWindowByName(
-            kFileMenuTestHost);
-        Require(
-            host_window != nullptr,
-            "File menu test should render its host window");
-        bool file_menu_hovered = false;
-        ImVec2 file_menu_click_pos;
-        for (float y = 20.0f;
-             y <= 70.0f && !file_menu_hovered;
-             y += 2.0f) {
-            for (float x = 20.0f;
-                 x <= 220.0f && !file_menu_hovered;
-                 x += 4.0f) {
-                ImGui::GetIO().AddMousePosEvent(x, y);
-                RenderShellFileMenuFrame(
-                    *shell,
-                    choose_source_file);
-                file_menu_hovered =
-                    GImGui->HoveredWindow == host_window &&
-                    GImGui->HoveredId != 0;
-                if (file_menu_hovered) {
-                    file_menu_click_pos = ImVec2(x, y);
-                }
-            }
-        }
-        Require(
-            file_menu_hovered,
-            "File menu test should hover the File menu item");
-
-        ImGui::GetIO().AddMouseButtonEvent(
-            ImGuiMouseButton_Left,
-            true);
-        ImGui::GetIO().AddMousePosEvent(
-            file_menu_click_pos.x,
-            file_menu_click_pos.y);
-        RenderShellFileMenuFrame(*shell, choose_source_file);
-        ImGui::GetIO().AddMouseButtonEvent(
-            ImGuiMouseButton_Left,
-            false);
-        RenderShellFileMenuFrame(*shell, choose_source_file);
-
-        Require(
-            !GImGui->OpenPopupStack.empty(),
-            "File menu test should open the File menu popup");
-        ImGuiWindow* file_popup =
-            GImGui->OpenPopupStack.back().Window;
-        Require(
-            file_popup != nullptr,
-            "File menu test should expose its popup window");
-        bool open_file_hovered = false;
-        ImVec2 open_file_click_pos;
-        for (float y = file_popup->Pos.y;
-             y <= file_popup->Pos.y + 42.0f && !open_file_hovered;
-             y += 2.0f) {
-            for (float x = file_popup->Pos.x;
-                 x <= file_popup->Pos.x + file_popup->Size.x &&
-                     !open_file_hovered;
-                 x += 4.0f) {
-                ImGui::GetIO().AddMousePosEvent(x, y);
-                RenderShellFileMenuFrame(
-                    *shell,
-                    choose_source_file);
-                open_file_hovered =
-                    GImGui->HoveredWindow == file_popup &&
-                    GImGui->HoveredId != 0;
-                if (open_file_hovered) {
-                    open_file_click_pos = ImVec2(x, y);
-                }
-            }
-        }
-        Require(
-            open_file_hovered,
-            "File menu test should hover the Open File menu item");
-
-        ImGui::GetIO().AddMouseButtonEvent(
-            ImGuiMouseButton_Left,
-            true);
-        ImGui::GetIO().AddMousePosEvent(
-            open_file_click_pos.x,
-            open_file_click_pos.y);
-        RenderShellFileMenuFrame(*shell, choose_source_file);
-        ImGui::GetIO().AddMouseButtonEvent(
-            ImGuiMouseButton_Left,
-            false);
-        RenderShellFileMenuFrame(*shell, choose_source_file);
+        specforge::test::WidgetHarness ui{[&] {
+            RenderShellFileMenuFrame(*shell, choose_source_file);
+        }, specforge::test::WidgetHarness::FrameMode::ExistingContext};
+        ui.Frames(2);
+        ui.Click("SpecForgeFileMenu");
+        ui.Click("SpecForgeOpenFile");
     }
     Require(
         file_picker_called,
@@ -4236,6 +4163,8 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
             file_menu_snapshot->collection.current_index == 0 &&
             folder_decode_indices.empty(),
         "File > Open File CSV should use an in-app single-file source despite the external folder preference");
+
+#endif
 
     shell->OpenSource(csv_preferred);
     Require(

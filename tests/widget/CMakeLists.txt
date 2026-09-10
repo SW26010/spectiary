@@ -70,3 +70,7 @@ set_property(TEST
 get_target_property(workflow_libraries specforge_sample_workflow_shortcut_tests LINK_LIBRARIES)
 set_property(TARGET specforge_sample_workflow_shortcut_tests PROPERTY LINK_LIBRARIES
     specforge_widget_harness ${workflow_libraries})
+
+get_target_property(shell_libraries specforge_shell_source_load_activation_tests LINK_LIBRARIES)
+set_property(TARGET specforge_shell_source_load_activation_tests PROPERTY LINK_LIBRARIES
+    specforge_widget_harness ${shell_libraries})
