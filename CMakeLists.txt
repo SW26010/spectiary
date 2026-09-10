@@ -441,6 +441,7 @@ target_link_libraries(specforge_renderer
 )
 
 add_executable(specforge_native WIN32
+    src/app/automation_execution.cpp
     src/app/automation_panel_command_coordinator.cpp
     src/app/runtime_resource_workload.cpp
     src/app/specforge_app.cpp
@@ -922,10 +923,21 @@ set_tests_properties(
         LABELS "automation;real-gui"
 )
 
+specforge_add_test(
+    specforge_automation_execution_tests
+    tests/automation_execution_tests.cpp
+    specforge_automation
+)
+target_sources(specforge_automation_execution_tests PRIVATE src/app/automation_execution.cpp)
+target_link_libraries(specforge_automation_execution_tests PRIVATE specforge_desktop_ui)
+set_tests_properties(specforge_automation_execution_tests PROPERTIES
+    LABELS "automation;automation-headless;ci-headless;required")
+
 add_custom_target(specforge_automation_headless_targets)
 add_dependencies(
     specforge_automation_headless_targets
     specforge_automation_control_tests
+    specforge_automation_execution_tests
     specforge_automation_panel_command_coordinator_tests
     specforge_automation_state_isolation_tests
 )
@@ -1675,6 +1687,7 @@ set(SPECFORGE_FAST_TESTS
     specforge_render_wake_scheduler_tests
     specforge_imgui_layout_persistence_tests
     specforge_automation_control_tests
+    specforge_automation_execution_tests
     specforge_automation_panel_command_coordinator_tests
     specforge_automation_state_isolation_tests
     specforge_automation_samples_contract_tests

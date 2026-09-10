@@ -300,9 +300,9 @@ Assert-True -Condition ($statusBody.Contains('always()') -and $statusBody.Contai
 
 Assert-True -Condition ($runnerText.Contains('if ($Mode -eq ''Headless'') { ''automation-headless'' } else { ''real-gui'' }') -and -not $runnerText.Contains('''ci-headless''') -and $runnerText.Contains('Invoke-BoundedCTest') -and $runnerText.Contains('WaitForExit') -and $runnerText.Contains('suite_timeout_sec') -and $runnerText.Contains('test_timeout_sec') -and $runnerText.Contains('ctest_start_ticks') -and $runnerText.Contains('ProcessHandle') -and $runnerText.Contains('New-AutomationKillOnCloseJob') -and $runnerText.Contains('Assign-AutomationProcessToJob') -and $runnerText.Contains('Stop-AutomationProcessHandle') -and -not $runnerText.Contains('taskkill.exe') -and -not $runnerText.Contains('Stop-Process -Id')) -Message 'The CI runner must select the automation-specific labels, capture CTest start identity, and bound process cleanup through the shared handle/Job seam.'
 Assert-True -Condition ($runnerText.Contains('SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS') -and $runnerText.Contains('automation-samples') -and $runnerText.Contains('ctest-temporary') -and $runnerText.Contains('current_ctest_run_started_utc') -and $runnerText.Contains('historical Testing/Temporary files are excluded') -and $runnerText.Contains('failed with exit code')) -Message 'The CI runner must route sample artifacts and actionable CTest evidence into the current run-scoped artifact root and make nonzero CTest summaries diagnostic.'
-Assert-CMakeTargetClosure -Text $cmakeText -Target 'specforge_automation_headless_targets' -Dependencies @('specforge_automation_control_tests', 'specforge_automation_panel_command_coordinator_tests', 'specforge_automation_state_isolation_tests')
+Assert-CMakeTargetClosure -Text $cmakeText -Target 'specforge_automation_headless_targets' -Dependencies @('specforge_automation_control_tests', 'specforge_automation_execution_tests', 'specforge_automation_panel_command_coordinator_tests', 'specforge_automation_state_isolation_tests')
 Assert-CMakeTargetClosure -Text $cmakeText -Target 'specforge_automation_real_gui_targets' -Dependencies @('specforge_automation_launcher', 'specforge_native', 'specforge_automation_control_tests', 'specforge_automation_launcher_timeout_fixture', 'specforge_automation_state_isolation_tests')
-$expectedHeadlessTests = @('specforge_automation_control_tests', 'specforge_automation_panel_command_coordinator_tests', 'specforge_automation_state_isolation_tests', 'specforge_automation_samples_contract_tests', 'specforge_automation_ci_contract_tests')
+$expectedHeadlessTests = @('specforge_automation_control_tests', 'specforge_automation_execution_tests', 'specforge_automation_panel_command_coordinator_tests', 'specforge_automation_state_isolation_tests', 'specforge_automation_samples_contract_tests', 'specforge_automation_ci_contract_tests')
 $labelsByTest = Get-CMakeTestLabelMap -Text $cmakeText
 $selectedHeadlessTests = @(
     $labelsByTest.GetEnumerator() |
@@ -310,7 +310,7 @@ $selectedHeadlessTests = @(
         ForEach-Object { [string]$_.Key } |
         Sort-Object
 )
-Assert-True -Condition ($selectedHeadlessTests.Count -eq $expectedHeadlessTests.Count -and @($expectedHeadlessTests | Where-Object { $selectedHeadlessTests -cnotcontains $_ }).Count -eq 0) -Message 'The effective automation-headless selector must contain exactly the five automation-owned tests.'
+Assert-True -Condition ($selectedHeadlessTests.Count -eq $expectedHeadlessTests.Count -and @($expectedHeadlessTests | Where-Object { $selectedHeadlessTests -cnotcontains $_ }).Count -eq 0) -Message 'The effective automation-headless selector must contain exactly the six automation-owned tests.'
 foreach ($testName in $expectedHeadlessTests) {
     Assert-True -Condition ($labelsByTest.ContainsKey($testName) -and @('automation', 'automation-headless', 'ci-headless', 'required' | Where-Object { -not $labelsByTest[$testName].Contains($_) }).Count -eq 0) -Message "CTest '$testName' must retain its automation and repository-wide label tokens."
 }

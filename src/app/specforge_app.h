@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/automation_panel_command_coordinator.h"
+#include "app/automation_execution.h"
 #include "app/native_window_title.h"
 #include "app/on_demand_frame_capture.h"
 #include "app/pan_pacing.h"
@@ -53,38 +54,6 @@ public:
         std::optional<std::filesystem::path> initial_source = std::nullopt);
 
 private:
-    struct AutomationSourceCommand {
-        AutomationQueuedCommand command;
-        SourceCollectionActivationTransaction::
-            SourceOpenOperation operation;
-    };
-
-    struct AutomationGotoCommand {
-        AutomationQueuedCommand command;
-        std::string source_id;
-        std::size_t target_index = 0;
-        std::uint64_t activation_generation = 0;
-        std::uint64_t presented_sequence_before = 0;
-        bool changed = false;
-    };
-
-    struct AutomationLabelCommand {
-        enum class Phase {
-            NavigatingToTarget,
-            WaitingForAutoAdvance,
-        };
-
-        AutomationQueuedCommand command;
-        Phase phase = Phase::NavigatingToTarget;
-        std::string source_id;
-        std::size_t target_index = 0;
-        std::uint64_t activation_generation = 0;
-        std::uint64_t presented_sequence_before = 0;
-        std::optional<
-            ShellAutomationLabelAssignmentResult>
-            assignment;
-    };
-
     struct AutomationCaptureCommand {
         AutomationQueuedCommand command;
         std::filesystem::path output_path;
@@ -173,14 +142,7 @@ private:
         const AutomationQueuedCommand& command);
     void ServiceAutomationPanelSet(
         const AutomationQueuedCommand& command);
-    void BeginAutomationSourceOpen(
-        const AutomationQueuedCommand& command);
-    void BeginAutomationSpectrumGoto(
-        const AutomationQueuedCommand& command);
-    void BeginAutomationLabelAssign(
-        const AutomationQueuedCommand& command);
-    void ContinueAutomationLabelAssign(
-        AutomationLabelCommand& operation);
+    [[nodiscard]] AutomationExecution::Callbacks AutomationExecutionCallbacks();
     void BeginAutomationFrameCapture(
         const AutomationQueuedCommand& command);
     void ServiceAutomationProfileStart(
@@ -236,12 +198,7 @@ private:
         automation_server_;
     std::vector<AutomationQueuedCommand>
         automation_idle_waits_;
-    std::vector<AutomationSourceCommand>
-        automation_source_commands_;
-    std::optional<AutomationGotoCommand>
-        automation_goto_command_;
-    std::optional<AutomationLabelCommand>
-        automation_label_command_;
+    AutomationExecution automation_execution_;
     std::optional<AutomationCaptureCommand>
         automation_capture_command_;
     std::optional<AutomationQueuedCommand>
