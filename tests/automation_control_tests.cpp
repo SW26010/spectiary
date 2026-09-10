@@ -34,6 +34,12 @@
 namespace specforge {
 
 struct AutomationNamedPipeServerTestAccess {
+    static bool WaitForReaderExit(AutomationNamedPipeServer& server)
+    {
+        return WaitForSingleObject(
+            server.reader_thread_.native_handle(), 2000) == WAIT_OBJECT_0;
+    }
+
     static void HandleDisconnect(
         AutomationNamedPipeServer& server)
     {
@@ -2249,6 +2255,41 @@ void TestIdleWaitStopsLaterBusinessDispatch()
         "the later source.open should retain its independent terminal lifecycle");
 }
 
+void TestPreHandshakeFailureSurvivesServerClose()
+{
+    for (const std::size_t extra_bytes : {1U, 4096U}) {
+        RunningServer fixture;
+        specforge::AutomationNamedPipeClient client;
+        std::string error;
+        Require(client.Connect(fixture.pipe_name, 1s, error), error);
+        const std::string oversized(
+            specforge::kAutomationMaxMessageBytes + extra_bytes, 'x');
+        Require(WriteOverlappedPipeMessage(client.native_handle(), oversized),
+            "oversized request should reach the server");
+
+        // Do not issue a read until the server has finished closing its end.
+        // This makes disconnect-before-read deterministic and also catches a
+        // blocking FlushFileBuffers even when its write fits in the buffer.
+        Require(specforge::AutomationNamedPipeServerTestAccess::
+                WaitForReaderExit(fixture.server),
+            "pre-handshake rejection must finish without a client read");
+        const auto shutdown_started = std::chrono::steady_clock::now();
+        fixture.server.Shutdown();
+        Require(std::chrono::steady_clock::now() - shutdown_started < 2s,
+            "shutdown must remain bounded when the client never reads");
+
+        const auto response = ReceiveParsed(client);
+        Require(response.status == "failed" &&
+                response.error_code == "message_too_large",
+            "buffered rejection must survive server close until the client reads");
+        std::string message;
+        Require(!client.ReceiveUntil(message,
+                std::chrono::steady_clock::now() + 1s, error) &&
+                error == "Automation server disconnected.",
+            "the client must observe EOF after the terminal rejection");
+    }
+}
+
 void TestQueueCapacityVersionAndDisconnect()
 {
     {
@@ -3340,6 +3381,7 @@ int wmain(int argc, wchar_t** argv)
     TestIdleWaitIsAnEarlierOnlySequenceBarrier();
     TestIdleWaitStopsLaterBusinessDispatch();
     TestPreHandshakeJsonNestingIsBounded();
+    TestPreHandshakeFailureSurvivesServerClose();
     TestQueueCapacityVersionAndDisconnect();
     TestOversizedTerminalResponseIsBounded();
     TestExecutionClaimsAndQuitBarrier();

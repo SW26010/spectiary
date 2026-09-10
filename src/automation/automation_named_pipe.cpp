@@ -275,10 +275,12 @@ void AutomationNamedPipeServer::Shutdown(
         stop_requested_ = true;
         response_ready_.notify_all();
         reader_poll_.notify_all();
-    }
-    if (pipe_ != INVALID_HANDLE_VALUE) {
-        (void)CancelIoEx(pipe_, nullptr);
-        (void)DisconnectNamedPipe(pipe_);
+        // ReaderMain may already have closed the server end. Serialize handle
+        // access with that close, without waiting on a blocked pipe I/O call.
+        if (pipe_ != INVALID_HANDLE_VALUE) {
+            (void)CancelIoEx(pipe_, nullptr);
+            (void)DisconnectNamedPipe(pipe_);
+        }
     }
     if (reader_thread_.joinable()) {
         (void)CancelSynchronousIo(
@@ -696,9 +698,18 @@ void AutomationNamedPipeServer::ReaderMain()
             std::chrono::milliseconds(1000));
     }
     HandleDisconnect();
-    if (pipe_ != INVALID_HANDLE_VALUE) {
+    {
         std::lock_guard io_lock(pipe_io_mutex_);
-        (void)DisconnectNamedPipe(pipe_);
+        std::lock_guard lock(mutex_);
+        if (pipe_ != INVALID_HANDLE_VALUE) {
+            // This server never reconnects. Closing its end lets the client
+            // read buffered terminal responses before EOF; DisconnectNamedPipe
+            // would discard them. FlushFileBuffers would instead wait forever
+            // for a client that does not read. Exclude writer I/O and Shutdown
+            // while closing so neither can use a stale/recycled handle.
+            CloseHandle(pipe_);
+            pipe_ = INVALID_HANDLE_VALUE;
+        }
     }
 }
 
