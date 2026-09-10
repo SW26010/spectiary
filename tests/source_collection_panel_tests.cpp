@@ -45,46 +45,11 @@ struct SourceCollectionPanelUiTestAccess {
         return panel.source_launch_error_;
     }
 
-    [[nodiscard]] static const std::optional<std::array<float, 4>>&
-    FirstSourceContextCellRect(
-        const SourceCollectionPanelUi& panel)
-    {
-        return panel.first_source_context_cell_rect_;
-    }
 
-    [[nodiscard]] static const std::optional<std::array<float, 4>>&
-    SourceContextActionRect(const SourceCollectionPanelUi& panel)
-    {
-        return panel.source_context_action_rect_;
-    }
 
-    [[nodiscard]] static const std::optional<std::array<float, 4>>&
-    AnnotationAddFileRect(
-        const SourceCollectionPanelUi& panel)
-    {
-        return panel.annotation_add_file_rect_;
-    }
 
-    [[nodiscard]] static const std::vector<std::array<float, 4>>&
-    AnnotationDiagnosticDismissRects(
-        const SourceCollectionPanelUi& panel)
-    {
-        return panel.annotation_diagnostic_dismiss_rects_;
-    }
 
-    [[nodiscard]] static const std::vector<std::array<float, 4>>&
-    AnnotationRemoveRects(
-        const SourceCollectionPanelUi& panel)
-    {
-        return panel.annotation_remove_rects_;
-    }
 
-    [[nodiscard]] static const std::optional<std::array<float, 4>>&
-    MissingLocalAnnotationRemoveConfirmRect(
-        const SourceCollectionPanelUi& panel)
-    {
-        return panel.missing_local_annotation_remove_confirm_rect_;
-    }
 };
 
 }  // namespace specforge
@@ -127,580 +92,7 @@ public:
     }
 };
 
-void TestFilesPanelAddFileForwardsCsvToInAppOpener()
-{
-    ScopedImGuiContext context;
-    specforge::SourceCollectionSessionView view;
-    specforge::PanelSessionInteraction interaction(
-        [](specforge::SourceCollectionSessionIntent,
-           std::optional<specforge::NavigationLatencyInputKind>) {
-            return specforge::SourceCollectionSessionResult{};
-        },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
-            return view;
-        });
-    specforge::SourceCollectionPanelUi panel;
-    const std::filesystem::path selected_path =
-        std::filesystem::path{"selected.CSV"};
-    std::optional<std::filesystem::path> opened_path;
-    int choose_file_count = 0;
-    int choose_folder_count = 0;
-    bool open = true;
 
-    const auto render_frame = [&]() {
-        ImGuiIO& io = ImGui::GetIO();
-        io.DeltaTime = 1.0f / 60.0f;
-        io.DisplaySize = ImVec2(900.0f, 700.0f);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(
-            ImVec2(20.0f, 20.0f),
-            ImGuiCond_Always);
-        ImGui::SetNextWindowSize(
-            ImVec2(700.0f, 500.0f),
-            ImGuiCond_Always);
-        panel.RenderFiles(
-            interaction,
-            specforge::UiLanguage::English,
-            &open,
-            [&]() -> std::optional<std::filesystem::path> {
-                ++choose_file_count;
-                return selected_path;
-            },
-            [&]() -> std::optional<std::filesystem::path> {
-                ++choose_folder_count;
-                return std::nullopt;
-            },
-            [&](const std::filesystem::path& path) {
-                opened_path = path;
-            },
-            [](const std::filesystem::path&) -> std::optional<std::string> {
-                return std::nullopt;
-            });
-        ImGui::EndFrame();
-    };
-
-    render_frame();
-    ImGuiWindow* window = ImGui::FindWindowByName(
-        specforge::SourceCollectionPanelUi::FilesWindowName());
-    Require(
-        window != nullptr,
-        "Files panel should render its window for the Add file test");
-    const ImGuiID add_file_id = window->GetID(
-        "Add file...###SpecForgeFilesAddFile");
-    bool hovered = false;
-    for (float y = 20.0f;
-         y <= 220.0f && !hovered;
-         y += 2.0f) {
-        for (float x = 20.0f;
-             x <= 420.0f && !hovered;
-             x += 4.0f) {
-            ImGui::GetIO().AddMousePosEvent(x, y);
-            render_frame();
-            hovered = GImGui->HoveredId == add_file_id;
-        }
-    }
-    Require(
-        hovered,
-        "Files panel should expose a clickable Add file button");
-
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    render_frame();
-    Require(
-        choose_file_count == 1 &&
-            choose_folder_count == 0 &&
-            opened_path == selected_path,
-        "Files panel Add file should forward the selected CSV to its source opener");
-}
-
-ImVec2 RectCenter(const std::array<float, 4>& rect)
-{
-    return ImVec2(
-        (rect[0] + rect[2]) * 0.5f,
-        (rect[1] + rect[3]) * 0.5f);
-}
-
-struct AnnotationPanelFrameObservation {
-    std::string logged_text;
-    bool popup_open = false;
-};
-
-class AnnotationPanelFixture {
-public:
-    AnnotationPanelFixture()
-    {
-        snapshot = std::make_shared<specforge::SpectrumSnapshot>();
-        snapshot->source.path = "source-a.npy";
-        snapshot->collection.spectrum_count = 1;
-        snapshot->collection.current_index = 0;
-        view.snapshot = snapshot;
-        view.current_sample_snapshot = snapshot;
-        view.navigation.has_active_source = true;
-        view.navigation.current_index = 0;
-        view.navigation.sample_count = 1;
-        view.labeling.has_active_source = true;
-        view.labeling.source_identity = "source-a";
-    }
-
-    AnnotationPanelFrameObservation RenderFrame(
-        bool capture_text = true)
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        io.DeltaTime = 1.0f / 60.0f;
-        io.DisplaySize = ImVec2(900.0f, 700.0f);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(
-            ImVec2(20.0f, 20.0f),
-            ImGuiCond_Always);
-        ImGui::SetNextWindowSize(
-            ImVec2(560.0f, 520.0f),
-            ImGuiCond_Always);
-        if (capture_text) {
-            ImGui::LogToBuffer();
-        }
-        bool open = true;
-        specforge::PanelSessionInteraction interaction(
-            [this](
-                specforge::SourceCollectionSessionIntent intent,
-                std::optional<
-                    specforge::NavigationLatencyInputKind>) {
-                if (intent.intent_kind() ==
-                    specforge::SourceCollectionSessionIntentKind::
-                        SourceCollection) {
-                    ++submit_count;
-                    if (after_submit) {
-                        after_submit();
-                    }
-                }
-                specforge::SourceCollectionSessionResult result;
-                result.loaded = submit_loaded;
-                return result;
-            },
-            [this]() -> const specforge::SourceCollectionSessionView& {
-                return view;
-            });
-        panel.RenderAnnotations(
-            interaction,
-            specforge::UiLanguage::English,
-            &open,
-            [this]() {
-                ++choose_file_count;
-                return selected_path;
-            });
-
-        AnnotationPanelFrameObservation observation;
-        if (capture_text) {
-            observation.logged_text =
-                GImGui->LogBuffer.c_str();
-            ImGui::LogFinish();
-        }
-        observation.popup_open = ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId |
-                ImGuiPopupFlags_AnyPopupLevel);
-        ImGui::EndFrame();
-        return observation;
-    }
-
-    std::shared_ptr<specforge::SpectrumSnapshot> snapshot;
-    specforge::SourceCollectionSessionView view;
-    specforge::SourceCollectionPanelUi panel;
-    std::optional<std::filesystem::path> selected_path;
-    std::function<void()> after_submit;
-    bool submit_loaded = false;
-    int choose_file_count = 0;
-    int submit_count = 0;
-};
-
-void ClickAnnotationPanelRect(
-    AnnotationPanelFixture& fixture,
-    const std::array<float, 4>& rect)
-{
-    const ImVec2 center = RectCenter(rect);
-    ImGui::GetIO().AddMousePosEvent(center.x, center.y);
-    (void)fixture.RenderFrame(false);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    (void)fixture.RenderFrame(false);
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    (void)fixture.RenderFrame(false);
-}
-
-std::size_t CountOccurrences(
-    std::string_view text,
-    std::string_view needle)
-{
-    std::size_t count = 0;
-    for (std::size_t offset = 0;
-         (offset = text.find(needle, offset)) !=
-             std::string_view::npos;
-         offset += needle.size()) {
-        ++count;
-    }
-    return count;
-}
-
-specforge::SourceCollectionManifestDiagnostic
-MakeAnnotationImportFailure(
-    std::filesystem::path path,
-    std::string detail)
-{
-    return {
-        .kind = specforge::
-            SourceCollectionManifestDiagnosticKind::
-                AnnotationIgnored,
-        .path = std::move(path),
-        .detail = std::move(detail),
-    };
-}
-
-void TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    fixture.view.navigation.annotation_diagnostics.push_back(
-        MakeAnnotationImportFailure(
-            "initial-labels.csv",
-            "CSV roster does not match the active source collection.\nExpected sample B at row 2."));
-    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
-
-    const AnnotationPanelFrameObservation observation =
-        fixture.RenderFrame();
-    Require(
-        observation.logged_text.find("initial-labels.csv") !=
-                std::string::npos &&
-            observation.logged_text.find(
-                "CSV roster does not match the active source collection.") !=
-                std::string::npos &&
-            observation.logged_text.find(
-                "Expected sample B at row 2.") !=
-                std::string::npos &&
-            observation.logged_text.find("Dismiss") !=
-                std::string::npos,
-        "annotation import notice should draw filename, full multiline reason, and Dismiss without hover");
-    Require(
-        !observation.popup_open,
-        "annotation import failure should remain inline rather than opening a modal");
-}
-
-void TestMissingLocalAnnotationRemovalRequiresConfirmation()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    const std::filesystem::path missing_path =
-        std::filesystem::path{"moved-away-labels.asdf"};
-    fixture.view.navigation.current_annotations.push_back({
-        .name = "Quality review",
-        .path = missing_path,
-        .relationship = specforge::
-            SampleAnnotationWorkflowRelationship::
-                LocalLabelingTask,
-        .output_missing = true,
-        .can_remove_annotation = true,
-        .labeling_owner_format = specforge::
-            SampleLabelingOutputArtifactFormat::
-                CanonicalAsdf,
-    });
-
-    (void)fixture.RenderFrame();
-    const auto& remove_rects =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationRemoveRects(fixture.panel);
-    Require(
-        remove_rects.size() == 1,
-        "a removable missing local task should expose one remove action");
-    const std::array<float, 4> remove_rect =
-        remove_rects.front();
-    ClickAnnotationPanelRect(fixture, remove_rect);
-
-    const AnnotationPanelFrameObservation warning =
-        fixture.RenderFrame();
-    Require(
-        fixture.submit_count == 0 &&
-            warning.popup_open &&
-            warning.logged_text.find(
-                "Delete local task \"Quality review\"") !=
-                std::string::npos &&
-            warning.logged_text.find(
-                "Output files are not deleted.") !=
-                std::string::npos,
-        "the first remove click should show an explicit warning without abandoning the task");
-
-    const auto confirm_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            MissingLocalAnnotationRemoveConfirmRect(
-                fixture.panel);
-    Require(
-        confirm_rect.has_value(),
-        "the missing-local warning should expose a confirmation action");
-    ClickAnnotationPanelRect(fixture, *confirm_rect);
-    Require(
-        fixture.submit_count == 1,
-        "confirming the warning should submit the missing local task removal exactly once");
-}
-
-void TestSourceSwitchDismissesMissingLocalRemovalWarning()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    fixture.view.navigation.current_annotations.push_back({
-        .name = "Old source review",
-        .path = "old-source-labels.asdf",
-        .relationship = specforge::
-            SampleAnnotationWorkflowRelationship::
-                LocalLabelingTask,
-        .output_missing = true,
-        .can_remove_annotation = true,
-        .labeling_owner_format = specforge::
-            SampleLabelingOutputArtifactFormat::
-                CanonicalAsdf,
-    });
-
-    (void)fixture.RenderFrame();
-    const auto& remove_rects =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationRemoveRects(fixture.panel);
-    Require(
-        remove_rects.size() == 1,
-        "the old source should expose its missing-task remove action");
-    const std::array<float, 4> remove_rect =
-        remove_rects.front();
-    ClickAnnotationPanelRect(
-        fixture,
-        remove_rect);
-    Require(
-        fixture.RenderFrame().popup_open,
-        "the old source removal warning should be open before switching sources");
-
-    fixture.view.labeling.source_identity = "source-b";
-    fixture.snapshot->source.path = "source-b.npy";
-    fixture.view.navigation.current_annotations.clear();
-    const AnnotationPanelFrameObservation switched =
-        fixture.RenderFrame();
-    Require(
-        fixture.submit_count == 0 &&
-            !switched.popup_open &&
-            switched.logged_text.find(
-                "Old source review") ==
-                std::string::npos,
-        "switching sources should dismiss the stale missing-task warning without submitting its deletion");
-}
-
-void TestAnnotationImportFailureDismissalTracksExactDetail()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    fixture.view.navigation.annotation_diagnostics.push_back(
-        MakeAnnotationImportFailure(
-            "initial-labels.csv",
-            "First roster mismatch detail."));
-    (void)fixture.RenderFrame();
-    const auto& dismiss_rects =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationDiagnosticDismissRects(fixture.panel);
-    Require(
-        dismiss_rects.size() == 1,
-        "one visible import failure should expose one Dismiss action");
-    const std::array<float, 4> dismiss_rect =
-        dismiss_rects.front();
-    ClickAnnotationPanelRect(fixture, dismiss_rect);
-    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
-    const AnnotationPanelFrameObservation dismissed =
-        fixture.RenderFrame();
-    Require(
-        dismissed.logged_text.find("initial-labels.csv") ==
-                std::string::npos &&
-            dismissed.logged_text.find(
-                "First roster mismatch detail.") ==
-                std::string::npos,
-        "dismissed diagnostic should stay hidden for this panel session");
-
-    fixture.view.navigation.annotation_diagnostics.front().detail =
-        "Changed roster mismatch detail.";
-    const AnnotationPanelFrameObservation changed =
-        fixture.RenderFrame();
-    Require(
-        changed.logged_text.find("initial-labels.csv") !=
-                std::string::npos &&
-            changed.logged_text.find(
-                "Changed roster mismatch detail.") !=
-                std::string::npos,
-        "a changed diagnostic detail should produce a new visible dismissal key");
-}
-
-void TestReimportSameAnnotationClearsDismissalForNewFailure()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    const std::filesystem::path diagnostic_path =
-        std::filesystem::path{"imports"} /
-        "nested" / ".." / "initial-labels.csv";
-    const std::filesystem::path selected_path =
-        std::filesystem::path{"imports"} /
-        "initial-labels.csv";
-    const auto diagnostic = MakeAnnotationImportFailure(
-        diagnostic_path,
-        "Roster mismatch on retry.");
-    fixture.view.navigation.annotation_diagnostics.push_back(
-        diagnostic);
-    (void)fixture.RenderFrame();
-    const std::array<float, 4> dismiss_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationDiagnosticDismissRects(fixture.panel)
-                .front();
-    ClickAnnotationPanelRect(fixture, dismiss_rect);
-    Require(
-        fixture.RenderFrame().logged_text.find(
-            "Roster mismatch on retry.") ==
-            std::string::npos,
-        "precondition: retry diagnostic should be dismissed");
-
-    fixture.selected_path = selected_path;
-    fixture.submit_loaded = false;
-    fixture.after_submit = [&fixture, diagnostic]() {
-        fixture.view.navigation.annotation_diagnostics.push_back(
-            diagnostic);
-    };
-    const auto add_file_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationAddFileRect(fixture.panel);
-    Require(
-        add_file_rect.has_value(),
-        "Annotations panel should expose its Add file action");
-    ClickAnnotationPanelRect(fixture, *add_file_rect);
-    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
-    const AnnotationPanelFrameObservation retried =
-        fixture.RenderFrame();
-    Require(
-        fixture.choose_file_count == 1 &&
-            fixture.submit_count == 1 &&
-            CountOccurrences(
-                retried.logged_text,
-                "Roster mismatch on retry.") == 1,
-        "same normalized path retry should submit once and reveal one latest failure card");
-
-    const std::array<float, 4> retried_dismiss_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationDiagnosticDismissRects(fixture.panel)
-                .front();
-    ClickAnnotationPanelRect(
-        fixture,
-        retried_dismiss_rect);
-    fixture.submit_loaded = true;
-    fixture.after_submit = {};
-    const auto success_add_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationAddFileRect(fixture.panel);
-    Require(
-        success_add_rect.has_value(),
-        "successful retry should retain the Add file action");
-    ClickAnnotationPanelRect(fixture, *success_add_rect);
-    const AnnotationPanelFrameObservation successful =
-        fixture.RenderFrame();
-    Require(
-        successful.logged_text.find(
-            "Roster mismatch on retry.") ==
-                std::string::npos &&
-            !successful.popup_open,
-        "successful retry should keep historical failure hidden without a modal or success toast");
-}
-
-void TestAnnotationDismissalsResetAcrossSourceSwitch()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    const auto source_a_failure = MakeAnnotationImportFailure(
-        "source-a.csv",
-        "Source A failure.");
-    fixture.view.navigation.annotation_diagnostics = {
-        source_a_failure};
-    (void)fixture.RenderFrame();
-    const std::array<float, 4> dismiss_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationDiagnosticDismissRects(fixture.panel)
-                .front();
-    ClickAnnotationPanelRect(fixture, dismiss_rect);
-
-    fixture.view.labeling.source_identity = "source-b";
-    fixture.snapshot->source.path = "source-b.npy";
-    fixture.view.navigation.annotation_diagnostics = {
-        MakeAnnotationImportFailure(
-            "source-b.csv",
-            "Source B failure.")};
-    const AnnotationPanelFrameObservation source_b =
-        fixture.RenderFrame();
-    Require(
-        source_b.logged_text.find("Source B failure.") !=
-                std::string::npos &&
-            source_b.logged_text.find("Source A failure.") ==
-                std::string::npos,
-        "source switch should show only the active source diagnostic");
-
-    fixture.view.labeling.source_identity = "source-a";
-    fixture.snapshot->source.path = "source-a.npy";
-    fixture.view.navigation.annotation_diagnostics = {
-        source_a_failure};
-    const AnnotationPanelFrameObservation source_a_again =
-        fixture.RenderFrame();
-    Require(
-        source_a_again.logged_text.find("Source A failure.") !=
-            std::string::npos,
-        "switching sources should clear prior-source transient dismissal state");
-}
-
-void TestHiddenAnnotationPanelObservesIntermediateSourceSwitch()
-{
-    ScopedImGuiContext context;
-    AnnotationPanelFixture fixture;
-    const auto source_a_failure = MakeAnnotationImportFailure(
-        "source-a.csv",
-        "Source A hidden-panel failure.");
-    fixture.view.navigation.annotation_diagnostics = {
-        source_a_failure};
-    (void)fixture.RenderFrame();
-    const std::array<float, 4> dismiss_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            AnnotationDiagnosticDismissRects(fixture.panel)
-                .front();
-    ClickAnnotationPanelRect(fixture, dismiss_rect);
-    Require(
-        fixture.RenderFrame().logged_text.find(
-            "Source A hidden-panel failure.") ==
-            std::string::npos,
-        "precondition: source A diagnostic should be dismissed");
-
-    fixture.view.labeling.source_identity = "source-b";
-    fixture.snapshot->source.path = "source-b.npy";
-    fixture.view.navigation.annotation_diagnostics = {
-        MakeAnnotationImportFailure(
-            "source-b.csv",
-            "Source B hidden-panel failure.")};
-    fixture.panel.SyncAnnotationDiagnosticSource(
-        fixture.view);
-
-    fixture.view.labeling.source_identity = "source-a";
-    fixture.snapshot->source.path = "source-a.npy";
-    fixture.view.navigation.annotation_diagnostics = {
-        source_a_failure};
-    fixture.panel.SyncAnnotationDiagnosticSource(
-        fixture.view);
-
-    const AnnotationPanelFrameObservation source_a_again =
-        fixture.RenderFrame();
-    Require(
-        source_a_again.logged_text.find(
-            "Source A hidden-panel failure.") !=
-            std::string::npos,
-        "an unrendered A-to-B-to-A source transition should clear source A dismissal state");
-}
 
 void TestReopenableSourcePathEligibility()
 {
@@ -725,384 +117,7 @@ void TestReopenableSourcePathEligibility()
         "a source path containing an embedded NUL must not be reopenable");
 }
 
-void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
-{
-    ScopedImGuiContext context;
-    const std::filesystem::path source_path =
-        std::filesystem::path{L"C:\\观测 data\\source file.npy"};
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
-    snapshot->source.path = source_path;
-    snapshot->source.display_name = "source file";
-    snapshot->collection.spectrum_count = 4;
-    snapshot->collection.current_index = 2;
 
-    specforge::SourceCollectionSessionView view;
-    view.snapshot = snapshot;
-    view.current_sample_snapshot = snapshot;
-    view.sources = {
-        {
-            source_path,
-            "source file",
-            std::string{"npy"},
-            specforge::SourceCollectionSourceState::Loaded,
-        },
-    };
-    view.current_source_index = 0;
-    view.navigation.has_active_source = true;
-    view.navigation.current_index = 2;
-    view.navigation.current_source_row = 2;
-    view.navigation.sample_count = 4;
-    view.labeling.has_active_source = true;
-    view.labeling.source_identity = "source identity";
-    view.sorting.has_active_source = true;
-    view.sorting.active_source_id = "source identity";
-    const specforge::SourceCollectionSessionView before = view;
-
-    int submit_count = 0;
-    int launch_count = 0;
-    std::optional<std::filesystem::path> launched_path;
-    specforge::PanelSessionInteraction interaction(
-        [&](specforge::SourceCollectionSessionIntent,
-            std::optional<specforge::NavigationLatencyInputKind>) {
-            ++submit_count;
-            return specforge::SourceCollectionSessionResult{};
-        },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
-            return view;
-        });
-    specforge::SourceCollectionPanelUi panel;
-    bool open = true;
-    const specforge::SourceCollectionPathLauncher launch_source =
-        [&](const std::filesystem::path& path)
-        -> std::optional<std::string> {
-        ++launch_count;
-        launched_path = path;
-        return std::string{"test process creation failure"};
-    };
-
-    const auto render_frame = [&]() {
-        ImGuiIO& io = ImGui::GetIO();
-        io.DeltaTime = 1.0f / 60.0f;
-        io.DisplaySize = ImVec2(900.0f, 700.0f);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(
-            ImVec2(20.0f, 20.0f),
-            ImGuiCond_Always);
-        ImGui::SetNextWindowSize(
-            ImVec2(700.0f, 500.0f),
-            ImGuiCond_Always);
-        panel.RenderFiles(
-            interaction,
-            specforge::UiLanguage::English,
-            &open,
-            []() -> std::optional<std::filesystem::path> {
-                return std::nullopt;
-            },
-            []() -> std::optional<std::filesystem::path> {
-                return std::nullopt;
-            },
-            [](const std::filesystem::path&) {},
-            launch_source);
-        ImGui::EndFrame();
-    };
-
-    render_frame();
-    ImGuiWindow* files_window = ImGui::FindWindowByName(
-        specforge::SourceCollectionPanelUi::FilesWindowName());
-    Require(
-        files_window != nullptr,
-        "Files panel should render its window for the context-menu test");
-
-    const auto source_context_cell =
-        specforge::SourceCollectionPanelUiTestAccess::
-            FirstSourceContextCellRect(panel);
-    Require(
-        source_context_cell.has_value(),
-        "Files panel should expose the rendered type-cell rectangle for its context menu");
-    const ImVec2 source_context_position =
-        RectCenter(*source_context_cell);
-    ImGui::GetIO().AddMousePosEvent(
-        source_context_position.x,
-        source_context_position.y);
-    render_frame();
-    Require(
-        GImGui->HoveredWindow == files_window,
-        "the rendered type-cell rectangle should target the Files panel");
-
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        false);
-    render_frame();
-    render_frame();
-    Require(
-        ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
-        "right-clicking a source row should open its context menu");
-    ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
-    Require(
-        popup != nullptr,
-        "source context menu should expose a popup window");
-
-    const auto action_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            SourceContextActionRect(panel);
-    Require(
-        action_rect.has_value(),
-        "source context menu should expose the rendered action rectangle");
-    const ImVec2 action_position = RectCenter(*action_rect);
-    ImGui::GetIO().AddMousePosEvent(
-        action_position.x,
-        action_position.y);
-    render_frame();
-    Require(
-        GImGui->HoveredWindow == popup &&
-            GImGui->HoveredId != 0 &&
-            !GImGui->HoveredIdIsDisabled,
-        "the eligible source context menu action should be enabled before activation");
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    render_frame();
-    Require(
-        launch_count == 1 && launched_path == source_path,
-        "activating the source context menu should launch the selected filesystem path");
-    Require(
-        submit_count == 0,
-        "opening a source in a new instance must not submit a session action");
-    Require(
-        view.snapshot == before.snapshot &&
-            view.current_sample_snapshot == before.current_sample_snapshot &&
-            view.current_source_index == before.current_source_index &&
-            view.navigation.current_index == before.navigation.current_index &&
-            view.navigation.current_source_row == before.navigation.current_source_row &&
-            view.labeling.source_identity == before.labeling.source_identity &&
-            view.sorting.active_source_id == before.sorting.active_source_id,
-        "the original source, selection, and workflow state must remain unchanged");
-    const specforge::SourceCollectionSessionAction pending_action =
-        interaction.TakeAction();
-    Require(
-        !pending_action.source_roster_changed &&
-            !pending_action.snapshot_changed &&
-            !pending_action.workflow_changed &&
-            !pending_action.navigation_inputs_changed &&
-            !interaction.PendingAction().source_roster_changed &&
-            !interaction.PendingAction().snapshot_changed &&
-            !interaction.PendingAction().workflow_changed &&
-            !interaction.PendingAction().navigation_inputs_changed,
-        "opening a source in a new instance must not change pending session state");
-    Require(
-        specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) &&
-            *specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) ==
-                "test process creation failure",
-        "a launcher failure should remain visible as a Files-panel diagnostic");
-}
-
-void TestFilesPanelContextActionIsDisabledForIneligiblePath()
-{
-    ScopedImGuiContext context;
-    const std::filesystem::path loaded_path =
-        std::filesystem::path{L"C:\\观测 data\\loaded source.npy"};
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
-    snapshot->source.path = loaded_path;
-    snapshot->source.display_name = "loaded source";
-    snapshot->collection.spectrum_count = 1;
-
-    specforge::SourceCollectionSessionView view;
-    view.snapshot = snapshot;
-    view.current_sample_snapshot = snapshot;
-    view.sources = {
-        {
-            {},
-            "unavailable source",
-            std::string{"npy"},
-            specforge::SourceCollectionSourceState::Unavailable,
-        },
-    };
-    view.current_source_index = 0;
-
-    int launch_count = 0;
-    specforge::PanelSessionInteraction interaction(
-        [](specforge::SourceCollectionSessionIntent,
-           std::optional<specforge::NavigationLatencyInputKind>) {
-            return specforge::SourceCollectionSessionResult{};
-        },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
-            return view;
-        });
-    specforge::SourceCollectionPanelUi panel;
-    bool open = true;
-    bool cover_source_context_cell = false;
-    const specforge::SourceCollectionPathLauncher launch_source =
-        [&launch_count](const std::filesystem::path&)
-        -> std::optional<std::string> {
-        ++launch_count;
-        return std::nullopt;
-    };
-
-    const auto render_frame = [&]() {
-        ImGuiIO& io = ImGui::GetIO();
-        io.DeltaTime = 1.0f / 60.0f;
-        io.DisplaySize = ImVec2(900.0f, 700.0f);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(
-            ImVec2(20.0f, 20.0f),
-            ImGuiCond_Always);
-        ImGui::SetNextWindowSize(
-            ImVec2(700.0f, 500.0f),
-            ImGuiCond_Always);
-        panel.RenderFiles(
-            interaction,
-            specforge::UiLanguage::English,
-            &open,
-            []() -> std::optional<std::filesystem::path> {
-                return std::nullopt;
-            },
-            []() -> std::optional<std::filesystem::path> {
-                return std::nullopt;
-            },
-            [](const std::filesystem::path&) {},
-            launch_source);
-        if (cover_source_context_cell) {
-            const auto cell =
-                specforge::SourceCollectionPanelUiTestAccess::
-                    FirstSourceContextCellRect(panel);
-            if (cell) {
-                ImGui::SetNextWindowPos(
-                    ImVec2((*cell)[0] - 20.0f,
-                           (*cell)[1] - 20.0f),
-                    ImGuiCond_Always);
-                ImGui::SetNextWindowSize(
-                    ImVec2((*cell)[2] - (*cell)[0] + 40.0f,
-                           (*cell)[3] - (*cell)[1] + 40.0f),
-                    ImGuiCond_Always);
-                ImGui::Begin(
-                    "Source context occluder",
-                    nullptr,
-                    ImGuiWindowFlags_NoDecoration |
-                        ImGuiWindowFlags_NoMove |
-                        ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoSavedSettings);
-                ImGui::End();
-            }
-        }
-        ImGui::EndFrame();
-    };
-
-    render_frame();
-    ImGuiWindow* files_window = ImGui::FindWindowByName(
-        specforge::SourceCollectionPanelUi::FilesWindowName());
-    Require(
-        files_window != nullptr,
-        "Files panel should render its window for the disabled context-menu test");
-
-    const auto source_context_cell =
-        specforge::SourceCollectionPanelUiTestAccess::
-            FirstSourceContextCellRect(panel);
-    Require(
-        source_context_cell.has_value(),
-        "Files panel should expose the ineligible type-cell rectangle for the disabled context-menu test");
-    const ImVec2 source_context_position(
-        (*source_context_cell)[0] + 1.0f,
-        ((*source_context_cell)[1] +
-         (*source_context_cell)[3]) * 0.5f);
-    ImGui::GetIO().AddMousePosEvent(
-        source_context_position.x,
-        source_context_position.y);
-    cover_source_context_cell = true;
-    render_frame();
-    render_frame();
-    ImGuiWindow* occluder = ImGui::FindWindowByName(
-        "Source context occluder");
-    Require(
-        occluder != nullptr &&
-            GImGui->HoveredWindow == occluder,
-        "the context-menu test should cover the source cell with a foreground window");
-
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        false);
-    render_frame();
-    render_frame();
-    Require(
-        !ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId |
-                ImGuiPopupFlags_AnyPopupLevel),
-        "right-clicking an occluded source cell must not open the underlying context menu");
-
-    cover_source_context_cell = false;
-    render_frame();
-    render_frame();
-    Require(
-        GImGui->HoveredWindow == files_window,
-        "the uncovered type-cell padding should target the Files panel");
-
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Right,
-        false);
-    render_frame();
-    render_frame();
-    Require(
-        ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
-        "right-clicking an ineligible row should still open its context menu");
-    ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
-    Require(
-        popup != nullptr,
-        "the ineligible source context menu should expose a popup window");
-
-    const auto action_rect =
-        specforge::SourceCollectionPanelUiTestAccess::
-            SourceContextActionRect(panel);
-    Require(
-        action_rect.has_value(),
-        "the ineligible source context menu should expose the rendered action rectangle");
-    const ImVec2 action_position = RectCenter(*action_rect);
-    ImGui::GetIO().AddMousePosEvent(
-        action_position.x,
-        action_position.y);
-    render_frame();
-    Require(
-        GImGui->HoveredWindow == popup &&
-            GImGui->HoveredId != 0 &&
-            GImGui->HoveredIdIsDisabled,
-        "the ineligible source context menu action should be disabled");
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        true);
-    render_frame();
-    ImGui::GetIO().AddMouseButtonEvent(
-        ImGuiMouseButton_Left,
-        false);
-    render_frame();
-
-    Require(
-        launch_count == 0,
-        "activating the disabled source context menu item must not launch an ineligible path");
-    Require(
-        ImGui::IsPopupOpen(
-            nullptr,
-            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
-        "a disabled source context menu item should not close its popup when clicked");
-}
 
 class NavigationFixture {
 public:
@@ -1340,21 +355,24 @@ private:
     bool docking_initialized_ = false;
 };
 
-void SetActiveInputTextValue(std::string_view text)
+template <typename RenderFrame>
+void ReplaceActiveInputText(RenderFrame render_frame, std::string_view text)
 {
-    ImGuiInputTextState& state =
-        GImGui->InputTextState;
-    state.TextA.resize(
-        static_cast<int>(text.size() + 1));
-    std::memcpy(
-        state.TextA.Data,
-        text.data(),
-        text.size());
-    state.TextA[
-        static_cast<int>(text.size())] = '\0';
-    state.TextLen =
-        static_cast<int>(text.size());
-    GImGui->ActiveIdHasBeenEditedBefore = true;
+    auto& io = ImGui::GetIO();
+    io.AddKeyEvent(ImGuiMod_Ctrl, true);
+    io.AddKeyEvent(ImGuiKey_A, true);
+    render_frame();
+    io.AddKeyEvent(ImGuiKey_A, false);
+    io.AddKeyEvent(ImGuiMod_Ctrl, false);
+    render_frame();
+    if (text.empty()) {
+        io.AddKeyEvent(ImGuiKey_Backspace, true);
+        render_frame();
+        io.AddKeyEvent(ImGuiKey_Backspace, false);
+    } else {
+        io.AddInputCharactersUTF8(std::string(text).c_str());
+    }
+    render_frame();
 }
 
 void ConfigureEditableSourceInput(
@@ -1462,28 +480,35 @@ void TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    for (const std::string_view value : {"", "0", "101"}) {
-        SetActiveInputTextValue(value);
+    for (const std::string_view value : {"", "0"}) {
+        ReplaceActiveInputText([&] { fixture.RenderFrame(); }, value);
         fixture.RenderFrame();
     }
     Require(
         fixture.submission_count == 0,
-        "empty, zero, and out-of-range live source values must not submit");
+        "empty and zero live source values must not submit");
 
-    SetActiveInputTextValue("4");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "101");
+    fixture.RenderFrame();
+    Require(fixture.submitted_requests.size() == 2 &&
+        fixture.submitted_requests[0].row_index == 0 &&
+        fixture.submitted_requests[1].row_index == 9,
+        "typing 101 must submit valid prefixes 1 and 10, but reject out-of-range 101");
+
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "4");
     fixture.RenderFrame();
     Require(
-        fixture.submission_count == 1,
+        fixture.submission_count == 3,
         "a valid live source value should submit before topology replacement");
     fixture.view.navigation.current_index = 7;
     fixture.view.navigation.current_source_row = 7;
     ++fixture.view.navigation.sequence_topology_revision;
     fixture.panel.SyncNavigationInputs(
         fixture.view.navigation);
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     Require(
-        fixture.submission_count == 1 &&
+        fixture.submission_count == 3 &&
             GImGui->ActiveId != source_input_id,
         "topology replacement should deactivate the old live edit and prevent further requests");
 
@@ -1492,10 +517,10 @@ void TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange()
         fixture.view.navigation);
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     Require(
-        fixture.submission_count == 1,
+        fixture.submission_count == 3,
         "an unavailable source-row locator must reject live requests");
 }
 
@@ -1589,7 +614,7 @@ void RequireLiveSourceEditDoesNotRepeatWhenNotRendered(
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
     Require(
         fixture.submission_count == 1,
@@ -1628,7 +653,7 @@ void TestCoveredDockTabDoesNotRepeatLiveEdit()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderDockedFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderDockedFrame(); }, "6");
     fixture.RenderDockedFrame();
     Require(
         fixture.submission_count == 1,
@@ -1656,7 +681,7 @@ void TestSourceDraftWaitsForBlurAndSurvivesCursorSync()
         GImGui->ActiveId == source_input_id,
         "source input should activate for a multi-digit edit");
 
-    SetActiveInputTextValue("4");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "4");
     fixture.RenderFrame();
     Require(
         fixture.submission_count == 0,
@@ -1666,7 +691,7 @@ void TestSourceDraftWaitsForBlurAndSurvivesCursorSync()
     fixture.view.navigation.current_source_row = 29;
     fixture.panel.SyncNavigationInputs(
         fixture.view.navigation);
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     ImGui::ClearActiveID();
     fixture.RenderFrame();
 
@@ -1691,7 +716,7 @@ void TestEnterCommitsSourceDraftOnce()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     Require(
         fixture.submission_count == 0,
@@ -1727,7 +752,7 @@ void TestExplicitCommittedSourceRowCancelsPendingTarget()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -1740,9 +765,9 @@ void TestExplicitCommittedSourceRowCancelsPendingTarget()
 
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("2");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "2");
     fixture.RenderFrame();
-    SetActiveInputTextValue("20");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "20");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -1772,7 +797,7 @@ void TestEscapeCancelsSourceDraftAgainstLatestCommittedValue()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
 
     fixture.view.navigation.current_index = 29;
@@ -1811,7 +836,7 @@ void TestTopologyChangeDiscardsActiveSourceDraft()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
 
     fixture.view.navigation.current_index = 7;
@@ -1856,7 +881,7 @@ void TestInvalidAndUnavailableSourceTargetsDoNotSubmit()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -1872,7 +897,7 @@ void TestInvalidAndUnavailableSourceTargetsDoNotSubmit()
     fixture.RenderFrame();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("0");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "0");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -1884,7 +909,7 @@ void TestInvalidAndUnavailableSourceTargetsDoNotSubmit()
 
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("101");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "101");
     ImGui::ClearActiveID();
     fixture.RenderFrame();
     Require(
@@ -1907,7 +932,7 @@ void RequireSourceDraftFinalizesWhenNotRendered(
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
 
     fixture.RenderFrame({}, presentation);
@@ -1949,7 +974,7 @@ void TestCoveredDockTabFinalizesSourceDraft()
         fixture.SourceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderDockedFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderDockedFrame(); }, "6");
     fixture.RenderDockedFrame();
     fixture.RenderDockedFrame(true);
 
@@ -1979,7 +1004,7 @@ void TestSourceAndSequenceEditsKeepIndependentCommitRouting()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(source_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
 
     ImGui::ActivateItemByID(sequence_input_id);
@@ -1995,7 +1020,7 @@ void TestSourceAndSequenceEditsKeepIndependentCommitRouting()
         GImGui->ActiveId == sequence_input_id,
         "the sequence input should remain active after the source blur commit is finalized");
 
-    SetActiveInputTextValue("7");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "7");
     ImGui::ClearActiveID();
     fixture.RenderFrame();
     Require(
@@ -2022,7 +1047,7 @@ void TestCurrentSequenceEditStillSubmitsOnDeactivation()
     Require(
         GImGui->ActiveId == sequence_input_id,
         "sequence input should activate for a current edit");
-    SetActiveInputTextValue("4");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "4");
     ImGui::ClearActiveID();
 
     fixture.RenderFrame();
@@ -2053,7 +1078,7 @@ void TestDeferredShellSyncDoesNotSubmitAMultiDigitPrefix()
         GImGui->ActiveId == sequence_input_id,
         "sequence input should activate for a multi-digit edit");
 
-    SetActiveInputTextValue("4");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "4");
     fixture.RenderFrame();
     Require(
         fixture.submission_count == 0,
@@ -2061,7 +1086,7 @@ void TestDeferredShellSyncDoesNotSubmitAMultiDigitPrefix()
     fixture.panel.SyncNavigationInputs(
         fixture.view.navigation);
 
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     ImGui::ClearActiveID();
     fixture.RenderFrame();
     Require(
@@ -2094,7 +1119,7 @@ void TestEnterCommitsSequenceDraftOnce()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     Require(
         fixture.submission_count == 0,
@@ -2141,7 +1166,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingTarget()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -2155,9 +1180,9 @@ void TestExplicitCommittedSequencePositionCancelsPendingTarget()
 
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("2");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "2");
     fixture.RenderFrame();
-    SetActiveInputTextValue("20");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "20");
     fixture.RenderFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
     fixture.RenderFrame();
@@ -2193,7 +1218,7 @@ void TestEscapeCancelsSequenceDraftAgainstLatestCommittedValue()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("45");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "45");
     fixture.RenderFrame();
 
     fixture.view.navigation.current_index = 29;
@@ -2235,7 +1260,7 @@ void TestStaleSequenceDraftIsNotReplayedAfterExternalSync()
     Require(
         GImGui->ActiveId == sequence_input_id,
         "sequence input should be active before the external synchronization");
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
     Require(
         GImGui->InputTextState.TextA.Data != nullptr &&
@@ -2284,7 +1309,7 @@ void TestBlurDraftIsDiscardedWhenLaterPanelChangesTopology()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
     ImGui::ClearActiveID();
 
@@ -2326,7 +1351,7 @@ void TestCollapsedNavigationFinalizesSequenceDraft()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
 
     fixture.RenderFrame(
@@ -2353,7 +1378,7 @@ void TestHiddenNavigationFinalizesDraftAfterSameTopologyCursorSync()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderFrame(); }, "6");
     fixture.RenderFrame();
 
     fixture.view.navigation.current_sequence_position = 7;
@@ -2429,7 +1454,7 @@ void TestCoveredDockTabFinalizesSequenceDraft()
         fixture.SequenceInputId();
     ImGui::ActivateItemByID(sequence_input_id);
     fixture.RenderDockedFrame();
-    SetActiveInputTextValue("6");
+    ReplaceActiveInputText([&] { fixture.RenderDockedFrame(); }, "6");
     fixture.RenderDockedFrame();
 
     fixture.RenderDockedFrame(true);
@@ -2448,17 +1473,7 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 
 int main()
 {
-    TestFilesPanelAddFileForwardsCsvToInAppOpener();
-    TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup();
-    TestMissingLocalAnnotationRemovalRequiresConfirmation();
-    TestSourceSwitchDismissesMissingLocalRemovalWarning();
-    TestAnnotationImportFailureDismissalTracksExactDetail();
-    TestReimportSameAnnotationClearsDismissalForNewFailure();
-    TestAnnotationDismissalsResetAcrossSourceSwitch();
-    TestHiddenAnnotationPanelObservesIntermediateSourceSwitch();
     TestReopenableSourcePathEligibility();
-    TestFilesPanelContextActionLaunchesWithoutMutatingSession();
-    TestFilesPanelContextActionIsDisabledForIneligiblePath();
     TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync();
     TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent();
     TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange();

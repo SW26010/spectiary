@@ -108,13 +108,21 @@ void TestRecordingDisablesDirectoryReset()
 void TestBoundedFailures()
 {
     WidgetHarness ui{[] {
+        ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
         ImGui::Begin("Harness failures");
         ImGui::PushID(1); ImGui::Button("Duplicate"); ImGui::PopID();
         ImGui::PushID(2); ImGui::Button("Duplicate"); ImGui::PopID();
+        ImGui::PushID("source/task-a"); ImGui::Button("Recover"); ImGui::PopID();
+        ImGui::PushID("source/task-b"); ImGui::Button("Recover"); ImGui::PopID();
         ImGui::BeginDisabled(); ImGui::Button("Disabled"); ImGui::EndDisabled();
         ImGui::End();
     }};
     ui.Frames(3);
+    const auto first_recovery = ui.Observe("Recover", "source/task-a");
+    const auto second_recovery = ui.Observe("Recover", "source/task-b");
+    Require(first_recovery && second_recovery && first_recovery->id != second_recovery->id,
+            "Semantic scopes must disambiguate repeated row actions");
+    Require(!ui.Observe("Missing"), "Immediate observation must not invent an absent widget");
     const auto expect_failure = [](auto action, const char* message) {
         try { action(); }
         catch (const std::runtime_error& error) {

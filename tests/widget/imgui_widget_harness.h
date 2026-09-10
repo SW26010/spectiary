@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,11 +17,13 @@ struct Widget {
     std::string label;
     ImRect bounds;
     bool disabled = false;
+    std::vector<ImGuiID> id_stack;
 };
 
 class WidgetHarness {
 public:
-    explicit WidgetHarness(std::function<void()> render);
+    enum class FrameMode { Owned, ExistingContext };
+    explicit WidgetHarness(std::function<void()> render, FrameMode mode = FrameMode::Owned);
     ~WidgetHarness();
     WidgetHarness(const WidgetHarness&) = delete;
     WidgetHarness& operator=(const WidgetHarness&) = delete;
@@ -28,7 +31,11 @@ public:
     void Frames(int count = 1);
     // Exact label or ### identity suffix; optional exact window disambiguation.
     Widget Find(std::string_view label, std::string_view window = {});
-    void Click(std::string_view label);
+    // Observe only this frame, including disabled controls. A semantic PushID
+    // scope disambiguates repeated rows without relying on their screen order.
+    std::optional<Widget> Observe(std::string_view label, std::string_view scope = {}) const;
+    static WidgetHarness& Current();
+    void Click(std::string_view label, ImGuiMouseButton button = ImGuiMouseButton_Left);
     void Key(ImGuiKey key);
     void Text(std::string_view text);
     void Until(const std::function<bool()>& predicate, std::string_view description,
@@ -44,5 +51,7 @@ private:
     std::function<void()> render_;
     std::vector<Widget> widgets_;
     int frame_count_ = 0;
+    FrameMode mode_;
+    int observed_frame_ = -1;
 };
 } // namespace specforge::test

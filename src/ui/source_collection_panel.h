@@ -168,23 +168,11 @@ private:
     std::string sample_name_search_restore_name_;
     std::string annotation_display_name_edit_key_;
     std::optional<std::string> source_launch_error_;
-    std::optional<std::array<float, 4>>
-        first_source_context_cell_rect_;
-    std::optional<std::array<float, 4>>
-        source_context_action_rect_;
     std::string annotation_diagnostic_source_identity_;
     std::unordered_set<std::string>
         dismissed_annotation_diagnostic_keys_;
-    std::optional<std::array<float, 4>>
-        annotation_add_file_rect_;
-    std::vector<std::array<float, 4>>
-        annotation_remove_rects_;
-    std::optional<std::array<float, 4>>
-        missing_local_annotation_remove_confirm_rect_;
     std::optional<MissingLocalAnnotationRemoval>
         pending_missing_local_annotation_removal_;
-    std::vector<std::array<float, 4>>
-        annotation_diagnostic_dismiss_rects_;
     std::vector<std::string>
         annotation_import_prior_diagnostic_keys_;
 };

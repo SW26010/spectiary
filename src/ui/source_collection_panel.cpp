@@ -930,8 +930,6 @@ void SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionPathOpener& open_source,
     const SourceCollectionPathLauncher& launch_source_in_new_instance)
 {
-    first_source_context_cell_rect_.reset();
-    source_context_action_rect_.reset();
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Files,
@@ -1060,17 +1058,6 @@ void SourceCollectionPanelUi::RenderFiles(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
             }
-            const ImRect source_context_cell =
-                ImGui::TableGetCellBgRect(
-                    ImGui::GetCurrentTable(),
-                    ImGui::TableGetColumnIndex());
-            if (index == 0) {
-                first_source_context_cell_rect_ = {
-                    source_context_cell.Min.x,
-                    source_context_cell.Min.y,
-                    source_context_cell.Max.x,
-                    source_context_cell.Max.y};
-            }
             OpenSourceContextPopupForHoveredCell("source_context");
 
             ImGui::TableSetColumnIndex(2);
@@ -1098,15 +1085,6 @@ void SourceCollectionPanelUi::RenderFiles(
                     "SpecForgeOpenSourceInNewInstance");
                 const bool reopen_requested =
                     ImGui::MenuItem(reopen_label.c_str());
-                const ImVec2 action_min =
-                    ImGui::GetItemRectMin();
-                const ImVec2 action_max =
-                    ImGui::GetItemRectMax();
-                source_context_action_rect_ = {
-                    action_min.x,
-                    action_min.y,
-                    action_max.x,
-                    action_max.y};
                 if (reopen_requested) {
                     LaunchSourceInNewInstance(
                         entry.path,
@@ -1474,13 +1452,6 @@ bool SourceCollectionPanelUi::RenderAnnotationImportDiagnostic(
         dismiss_cursor.y));
     const bool dismissed = ImGui::Button(
         dismiss_label.c_str());
-    const ImVec2 dismiss_min = ImGui::GetItemRectMin();
-    const ImVec2 dismiss_max = ImGui::GetItemRectMax();
-    annotation_diagnostic_dismiss_rects_.push_back({
-        dismiss_min.x,
-        dismiss_min.y,
-        dismiss_max.x,
-        dismiss_max.y});
     ImGui::Unindent(style.FramePadding.x);
     ImGui::Dummy(ImVec2(0.0f, style.FramePadding.y));
     const ImVec2 card_max(
@@ -1573,10 +1544,6 @@ void SourceCollectionPanelUi::RenderAnnotations(
     bool* open,
     const SourceCollectionPathPicker& choose_annotation_file)
 {
-    annotation_add_file_rect_.reset();
-    annotation_remove_rects_.clear();
-    missing_local_annotation_remove_confirm_rect_.reset();
-    annotation_diagnostic_dismiss_rects_.clear();
     const SourceCollectionSessionView& session_view =
         interaction.View();
     SyncAnnotationDiagnosticSource(session_view);
@@ -1618,13 +1585,6 @@ void SourceCollectionPanelUi::RenderAnnotations(
                 update.result.loaded);
         }
     }
-    const ImVec2 add_file_min = ImGui::GetItemRectMin();
-    const ImVec2 add_file_max = ImGui::GetItemRectMax();
-    annotation_add_file_rect_ = {
-        add_file_min.x,
-        add_file_min.y,
-        add_file_max.x,
-        add_file_max.y};
 
     if (!navigation.annotation_diagnostics.empty()) {
         bool rendered_diagnostic = false;
@@ -1844,11 +1804,6 @@ void SourceCollectionPanelUi::RenderAnnotations(
             if (annotation.can_remove_annotation) {
                 const ImRect remove_cell =
                     ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
-                annotation_remove_rects_.push_back({
-                    remove_cell.Min.x,
-                    remove_cell.Min.y,
-                    remove_cell.Max.x,
-                    remove_cell.Max.y});
                 if (TrashIconButton(
                         "remove_annotation",
                         remove_cell,
@@ -1911,13 +1866,6 @@ void SourceCollectionPanelUi::RenderAnnotations(
                 "SpecForgeConfirmRemoveMissingLocalLabelingTask");
             const bool confirmed = ImGui::Button(
                 confirm_label.c_str());
-            const ImVec2 confirm_min = ImGui::GetItemRectMin();
-            const ImVec2 confirm_max = ImGui::GetItemRectMax();
-            missing_local_annotation_remove_confirm_rect_ = {
-                confirm_min.x,
-                confirm_min.y,
-                confirm_max.x,
-                confirm_max.y};
 
             ImGui::SameLine();
             const std::string cancel_label = StableUiLabel(

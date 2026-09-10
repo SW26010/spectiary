@@ -4,14 +4,17 @@
 #include <utility>
 
 namespace specforge::test {
-WidgetHarness::WidgetHarness(std::function<void()> render)
-    : previous_(ImGui::GetCurrentContext()), render_(std::move(render))
+WidgetHarness::WidgetHarness(std::function<void()> render, FrameMode mode)
+    : previous_(ImGui::GetCurrentContext()), render_(std::move(render)), mode_(mode)
 {
     IMGUI_CHECKVERSION();
-    context_ = ImGui::CreateContext();
+    context_ = mode_ == FrameMode::Owned ? ImGui::CreateContext() : previous_;
+    if (!context_ || context_->TestEngine)
+        throw std::runtime_error("Widget harness requires an uninstrumented context");
     ImGui::SetCurrentContext(context_);
     context_->TestEngine = this;
     context_->TestEngineHookItems = true;
+    if (mode_ == FrameMode::ExistingContext) return;
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
@@ -24,7 +27,9 @@ WidgetHarness::WidgetHarness(std::function<void()> render)
 
 WidgetHarness::~WidgetHarness()
 {
-    ImGui::DestroyContext(context_);
+    context_->TestEngine = nullptr;
+    context_->TestEngineHookItems = false;
+    if (mode_ == FrameMode::Owned) ImGui::DestroyContext(context_);
     ImGui::SetCurrentContext(previous_);
 }
 
@@ -35,6 +40,11 @@ void WidgetHarness::Frames(int count)
     ImGui::SetCurrentContext(context_);
     for (int i = 0; i < count; ++i) {
         widgets_.clear();
+        if (mode_ == FrameMode::ExistingContext) {
+            render_();
+            ++frame_count_;
+            continue;
+        }
         ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
         ImGui::NewFrame();
         render_();
@@ -45,12 +55,18 @@ void WidgetHarness::Frames(int count)
 
 void WidgetHarness::ItemAdd(ImGuiID id, const ImRect& bounds, const ImGuiLastItemData* data)
 {
+    if (observed_frame_ != context_->FrameCount) {
+        widgets_.clear();
+        observed_frame_ = context_->FrameCount;
+    }
     if (!id) return;
     ImRect visible = data ? data->NavRect : bounds;
     visible.ClipWith(ImGui::GetCurrentWindow()->ClipRect);
     if (visible.GetWidth() <= 0 || visible.GetHeight() <= 0) return;
+    const auto& stack = ImGui::GetCurrentWindow()->IDStack;
     widgets_.push_back({id, ImGui::GetCurrentWindow()->Name, {}, visible,
-        ((data ? data->ItemFlags : context_->CurrentItemFlags) & ImGuiItemFlags_Disabled) != 0});
+        ((data ? data->ItemFlags : context_->CurrentItemFlags) & ImGuiItemFlags_Disabled) != 0,
+        std::vector<ImGuiID>(stack.begin(), stack.end())});
 }
 
 void WidgetHarness::ItemInfo(ImGuiID id, const char* label)
@@ -61,6 +77,41 @@ void WidgetHarness::ItemInfo(ImGuiID id, const char* label)
             return;
         }
     }
+}
+
+WidgetHarness& WidgetHarness::Current()
+{
+    auto* context = ImGui::GetCurrentContext();
+    if (!context || !context->TestEngine)
+        throw std::runtime_error("No widget harness attached");
+    return *static_cast<WidgetHarness*>(context->TestEngine);
+}
+
+std::optional<Widget> WidgetHarness::Observe(std::string_view label, std::string_view scope) const
+{
+    if (observed_frame_ != context_->FrameCount) return std::nullopt;
+    std::optional<Widget> match;
+    for (const auto& widget : widgets_) {
+        // Window decorations may be reported before the root ID stack exists.
+        if (widget.id_stack.empty()) continue;
+        const auto suffix = widget.label.find("###");
+        const auto seed = widget.id_stack.back();
+        const bool identity = widget.label.empty() &&
+            (widget.id == ImHashStr(std::string(label).c_str(), 0, seed) ||
+             widget.id == ImHashStr(("###" + std::string(label)).c_str(), 0, seed));
+        if (!(identity || widget.label == label ||
+            (suffix != std::string::npos && std::string_view(widget.label).substr(suffix + 3) == label))) continue;
+        if (!scope.empty()) {
+            bool scoped = false;
+            for (std::size_t i = 1; i < widget.id_stack.size(); ++i)
+                scoped |= widget.id_stack[i] == ImHashStr(std::string(scope).c_str(), 0, widget.id_stack[i - 1]);
+            if (!scoped) continue;
+        }
+        if (match && (match->id != widget.id || match->window != widget.window))
+            throw std::runtime_error("Ambiguous widget: " + std::string(label));
+        match = widget;
+    }
+    return match;
 }
 
 Widget WidgetHarness::Find(std::string_view label, std::string_view window)
@@ -89,7 +140,7 @@ Widget WidgetHarness::Find(std::string_view label, std::string_view window)
     throw std::runtime_error("Widget not found after 8 frames: " + std::string(label));
 }
 
-void WidgetHarness::Click(std::string_view label)
+void WidgetHarness::Click(std::string_view label, ImGuiMouseButton button)
 {
     auto widget = Find(label);
     if (widget.disabled) throw std::runtime_error("Disabled widget: " + std::string(label));
@@ -102,9 +153,9 @@ void WidgetHarness::Click(std::string_view label)
     center = widget.bounds.GetCenter();
     ImGui::GetIO().AddMousePosEvent(center.x, center.y);
     Frames();
-    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    ImGui::GetIO().AddMouseButtonEvent(button, true);
     Frames();
-    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    ImGui::GetIO().AddMouseButtonEvent(button, false);
     Frames(2);
 }
 
