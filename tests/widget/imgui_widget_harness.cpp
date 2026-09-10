@@ -64,7 +64,7 @@ void WidgetHarness::ItemAdd(ImGuiID id, const ImRect& bounds, const ImGuiLastIte
     visible.ClipWith(ImGui::GetCurrentWindow()->ClipRect);
     if (visible.GetWidth() <= 0 || visible.GetHeight() <= 0) return;
     const auto& stack = ImGui::GetCurrentWindow()->IDStack;
-    widgets_.push_back({id, ImGui::GetCurrentWindow()->Name, {}, visible,
+    widgets_.push_back({id, ImGui::GetCurrentWindow()->Name, {}, visible, bounds,
         ((data ? data->ItemFlags : context_->CurrentItemFlags) & ImGuiItemFlags_Disabled) != 0,
         std::vector<ImGuiID>(stack.begin(), stack.end())});
 }

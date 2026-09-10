@@ -3921,10 +3921,12 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
             narrow_size);
     const auto copy_rect =
         WidgetBounds("SpecForgeCopyLabelingTaskId");
+    const auto copy_widget =
+        specforge::test::WidgetHarness::Current().Observe("SpecForgeCopyLabelingTaskId");
     Require(
-        copy_rect.has_value() &&
-            (*copy_rect)[0] >= window_x &&
-            (*copy_rect)[2] <= window_x + narrow_width &&
+        copy_rect.has_value() && copy_widget.has_value() &&
+            copy_widget->raw_bounds.Min.x >= window_x &&
+            copy_widget->raw_bounds.Max.x <= window_x + narrow_width &&
             rendered.logged_text.find(view.labeling.task_id) !=
                 std::string::npos,
         "the default narrow dock should wrap the full task ID and keep Copy ID inside the visible panel");

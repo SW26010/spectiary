@@ -15,7 +15,8 @@ struct Widget {
     ImGuiID id = 0;
     std::string window;
     std::string label;
-    ImRect bounds;
+    ImRect bounds; // Visible navigation bounds for pointer input.
+    ImRect raw_bounds; // Unclipped item bounds for geometry assertions.
     bool disabled = false;
     std::vector<ImGuiID> id_stack;
 };

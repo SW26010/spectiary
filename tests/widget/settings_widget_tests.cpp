@@ -135,6 +135,30 @@ void TestRecordingDisablesDirectoryReset()
     Require(f.intents == 1, "Enabled reset must emit one intent");
 }
 
+void TestClippedWidgetBounds()
+{
+    int clicks = 0;
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(240, 160), ImGuiCond_Always);
+        ImGui::Begin("Harness clipping", nullptr,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::SetCursorScreenPos(ImVec2(220, 70));
+        if (ImGui::Button("Partially clipped", ImVec2(100, 30))) ++clicks;
+        ImGui::End();
+    }};
+    ui.Frames(3);
+    const auto widget = ui.Find("Partially clipped");
+    Require(widget.raw_bounds.GetWidth() == 100.0f &&
+            widget.raw_bounds.Max.x > widget.bounds.Max.x &&
+            widget.bounds.GetWidth() > 0.0f,
+        "Geometry observations must preserve overflow beyond the visible bounds");
+    Require(!widget.bounds.Contains(widget.raw_bounds.GetCenter()),
+        "Clipping fixture must put the raw center outside the visible region");
+    ui.Click("Partially clipped");
+    Require(clicks == 1, "Pointer input must use the visible part of a clipped widget");
+}
+
 void TestBoundedFailures()
 {
     WidgetHarness ui{[] {
@@ -179,7 +203,7 @@ int main(int argc, char** argv)
         const std::string name = argc > 1 ? argv[1] : "all";
         Require(name == "all" || name == "failures" || name == "input" ||
                 name == "theme" || name == "scale" || name == "recording", "Unknown widget test case");
-        if (name == "all" || name == "failures") TestBoundedFailures();
+        if (name == "all" || name == "failures") { TestBoundedFailures(); TestClippedWidgetBounds(); }
         if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); }
         if (name == "all" || name == "theme") TestThemeCombo();
         if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();

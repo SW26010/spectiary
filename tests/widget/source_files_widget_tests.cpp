@@ -321,7 +321,14 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
     specforge::test::WidgetHarness ui{render_frame,
         specforge::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
-    const ImVec2 cell = ui.Find("type").bounds.GetCenter();
+    const auto type_widget = ui.Find("type");
+    // Exercise the cell's left padding, outside the InvisibleButton itself.
+    const float padding = ImGui::GetStyle().CellPadding.x;
+    Require(padding > 0.0f, "cell padding fixture must have positive width");
+    const ImVec2 cell(type_widget.raw_bounds.Min.x - padding * 0.5f,
+        type_widget.bounds.GetCenter().y);
+    Require(!type_widget.raw_bounds.Contains(cell),
+        "padding right-click must be outside the widget bounds");
     cover_source_context_cell = true;
     ImGui::GetIO().AddMousePosEvent(cell.x, cell.y);
     ui.Frames(2);
@@ -334,7 +341,12 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
         ImGuiPopupFlags_AnyPopupLevel), "an occluded cell must not open its context menu");
     cover_source_context_cell = false;
     ui.Frames(2);
-    ui.Click("type", ImGuiMouseButton_Right);
+    ImGui::GetIO().AddMousePosEvent(cell.x, cell.y);
+    ui.Frames(2);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+    ui.Frames();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+    ui.Frames(2);
     const auto action = ui.Find("SpecForgeOpenSourceInNewInstance");
     Require(action.disabled, "ineligible source action must be disabled");
     const auto center = action.bounds.GetCenter();
