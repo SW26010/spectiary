@@ -630,6 +630,35 @@ mutation occurs from the existing UI-thread event loop. Control readiness wakes
 that loop with an application message, and idle checks use a bounded maintenance
 deadline, preserving event-driven rendering.
 
+## Execution ownership
+
+`app/automation_execution` owns the accepted-to-terminal lifecycle of
+`source.open`, `spectrum.goto`, and `label.assign`: execution claims, pending
+operations, label phases, activation and successful-Present correlation,
+replacement failures, terminal results, and the next 25 ms observation deadline.
+The application supplies synchronous callbacks for transport settlement, Shell
+operations and runtime observations, and frame scheduling. It owns the Win32
+message loop and rendering, without interpreting these command phases.
+
+Shell supplies a source-open observation closure that hides the activation
+transaction token. The closure must be released before Shell is destroyed.
+Source activation, navigation, and label mutations continue to belong to the
+existing Shell/session modules. Execution retains only command correlation and
+the committed assignment result; it does not copy business state.
+
+Inactive requests retire without another terminal. The transport continues to
+keep claimed requests active across disconnect and normal `app.quit`, allowing
+their existing terminal paths to settle. Once transport shutdown has retired
+requests, execution releases its observations idempotently. A source replacement
+cancels unfinished navigation or a label target, but an already committed label
+assignment still returns its result even when its auto-advance is superseded.
+An unsuccessful Present supplies no completion evidence; the existing launcher
+timeout policy remains responsible for bounding externally awaited commands.
+
+`specforge_automation_execution_tests` exercises these transitions directly with
+controlled Shell observations; the real-GUI launcher integration suite verifies
+the production adapter and rendering path.
+
 ## Source truth, derived observation, and persisted projection
 
 The control plane does not make `state.get` or its JSON files a second product
@@ -760,7 +789,7 @@ useful as the files evolve.
 | Queue, request-ID, acceptance, terminal, and shutdown rejection | `automation_named_pipe.cpp`: `HandleClientMessage`, `TryReserveRequestIdLocked`, `Complete`, `Fail` | `TestSingleClientQueueAndLifecycle`, `TestDistinctRequestIdLimit`, `TestQueueCapacityVersionAndDisconnect` | **Verified.** While connected, each accepted request has one terminal; valid observed IDs are consumed as documented. |
 | Execution claims, disconnect, quit sequence barrier, and publication races | `automation_named_pipe.cpp`: `TryClaimExecution`, `TryBeginAppQuit`, `HandleDisconnect`, `TryFinalizeFrameCapture` | `TestExecutionClaimsAndQuitBarrier`, `TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState`, `TestFrameCaptureFinalizationLease` | **Verified.** Unclaimed work cancels; claimed mutations keep factual ownership and terminal ordering. |
 | `wait.idle`, retry ownership, and persistence timing | `specforge_app.cpp`: `ServiceAutomation`, `AutomationBusinessIdle`; production persistence owners under `src/app` and `src/sessions` | `TestIdleWaitIsAnEarlierOnlySequenceBarrier`, `TestIdleWaitStopsLaterBusinessDispatch`, real GUI persistence assertions | **Verified.** The barrier is earlier-sequence-only and does not wait for future debounce/retry deadlines. |
-| Source truth versus live, presented, terminal, and persisted projections | `specforge_app.cpp`: command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
+| Source truth versus live, presented, terminal, and persisted projections | `automation_execution.cpp`: source/navigation/label phases and terminal facts; `specforge_app.cpp`: remaining command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
 | Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, deadline-bound response helpers; `automation_named_pipe.cpp`: `AutomationNamedPipeClient::SendUntil` and `ReceiveUntil`; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | hello-no-response, no-accepted/accepted-command, accepted pipeline, pipeline-write-stall, and EOF app.quit-no-terminal fake GUI/pipe fixture cases, with retained-root and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **Verified.** Launcher-owned response/write deadlines close the pipe and preserve the existing exact-child handle/Job Object cleanup path; accepted requests remain explicitly outcome-ambiguous and are never retried. |
 | Orderly shutdown, panel rollback, state flush, and writer retirement | `specforge_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
 

@@ -130,7 +130,7 @@ headroom.
 
 The CI helper maps `Headless` to `automation-headless` and `RealGui` to `real-gui`.
 The workflow and the helper use these exact labels; `required` is an additional
-CTest label on the five headless tests, not a different selector. The five tests
+CTest label on the six headless tests, not a different selector. The six tests
 also retain `ci-headless` for repository-wide selection; automation does not
 consume that broader label.
 
