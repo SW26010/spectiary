@@ -22,7 +22,25 @@ add_executable(specforge_widget_tests imgui_widget_harness.cpp settings_widget_t
 target_compile_definitions(specforge_widget_tests PRIVATE IMGUI_ENABLE_TEST_ENGINE)
 target_link_libraries(specforge_widget_tests PRIVATE specforge_widget_imgui specforge_desktop_ui dwmapi)
 specforge_enable_warnings(specforge_widget_tests)
-foreach(case IN ITEMS failures input theme scale recording)
-    add_test(NAME specforge_widget_${case}_tests COMMAND specforge_widget_tests ${case})
-    set_tests_properties(specforge_widget_${case}_tests PROPERTIES LABELS "fast;extended;widget" TIMEOUT 30)
-endforeach()
+add_test(NAME specforge_widget_failures_tests COMMAND specforge_widget_tests failures)
+add_test(NAME specforge_widget_input_tests COMMAND specforge_widget_tests input)
+add_test(NAME specforge_widget_theme_tests COMMAND specforge_widget_tests theme)
+add_test(NAME specforge_widget_scale_tests COMMAND specforge_widget_tests scale)
+add_test(NAME specforge_widget_recording_tests COMMAND specforge_widget_tests recording)
+specforge_set_test_tier(specforge_widget_failures_tests fast)
+specforge_set_test_tier(specforge_widget_input_tests fast)
+specforge_set_test_tier(specforge_widget_theme_tests fast)
+specforge_set_test_tier(specforge_widget_scale_tests fast)
+specforge_set_test_tier(specforge_widget_recording_tests fast)
+set_tests_properties(
+    specforge_widget_failures_tests specforge_widget_input_tests
+    specforge_widget_theme_tests specforge_widget_scale_tests
+    specforge_widget_recording_tests
+    PROPERTIES TIMEOUT 30
+)
+set_property(TEST
+    specforge_widget_failures_tests specforge_widget_input_tests
+    specforge_widget_theme_tests specforge_widget_scale_tests
+    specforge_widget_recording_tests
+    APPEND PROPERTY LABELS widget
+)

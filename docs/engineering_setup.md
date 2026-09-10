@@ -395,3 +395,7 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 - profile JSONL schema 是否覆盖本次要判断的交互路径。
 - 真实性能判断是否使用真实 `.npy` 数据和新生成日志。
 - 真实数据路径是否仍留在仓库外。
+
+## ImGui widget regression tests
+
+See [ImGui widget regression tests](widget_testing.md) for the headless real-widget harness, focused commands, and its boundary with business automation and presentation diagnostics.

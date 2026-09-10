@@ -83,22 +83,6 @@ struct SettingsPanelUiTestAccess {
     {
         panel.RenderGeneral(settings);
     }
-    static void ResetProfileOutputDirectory(SettingsPanelUi& panel)
-    {
-        panel.ResetProfileOutputDirectory();
-    }
-    static void SetUiScalePercentage(
-        SettingsPanelUi& panel,
-        int percentage)
-    {
-        panel.SetUiScalePercentage(percentage);
-    }
-    static void SetThemeSelection(
-        SettingsPanelUi& panel,
-        ThemeSelection selection)
-    {
-        panel.SetThemeSelection(std::move(selection));
-    }
     static std::string SectionLabel(
         SettingsSection section,
         UiLanguage language)
@@ -1442,25 +1426,6 @@ void TestClosedToOpenClearsTransientFeedback()
         "reopening a closed panel should clear stale failure state");
 }
 
-void TestProfileResetEmitsOneShotSettingsIntent()
-{
-    specforge::SettingsPanelUi panel = MakePanel();
-    specforge::SettingsPanelUiTestAccess::
-        ResetProfileOutputDirectory(panel);
-
-    const std::optional<specforge::ApplicationSettingsIntent> intent =
-        panel.TakeApplicationSettingsIntent();
-    Require(
-        intent &&
-            intent->kind ==
-                specforge::ApplicationSettingsIntentKind::
-                    RestoreDefaultProfileOutputDirectory,
-        "profile reset should emit an application-settings intent");
-    Require(
-        !panel.TakeApplicationSettingsIntent(),
-        "profile reset intent should be consumed once");
-}
-
 void TestWarnedFallbacksRemainDirectlyRepairable()
 {
     specforge::ApplicationSettingsView settings =
@@ -1507,62 +1472,6 @@ void TestWarnedFallbacksRemainDirectlyRepairable()
                 .find("could not be saved") !=
             std::string_view::npos,
         "profile persistence failures should retain distinct save wording");
-}
-
-void TestUiScaleControlEmitsOneShotSettingsIntent()
-{
-    specforge::SettingsPanelUi panel = MakePanel();
-    specforge::SettingsPanelUiTestAccess::
-        SetUiScalePercentage(panel, 125);
-
-    const std::optional<specforge::ApplicationSettingsIntent> intent =
-        panel.TakeApplicationSettingsIntent();
-    Require(
-        intent &&
-            intent->kind ==
-                specforge::ApplicationSettingsIntentKind::
-                    SetUiScale &&
-            intent->ui_scale_percentage == 125,
-        "UI scale control should emit the selected percentage");
-    Require(
-        !panel.TakeApplicationSettingsIntent(),
-        "UI scale intent should be consumed once");
-
-    specforge::SettingsPanelUiTestAccess::
-        SetUiScalePercentage(panel, 100);
-    const std::optional<specforge::ApplicationSettingsIntent>
-        reset_intent = panel.TakeApplicationSettingsIntent();
-    Require(
-        reset_intent &&
-            reset_intent->kind ==
-                specforge::ApplicationSettingsIntentKind::
-                    SetUiScale &&
-            reset_intent->ui_scale_percentage == 100,
-        "UI scale reset should emit 100%");
-}
-
-void TestThemeControlEmitsStableSelectionIntent()
-{
-    specforge::SettingsPanelUi panel = MakePanel();
-    specforge::SettingsPanelUiTestAccess::SetThemeSelection(
-        panel,
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInLightThemeId()));
-
-    const std::optional<specforge::ApplicationSettingsIntent> intent =
-        panel.TakeApplicationSettingsIntent();
-    Require(
-        intent &&
-            intent->kind ==
-                specforge::ApplicationSettingsIntentKind::
-                    SetThemeSelection &&
-            intent->theme_selection ==
-                specforge::ThemeSelection::Explicit(
-                    specforge::BuiltInLightThemeId()),
-        "theme control should emit an explicit stable theme identity");
-    Require(
-        !panel.TakeApplicationSettingsIntent(),
-        "theme selection intent should be consumed once");
 }
 
 void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
@@ -2620,10 +2529,7 @@ int main()
     TestOpenIsIdempotent();
     TestDetachedPlatformWindowFocusUsesBackendCallback();
     TestClosedToOpenClearsTransientFeedback();
-    TestProfileResetEmitsOneShotSettingsIntent();
     TestWarnedFallbacksRemainDirectlyRepairable();
-    TestUiScaleControlEmitsOneShotSettingsIntent();
-    TestThemeControlEmitsStableSelectionIntent();
     TestAppearanceThemeOptionsKeepStableOrderAndMapping();
     TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent();
     TestExternalSourceFolderCheckboxAndDeferredSubfolderPlaceholder();

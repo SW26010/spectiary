@@ -7,6 +7,7 @@ namespace specforge::test {
 WidgetHarness::WidgetHarness(std::function<void()> render)
     : previous_(ImGui::GetCurrentContext()), render_(std::move(render))
 {
+    IMGUI_CHECKVERSION();
     context_ = ImGui::CreateContext();
     ImGui::SetCurrentContext(context_);
     context_->TestEngine = this;
@@ -65,7 +66,7 @@ void WidgetHarness::ItemInfo(ImGuiID id, const char* label)
 Widget WidgetHarness::Find(std::string_view label, std::string_view window)
 {
     ImGui::SetCurrentContext(context_);
-    for (int attempt = 0; attempt < 8; ++attempt) {
+    for (int attempt = 0; attempt <= 8; ++attempt) {
         const Widget* match = nullptr;
         for (const auto& widget : widgets_) {
             const auto suffix = widget.label.find("###");
@@ -83,7 +84,7 @@ Widget WidgetHarness::Find(std::string_view label, std::string_view window)
             match = &widget;
         }
         if (match) return *match;
-        Frames();
+        if (attempt < 8) Frames();
     }
     throw std::runtime_error("Widget not found after 8 frames: " + std::string(label));
 }
