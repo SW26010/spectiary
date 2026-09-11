@@ -2,17 +2,24 @@
 param(
     [Parameter(Mandatory = $true)][string]$Path,
     [switch]$RequireLiveResize,
-    [switch]$RequireDetachedBreakdown
+    [switch]$RequireDetachedBreakdown,
+    [switch]$RequireNativeSizeBreakdown,
+    [switch]$RequireClockSync,
+    [switch]$RequireFeedbackBreakdown
 )
 $ErrorActionPreference = 'Stop'
 # Bound input and retain only open operations plus small event counters.
 if ((Get-Item -LiteralPath $Path).Length -gt 101MB) { throw 'Profile exceeds the recorder file bound.' }
-$names = @('viewport_lifecycle', 'viewport_size_move', 'viewport_initialize',
+$names = @('viewport_lifecycle', 'viewport_capture_boundary', 'viewport_size_move', 'viewport_initialize',
     'viewport_resize', 'viewport_acquire', 'viewport_present', 'presentation_buffer_rebuild',
     'presentation_buffer_reset', 'presentation_buffer_allocation', 'presentation_source_rect',
     'presentation_render_target', 'presentation_available_wait', 'message_pump_batch',
     'render_invalidation_latency', 'render_frame', 'viewport_draw_submission',
-    'platform_windows_update', 'platform_windows_render', 'platform_window_position', 'platform_window_size')
+    'platform_windows_update', 'platform_windows_render', 'platform_window_position', 'platform_window_size',
+    'native_size_callback', 'native_size_message', 'native_size_thread_cpu', 'native_size_observation',
+    'viewport_shutdown', 'presentation_feedback_collect', 'presentation_statistics_drain',
+    'presentation_statistics_poll', 'presentation_statistics_item', 'presentation_statistics_get_next',
+    'presentation_buffer_release', 'presentation_resource_release')
 $numeric = @('schema_version', 'hwnd', 'viewport_id', 'viewport_lifetime', 'size_move_id',
     'operation_id', 'parent_operation_id', 'frame', 'old_width', 'old_height', 'new_width',
     'new_height', 'result', 'count', 'timeout_ms', 'duration_ms')
@@ -25,12 +32,26 @@ $breakdownRoles = @{}
 $moves = @{}
 $roles = @{}
 $summary = $null
+$native = @{}
+$nativeResults = [Collections.Generic.List[object]]::new()
 $lineNumber = 0
+$clockSync = $null
+$feedbackCoverage = @{}
 $reader = [IO.File]::OpenText((Resolve-Path -LiteralPath $Path).Path)
 try {
 while ($null -ne ($line = $reader.ReadLine())) {
     $lineNumber++
     $row = $line | ConvertFrom-Json
+    if ($row.event -eq 'presentation_clock_sync') {
+        foreach ($field in @('process_id', 'thread_id', 'steady_sample_ns', 'qpc_before', 'qpc_after', 'qpc_frequency')) {
+            $v = $row.$field
+            if ($null -eq $v -or $v -is [string] -or $v -is [bool] -or $v -isnot [ValueType] -or
+                $v -le 0 -or [math]::Truncate([double]$v) -ne $v) { throw "Invalid clock field $field" }
+        }
+        if ($row.valid -isnot [bool] -or !$row.valid -or $row.qpc_after -lt $row.qpc_before) { throw 'Invalid clock correlation' }
+        $clockSync = $row
+        continue
+    }
     if ($row.event -eq 'profile_recorder_summary') { $summary = $row; continue }
     if ($row.event -notin $names) { continue }
     foreach ($field in $numeric) {
@@ -57,6 +78,68 @@ while ($null -ne ($line = $reader.ReadLine())) {
         throw "Line ${lineNumber}: completion must mean S_OK API return"
     }
     $counts[$row.event]++
+    if ($row.event -in @('presentation_buffer_release', 'presentation_resource_release')) {
+        if ($row.buffer_slot -isnot [ValueType] -or $row.buffer_slot -is [bool] -or
+            $row.buffer_slot -lt 0 -or $row.buffer_slot -gt 2 -or [math]::Truncate([double]$row.buffer_slot) -ne $row.buffer_slot) {
+            throw 'Invalid release buffer slot'
+        }
+        if ($row.event -eq 'presentation_resource_release' -and
+            $row.resource_kind -notin @('available_event','presentation_buffer','render_target_view','texture')) { throw 'Invalid release resource kind' }
+    }
+    if ($row.event -in @('presentation_statistics_poll','presentation_statistics_get_next','presentation_statistics_item','presentation_resource_release')) {
+        $parent = $pending[[string]$row.parent_operation_id]
+        $expectedParent = switch ($row.event) {
+            'presentation_statistics_poll' { 'presentation_statistics_drain' }
+            'presentation_statistics_get_next' { 'presentation_statistics_item' }
+            'presentation_statistics_item' { 'presentation_statistics_drain' }
+            'presentation_resource_release' { 'presentation_buffer_release' }
+        }
+        if ($null -eq $parent -or $parent.event -ne $expectedParent) { throw 'Invalid feedback/release parent' }
+        if ($row.event -eq 'presentation_statistics_poll' -and $row.timeout_ms -ne 0) { throw 'Statistics polling must remain nonblocking' }
+    }
+    if ($row.phase -eq 'end' -and $row.viewport_role -eq 'detached' -and
+        $row.event -in @('presentation_feedback_collect','presentation_statistics_drain','presentation_statistics_poll',
+            'presentation_statistics_get_next','presentation_resource_release')) { $feedbackCoverage[$row.event] = $true }
+    if ($row.event -eq 'native_size_message') {
+        foreach ($field in @('message_id', 'message_hwnd')) {
+            if ($null -eq $row.$field -or $row.$field -is [string] -or $row.$field -is [bool] -or
+                $row.$field -isnot [ValueType] -or $row.$field -lt 0 -or
+                [math]::Truncate([double]$row.$field) -ne $row.$field) { throw "Invalid $field" }
+        }
+    }
+    if ($row.event -eq 'native_size_callback' -and $row.phase -eq 'begin') {
+        $native[[string]$row.operation_id] = @{ message_ms = 0.0; message_count = 0; cpu_ms = $null; observed = $false; summaries = @{} }
+    }
+    $nativeParent = [string]$row.parent_operation_id
+    if ($row.event -eq 'native_size_message' -and $row.phase -eq 'end' -and $native.ContainsKey($nativeParent)) {
+        $native[$nativeParent].message_ms += $row.duration_ms
+        $native[$nativeParent].message_count++
+    }
+    if ($row.event -in @('native_size_thread_cpu', 'native_size_observation')) {
+        if (!$native.ContainsKey($nativeParent) -or $row.phase -ne 'end') { throw 'Native summary without active callback' }
+        if ($row.operation_id -ne 0 -or $native[$nativeParent].summaries.ContainsKey($row.event)) { throw 'Invalid or duplicate native summary' }
+        $native[$nativeParent].summaries[$row.event] = $true
+        if ($row.event -eq 'native_size_thread_cpu' -and $row.result_valid) {
+            $native[$nativeParent].cpu_ms = $row.duration_ms
+        }
+        if ($row.event -eq 'native_size_observation') {
+            $native[$nativeParent].observed = $row.result_valid -and $row.result -eq 0 -and $row.count -eq 0
+            if ($RequireNativeSizeBreakdown -and !$native[$nativeParent].observed) { throw 'Native message hook unavailable or observation overflow/mismatch' }
+        }
+    }
+    if ($row.event -eq 'native_size_callback' -and $row.phase -eq 'end') {
+        $key = [string]$row.operation_id
+        if (!$native.ContainsKey($key)) { throw 'Native callback end without begin' }
+        $value = $native[$key]
+        if ($value.summaries.Count -ne 2) { throw 'Missing native callback summary' }
+        if ($RequireNativeSizeBreakdown -and !$value.observed) { throw 'Incomplete native callback observation' }
+        $nativeResults.Add([pscustomobject]@{ frame = $row.frame; operation_id = $row.operation_id;
+            duration_ms = $row.duration_ms; top_level_message_ms = $value.message_ms;
+            unassigned_ms = [math]::Max([double]0, [double]($row.duration_ms - $value.message_ms));
+            thread_cpu_ms = $value.cpu_ms; top_level_messages = $value.message_count; complete = $value.observed })
+        if ($nativeResults.Count -gt 10000) { throw 'Native callback analysis bound exceeded' }
+        $native.Remove($key)
+    }
     $lifetime = [string]$row.viewport_lifetime
     if ($row.hwnd -ne 0) {
         if ($row.viewport_lifetime -le 0) { throw "Line ${lineNumber}: missing window lifetime" }
@@ -64,7 +147,7 @@ while ($null -ne ($line = $reader.ReadLine())) {
             throw "Line ${lineNumber}: lifetime changed HWND"
         }
         $lifetimes[$lifetime] = $row.hwnd
-        if ($row.event -eq 'viewport_lifecycle' -and $row.phase -eq 'begin') {
+        if ($row.event -in @('viewport_lifecycle','viewport_capture_boundary') -and $row.phase -eq 'begin') {
             if ($live.ContainsKey($lifetime)) { throw 'Duplicate viewport lifetime begin' }
             $live[$lifetime] = $true
             $lifetimeRoles[$lifetime] = $row.viewport_role
@@ -72,7 +155,18 @@ while ($null -ne ($line = $reader.ReadLine())) {
             throw 'Viewport event without lifecycle begin (partial capture)'
         }
         if ($lifetimeRoles[$lifetime] -ne $row.viewport_role) { throw 'Viewport role changed during its lifetime' }
-        if ($row.event -eq 'viewport_lifecycle' -and $row.phase -eq 'end') { $live.Remove($lifetime) }
+        if ($row.event -in @('viewport_lifecycle','viewport_capture_boundary') -and $row.phase -eq 'end') { $live.Remove($lifetime) }
+        if ($row.event -eq 'viewport_capture_boundary') {
+            if ($row.phase -notin @('begin','end')) { throw 'Invalid capture boundary phase' }
+            if ($row.operation_id -ne 0 -or $row.parent_operation_id -ne 0) { throw 'Capture boundary must be outside operations' }
+            if ($row.in_size_move) {
+                if ($row.size_move_id -le 0) { throw 'Capture boundary missing active size-move identity' }
+                $moveKey = "$lifetime/$($row.size_move_id)"
+                if ($row.phase -eq 'begin') { $moves[$moveKey] = $true }
+                elseif (!$moves.ContainsKey($moveKey)) { throw 'Capture boundary missing active size-move begin' }
+                else { $moves.Remove($moveKey) }
+            }
+        }
     }
     if ($row.event -eq 'viewport_size_move') {
         $key = "$lifetime/$($row.size_move_id)"
@@ -98,7 +192,8 @@ while ($null -ne ($line = $reader.ReadLine())) {
             if (!$pending.ContainsKey($key)) { throw 'Operation end without begin (partial capture)' }
             $begin = $pending[$key]
             foreach ($field in @('event', 'parent_operation_id', 'viewport_lifetime', 'hwnd',
-                'old_width', 'old_height', 'new_width', 'new_height', 'backend', 'present_mode', 'timeout_ms')) {
+                'old_width', 'old_height', 'new_width', 'new_height', 'backend', 'present_mode', 'timeout_ms',
+                'message_id', 'message_hwnd', 'buffer_slot', 'resource_kind')) {
                 if ($begin.$field -ne $row.$field) { throw "Operation changed $field" }
             }
             $pending.Remove($key)
@@ -115,7 +210,7 @@ while ($null -ne ($line = $reader.ReadLine())) {
     }
 }
 } finally { $reader.Dispose() }
-if ($null -eq $summary -or $summary.dropped_events -ne 0 -or $summary.stop_reason -eq 'write_failure') {
+if ($null -eq $summary -or $summary.dropped_events -ne 0 -or $summary.stop_reason -in @('write_failure', 'file_size_limit')) {
     throw 'Missing recorder summary or dropped/failed recording: evidence is incomplete'
 }
 if ($pending.Count -gt 0 -or $moves.Count -gt 0 -or $live.Count -gt 0) {
@@ -131,5 +226,10 @@ if ($RequireDetachedBreakdown -and (!$roles.ContainsKey('detached') -or
     !$breakdownRoles.ContainsKey('main') -or !$breakdownRoles.ContainsKey('detached') -or
     !$counts.ContainsKey('platform_windows_update') -or !$counts.ContainsKey('platform_windows_render') -or
     !$counts.ContainsKey('platform_window_size'))) { throw 'Missing detached resize render/platform breakdown coverage' }
+if ($RequireNativeSizeBreakdown -and (!$roles.ContainsKey('detached') -or $nativeResults.Count -eq 0 -or
+    !$counts.ContainsKey('native_size_message'))) { throw 'Missing native size/message coverage' }
+if ($RequireClockSync -and $null -eq $clockSync) { throw 'Missing process/thread clock correlation' }
+if ($RequireFeedbackBreakdown -and $feedbackCoverage.Count -ne 5) { throw 'Missing detached feedback/release breakdown coverage' }
 [pscustomobject]@{ schema_valid = $true; dropped_events = 0; event_counts = $counts;
+    slowest_native_size_callbacks = @($nativeResults | Sort-Object duration_ms -Descending | Select-Object -First 10);
     resize_roles = @($roles.Keys); root_cause = 'not_determined' } | ConvertTo-Json -Depth 5

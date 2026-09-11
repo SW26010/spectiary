@@ -87,6 +87,10 @@ void TestProductionSerialization()
     {
         specforge::ProfileSink sink(path);
         Require(sink.is_open(), "test recorder must open");
+#ifdef _WIN32
+        specforge::WritePresentationTrace(sink, trace::Event{
+            .name = "viewport_lifecycle", .phase = "begin", .window = {42, 3}}, "detached", 22);
+#endif
         specforge::WritePresentationTrace(sink, trace::Event{
             .name = "viewport_present", .phase = "end", .window = {42, 3},
             .operation = 5, .frame = 8, .backend = "dxgi", .result = -1}, "detached", 22);
@@ -96,6 +100,12 @@ void TestProductionSerialization()
     std::string content((std::istreambuf_iterator<char>(input)), {});
     input.close();
     std::filesystem::remove(path);
+#ifdef _WIN32
+    for (const auto field : {"\"event\":\"presentation_clock_sync\"", "\"qpc_before\":",
+        "\"qpc_after\":", "\"qpc_frequency\":", "\"steady_sample_ns\":", "\"valid\":true"}) {
+        Require(content.find(field) != std::string::npos, "native clock correlation field missing");
+    }
+#endif
     for (const auto field : {"\"schema_version\":1", "\"viewport_role\":\"detached\"",
         "\"viewport_id\":22", "\"viewport_lifetime\":3", "\"operation_id\":5",
         "\"frame\":8", "\"result\":-1", "\"duration_ms\":", "\"phase\":\"end\""}) {
@@ -103,12 +113,34 @@ void TestProductionSerialization()
     }
 }
 }
+void TestCaptureBoundaryPreservesWindows()
+{
+    recording = true;
+    trace::enabled = [](void*) { return recording; };
+    trace::callback = [](void*, const trace::Event& event) { events.push_back(event); };
+    trace::Register(123, 640, 480);
+    trace::SizeMove(123, true);
+    const auto original = trace::Lookup(123);
+    events.clear();
+    trace::CaptureBoundary(true);
+    trace::CaptureBoundary(false);
+    Require(events.size() == 2 && events[0].name == "viewport_capture_boundary" &&
+        events[0].phase == "begin" && events[1].phase == "end" &&
+        events[0].window.lifetime == original.lifetime && events[1].window.in_size_move &&
+        events[1].window.size_move == original.size_move && events[1].operation == 0,
+        "capture boundaries must snapshot existing identities and active size moves");
+    Require(trace::Lookup(123).lifetime == original.lifetime && trace::Lookup(123).in_size_move,
+        "ending recording must not destroy or end the native window lifecycle");
+    trace::SizeMove(123, false);
+    trace::Unregister(123);
+}
 int main()
 {
     try {
         events.reserve(64);
         TestLifecycleAndFailure();
         TestDisabledAndInvalidation();
+        TestCaptureBoundaryPreservesWindows();
         TestProductionSerialization();
         trace::callback = nullptr;
         std::cout << "presentation trace tests passed\n";

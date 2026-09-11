@@ -25,12 +25,19 @@ bool D3D11CompositionFeedback::empty() const noexcept
 
 void D3D11CompositionSwapChain::Buffer::Reset() noexcept
 {
+    const auto release = [](std::string_view kind, auto&& operation) {
+        auto event = presentation_trace::current;
+        event.name = "presentation_resource_release";
+        event.resource_kind = kind;
+        presentation_trace::Span span(event);
+        operation();
+    };
     if (available_event != nullptr) {
-        CloseHandle(std::exchange(available_event, nullptr));
+        release("available_event", [&] { CloseHandle(std::exchange(available_event, nullptr)); });
     }
-    presentation.Reset();
-    render_target.Reset();
-    texture.Reset();
+    if (presentation) release("presentation_buffer", [&] { presentation.Reset(); });
+    if (render_target) release("render_target_view", [&] { render_target.Reset(); });
+    if (texture) release("texture", [&] { texture.Reset(); });
 }
 
 D3D11CompositionSwapChain::~D3D11CompositionSwapChain()
@@ -487,8 +494,18 @@ void D3D11CompositionSwapChain::ResetBuffers() noexcept
 {
     selected_buffer_ = -1;
     for (Buffer& buffer : buffers_) {
-        buffer.Reset();
+        ReleaseBuffer(buffer, static_cast<int>(&buffer - buffers_.data()));
     }
+}
+
+void D3D11CompositionSwapChain::ReleaseBuffer(Buffer& buffer, int slot) noexcept
+{
+    auto event = presentation_trace::current;
+    event.name = "presentation_buffer_release";
+    event.backend = "composition";
+    event.buffer_slot = slot;
+    presentation_trace::Span span(event);
+    buffer.Reset();
 }
 
 void D3D11CompositionSwapChain::DrainStatistics() noexcept
@@ -496,10 +513,24 @@ void D3D11CompositionSwapChain::DrainStatistics() noexcept
     if (statistics_event_ == nullptr || manager_ == nullptr) {
         return;
     }
-    while (WaitForSingleObject(statistics_event_, 0) == WAIT_OBJECT_0) {
+    auto drain_event = presentation_trace::current;
+    drain_event.name = "presentation_statistics_drain";
+    drain_event.backend = "composition";
+    drain_event.timeout_ms = 0;
+    presentation_trace::Span drain(drain_event);
+    std::uint64_t items = 0;
+    while (presentation_trace::Measure("presentation_statistics_poll", [&] {
+        return WaitForSingleObject(statistics_event_, 0);
+    }) == WAIT_OBJECT_0) {
+        drain.Count(++items);
+        auto item_event = presentation_trace::current;
+        item_event.name = "presentation_statistics_item";
+        presentation_trace::Span item(item_event);
         Microsoft::WRL::ComPtr<IPresentStatistics> statistics;
-        const HRESULT result = manager_->GetNextPresentStatistics(
-            statistics.GetAddressOf());
+        const HRESULT result = presentation_trace::Measure("presentation_statistics_get_next", [&] {
+            return manager_->GetNextPresentStatistics(statistics.GetAddressOf());
+        });
+        item.Result(result);
         if (FAILED(result)) {
             feedback_.statistics_error = result;
             CloseHandle(std::exchange(statistics_event_, nullptr));

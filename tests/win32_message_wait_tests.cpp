@@ -1,5 +1,6 @@
 #include "app/render_wake_scheduler.h"
 #include "profile/presentation_trace.h"
+#include "platform/win32_native_size_trace.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_message_wait.h"
 #include "platform/win32_touchpad_gesture_source.h"
@@ -12,6 +13,7 @@
 #include <iostream>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -21,6 +23,8 @@ constexpr wchar_t kWindowClassName[] = L"SpecForgeWin32MessageWaitTests";
 constexpr UINT kSentMessage = WM_APP + 1U;
 constexpr UINT kUnusedQueuedMessage = WM_APP + 2U;
 constexpr UINT kIgnoredClockMessage = WM_APP + 3U;
+constexpr UINT kNestedTraceMessage = WM_APP + 4U;
+constexpr UINT kTraceLeafMessage = WM_APP + 5U;
 std::atomic_bool g_sent_message_handled = false;
 std::atomic_bool g_hit_test_handled = false;
 
@@ -34,6 +38,10 @@ void Require(bool condition, std::string_view message)
 
 LRESULT CALLBACK TestWindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    if (message == kNestedTraceMessage) {
+        return SendMessageW(hwnd, kTraceLeafMessage, 0, 0);
+    }
+    if (message == kTraceLeafMessage) { Sleep(3); return 123; }
     if (message == kSentMessage) {
         g_sent_message_handled = true;
         return 0;
@@ -451,6 +459,90 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
 
 int main()
 {
+    {
+        namespace trace = specforge::presentation_trace;
+        namespace native = specforge::native_size_trace;
+        TestWindow window;
+        specforge::RenderWakeScheduler scheduler;
+        specforge::Win32MessageRenderObserver observer;
+        Require(observer.Start(&RequestFrame, &scheduler), "native trace hook must start");
+        Require(native::hook_available, "return hook must be available in integration test");
+        const auto hwnd = reinterpret_cast<std::uintptr_t>(window.hwnd());
+        trace::Register(hwnd, 320, 240);
+        std::vector<trace::Event> events;
+        events.reserve(64);
+        trace::context = &events;
+        trace::enabled = [](void*) { return true; };
+        trace::callback = [](void* context, const trace::Event& event) {
+            static_cast<std::vector<trace::Event>*>(context)->push_back(event);
+        };
+        {
+            trace::Span outer({.name = "platform_window_size", .window = trace::Lookup(hwnd)});
+            {
+                native::Scope scope;
+                Require(SendMessageW(window.hwnd(), kNestedTraceMessage, 0, 0) == 123,
+                    "message tracing must preserve the original result");
+                SetLastError(4321);
+            }
+            Require(GetLastError() == 4321, "native scope must preserve last error");
+        }
+        const trace::Event* parent = nullptr;
+        const trace::Event* child = nullptr;
+        bool observation = false, cpu = false;
+        for (const auto& event : events) {
+            if (event.phase != "end") continue;
+            if (event.name == "native_size_message" && event.message_id == kNestedTraceMessage) parent = &event;
+            if (event.name == "native_size_message" && event.message_id == kTraceLeafMessage) child = &event;
+            if (event.name == "native_size_observation") observation = event.result == 0 && event.count == 0;
+            if (event.name == "native_size_thread_cpu") cpu = event.result_valid && event.duration_ms >= 0;
+        }
+        Require(parent && child && child->parent == parent->operation && child->message_hwnd == hwnd &&
+            child->duration_ms >= 1 && parent->duration_ms >= child->duration_ms,
+            "real nested sent messages must be paired and timed under their parent");
+        Require(observation && cpu && native::depth == 0 && trace::current.operation == 0,
+            "scope must unwind and report complete observation and CPU availability");
+        events.clear();
+        native::Enter(window.hwnd(), kTraceLeafMessage);
+        native::Leave(window.hwnd(), kTraceLeafMessage);
+        Require(events.empty(), "messages outside a size scope must not be traced");
+        {
+            native::Scope scope;
+            for (unsigned i = 0; i < 40; ++i) native::Enter(window.hwnd(), kTraceLeafMessage);
+            Require(native::depth == 32, "message storage must remain bounded");
+            for (unsigned i = 0; i < 40; ++i) native::Leave(window.hwnd(), kTraceLeafMessage);
+        }
+        bool overflow = false;
+        for (const auto& event : events) {
+            if (event.name == "native_size_observation") overflow = event.count == 8;
+        }
+        Require(overflow && native::depth == 0 && native::suppressed_depth == 0,
+            "overflow must be explicit and fully unwind");
+        events.clear();
+        {
+            native::Scope scope;
+            native::Enter(window.hwnd(), kTraceLeafMessage);
+            native::Leave(window.hwnd(), kNestedTraceMessage);
+        }
+        bool mismatch = false;
+        for (const auto& event : events) {
+            if (event.name == "native_size_observation") mismatch = event.count > 0;
+        }
+        Require(mismatch && native::depth == 0 && trace::current.operation == 0,
+            "mismatch must report incomplete observation and restore the parent");
+        events.clear();
+        trace::enabled = [](void*) { return false; };
+        {
+            native::Scope scope;
+            Require(SendMessageW(window.hwnd(), kNestedTraceMessage, 0, 0) == 123,
+                "disabled telemetry must preserve dispatch");
+        }
+        Require(events.empty() && native::scopes == 0, "disabled telemetry must emit nothing");
+        trace::callback = nullptr;
+        trace::enabled = nullptr;
+        trace::context = nullptr;
+        trace::Unregister(hwnd);
+        observer.Stop();
+    }
     {
         namespace trace = specforge::presentation_trace;
         TestWindow window;

@@ -126,6 +126,7 @@ private:
 
     HRESULT RecordFailure(std::string_view operation, HRESULT result) noexcept;
     HRESULT CreateBuffers(ID3D11Device* device, UINT width, UINT height);
+    void ReleaseBuffer(Buffer& buffer, int slot) noexcept;
     void ResetBuffers() noexcept;
     void DrainStatistics() noexcept;
 

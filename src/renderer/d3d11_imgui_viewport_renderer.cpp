@@ -1,5 +1,6 @@
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "profile/presentation_trace.h"
+#include "platform/win32_native_size_trace.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -105,6 +106,7 @@ void D3D11ImGuiViewportRenderer::TracePlatformWindowSize(ImGuiViewport* viewport
         .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(ViewportWindowHandle(*viewport))),
         .new_width = size.x > 0 ? static_cast<unsigned>(size.x) : 0,
         .new_height = size.y > 0 ? static_cast<unsigned>(size.y) : 0});
+    native_size_trace::Scope native_size;
     instance->platform_set_size_(viewport, size);
 }
 

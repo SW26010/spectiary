@@ -685,9 +685,12 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
     Require(
         SUCCEEDED(presentation.RefreshTarget()),
         "the selected backend should refresh its per-monitor duration policy");
+    const bool composition_selected = presentation.backend() == specforge::D3D11PresentationBackend::Composition;
+    (void)presentation.TakeCompositionFeedback();
     presentation.Shutdown();
 
     bool resize_seen = false, present_seen = false, rebuild_seen = false;
+    bool feedback_seen = false, release_seen = false, poll_seen = false;
     for (const auto& event : trace_events) {
         if (event.phase != "end") continue;
         if (event.name == "viewport_resize") {
@@ -702,8 +705,29 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
             present_seen = true;
         }
         if (event.name == "presentation_buffer_rebuild" && event.parent != 0) rebuild_seen = true;
+        if (event.name == "presentation_feedback_collect") {
+            Require(event.window.hwnd == reinterpret_cast<std::uintptr_t>(window.hwnd()) &&
+                event.window.lifetime != 0, "feedback must retain viewport identity outside resize");
+            feedback_seen = true;
+        }
+        if (event.name == "presentation_statistics_poll") {
+            Require(event.parent != 0 && event.timeout_ms == 0 && event.result_valid,
+                "statistics polling must expose the zero-timeout wait result");
+            poll_seen = true;
+        }
+        if (event.name == "presentation_resource_release") {
+            Require(event.window.hwnd == reinterpret_cast<std::uintptr_t>(window.hwnd()) &&
+                event.window.lifetime != 0 && event.parent != 0 &&
+                event.buffer_slot >= 0 && event.buffer_slot < 3 &&
+                (event.resource_kind == "available_event" || event.resource_kind == "presentation_buffer" ||
+                 event.resource_kind == "render_target_view" || event.resource_kind == "texture"),
+                "real resource releases must retain viewport, slot and resource identity");
+            release_seen = true;
+        }
     }
     Require(resize_seen && present_seen && rebuild_seen, "production renderer trace coverage missing");
+    Require(feedback_seen && (!composition_selected || (release_seen && poll_seen)),
+        "feedback and Composition release trace coverage missing");
 
     Require(
         SUCCEEDED(presentation.Initialize(
@@ -1225,6 +1249,8 @@ void TestImGuiViewportSwapChainLifecycle()
     Require(resize_seen && draw_seen && present_completions == ordinary_presentations.size() + paced_presentations.size(),
         "telemetry completions must match actual detached completion policy");
     Require(!composition_selected || wait_seen, "composition acquire must emit actual available-event waits");
+
+
 }
 
 void TestPlatformTelemetryForwardsAndRestoresCallbacks()
@@ -1289,14 +1315,14 @@ void TestPlatformTelemetryForwardsAndRestoresCallbacks()
     Require(state.positions == 1 && state.sizes == 1 && state.position.x == -10.5f &&
         state.position.y == 200.25f && state.size.x == 640.5f && state.size.y == 480.25f,
         "instrumentation must forward each exact platform argument once");
-    Require(state.events.size() == 6 && state.events[1].parent == state.events[0].operation &&
+    Require(state.events.size() == 10 && state.events[1].parent == state.events[0].operation &&
         state.events[3].parent == state.events[0].operation &&
-        state.events[3].window.lifetime != 0 && state.events[4].phase == "end" &&
-        !state.events[4].result_valid && state.events[4].new_width == 640,
+        state.events[3].window.lifetime != 0 && state.events[8].phase == "end" &&
+        !state.events[8].result_valid && state.events[8].new_width == 640,
         "platform callbacks must emit nested durations without invented return status");
     state.recording = false;
     io.Platform_SetWindowSize(&viewport, ImVec2(321, 123));
-    Require(state.sizes == 2 && state.events.size() == 6 && state.size.x == 321,
+    Require(state.sizes == 2 && state.events.size() == 10 && state.size.x == 321,
         "disabled telemetry must preserve callbacks without events");
     renderer.Shutdown();
     Require(io.Platform_SetWindowPos == position_callback && io.Platform_SetWindowSize == size_callback,

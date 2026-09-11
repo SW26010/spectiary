@@ -129,11 +129,16 @@ HRESULT D3D11WindowPresentation::Initialize(
 
 void D3D11WindowPresentation::Shutdown() noexcept
 {
-    if (device_context_ != nullptr) {
-        device_context_->OMSetRenderTargets(0, nullptr, nullptr);
+    {
+        presentation_trace::Span shutdown({.name = "viewport_shutdown",
+            .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
+            .backend = D3D11PresentationBackendName(backend_)});
+        if (device_context_ != nullptr) {
+            device_context_->OMSetRenderTargets(0, nullptr, nullptr);
+        }
+        composition_.Shutdown();
+        dxgi_.Shutdown();
     }
-    composition_.Shutdown();
-    dxgi_.Shutdown();
     factory_ = nullptr;
     device_ = nullptr;
     device_context_ = nullptr;
@@ -349,6 +354,9 @@ D3D11PresentationTransition D3D11WindowPresentation::TakeTransition() noexcept
 D3D11CompositionFeedback
 D3D11WindowPresentation::TakeCompositionFeedback() noexcept
 {
+    presentation_trace::Span feedback({.name = "presentation_feedback_collect",
+        .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
+        .backend = D3D11PresentationBackendName(backend_)});
     return composition_.TakeFeedback();
 }
 

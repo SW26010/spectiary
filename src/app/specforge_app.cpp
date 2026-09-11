@@ -574,6 +574,12 @@ void SpecForgeApp::Initialize(
         std::move(frame_capture_configuration));
     OpenInitialSource(ui_, initial_source);
 
+    wchar_t windowed_capture[2] = {};
+    if (!runtime_resource_workload_ &&
+        GetEnvironmentVariableW(L"SPECFORGE_PROFILE_WINDOWED", windowed_capture, 2) == 1 &&
+        windowed_capture[0] == L'1') {
+        profile_limits_.max_duration = std::chrono::seconds(5);
+    }
     profile_ = ProfileSink::CreateDefault(
         ui_.profile_output_directory(),
         profile_limits_);
@@ -619,7 +625,8 @@ void SpecForgeApp::Initialize(
     presentation_trace::context = this;
     presentation_trace::main_hwnd = reinterpret_cast<std::uintptr_t>(window_.hwnd());
     presentation_trace::enabled = [](void* context) {
-        return static_cast<SpecForgeApp*>(context)->profile_.is_frame_recording_active();
+        return presentation_trace::capture_ready &&
+            static_cast<SpecForgeApp*>(context)->profile_.is_frame_recording_active();
     };
     presentation_trace::callback = [](void* context, const presentation_trace::Event& event) {
         auto* app = static_cast<SpecForgeApp*>(context);
@@ -900,11 +907,23 @@ void SpecForgeApp::Shutdown()
 
 RenderFrameOutcome SpecForgeApp::RenderFrame()
 {
+    if (!presentation_trace::capture_ready && profile_.is_frame_recording_active()) {
+        presentation_trace::capture_ready = true;
+        presentation_trace::CaptureBoundary(true);
+    }
     presentation_trace::RenderFrame(frame_index_ + 1);
     profile_.BeginFrame();
     struct ProfileFrameFinalizationGuard {
         ProfileSink& sink;
-        ~ProfileFrameFinalizationGuard() { presentation_trace::frame = 0; sink.CompleteFrameFinalization(); }
+        ~ProfileFrameFinalizationGuard() {
+            if (sink.is_frame_finalization_pending() && presentation_trace::capture_ready) {
+                presentation_trace::CancelInvalidation();
+                presentation_trace::CaptureBoundary(false);
+                presentation_trace::capture_ready = false;
+            }
+            presentation_trace::frame = 0;
+            sink.CompleteFrameFinalization();
+        }
     } profile_frame_finalization{profile_};
     presentation_trace::Span render_frame_span({.name = "render_frame"});
 
@@ -1900,6 +1919,7 @@ bool SpecForgeApp::StartProfileRecording(
     profile_status_ = {
         .kind = ProfileRecordingStatusKind::Recording,
     };
+    presentation_trace::capture_ready = false;
     LogProfileRecordingStarted(trigger, "recording_started");
     WriteDpiConfiguration("recording_started");
     profile_.WriteEvent("compositor_clock", {

@@ -30,6 +30,10 @@ struct Event {
     std::uint64_t timeout_ms = 0;
     std::string_view present_mode = "none";
     double duration_ms = 0;
+    std::uint32_t message_id = 0;
+    std::uintptr_t message_hwnd = 0;
+    int buffer_slot = -1;
+    std::string_view resource_kind = "none";
 };
 using Callback = void (*)(void*, const Event&);
 using Enabled = bool (*)(void*);
@@ -43,6 +47,8 @@ inline thread_local Event current;
 inline thread_local Clock::time_point invalidated_at;
 inline thread_local std::uint64_t invalidation_count = 0;
 inline thread_local std::uint64_t invalidation_id = 0;
+// Manual recording starts at the next full frame, not in the UI callback's frame.
+inline thread_local bool capture_ready = true;
 
 inline bool Active() noexcept { return callback && enabled && enabled(context); }
 inline void Emit(const Event& event) noexcept
@@ -73,6 +79,13 @@ inline void Unregister(std::uintptr_t hwnd) noexcept
     if (windows.contains(hwnd)) {
         Emit(Event{.name = "viewport_lifecycle", .phase = "end", .window = Lookup(hwnd)});
         windows.erase(hwnd);
+    }
+}
+inline void CaptureBoundary(bool begin) noexcept
+{
+    for (const auto& [hwnd, window] : windows) {
+        Emit(Event{.name = "viewport_capture_boundary", .phase = begin ? "begin" : "end",
+                   .window = window});
     }
 }
 inline void SizeMove(std::uintptr_t hwnd, bool entering) noexcept

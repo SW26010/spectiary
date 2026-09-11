@@ -1,7 +1,7 @@
 # Live-resize presentation telemetry (schema 1)
 
-For investigation scope and evidence, see [issue #56](live-resize/README.md).
-This instrumentation does not select a resize strategy or diagnose #56. It leaves
+For investigation scope, evidence and current decisions, see [issue #56](live-resize/README.md).
+The ordinary instrumentation path does not select a resize strategy. It leaves
 buffer count, synchronous rebuilding, fallback, Present flags, frame scheduling,
 main acquire timeout (1000 ms) and detached acquire timeout (0 ms) unchanged.
 Enable the existing bounded JSONL recorder with `SPECFORGE_PROFILE=1` (or the UI).
@@ -89,8 +89,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.
 It creates a separate recording directory, preserves presentation settings,
 requests normal close after 180 seconds, and runs strict schema acceptance.
 It never force-terminates the application. Record from launch through normal
-shutdown for full lifecycle acceptance; UI-started/stopped partial captures
-remain useful for inspection but intentionally fail the complete-evidence gate.
+shutdown for full lifecycle acceptance. Alternatively, use the bounded manual
+capture mode described below; unmatched spans or boundaries still fail acceptance.
 
 The follow-up to the 2026-09-11 capture needs only detached resize:
 
@@ -121,3 +121,159 @@ Bounded tests cover disabled recording, nested failure results, HWND reuse,
 coalesced invalidations, production JSONL fields, malformed/incomplete captures,
 actual Win32 modal boundary messages and real D3D resize/Present calls. They
 establish observability and unchanged API outcomes, not a performance root cause.
+
+## Native size callback follow-up
+
+The 00:50 capture places the largest detached resize stalls inside the original
+ImGui platform size callback. The next capture adds these events without replacing
+the compiled ImGui backend or changing its native calls:
+
+| Event | Correlation and meaning |
+| --- | --- |
+| `native_size_callback` | Begin/end operation inside `platform_window_size`; wall duration of the forwarded callback with instrumentation overhead. |
+| `native_size_message` | Begin/end from the existing thread's `WH_CALLWNDPROC` and an additional `WH_CALLWNDPROCRET` hook, only during a size callback. Parent is the callback or enclosing message. `message_id` is the numeric Win32 message; `message_hwnd` is its receiver, which may differ from the owning viewport's `hwnd`. |
+| `native_size_thread_cpu` | One end-only summary, operation 0, parent callback operation. `duration_ms` is the thread's kernel plus user CPU delta from `GetThreadTimes`; `result_valid=false`, result -1 explicitly marks an unavailable sample. |
+| `native_size_observation` | One end-only summary, operation 0, parent callback operation. Result 0 means the return hook is available; -1 means unavailable. `count` reports overflow, pairing or unwind errors; complete message observation requires result 0 and count 0. |
+
+All events retain viewport lifetime, role, frame, old/new size and parent operation
+fields. The two message fields are additive numeric fields in schema 1; historical
+events without them remain readable. Message begin/end receiver and ID must match.
+Each callback must have exactly one CPU summary and one observation summary.
+
+Message spans include nested work and hook-chain overhead. Only direct child
+message durations are summed, avoiding double counting nested messages. Callback
+wall time minus that sum is reported as `unassigned_ms`; it is not a measurement
+of the entire `SetWindowPos` call or proof of an OS, driver or DWM cause. The CPU
+counter has coarse resolution and includes instrumentation; zero does not prove
+no CPU work, and wall/CPU differences cannot distinguish preemption from blocking.
+
+Storage is bounded to 32 nested messages per UI thread. Overflow or mismatch is
+explicitly reported and disqualifies the strict native evidence gate. Failure to
+install the optional return hook does not change application startup success.
+The observer never dispatches messages, and the callback wrapper preserves the
+original arguments and last-error value. Disabled recording creates no spans.
+
+For this follow-up, repeat only the detached Spectrum outer-border resize:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.ps1 -Scenario NativeSize
+```
+
+Keep the same source and display settings. After detaching, wait three seconds,
+resize for 10–15 seconds, wait three seconds, redock and close normally. The runner
+requires both detached breakdown coverage and `-RequireNativeSizeBreakdown`.
+The analyzer lists the ten slowest callbacks with wall, top-level message, CPU
+and unassigned times, retaining at most 10,000 callback summaries. Passing this
+gate validates evidence completeness; `root_cause` remains `not_determined`.
+
+Tests cover real nested synchronous dispatch and unchanged return values, bounded
+overflow, mismatch cleanup, disabled tracing, callback forwarding/restoration,
+missing summaries, receiver/ID mismatch and incomplete hook observations.
+
+## System scheduling capture
+
+The 07:20 recording places a 141.55 ms gap between WM_NCCALCSIZE return and
+WM_NCPAINT entry. Collect scheduling and stacks with the same interaction:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.ps1 -Scenario NativeSize -SystemTrace
+```
+
+Run this from the usual, non-administrator repository terminal. Windows asks for
+administrator approval to start WPR and again to save it. Only the WPR helper is
+elevated; SpecForge retains the caller's privileges. Resize the detached Spectrum
+outer border for 10–15 seconds, with three seconds idle before and after; redock
+and close normally. Allow the second UAC prompt to save the trace.
+
+The helper uses the installed WPR `CPU.Verbose` profile in file mode. Its local
+profile details include CSwitch, ReadyThread and SampledProfile stacks and are
+saved with the capture. Microsoft documents [CPU wait analysis with WPR/WPA](https://learn.microsoft.com/en-us/troubleshoot/windows-server/support-tools/support-tools-xperf-wpa-wpr)
+and [named WPR instances and command options](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options).
+Each capture has a unique instance; the script never cancels other sessions.
+The existing application timeout also bounds the interaction, and a finally
+block saves this instance on normal script errors. If the shell is forcibly
+closed or saving is denied, use the administrator `recovery_command` recorded
+in `system-trace-session.json` to stop and save that specific instance.
+
+The recording directory contains `system-trace.etl`, the normal JSONL,
+`process-id.txt`, WPR logs/profile details, session metadata with the EXE SHA256,
+and a `symbols` directory containing the matching EXE and PDB. Preserve them
+together before rebuilding. WPR is system-wide; its ETL can contain other
+process activity and paths. Capture remains local. File-mode ETL size depends
+on system activity and is not subject to the JSONL byte limit.
+
+On each recorded viewport lifecycle begin, `presentation_clock_sync` records
+`process_id`, UI `thread_id`, `steady_sample_ns`, `qpc_before`, `qpc_after`,
+`qpc_frequency` and boolean `valid`. QPC reads bracket the steady clock sample.
+For a JSONL timestamp S, the estimated QPC tick is
+`(qpc_before + qpc_after)/2 + (S - steady_sample_ns)*qpc_frequency/1e9`;
+the bracket width supplies the sampling uncertainty. Convert that tick using
+the ETL's own QPC origin/frequency, not wall-clock launch time. The system-trace
+runner requires a valid clock record in addition to native resize coverage.
+
+In WPA, select that process/UI thread and the slow callback interval. Inspect
+CPU Usage (Precise) switch-out, ready and switch-in times/stacks to distinguish
+time waiting from time ready but not scheduled; use sampled stacks as supporting
+evidence. Resolve application stacks with the saved PDB. Check ETL event loss,
+stack availability and clock alignment before accepting an attribution.
+Successful WPR saving and JSONL schema checks alone do not prove usable stacks
+or establish a root cause. No resize or presentation policy changes accompany
+this capture path.
+
+### Feedback and resource-release breakdown
+
+Capture-window follow-up: the live-resize runner now starts recording **off** when
+`-FeedbackBreakdown` or `-WindowedCapture` is selected. Prepare the detached viewport,
+then use Settings > Diagnostics > Start Recording. `SPECFORGE_PROFILE_WINDOWED=1`
+sets the existing recorder duration bound to five seconds, retaining its ordinary
+queue/file bounds and frame-finalization tail. It does not affect runtime-resource
+workload duration policy. Close normally after recording finishes; only one recording
+is accepted by this runner. This replaces the former launch-to-exit capture instruction
+for detailed resize trials.
+
+On manual start, presentation tracing waits for the next complete RenderFrame.
+`viewport_capture_boundary` begin snapshots each existing window's real identity,
+dimensions and active size-move ID; it is not a fabricated HWND creation event.
+The corresponding end snapshot is emitted after spans unwind and before the recorder
+seals an active frame. Clock synchronization and sampled window style accompany begin
+snapshots. Actual create/destroy events inside the interval remain `viewport_lifecycle`.
+Size-move sessions intersecting a boundary are explicitly partial native sessions.
+The analyzer accepts bounded window snapshots but still rejects missing span pairs,
+missing closing window boundaries, dropped events and file-size-limit termination.
+If recording stops while no frame tail is available, absent boundaries still fail
+validation; five seconds is a recording limit, not a guarantee of complete evidence
+under every minimized/lost-device condition.
+
+The September 11 follow-up adds instrumentation only; polling remains zero-timeout,
+statistics are drained with the original loop, and resource release order is unchanged.
+All spans use the existing operation/parent-operation, frame and viewport-lifetime IDs.
+
+| Event | Meaning and correlation |
+| --- | --- |
+| `presentation_feedback_collect` | Per-window `TakeCompositionFeedback`; supplies viewport identity even outside resize. |
+| `presentation_statistics_drain` | One statistics drain; end `count` is the number of attempted items, including a failed GetNext call. |
+| `presentation_statistics_poll` | Child of drain; `timeout_ms=0`, end `result` is raw WaitForSingleObject return. |
+| `presentation_statistics_item` | Child of drain; covers GetNext, processing and the statistics object's Release; end result is GetNext HRESULT. |
+| `presentation_statistics_get_next` | Child of item; isolates GetNextPresentStatistics and records its HRESULT. |
+| `presentation_buffer_release` | One buffer slot reset; `buffer_slot` is 0..2, scoped to its parent reset and viewport lifetime. |
+| `presentation_resource_release` | Child of buffer release; same slot, `resource_kind` is available_event, presentation_buffer, render_target_view or texture. Only non-null resources emit this span. |
+| `viewport_shutdown` | Brackets backend shutdown before viewport lifecycle end, preserving release identity. |
+
+Release duration measures synchronous CloseHandle/ComPtr::Reset return, not GPU retirement
+or ultimate object destruction. It has no HRESULT (`result_valid=false`). Slot IDs are
+reused across rebuilds; they are not allocation IDs. Other events serialize slot -1
+unless inherited from a buffer scope, and resource kind `none` unless in a resource scope.
+
+`analyze-presentation-profile.ps1 -RequireFeedbackBreakdown` requires completed detached
+feedback, drain, poll, GetNext and resource-release events, in addition to ordinary lifecycle
+and pairing checks. It rejects invalid release slots/kinds, incorrect child parent types,
+and nonzero statistics polling timeout. Empty statistics queues need not produce GetNext;
+a capture without it fails the coverage gate rather than proving that path fast.
+
+Use `profile-live-resize.ps1 -Scenario NativeSize -FeedbackBreakdown` for a manually
+armed short capture with ordinary presentation policy. Prepare the detached Spectrum,
+start recording, and drag its outer border during the five-second recording. Close
+normally afterwards. Extra events increase overhead and file volume; keep the recorder
+limits and reject dropped or truncated captures. Absolute timings from different
+instrumentation versions are not directly comparable. Experimental configurations and
+results belong in the [issue #56 investigation](live-resize/README.md).
