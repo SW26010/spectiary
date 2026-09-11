@@ -385,9 +385,9 @@ HRESULT D3D11CompositionSwapChain::Present(
     return S_OK;
 }
 
-D3D11CompositionFeedback D3D11CompositionSwapChain::TakeFeedback() noexcept
+D3D11CompositionFeedback D3D11CompositionSwapChain::TakeFeedback(bool drain) noexcept
 {
-    DrainStatistics();
+    if (drain) DrainStatistics();
     const bool first_independent_flip =
         !independent_flip_reported_ && feedback_.independent_flip_frames > 0;
     const bool anomaly = feedback_.status_skipped > 0 ||

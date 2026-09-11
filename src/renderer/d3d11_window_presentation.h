@@ -106,7 +106,7 @@ public:
     active_render_texture() const noexcept;
 
     [[nodiscard]] D3D11PresentationTransition TakeTransition() noexcept;
-    [[nodiscard]] D3D11CompositionFeedback TakeCompositionFeedback() noexcept;
+    [[nodiscard]] D3D11CompositionFeedback TakeCompositionFeedback(bool drain = true) noexcept;
     [[nodiscard]] D3D11PresentationBackend backend() const noexcept
     {
         return backend_;

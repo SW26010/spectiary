@@ -5,7 +5,9 @@ param(
     [switch]$RequireDetachedBreakdown,
     [switch]$RequireNativeSizeBreakdown,
     [switch]$RequireClockSync,
-    [switch]$RequireFeedbackBreakdown
+    [ValidateSet('None', 'A', 'B')][string]$RedirectionArm = 'None',
+    [switch]$RequireFeedbackBreakdown,
+    [switch]$RequireFeedbackAcquireOnly
 )
 $ErrorActionPreference = 'Stop'
 # Bound input and retain only open operations plus small event counters.
@@ -36,12 +38,25 @@ $native = @{}
 $nativeResults = [Collections.Generic.List[object]]::new()
 $lineNumber = 0
 $clockSync = $null
+$redirectionBuild = $null
+$redirectionSamples = 0
 $feedbackCoverage = @{}
+$feedbackAcquireOnly = $false
+$drainFrames = @{}
 $reader = [IO.File]::OpenText((Resolve-Path -LiteralPath $Path).Path)
 try {
 while ($null -ne ($line = $reader.ReadLine())) {
     $lineNumber++
     $row = $line | ConvertFrom-Json
+    if ($row.event -eq 'feedback_experiment') { $feedbackAcquireOnly = ($row.acquire_only -eq $true) }
+    if ($row.event -eq 'runtime_config') { $redirectionBuild = $row.redirection_build }
+    if ($RedirectionArm -ne 'None' -and $row.event -eq 'platform_window_size' -and $row.viewport_role -eq 'detached') {
+        $style = $row.hwnd_ex_style
+        if ($null -eq $style -or $style -is [string] -or $style -is [bool] -or $style -isnot [ValueType] -or
+            $style -lt 0 -or [math]::Truncate([double]$style) -ne $style) { throw 'Missing or invalid sampled HWND style' }
+        if ((($style -band 0x00200000) -ne 0) -ne ($RedirectionArm -eq 'B')) { throw 'HWND style does not match requested A/B arm' }
+        $redirectionSamples++
+    }
     if ($row.event -eq 'presentation_clock_sync') {
         foreach ($field in @('process_id', 'thread_id', 'steady_sample_ns', 'qpc_before', 'qpc_after', 'qpc_frequency')) {
             $v = $row.$field
@@ -78,6 +93,15 @@ while ($null -ne ($line = $reader.ReadLine())) {
         throw "Line ${lineNumber}: completion must mean S_OK API return"
     }
     $counts[$row.event]++
+    if ($RequireFeedbackAcquireOnly -and $row.event -eq 'presentation_statistics_drain' -and
+        $row.viewport_role -eq 'detached' -and $row.phase -eq 'begin') {
+        $parent = $pending[[string]$row.parent_operation_id]
+        if ($null -eq $parent -or $parent.event -ne 'viewport_acquire') { throw 'Experimental drain must be inside acquisition' }
+        $key = [string]$row.viewport_lifetime
+        if ($drainFrames.ContainsKey($key) -and $drainFrames[$key] -eq $row.frame) { throw 'Repeated experimental drain in one viewport frame' }
+        $drainFrames[$key] = $row.frame
+    }
+    if ($row.event -eq 'viewport_lifecycle' -and $row.phase -eq 'end') { $drainFrames.Remove([string]$row.viewport_lifetime) }
     if ($row.event -in @('presentation_buffer_release', 'presentation_resource_release')) {
         if ($row.buffer_slot -isnot [ValueType] -or $row.buffer_slot -is [bool] -or
             $row.buffer_slot -lt 0 -or $row.buffer_slot -gt 2 -or [math]::Truncate([double]$row.buffer_slot) -ne $row.buffer_slot) {
@@ -230,6 +254,12 @@ if ($RequireNativeSizeBreakdown -and (!$roles.ContainsKey('detached') -or $nativ
     !$counts.ContainsKey('native_size_message'))) { throw 'Missing native size/message coverage' }
 if ($RequireClockSync -and $null -eq $clockSync) { throw 'Missing process/thread clock correlation' }
 if ($RequireFeedbackBreakdown -and $feedbackCoverage.Count -ne 5) { throw 'Missing detached feedback/release breakdown coverage' }
+if ($RequireFeedbackAcquireOnly -and (!$feedbackAcquireOnly -or !$feedbackCoverage.ContainsKey('presentation_statistics_drain'))) {
+    throw 'Missing acquisition-only experiment activation or drain coverage'
+}
+if ($RedirectionArm -ne 'None' -and ($redirectionBuild -ne 'creation_time_ab' -or $redirectionSamples -eq 0)) {
+    throw 'A/B evidence requires the isolated build and sampled detached sizes'
+}
 [pscustomobject]@{ schema_valid = $true; dropped_events = 0; event_counts = $counts;
     slowest_native_size_callbacks = @($nativeResults | Sort-Object duration_ms -Descending | Select-Object -First 10);
     resize_roles = @($roles.Keys); root_cause = 'not_determined' } | ConvertTo-Json -Depth 5

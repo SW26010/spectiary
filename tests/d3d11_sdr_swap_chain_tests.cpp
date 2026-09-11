@@ -36,7 +36,7 @@ LRESULT CALLBACK SwapChainTestWindowProc(HWND hwnd, UINT message, WPARAM wparam,
 
 class SwapChainTestWindow {
 public:
-    SwapChainTestWindow()
+    explicit SwapChainTestWindow(DWORD extended_style = 0)
     {
         instance_ = GetModuleHandleW(nullptr);
         WNDCLASSW window_class = {};
@@ -47,7 +47,7 @@ public:
         Require(atom_ != 0, "the swap-chain integration test should register its window class");
 
         hwnd_ = CreateWindowExW(
-            0,
+            extended_style,
             kSwapChainTestWindowClass,
             L"SpecForge SDR swap-chain integration test",
             WS_OVERLAPPEDWINDOW,
@@ -515,6 +515,7 @@ public:
     {
         renderer_.SetCompositorClockPaced(paced);
     }
+    void SetFeedbackAcquireOnly(bool enabled) { renderer_.SetFeedbackAcquireOnlyExperiment(enabled); }
 
     void DestroyViewport()
     {
@@ -754,6 +755,37 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         SUCCEEDED(presentation.BeginFrame(clear_color)) &&
             SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::Immediate)),
         "the deterministic DXGI fallback should render and present");
+}
+
+void TestCreationTimeNoRedirectionCompatibility()
+{
+    // Isolated HWND experiment only: production HWND creation is unchanged.
+    for (auto policy : {specforge::D3D11CompositionPolicy::Prefer, specforge::D3D11CompositionPolicy::Disabled}) {
+        SwapChainTestWindow window(WS_EX_NOREDIRECTIONBITMAP);
+        ComPtr<ID3D11Device> device;
+        ComPtr<ID3D11DeviceContext> context;
+        Require(SUCCEEDED(CreateTestDevice(device, context)), "creation-time experiment requires D3D11");
+        auto factory = GetTestFactory(device.Get());
+        specforge::D3D11WindowPresentation presentation;
+        Require(SUCCEEDED(presentation.Initialize(factory.Get(), device.Get(), context.Get(), window.hwnd(), 320, 240, policy)),
+            "creation-time no-redirection HWND should support presentation initialization");
+        std::printf("[redirection probe] backend=%s policy=%s\n",
+            specforge::D3D11PresentationBackendName(presentation.backend()),
+            policy == specforge::D3D11CompositionPolicy::Prefer ? "prefer" : "disabled");
+        if (policy == specforge::D3D11CompositionPolicy::Disabled)
+            Require(presentation.backend() == specforge::D3D11PresentationBackend::Dxgi, "probe must exercise deterministic DXGI");
+        constexpr float color[4] = {0.08f, 0.09f, 0.1f, 1.0f};
+        for (UINT size : {360U, 400U, 320U}) {
+            Require(SetWindowPos(window.hwnd(), nullptr, 0, 0, size, 240,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "probe native resize must succeed");
+            Require(SUCCEEDED(presentation.Resize(size, 240)) && SUCCEEDED(presentation.BeginFrame(color)) &&
+                SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::DisplayVSync)),
+                "probe must resize, acquire and present with its creation-time style");
+            Require((GetWindowLongPtrW(window.hwnd(), GWL_EXSTYLE) & WS_EX_NOREDIRECTIONBITMAP) != 0,
+                "creation-time experiment bit must persist through resize and Present");
+        }
+        presentation.Shutdown();
+    }
 }
 
 void TestInvalidArgumentsPreserveDiagnosticStage()
@@ -1250,7 +1282,31 @@ void TestImGuiViewportSwapChainLifecycle()
         "telemetry completions must match actual detached completion policy");
     Require(!composition_selected || wait_seen, "composition acquire must emit actual available-event waits");
 
-
+    // Exercise the actual detached callbacks, including a recreated lifetime.
+    fixture.SetFeedbackAcquireOnly(true);
+    for (int lifetime = 0; lifetime < 2; ++lifetime) {
+        events.clear();
+        fixture.CreateViewport();
+        fixture.ResizeViewport(ImVec2(640.0f, 360.0f));
+        unsigned drains = 0;
+        for (const auto& event : events)
+            if (event.name == "presentation_statistics_drain" && event.phase == "end") ++drains;
+        Require(drains == 0, "experimental creation and resize collection must not drain statistics");
+        events.clear();
+        fixture.PresentViewport();
+        Require(SUCCEEDED(fixture.TakeLastError().result), "experimental detached presentation must succeed");
+        drains = 0;
+        for (const auto& event : events) {
+            if (event.name != "presentation_statistics_drain" || event.phase != "end") continue;
+            ++drains;
+            bool acquire_parent = false;
+            for (const auto& parent : events)
+                if (parent.operation == event.parent && parent.name == "viewport_acquire") acquire_parent = true;
+            Require(acquire_parent, "experimental drain must belong to buffer acquisition");
+        }
+        Require(!composition_selected || drains == 1, "experimental frame must drain exactly once");
+        fixture.DestroyViewport();
+    }
 }
 
 void TestPlatformTelemetryForwardsAndRestoresCallbacks()
@@ -1387,6 +1443,10 @@ int main()
         {
             "TestDisplayRefreshDurationPolicy",
             TestDisplayRefreshDurationPolicy,
+        },
+        {
+            "TestCreationTimeNoRedirectionCompatibility",
+            TestCreationTimeNoRedirectionCompatibility,
         },
         {
             "TestInvalidArgumentsPreserveDiagnosticStage",

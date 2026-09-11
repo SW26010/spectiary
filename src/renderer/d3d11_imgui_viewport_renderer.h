@@ -49,6 +49,9 @@ public:
     bool Initialize(IDXGIFactory2* factory, ID3D11Device* device, ID3D11DeviceContext* device_context);
     void Shutdown() noexcept;
     void SetCompositorClockPaced(bool paced) noexcept { compositor_clock_paced_ = paced; }
+    // Diagnostic only: leave statistics draining at the existing BeginFrame boundary.
+    void SetFeedbackAcquireOnlyExperiment(bool enabled) noexcept { feedback_acquire_only_ = enabled; }
+    [[nodiscard]] bool FeedbackAcquireOnlyExperiment() const noexcept { return feedback_acquire_only_; }
     void SetClearColor(
         const std::array<float, 4>& clear_color) noexcept;
     void SetNativeWindowThemeCallback(
@@ -89,6 +92,7 @@ private:
     std::array<float, 4> clear_color_{0.0f, 0.0f, 0.0f, 1.0f};
     std::function<void(HWND)> native_window_theme_callback_;
     bool compositor_clock_paced_ = false;
+    bool feedback_acquire_only_ = false;
 };
 
 }  // namespace specforge

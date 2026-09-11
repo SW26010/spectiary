@@ -799,6 +799,15 @@ void SpecForgeApp::InitializeUiBackends()
         throw std::runtime_error("Failed to initialize the Dear ImGui SDR viewport renderer.");
     }
 
+#ifdef SPECFORGE_REDIRECTION_AB_BUILD
+    wchar_t feedback_experiment[2] = {};
+    viewport_renderer_.SetFeedbackAcquireOnlyExperiment(
+        GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY", feedback_experiment, 2) == 1 &&
+        feedback_experiment[0] == L'1');
+#endif
+    profile_.WriteEvent("feedback_experiment", {
+        ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
+    });
     imgui_initialized_ = true;
 }
 
@@ -910,6 +919,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     if (!presentation_trace::capture_ready && profile_.is_frame_recording_active()) {
         presentation_trace::capture_ready = true;
         presentation_trace::CaptureBoundary(true);
+        profile_.WriteEvent("feedback_experiment", {
+            ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
+        });
     }
     presentation_trace::RenderFrame(frame_index_ + 1);
     profile_.BeginFrame();
@@ -3184,6 +3196,11 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
     const std::string source_type(
         snapshot ? MetadataValue(snapshot->source.metadata, "source_type") : std::string_view{});
     profile_.WriteEvent("runtime_config", {
+#ifdef SPECFORGE_REDIRECTION_AB_BUILD
+                                            ProfileSink::Field::String("redirection_build", "creation_time_ab"),
+#else
+                                            ProfileSink::Field::String("redirection_build", "baseline"),
+#endif
                                             ProfileSink::Field::String("reason", std::string(reason)),
                                             ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
                                             ProfileSink::Field::String(

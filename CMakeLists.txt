@@ -1817,6 +1817,7 @@ set_property(
 
 if(SPECFORGE_BUILD_WIDGET_TESTS)
     add_subdirectory(tests/widget)
+    include(cmake/redirection_experiment.cmake)
     set_property(TEST specforge_sample_workflow_shortcut_tests specforge_shell_source_load_activation_tests
         APPEND PROPERTY LABELS widget)
 endif()

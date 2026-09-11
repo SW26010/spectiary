@@ -61,6 +61,19 @@ try {
     Check $windowedRows $true
     ($windowedRows | Where-Object { $_.event -eq 'viewport_capture_boundary' -and $_.phase -eq 'end' }).size_move_id = 98
     Check $windowedRows $false
+    $acquireRows = @(@{ event = 'feedback_experiment'; acquire_only = $true }) + @(FeedbackFixture)
+    foreach ($row in $acquireRows) {
+        if ($row.event -eq 'presentation_feedback_collect') { $row.event = 'viewport_acquire' }
+    }
+    Check $acquireRows $true
+    & $Analyzer -Path $path -RequireFeedbackAcquireOnly | Out-Null
+    $acquireRows[0].acquire_only = $false
+    Check $acquireRows $true
+    try { & $Analyzer -Path $path -RequireFeedbackAcquireOnly | Out-Null; throw 'Expected activation failure' }
+    catch { if ($_.Exception.Message -ne 'Missing acquisition-only experiment activation or drain coverage') { throw } }
+    Check (@(@{event = 'feedback_experiment'; acquire_only = $true}) + @(FeedbackFixture)) $true
+    try { & $Analyzer -Path $path -RequireFeedbackAcquireOnly | Out-Null; throw 'Expected drain parent failure' }
+    catch { if ($_.Exception.Message -ne 'Experimental drain must be inside acquisition') { throw } }
     Check (@(@{ event = 'presentation_feedback'; target = 'detached'; present_submissions = 4 }) + @(FeedbackFixture)) $true $false $false $true
     $rows = FeedbackFixture; ($rows | Where-Object operation_id -eq 26)[0].buffer_slot = 3; Check $rows $false
     $rows = FeedbackFixture; ($rows | Where-Object operation_id -eq 26)[0].resource_kind = 'unknown'; Check $rows $false
@@ -96,6 +109,19 @@ try {
     $complete = @(Fixture) + $breakdown + @($detached[0], $update[0]) + @($detached[1..4]) +
         @($update[1], $render[0]) + @($detached[5..6]) + @($render[1], $detached[7])
     Check $complete $true $true
+    $armRows = @(@{event = 'runtime_config'; redirection_build = 'creation_time_ab'}) + $complete
+    $detached[1].hwnd_ex_style = 0; $detached[2].hwnd_ex_style = 0
+    Check $armRows $true $true
+    & $Analyzer -Path $path -RedirectionArm A | Out-Null
+    try { & $Analyzer -Path $path -RedirectionArm B | Out-Null; throw 'Expected B style failure' }
+    catch { if ($_.Exception.Message -ne 'HWND style does not match requested A/B arm') { throw } }
+    $detached[1].hwnd_ex_style = 0x00200000; $detached[2].hwnd_ex_style = 0x00200000
+    Check $armRows $true $true
+    & $Analyzer -Path $path -RedirectionArm B | Out-Null
+    $armRows[0].redirection_build = 'baseline'
+    Check $armRows $true
+    try { & $Analyzer -Path $path -RedirectionArm B | Out-Null; throw 'Expected wrong build failure' }
+    catch { if ($_.Exception.Message -ne 'A/B evidence requires the isolated build and sampled detached sizes') { throw } }
     Check $complete $false $true $true
     $native = @((Event 'native_size_callback' 'begin' 10),
         (Event 'native_size_message' 'begin' 11), (Event 'native_size_message' 'end' 11),

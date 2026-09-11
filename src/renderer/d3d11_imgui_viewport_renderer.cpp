@@ -83,6 +83,7 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     present_completions_.clear();
     native_window_theme_callback_ = {};
     compositor_clock_paced_ = false;
+    feedback_acquire_only_ = false;
 }
 
 void D3D11ImGuiViewportRenderer::SetClearColor(
@@ -327,7 +328,7 @@ void D3D11ImGuiViewportRenderer::CollectPresentationUpdate(
     D3D11WindowPresentation& presentation)
 {
     D3D11PresentationTransition transition = presentation.TakeTransition();
-    D3D11CompositionFeedback feedback = presentation.TakeCompositionFeedback();
+    D3D11CompositionFeedback feedback = presentation.TakeCompositionFeedback(!feedback_acquire_only_);
     if (transition.empty() && feedback.empty()) {
         return;
     }

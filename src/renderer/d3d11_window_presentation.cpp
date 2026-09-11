@@ -352,12 +352,12 @@ D3D11PresentationTransition D3D11WindowPresentation::TakeTransition() noexcept
 }
 
 D3D11CompositionFeedback
-D3D11WindowPresentation::TakeCompositionFeedback() noexcept
+D3D11WindowPresentation::TakeCompositionFeedback(bool drain) noexcept
 {
     presentation_trace::Span feedback({.name = "presentation_feedback_collect",
         .window = presentation_trace::Lookup(reinterpret_cast<std::uintptr_t>(hwnd_)),
         .backend = D3D11PresentationBackendName(backend_)});
-    return composition_.TakeFeedback();
+    return composition_.TakeFeedback(drain);
 }
 
 D3D11PresentationDegradation D3D11WindowPresentation::degradation(

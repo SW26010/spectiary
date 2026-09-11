@@ -6,13 +6,22 @@ param(
     [ValidateRange(30, 240)][int]$TimeoutSec = 180,
     [switch]$SystemTrace,
     [switch]$FeedbackBreakdown,
-    [switch]$WindowedCapture
+    [switch]$FeedbackAcquireOnly,
+    [switch]$WindowedCapture,
+    [ValidateSet('None', 'A', 'B')][string]$RedirectionArm = 'None'
 )
 $ErrorActionPreference = 'Stop'
 $windowed = $WindowedCapture -or $FeedbackBreakdown
+if ($FeedbackAcquireOnly -and ($RedirectionArm -eq 'None' -or !$FeedbackBreakdown)) {
+    throw 'FeedbackAcquireOnly requires an isolated RedirectionArm and FeedbackBreakdown.'
+}
 if ($SystemTrace -and $Scenario -ne 'NativeSize') { throw 'SystemTrace requires -Scenario NativeSize.' }
 if ($FeedbackBreakdown -and $Scenario -ne 'NativeSize') { throw 'FeedbackBreakdown requires -Scenario NativeSize.' }
 $repo = Split-Path -Parent $PSScriptRoot
+if ($RedirectionArm -ne 'None') {
+    if ($Scenario -ne 'NativeSize') { throw 'Redirection A/B requires -Scenario NativeSize' }
+    if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/redirection-experiment/SpecForge.exe' }
+}
 if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/SpecForge.exe' }
 $Executable = (Resolve-Path -LiteralPath $Executable).Path
 $directory = Join-Path $repo ('logs/live-resize-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
@@ -26,6 +35,13 @@ $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal
 $start.EnvironmentVariables['SPECFORGE_PROFILE'] = $(if ($windowed) { '0' } else { '1' })
 $start.EnvironmentVariables['SPECFORGE_PROFILE_WINDOWED'] = $(if ($windowed) { '1' } else { '0' })
 $start.EnvironmentVariables['SPECFORGE_PROFILE_DIR'] = $directory
+$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY'] = $(if ($FeedbackAcquireOnly) { '1' } else { '0' })
+$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_NO_REDIRECTION_BITMAP'] = $(if ($RedirectionArm -eq 'B') { '1' } else { '0' })
+[pscustomobject]@{ arm = $RedirectionArm; feedback_acquire_only = [bool]$FeedbackAcquireOnly;
+    windowed_capture = [bool]$windowed;
+    capture_seconds = $(if ($windowed) { 5 } else { 0 }); executable = $Executable;
+    sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash } |
+    ConvertTo-Json | Set-Content (Join-Path $directory 'redirection-experiment.json')
 if ($InitialSource) {
     $source = (Resolve-Path -LiteralPath $InitialSource).Path
     if ($source.Contains('"')) { throw 'Invalid source path quote' }
@@ -41,6 +57,7 @@ if ($windowed) {
 }
 if (!$windowed) { Write-Host 'Let each interval settle, redock, and close normally. Record display setup and visual observations.' }
 Write-Host "Recording directory: $directory"
+if ($RedirectionArm -ne 'None') { Write-Host "Redirection A/B arm: $RedirectionArm (same isolated executable for both arms)." }
 $instance = 'SpecForgeResize-' + [guid]::NewGuid().ToString('N')
 function Invoke-ResizeWpr([string]$action) {
     $helper = Join-Path $PSScriptRoot 'profile-resize-wpr-helper.ps1'
@@ -100,7 +117,7 @@ try {
 $profiles = @(Get-ChildItem -LiteralPath $directory -Filter '*.jsonl')
 if ($profiles.Count -ne 1) { throw 'Expected exactly one complete profile; inspect the recording directory.' }
 if ($Scenario -eq 'NativeSize') {
-    & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown -RequireNativeSizeBreakdown -RequireClockSync:$SystemTrace -RequireFeedbackBreakdown:$FeedbackBreakdown
+    & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown -RequireNativeSizeBreakdown -RequireClockSync:$SystemTrace -RedirectionArm $RedirectionArm -RequireFeedbackBreakdown:$FeedbackBreakdown -RequireFeedbackAcquireOnly:$FeedbackAcquireOnly
 } elseif ($Scenario -eq 'Detached') {
     & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown
 } else {

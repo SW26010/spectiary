@@ -61,7 +61,7 @@ public:
         DWORD availability_timeout_ms = 1'000);
     HRESULT Present(ID3D11DeviceContext* device_context);
 
-    [[nodiscard]] D3D11CompositionFeedback TakeFeedback() noexcept;
+    [[nodiscard]] D3D11CompositionFeedback TakeFeedback(bool drain = true) noexcept;
     [[nodiscard]] ID3D11Texture2D*
     active_render_texture() const noexcept
     {
