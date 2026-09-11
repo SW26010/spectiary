@@ -1,0 +1,86 @@
+# Incremental buffers: first complete paired resize capture
+
+> Historical investigation record. See the [current resize investigation](../README.md) for current decisions and next steps.
+
+User initially reported **时间太短感觉不出来**, then confirmed **确实后者更流畅**.
+This is positive subjective evidence for the incremental treatment under window-style
+arm B. It does not establish production suitability or independence from that style.
+
+## Capture validity and comparison population
+
+- Control: `logs/live-resize-20260911-102311-442bfecb`.
+- Incremental: `logs/live-resize-20260911-102356-8b913966`.
+- Both executable SHA256:
+  `F8AC3E627379D5F809BA263A54A09574D26E7E54860C94839049B7153C8EAF44`.
+- Both redirection arm B, ordinary feedback frequency, manually armed five-second
+  recordings. Incremental activation is false/true respectively, confirmed at runtime.
+- Both pass full native-size, detached-stage and feedback coverage validation;
+  treatment also passes incremental-buffer validation. Both finish with duration_limit,
+  paired capture boundaries and zero dropped events, without file-size exhaustion.
+  Accepted bytes: 41,667,518 / 42,243,371.
+- There are **two detached viewports** in each capture. Only lifetime 2, viewport ID
+  167297964, changes size. Lifetime 3, viewport ID 2435321369, remains 860x560.
+  Per-viewport stage metrics below use only lifetime 2; whole RenderFrame still includes
+  main and both detached viewports. Do not combine both detached viewports' Present
+  or acquisition events when reporting the resizing viewport's latency.
+
+## Results in frames containing completed target resize
+
+| Metric | Control | Incremental |
+| --- | ---: | ---: |
+| Completed target resize frames | 249 | 232 |
+| Whole RenderFrame p50 | 12.4616 ms | 11.5806 ms |
+| Whole RenderFrame p95 | 14.8574 ms | 12.6345 ms |
+| Whole RenderFrame p99 | 16.1279 ms | 12.9986 ms |
+| Whole RenderFrame maximum | 17.6942 ms | 13.0508 ms |
+| Target native-size callback p95 | 1.1601 ms | 1.2038 ms |
+| Target viewport_resize p95 | 4.6196 ms | 0.0838 ms |
+| Target acquisition p95 | 0.2908 ms | 1.4191 ms |
+| Target Present p95 | 1.9339 ms | 2.2673 ms |
+| Target per-slot release p95 | 1.7362 ms | 0.3468 ms |
+| Target per-slot release maximum | 3.1982 ms | 0.3948 ms |
+
+Nearest-rank percentiles. Whole-frame p95 is approximately 15% lower in this pair.
+The reduced Resize time alone is not a benefit claim: allocation work intentionally
+moves to acquisition, whose duration increases. Present p95 also increases. The
+whole-frame tail reduction is the relevant positive signal.
+
+Control releases 747 slots in 249 resize frames (three each). Treatment performs
+232 replacement attempts in 232 resize frames (one each), all successful, distributed
+across slots 0/1/2 as 100/69/63. Treatment replacement p95 is 0.6774 ms, maximum
+0.7907 ms. All target acquisitions and Presents return S_OK in these frames, with
+no still-drawing skips or DXGI fallback. Across all treatment selections in the full
+capture there are 463 selects and 241 replacements, with no skip/budget-failure action.
+Target planned peak logical texture bytes in resize frames are 30,123,824 (~28.73 MiB),
+below the 256 MiB per-viewport budget. This is not measured driver/process GPU memory.
+
+The workloads are not identical: control target widths/heights range 144..1689 /
+573..1464, versus treatment 254..1750 / 471..1468. Manual drag paths, short intervals
+and instrumentation overhead prevent a general causal speedup or stability claim.
+There is no ETL for this pair; do not assign individual waits to kernel fences solely
+from earlier captures. Present S_OK is API submission success, not display completion.
+
+## Decision and next validation
+
+Keep the default-off experiment as a promising candidate. Unlike the feedback-only
+trial, this pair has complete target interaction coverage and lower whole-frame tails,
+and the user subsequently confirmed smoother interaction. The arm-B UX observation
+is positive; ordinary-style replication and resource stability remain open.
+
+The five-second cap limits recording, **not interaction time**. For a subsequent
+comparison, use the same two runner commands, prepare the same viewport/data, and
+spend 30–60 seconds dragging before starting the short recording (or continue after
+it finishes). Keep within the runner's overall 180-second bound. There is no need to
+increase the log limit or gather a long verbose capture merely to judge feel.
+
+Next, test with the ordinary HWND style held fixed
+(arm A for both control and incremental) before considering production. Follow with
+bounded resource-stability and repeated resize/recreate checks. The earlier B window
+style remains independently unaccepted as a fix. No production policy changes are
+made by this analysis, and no new manual capture is launched automatically.
+
+Artifacts: `validation.json`, `incremental-comparison.json` in each directory.
+The latter is generated by `logs/compare-incremental-buffers.cjs`, which selects
+resizing viewport lifetimes before calculating target stage metrics. The older
+`feedback-comparison.json` includes both detached viewports for stage metrics and
+must not be used as the target-only comparison. Raw captures are unchanged.

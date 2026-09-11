@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer/win32_display_refresh.h"
+#include "renderer/incremental_buffer_plan.h"
 
 #include <Windows.h>
 #include <d3d11_1.h>
@@ -44,7 +45,8 @@ public:
         HWND hwnd,
         UINT width,
         UINT height,
-        const Win32DisplayRefreshState& refresh_state);
+        const Win32DisplayRefreshState& refresh_state,
+        bool incremental_buffers = false);
     void Shutdown() noexcept;
 
     HRESULT Resize(
@@ -58,7 +60,8 @@ public:
         ID3D11DeviceContext* device_context,
         const float clear_color[4],
         bool clear = true,
-        DWORD availability_timeout_ms = 1'000);
+        DWORD availability_timeout_ms = 1'000,
+        std::uint64_t frame_id = 0);
     HRESULT Present(ID3D11DeviceContext* device_context);
 
     [[nodiscard]] D3D11CompositionFeedback TakeFeedback(bool drain = true) noexcept;
@@ -115,17 +118,23 @@ public:
     }
 
 private:
+    friend struct D3D11CompositionSwapChainTestAccess;
+    // Test-only fault checkpoint, never set by application configuration.
+    HRESULT (*allocation_checkpoint_)(unsigned) = nullptr;
     struct Buffer {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> render_target;
         Microsoft::WRL::ComPtr<IPresentationBuffer> presentation;
         HANDLE available_event = nullptr;
+        IncrementalBufferSlot identity;
 
         void Reset() noexcept;
     };
 
     HRESULT RecordFailure(std::string_view operation, HRESULT result) noexcept;
     HRESULT CreateBuffers(ID3D11Device* device, UINT width, UINT height);
+    HRESULT CreateBuffer(ID3D11Device* device, UINT width, UINT height, Buffer& buffer);
+    HRESULT SelectIncrementalBuffer(ID3D11DeviceContext* context, std::uint64_t frame_id);
     void ReleaseBuffer(Buffer& buffer, int slot) noexcept;
     void ResetBuffers() noexcept;
     void DrainStatistics() noexcept;
@@ -143,6 +152,9 @@ private:
     UINT width_ = 0;
     UINT height_ = 0;
     int selected_buffer_ = -1;
+    int bound_buffer_ = -1;
+    bool incremental_buffers_ = false;
+    std::uint64_t generation_ = 0, resize_serial_ = 0, last_replacement_frame_ = 0;
     UINT preferred_duration_ = 0;
     UINT preferred_tolerance_ = 0;
     UINT_PTR content_tag_ = 0;

@@ -21,6 +21,20 @@
 #include <string_view>
 #include <vector>
 
+namespace specforge {
+struct D3D11CompositionSwapChainTestAccess {
+    inline static unsigned fail_step = 0;
+    static void Inject(D3D11CompositionSwapChain& chain, unsigned step) {
+        fail_step = step;
+        chain.allocation_checkpoint_ = [](unsigned current) -> HRESULT { return current == fail_step ? E_FAIL : S_OK; };
+    }
+    static void Inject(D3D11WindowPresentation& window, unsigned step) { Inject(window.composition_, step); }
+    static auto Generations(const D3D11CompositionSwapChain& chain) {
+        return std::array<std::uint64_t, 3>{chain.buffers_[0].identity.generation,
+            chain.buffers_[1].identity.generation, chain.buffers_[2].identity.generation};
+    }
+};
+}
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -757,6 +771,79 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         "the deterministic DXGI fallback should render and present");
 }
 
+void TestIncrementalBufferPlanAndFailure()
+{
+    using namespace specforge;
+    std::array<IncrementalBufferSlot, 3> slots{{{320,240,1},{320,240,2},{320,240,3}}};
+    Require(BufferPixelBytes(~0U, ~0U) == 0 && BufferPixelBytes(0, 1) == 0,
+        "invalid and overflowing dimensions must fail before allocation");
+    auto plan = PlanIncrementalBuffer(slots, {true,true,true}, 0, 640, 480);
+    Require(plan.action == BufferPlanAction::Replace && plan.slot == 1 &&
+        plan.peak_bytes == 3ULL * 320 * 240 * 4 + 640ULL * 480 * 4,
+        "replacement must exclude bound slot and include temporary memory");
+    Require(PlanIncrementalBuffer(slots, {true,false,false}, 0, 640, 480).action == BufferPlanAction::Skip,
+        "only a bound or unavailable candidate must skip");
+    Require(PlanIncrementalBuffer(slots, {false,true,false}, 0, 320, 240).action == BufferPlanAction::Select,
+        "an exact-size available buffer must be reused");
+    auto large = slots;
+    for (auto& slot : large) slot = {4096,4096,1};
+    Require(PlanIncrementalBuffer(large, {true,true,true}, -1, 4097,4096).action == BufferPlanAction::BudgetExceeded,
+        "budget includes installed buffers until replacement commits");
+    Require(PlanIncrementalBuffer(slots, {true,true,true}, -1, 640,480).slot == 0,
+        "another viewport's planning must remain independent");
+
+    SwapChainTestWindow window(WS_EX_NOREDIRECTIONBITMAP);
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    Require(SUCCEEDED(CreateTestDevice(device, context)), "incremental test requires device");
+    Win32DisplayRefreshState refresh;
+    Require(SUCCEEDED(QueryWin32DisplayRefreshState(window.hwnd(), refresh)), "incremental test requires display timing");
+    D3D11CompositionSwapChain chain;
+    const HRESULT initialized = chain.Initialize(device.Get(), window.hwnd(), 320,240,refresh,true);
+    if (FAILED(initialized)) {
+        std::printf("[SKIP] incremental Composition unavailable: 0x%08lx\n", static_cast<unsigned long>(initialized));
+        return;
+    }
+    const auto original = D3D11CompositionSwapChainTestAccess::Generations(chain);
+    constexpr float color[4] = {0.1f,0.1f,0.1f,1};
+    for (unsigned step = 1; step <= 4; ++step) {
+        D3D11CompositionSwapChainTestAccess::Inject(chain, step);
+        Require(SUCCEEDED(chain.Resize(device.Get(), context.Get(), 640,360)), "resize only records request");
+        Require(chain.BeginFrame(context.Get(), color, true, 0, step) == E_FAIL,
+            "each partial allocation failure must retain its HRESULT");
+        Require(D3D11CompositionSwapChainTestAccess::Generations(chain) == original,
+            "partial allocation must leave all old generations installed");
+    }
+    D3D11CompositionSwapChainTestAccess::Inject(chain, 0);
+    Require(SUCCEEDED(chain.Resize(device.Get(), context.Get(), 500,300)) &&
+        SUCCEEDED(chain.Resize(device.Get(), context.Get(), 640,360)) &&
+        SUCCEEDED(chain.BeginFrame(context.Get(), color, true,0,10)), "latest request must acquire");
+    D3D11_TEXTURE2D_DESC desc{};
+    chain.active_render_texture()->GetDesc(&desc);
+    Require(desc.Width == 640 && desc.Height == 360, "render target must match latest dimensions");
+    const auto replaced = D3D11CompositionSwapChainTestAccess::Generations(chain);
+    unsigned changed = 0;
+    for (int i = 0; i < 3; ++i) changed += original[i] != replaced[i];
+    Require(changed == 1 && SUCCEEDED(chain.Present(context.Get())), "one slot replacement must present");
+    Require(SUCCEEDED(chain.Resize(device.Get(),context.Get(),641,360)) &&
+        chain.BeginFrame(context.Get(),color,true,0,10) == DXGI_ERROR_WAS_STILL_DRAWING,
+        "a second replacement in the same frame must skip");
+    chain.Shutdown();
+    Require(SUCCEEDED(chain.Initialize(device.Get(),window.hwnd(),320,240,refresh,true)) &&
+        SUCCEEDED(chain.Resize(device.Get(),context.Get(),640,360)) &&
+        SUCCEEDED(chain.BeginFrame(context.Get(),color,true,0,10)), "recreated lifetime must not inherit frame suppression");
+    chain.Shutdown();
+
+    auto factory = GetTestFactory(device.Get());
+    D3D11WindowPresentation presentation;
+    Require(SUCCEEDED(presentation.Initialize(factory.Get(),device.Get(),context.Get(),window.hwnd(),320,240,
+        D3D11CompositionPolicy::Prefer,true)), "experimental adapter initializes");
+    D3D11CompositionSwapChainTestAccess::Inject(presentation,3);
+    Require(SUCCEEDED(presentation.Resize(640,360)) && SUCCEEDED(presentation.BeginFrame(color,true,0,11)) &&
+        presentation.backend() == D3D11PresentationBackend::Dxgi,
+        "replacement failure must use the existing DXGI fallback");
+}
+
 void TestCreationTimeNoRedirectionCompatibility()
 {
     // Isolated HWND experiment only: production HWND creation is unchanged.
@@ -1443,6 +1530,10 @@ int main()
         {
             "TestDisplayRefreshDurationPolicy",
             TestDisplayRefreshDurationPolicy,
+        },
+        {
+            "TestIncrementalBufferPlanAndFailure",
+            TestIncrementalBufferPlanAndFailure,
         },
         {
             "TestCreationTimeNoRedirectionCompatibility",

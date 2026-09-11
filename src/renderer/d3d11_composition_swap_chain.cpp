@@ -50,9 +50,15 @@ HRESULT D3D11CompositionSwapChain::Initialize(
     HWND hwnd,
     UINT width,
     UINT height,
-    const Win32DisplayRefreshState& refresh_state)
+    const Win32DisplayRefreshState& refresh_state,
+    bool incremental_buffers)
 {
     Shutdown();
+    incremental_buffers_ = incremental_buffers;
+    if (incremental_buffers_ && (!BufferPixelBytes(width, height) ||
+        BufferPixelBytes(width, height) > kIncrementalBufferBudget / 3)) {
+        return RecordFailure("incremental buffers initial budget", E_OUTOFMEMORY);
+    }
     last_error_operation_ = {};
     if (device == nullptr || hwnd == nullptr || width == 0 || height == 0 ||
         refresh_state.preferred_duration == 0 ||
@@ -239,6 +245,9 @@ void D3D11CompositionSwapChain::Shutdown() noexcept
     height_ = 0;
     selected_buffer_ = -1;
     preferred_duration_ = 0;
+    bound_buffer_ = -1;
+    incremental_buffers_ = false;
+    generation_ = resize_serial_ = last_replacement_frame_ = 0;
     preferred_tolerance_ = 0;
     content_tag_ = 0;
     preferred_duration_result_ = E_FAIL;
@@ -265,6 +274,20 @@ HRESULT D3D11CompositionSwapChain::Resize(
     }
     device_context->OMSetRenderTargets(0, nullptr, nullptr);
     selected_buffer_ = -1;
+    if (incremental_buffers_) {
+        width_ = width;
+        height_ = height;
+        ++resize_serial_;
+        auto event = presentation_trace::current;
+        event.name = "presentation_resize_request";
+        event.resize_request_serial = resize_serial_;
+        event.buffer_action = "request";
+        return presentation_trace::Measure(event, [&]() -> HRESULT {
+            if (!BufferPixelBytes(width, height)) return RecordFailure("incremental buffers request budget", E_OUTOFMEMORY);
+            last_error_operation_ = {};
+            return S_OK;
+        });
+    }
     const HRESULT result = CreateBuffers(device, width, height);
     if (SUCCEEDED(result)) {
         last_error_operation_ = {};
@@ -305,7 +328,8 @@ HRESULT D3D11CompositionSwapChain::BeginFrame(
     ID3D11DeviceContext* device_context,
     const float clear_color[4],
     bool clear,
-    DWORD availability_timeout_ms)
+    DWORD availability_timeout_ms,
+    std::uint64_t frame_id)
 {
     if (device_context == nullptr || (clear && clear_color == nullptr) || manager_ == nullptr ||
         selected_buffer_ >= 0) {
@@ -315,6 +339,15 @@ HRESULT D3D11CompositionSwapChain::BeginFrame(
     }
 
     DrainStatistics();
+    if (incremental_buffers_) {
+        const HRESULT result = SelectIncrementalBuffer(device_context, frame_id);
+        if (FAILED(result)) return result;
+        ID3D11RenderTargetView* target = buffers_[selected_buffer_].render_target.Get();
+        device_context->OMSetRenderTargets(1, &target, nullptr);
+        if (clear) device_context->ClearRenderTargetView(target, clear_color);
+        last_error_operation_ = {};
+        return S_OK;
+    }
     std::array<HANDLE, 3> available_events = {};
     for (std::size_t index = 0; index < buffers_.size(); ++index) {
         available_events[index] = buffers_[index].available_event;
@@ -375,12 +408,27 @@ HRESULT D3D11CompositionSwapChain::Present(
         selected_buffer_ = -1;
         return RecordFailure("IPresentationSurface::SetBuffer", result);
     }
+    const int submitted_slot = selected_buffer_;
     result = manager_->Present();
     selected_buffer_ = -1;
     if (FAILED(result)) {
         return RecordFailure("IPresentationManager::Present", result);
     }
     ++feedback_.present_submissions;
+    if (incremental_buffers_) {
+        bound_buffer_ = submitted_slot;
+        auto event = presentation_trace::current;
+        event.name = "presentation_buffer_submission";
+        event.resize_request_serial = resize_serial_;
+        event.buffer_slot = submitted_slot;
+        event.bound_buffer_slot = bound_buffer_;
+        event.allocation_generation = event.bound_generation = buffer.identity.generation;
+        event.new_width = buffer.identity.width;
+        event.new_height = buffer.identity.height;
+        event.buffer_action = "submitted";
+        presentation_trace::Span submitted(event);
+        submitted.Result(result);
+    }
     last_error_operation_ = {};
     return S_OK;
 }
@@ -446,53 +494,74 @@ HRESULT D3D11CompositionSwapChain::CreateBuffers(
 
         return presentation_trace::Measure("presentation_buffer_allocation", [&]() -> HRESULT {
             for (Buffer& buffer : buffers_) {
-                D3D11_TEXTURE2D_DESC description = {};
-                description.Width = width;
-                description.Height = height;
-                description.MipLevels = 1;
-                description.ArraySize = 1;
-                description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                description.SampleDesc.Count = 1;
-                description.Usage = D3D11_USAGE_DEFAULT;
-                description.BindFlags =
-                    D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-                description.MiscFlags =
-                    D3D11_RESOURCE_MISC_SHARED |
-                    D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
-                    D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
-                result = device->CreateTexture2D(
-                    &description,
-                    nullptr,
-                    buffer.texture.GetAddressOf());
-                if (FAILED(result)) {
-                    return RecordFailure("ID3D11Device::CreateTexture2D(displayable)", result);
-                }
-                result = device->CreateRenderTargetView(
-                    buffer.texture.Get(),
-                    nullptr,
-                    buffer.render_target.GetAddressOf());
-                if (FAILED(result)) {
-                    return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
-                }
-                result = manager_->AddBufferFromResource(
-                    buffer.texture.Get(),
-                    buffer.presentation.GetAddressOf());
-                if (FAILED(result)) {
-                    return RecordFailure("IPresentationManager::AddBufferFromResource", result);
-                }
-                result = buffer.presentation->GetAvailableEvent(&buffer.available_event);
-                if (FAILED(result)) {
-                    return RecordFailure("IPresentationBuffer::GetAvailableEvent", result);
-                }
+                result = CreateBuffer(device, width, height, buffer);
+                if (FAILED(result)) return result;
             }
             return S_OK;
         });
     });
 }
 
+HRESULT D3D11CompositionSwapChain::CreateBuffer(ID3D11Device* device, UINT width, UINT height, Buffer& buffer)
+{
+    const auto checkpoint = [&](unsigned step) {
+        const HRESULT result = allocation_checkpoint_ ? allocation_checkpoint_(step) : S_OK;
+        return FAILED(result) ? RecordFailure("buffer allocation test checkpoint", result) : S_OK;
+    };
+    HRESULT injected = checkpoint(1);
+    if (FAILED(injected)) return injected;
+    D3D11_TEXTURE2D_DESC description = {};
+    description.Width = width;
+    description.Height = height;
+    description.MipLevels = 1;
+    description.ArraySize = 1;
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.SampleDesc.Count = 1;
+    description.Usage = D3D11_USAGE_DEFAULT;
+    description.BindFlags =
+        D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    description.MiscFlags =
+        D3D11_RESOURCE_MISC_SHARED |
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+        D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
+    HRESULT result = device->CreateTexture2D(
+        &description,
+        nullptr,
+        buffer.texture.GetAddressOf());
+    if (FAILED(result)) {
+        return RecordFailure("ID3D11Device::CreateTexture2D(displayable)", result);
+    }
+    injected = checkpoint(2);
+    if (FAILED(injected)) return injected;
+    result = device->CreateRenderTargetView(
+        buffer.texture.Get(),
+        nullptr,
+        buffer.render_target.GetAddressOf());
+    if (FAILED(result)) {
+        return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
+    }
+    injected = checkpoint(3);
+    if (FAILED(injected)) return injected;
+    result = manager_->AddBufferFromResource(
+        buffer.texture.Get(),
+        buffer.presentation.GetAddressOf());
+    if (FAILED(result)) {
+        return RecordFailure("IPresentationManager::AddBufferFromResource", result);
+    }
+    injected = checkpoint(4);
+    if (FAILED(injected)) return injected;
+    result = buffer.presentation->GetAvailableEvent(&buffer.available_event);
+    if (FAILED(result)) {
+        return RecordFailure("IPresentationBuffer::GetAvailableEvent", result);
+    }
+    buffer.identity = {width, height, ++generation_};
+    return S_OK;
+}
+
 void D3D11CompositionSwapChain::ResetBuffers() noexcept
 {
     selected_buffer_ = -1;
+    bound_buffer_ = -1;
     for (Buffer& buffer : buffers_) {
         ReleaseBuffer(buffer, static_cast<int>(&buffer - buffers_.data()));
     }
@@ -504,8 +573,99 @@ void D3D11CompositionSwapChain::ReleaseBuffer(Buffer& buffer, int slot) noexcept
     event.name = "presentation_buffer_release";
     event.backend = "composition";
     event.buffer_slot = slot;
+    event.allocation_generation = buffer.identity.generation;
     presentation_trace::Span span(event);
     buffer.Reset();
+    buffer.identity = {};
+}
+
+HRESULT D3D11CompositionSwapChain::SelectIncrementalBuffer(ID3D11DeviceContext* context, std::uint64_t frame_id)
+{
+    std::array<bool, 3> available{};
+    std::array<IncrementalBufferSlot, 3> identities{};
+    std::uint64_t mask = 0;
+    for (int i = 0; i < 3; ++i) {
+        identities[i] = buffers_[i].identity;
+        auto wait = presentation_trace::current;
+        wait.name = "presentation_available_wait";
+        wait.buffer_slot = i;
+        wait.timeout_ms = 0;
+        wait.count = 1;
+        const DWORD result = presentation_trace::Measure(wait, [&] {
+            return WaitForSingleObject(buffers_[i].available_event, 0);
+        });
+        if (result == WAIT_FAILED) return RecordFailure("incremental buffers availability", E_FAIL);
+        available[i] = result == WAIT_OBJECT_0;
+        if (available[i]) mask |= 1ULL << i;
+    }
+    const BufferPlan plan = PlanIncrementalBuffer(identities, available, bound_buffer_, width_, height_);
+    auto event = presentation_trace::current;
+    event.name = "presentation_buffer_selection";
+    event.buffer_slot = plan.slot;
+    event.resize_request_serial = resize_serial_;
+    event.new_width = width_;
+    event.new_height = height_;
+    event.logical_bytes = plan.peak_bytes;
+    event.count = mask;
+    event.bound_buffer_slot = bound_buffer_;
+    event.bound_generation = bound_buffer_ >= 0 ? buffers_[bound_buffer_].identity.generation : 0;
+    if (plan.action == BufferPlanAction::BudgetExceeded) {
+        event.buffer_action = "budget_failure";
+        return presentation_trace::Measure(event, [&] { return RecordFailure("incremental buffers replacement budget", E_OUTOFMEMORY); });
+    }
+    if (plan.action == BufferPlanAction::Skip ||
+        (plan.action == BufferPlanAction::Replace && frame_id != 0 && frame_id == last_replacement_frame_)) {
+        event.buffer_action = plan.action == BufferPlanAction::Skip ? "skip_unavailable" : "skip_frame_budget";
+        return presentation_trace::Measure(event, [&] {
+            ++feedback_.buffer_acquire_skipped;
+            last_error_operation_ = {};
+            return DXGI_ERROR_WAS_STILL_DRAWING;
+        });
+    }
+    event.buffer_action = plan.action == BufferPlanAction::Replace ? "replace" : "select";
+    event.allocation_generation = plan.action == BufferPlanAction::Replace ? generation_ + 1 : buffers_[plan.slot].identity.generation;
+    return presentation_trace::Measure(event, [&]() -> HRESULT {
+        if (plan.action == BufferPlanAction::Replace) {
+            last_replacement_frame_ = frame_id;
+            Buffer replacement;
+            Microsoft::WRL::ComPtr<ID3D11Device> device;
+            context->GetDevice(device.GetAddressOf());
+            auto replace = event;
+            replace.name = "presentation_buffer_replace";
+            const HRESULT result = presentation_trace::Measure(replace, [&]() -> HRESULT {
+                const HRESULT allocation = CreateBuffer(device.Get(), width_, height_, replacement);
+                if (FAILED(allocation)) {
+                    ReleaseBuffer(replacement, plan.slot);
+                    return allocation;
+                }
+                // Only commit a fully constructed slot. The temporary then owns the old resources.
+                std::swap(buffers_[plan.slot], replacement);
+                ReleaseBuffer(replacement, plan.slot);
+                return S_OK;
+            });
+            if (FAILED(result)) return result;
+        }
+        // A newly registered buffer must also be observed available before rendering.
+        auto wait = event;
+        wait.name = "presentation_available_wait";
+        wait.timeout_ms = 0;
+        wait.count = 1;
+        const DWORD ready = presentation_trace::Measure(wait, [&] {
+            return WaitForSingleObject(buffers_[plan.slot].available_event, 0);
+        });
+        if (ready == WAIT_TIMEOUT) {
+            ++feedback_.buffer_acquire_skipped;
+            return DXGI_ERROR_WAS_STILL_DRAWING;
+        }
+        if (ready != WAIT_OBJECT_0) return RecordFailure("incremental buffers selected availability", E_FAIL);
+        const RECT rect{0, 0, static_cast<LONG>(width_), static_cast<LONG>(height_)};
+        const HRESULT result = presentation_trace::Measure("presentation_source_rect", [&] {
+            return presentation_surface_->SetSourceRect(&rect);
+        });
+        if (FAILED(result)) return RecordFailure("incremental buffers source rectangle", result);
+        selected_buffer_ = plan.slot;
+        return S_OK;
+    });
 }
 
 void D3D11CompositionSwapChain::DrainStatistics() noexcept

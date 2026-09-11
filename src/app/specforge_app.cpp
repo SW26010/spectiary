@@ -804,9 +804,16 @@ void SpecForgeApp::InitializeUiBackends()
     viewport_renderer_.SetFeedbackAcquireOnlyExperiment(
         GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY", feedback_experiment, 2) == 1 &&
         feedback_experiment[0] == L'1');
+    wchar_t buffer_experiment[2] = {};
+    viewport_renderer_.SetIncrementalBuffersExperiment(
+        GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS", buffer_experiment, 2) == 1 &&
+        buffer_experiment[0] == L'1');
 #endif
     profile_.WriteEvent("feedback_experiment", {
         ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
+    });
+    profile_.WriteEvent("buffer_replacement_experiment", {
+        ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersExperiment()),
     });
     imgui_initialized_ = true;
 }
@@ -919,6 +926,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     if (!presentation_trace::capture_ready && profile_.is_frame_recording_active()) {
         presentation_trace::capture_ready = true;
         presentation_trace::CaptureBoundary(true);
+        profile_.WriteEvent("buffer_replacement_experiment", {
+            ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersExperiment()),
+        });
         profile_.WriteEvent("feedback_experiment", {
             ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
         });

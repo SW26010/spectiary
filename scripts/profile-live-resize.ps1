@@ -8,10 +8,14 @@ param(
     [switch]$FeedbackBreakdown,
     [switch]$FeedbackAcquireOnly,
     [switch]$WindowedCapture,
+    [switch]$IncrementalBuffers,
     [ValidateSet('None', 'A', 'B')][string]$RedirectionArm = 'None'
 )
 $ErrorActionPreference = 'Stop'
 $windowed = $WindowedCapture -or $FeedbackBreakdown
+if ($IncrementalBuffers -and ($RedirectionArm -eq 'None' -or !$FeedbackBreakdown -or $FeedbackAcquireOnly)) {
+    throw 'IncrementalBuffers requires an isolated RedirectionArm, FeedbackBreakdown, and ordinary feedback frequency.'
+}
 if ($FeedbackAcquireOnly -and ($RedirectionArm -eq 'None' -or !$FeedbackBreakdown)) {
     throw 'FeedbackAcquireOnly requires an isolated RedirectionArm and FeedbackBreakdown.'
 }
@@ -35,10 +39,11 @@ $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal
 $start.EnvironmentVariables['SPECFORGE_PROFILE'] = $(if ($windowed) { '0' } else { '1' })
 $start.EnvironmentVariables['SPECFORGE_PROFILE_WINDOWED'] = $(if ($windowed) { '1' } else { '0' })
 $start.EnvironmentVariables['SPECFORGE_PROFILE_DIR'] = $directory
+$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS'] = $(if ($IncrementalBuffers) { '1' } else { '0' })
 $start.EnvironmentVariables['SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY'] = $(if ($FeedbackAcquireOnly) { '1' } else { '0' })
 $start.EnvironmentVariables['SPECFORGE_EXPERIMENT_NO_REDIRECTION_BITMAP'] = $(if ($RedirectionArm -eq 'B') { '1' } else { '0' })
 [pscustomobject]@{ arm = $RedirectionArm; feedback_acquire_only = [bool]$FeedbackAcquireOnly;
-    windowed_capture = [bool]$windowed;
+    windowed_capture = [bool]$windowed; incremental_buffers = [bool]$IncrementalBuffers;
     capture_seconds = $(if ($windowed) { 5 } else { 0 }); executable = $Executable;
     sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash } |
     ConvertTo-Json | Set-Content (Join-Path $directory 'redirection-experiment.json')
@@ -117,7 +122,7 @@ try {
 $profiles = @(Get-ChildItem -LiteralPath $directory -Filter '*.jsonl')
 if ($profiles.Count -ne 1) { throw 'Expected exactly one complete profile; inspect the recording directory.' }
 if ($Scenario -eq 'NativeSize') {
-    & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown -RequireNativeSizeBreakdown -RequireClockSync:$SystemTrace -RedirectionArm $RedirectionArm -RequireFeedbackBreakdown:$FeedbackBreakdown -RequireFeedbackAcquireOnly:$FeedbackAcquireOnly
+    & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown -RequireNativeSizeBreakdown -RequireClockSync:$SystemTrace -RedirectionArm $RedirectionArm -RequireFeedbackBreakdown:$FeedbackBreakdown -RequireFeedbackAcquireOnly:$FeedbackAcquireOnly -RequireIncrementalBuffers:$IncrementalBuffers
 } elseif ($Scenario -eq 'Detached') {
     & (Join-Path $PSScriptRoot 'analyze-presentation-profile.ps1') -Path $profiles[0].FullName -RequireDetachedBreakdown
 } else {

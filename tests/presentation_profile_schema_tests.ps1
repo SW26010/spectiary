@@ -25,6 +25,34 @@ function Check($rows, $expectSuccess, $requireBreakdown = $false, $requireNative
 }
 try {
     Check (Fixture) $true
+    function IncrementalFixture {
+        $rows = @((Event 'viewport_lifecycle' 'begin' 0),
+            (Event 'viewport_acquire' 'begin' 30),
+            (Event 'presentation_buffer_selection' 'begin' 31),
+            (Event 'presentation_buffer_replace' 'begin' 32), (Event 'presentation_buffer_replace' 'end' 32),
+            (Event 'presentation_buffer_selection' 'end' 31), (Event 'viewport_acquire' 'end' 30),
+            (Event 'viewport_present' 'begin' 33),
+            (Event 'presentation_buffer_submission' 'begin' 34), (Event 'presentation_buffer_submission' 'end' 34),
+            (Event 'viewport_present' 'end' 33), (Event 'viewport_lifecycle' 'end' 0))
+        foreach ($row in $rows) {
+            $row.hwnd = 43; $row.viewport_lifetime = 2; $row.viewport_role = 'detached'; $row.backend = 'composition'
+            $row.parent_operation_id = switch ($row.operation_id) { 31 {30} 32 {31} 34 {33} default {0} }
+            $row.resize_request_serial = 1; $row.allocation_generation = 4; $row.bound_generation = 1
+            $row.logical_bytes = 4000000; $row.buffer_slot = 1; $row.bound_buffer_slot = 0; $row.count = 7
+            $row.buffer_action = $(if ($row.operation_id -eq 34) { 'submitted' } else { 'replace' })
+        }
+        return @(@{event = 'buffer_replacement_experiment'; enabled = $true}) + @(Fixture) + $rows
+    }
+    Check (IncrementalFixture) $true
+    & $Analyzer -Path $path -RequireIncrementalBuffers | Out-Null
+    $rows = IncrementalFixture; ($rows | Where-Object operation_id -eq 32)[0].bound_buffer_slot = 1; Check $rows $false
+    $rows = IncrementalFixture; ($rows | Where-Object operation_id -eq 32)[0].logical_bytes = 268435457; Check $rows $false
+    $rows = IncrementalFixture; ($rows | Where-Object operation_id -eq 32)[0].count = 1; Check $rows $false
+    $rows = IncrementalFixture; ($rows | Where-Object operation_id -eq 34)[0].allocation_generation = 5; Check $rows $false
+    $rows = IncrementalFixture; ($rows | Where-Object operation_id -eq 34)[0].new_width = 639; Check $rows $false
+    $rows = IncrementalFixture; $rows[0].enabled = $false; Check $rows $true
+    try { & $Analyzer -Path $path -RequireIncrementalBuffers | Out-Null; throw 'Expected incremental activation failure' }
+    catch { if ($_.Exception.Message -ne 'Missing isolated incremental buffer experiment coverage') { throw } }
     Check (@(@{ event = 'presentation_feedback'; target = 'main'; present_submissions = 4 }) + @(Fixture)) $true
     $limited = Fixture; $limited[4].stop_reason = 'file_size_limit'; Check $limited $false
     Check (Fixture) $false $false $false $true

@@ -62,7 +62,8 @@ HRESULT D3D11WindowPresentation::Initialize(
     HWND hwnd,
     UINT width,
     UINT height,
-    D3D11CompositionPolicy composition_policy)
+    D3D11CompositionPolicy composition_policy,
+    bool incremental_buffers)
 {
     Shutdown();
     last_error_operation_ = {};
@@ -97,7 +98,7 @@ HRESULT D3D11WindowPresentation::Initialize(
                     hwnd_,
                     width_,
                     height_,
-                    refresh_state_);
+                    refresh_state_, incremental_buffers);
                 if (SUCCEEDED(composition_result)) {
                     backend_ = D3D11PresentationBackend::Composition;
                     transition_ = {
@@ -235,7 +236,8 @@ HRESULT D3D11WindowPresentation::RefreshTarget()
 HRESULT D3D11WindowPresentation::BeginFrame(
     const float clear_color[4],
     bool clear,
-    DWORD availability_timeout_ms)
+    DWORD availability_timeout_ms,
+    std::uint64_t frame_id)
 {
     return presentation_trace::Measure(
         presentation_trace::Event{
@@ -255,7 +257,7 @@ HRESULT D3D11WindowPresentation::BeginFrame(
                     device_context_,
                     clear_color,
                     clear,
-                    availability_timeout_ms);
+                    availability_timeout_ms, frame_id);
                 if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
                     last_error_operation_ = {};
                     return result;

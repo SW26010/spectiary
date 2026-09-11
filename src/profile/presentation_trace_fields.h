@@ -72,6 +72,12 @@ inline void WritePresentationTrace(ProfileSink& sink,
         F::Number("hwnd_ex_style", std::to_string(actual_ex_style)),
         F::Number("buffer_slot", std::to_string(event.buffer_slot)),
         F::String("resource_kind", std::string(event.resource_kind)),
+        F::Number("resize_request_serial", std::to_string(event.resize_request_serial)),
+        F::Number("allocation_generation", std::to_string(event.allocation_generation)),
+        F::Number("bound_generation", std::to_string(event.bound_generation)),
+        F::Number("logical_bytes", std::to_string(event.logical_bytes)),
+        F::String("buffer_action", std::string(event.buffer_action)),
+        F::Number("bound_buffer_slot", std::to_string(event.bound_buffer_slot)),
     });
 }
 } // namespace specforge

@@ -52,6 +52,8 @@ public:
     // Diagnostic only: leave statistics draining at the existing BeginFrame boundary.
     void SetFeedbackAcquireOnlyExperiment(bool enabled) noexcept { feedback_acquire_only_ = enabled; }
     [[nodiscard]] bool FeedbackAcquireOnlyExperiment() const noexcept { return feedback_acquire_only_; }
+    void SetIncrementalBuffersExperiment(bool enabled) noexcept { incremental_buffers_ = enabled; }
+    [[nodiscard]] bool IncrementalBuffersExperiment() const noexcept { return incremental_buffers_; }
     void SetClearColor(
         const std::array<float, 4>& clear_color) noexcept;
     void SetNativeWindowThemeCallback(
@@ -93,6 +95,7 @@ private:
     std::function<void(HWND)> native_window_theme_callback_;
     bool compositor_clock_paced_ = false;
     bool feedback_acquire_only_ = false;
+    bool incremental_buffers_ = false;
 };
 
 }  // namespace specforge

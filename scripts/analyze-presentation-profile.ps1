@@ -7,7 +7,8 @@ param(
     [switch]$RequireClockSync,
     [ValidateSet('None', 'A', 'B')][string]$RedirectionArm = 'None',
     [switch]$RequireFeedbackBreakdown,
-    [switch]$RequireFeedbackAcquireOnly
+    [switch]$RequireFeedbackAcquireOnly,
+    [switch]$RequireIncrementalBuffers
 )
 $ErrorActionPreference = 'Stop'
 # Bound input and retain only open operations plus small event counters.
@@ -21,7 +22,8 @@ $names = @('viewport_lifecycle', 'viewport_capture_boundary', 'viewport_size_mov
     'native_size_callback', 'native_size_message', 'native_size_thread_cpu', 'native_size_observation',
     'viewport_shutdown', 'presentation_feedback_collect', 'presentation_statistics_drain',
     'presentation_statistics_poll', 'presentation_statistics_item', 'presentation_statistics_get_next',
-    'presentation_buffer_release', 'presentation_resource_release')
+    'presentation_buffer_release', 'presentation_resource_release', 'presentation_resize_request',
+    'presentation_buffer_selection', 'presentation_buffer_replace', 'presentation_buffer_submission')
 $numeric = @('schema_version', 'hwnd', 'viewport_id', 'viewport_lifetime', 'size_move_id',
     'operation_id', 'parent_operation_id', 'frame', 'old_width', 'old_height', 'new_width',
     'new_height', 'result', 'count', 'timeout_ms', 'duration_ms')
@@ -43,12 +45,17 @@ $redirectionSamples = 0
 $feedbackCoverage = @{}
 $feedbackAcquireOnly = $false
 $drainFrames = @{}
+$incrementalEnabled = $false
+$replacementFrames = @{}
+$selectedBuffers = @{}
+$replacementCount = 0
 $reader = [IO.File]::OpenText((Resolve-Path -LiteralPath $Path).Path)
 try {
 while ($null -ne ($line = $reader.ReadLine())) {
     $lineNumber++
     $row = $line | ConvertFrom-Json
     if ($row.event -eq 'feedback_experiment') { $feedbackAcquireOnly = ($row.acquire_only -eq $true) }
+    if ($row.event -eq 'buffer_replacement_experiment') { $incrementalEnabled = ($row.enabled -eq $true) }
     if ($row.event -eq 'runtime_config') { $redirectionBuild = $row.redirection_build }
     if ($RedirectionArm -ne 'None' -and $row.event -eq 'platform_window_size' -and $row.viewport_role -eq 'detached') {
         $style = $row.hwnd_ex_style
@@ -93,6 +100,62 @@ while ($null -ne ($line = $reader.ReadLine())) {
         throw "Line ${lineNumber}: completion must mean S_OK API return"
     }
     $counts[$row.event]++
+    if ($row.event -in @('presentation_resize_request','presentation_buffer_selection','presentation_buffer_replace','presentation_buffer_submission')) {
+        foreach ($field in @('resize_request_serial','allocation_generation','bound_generation','logical_bytes')) {
+            $value = $row.$field
+            if ($value -isnot [ValueType] -or $value -is [bool] -or $value -lt 0 -or
+                [math]::Truncate([double]$value) -ne $value) { throw 'Invalid incremental buffer identity' }
+        }
+        foreach ($field in @('buffer_slot','bound_buffer_slot')) {
+            if ($row.$field -isnot [ValueType] -or $row.$field -is [bool] -or $row.$field -notin @(-1,0,1,2)) {
+                throw 'Invalid incremental buffer slot'
+            }
+        }
+        if ($row.logical_bytes -gt 268435456) { throw 'Incremental buffer budget exceeded' }
+        if ($row.buffer_action -notin @('request','select','replace','skip_unavailable','skip_frame_budget','budget_failure','submitted')) {
+            throw 'Invalid incremental buffer action'
+        }
+        $parent = $pending[[string]$row.parent_operation_id]
+        $expected = switch ($row.event) {
+            'presentation_resize_request' { 'viewport_resize' }
+            'presentation_buffer_selection' { 'viewport_acquire' }
+            'presentation_buffer_replace' { 'presentation_buffer_selection' }
+            'presentation_buffer_submission' { 'viewport_present' }
+        }
+        if ($null -eq $parent -or $parent.event -ne $expected) { throw 'Invalid incremental buffer parent' }
+        $bufferKey = [string]$row.viewport_lifetime
+        if ($row.event -eq 'presentation_buffer_replace' -and $row.phase -eq 'begin') {
+            if ($row.buffer_slot -notin @(0,1,2) -or $row.allocation_generation -le 0 -or
+                $row.bound_buffer_slot -notin @(-1,0,1,2) -or $row.buffer_slot -eq $row.bound_buffer_slot -or
+                $row.allocation_generation -eq $row.bound_generation -or
+                ($row.count -band (1 -shl $row.buffer_slot)) -eq 0) { throw 'Unsafe incremental replacement candidate' }
+            if ($replacementFrames.ContainsKey($bufferKey) -and $replacementFrames[$bufferKey] -eq $row.frame) {
+                throw 'Multiple replacements in one viewport frame'
+            }
+            $replacementFrames[$bufferKey] = $row.frame
+            $replacementCount++
+        }
+        if ($row.event -eq 'presentation_resize_request') { $selectedBuffers.Remove($bufferKey) }
+        if ($row.event -eq 'presentation_buffer_selection' -and $row.phase -eq 'end' -and $row.result_valid -and $row.result -eq 0) {
+            if ($row.buffer_slot -notin @(0,1,2) -or $row.allocation_generation -le 0 -or
+                $row.new_width -le 0 -or $row.new_height -le 0) { throw 'Invalid selected buffer' }
+            $selectedBuffers[$bufferKey] = $row
+        }
+        if ($row.event -eq 'presentation_buffer_submission') {
+            $selection = $selectedBuffers[$bufferKey]
+            foreach ($field in @('buffer_slot','allocation_generation','resize_request_serial','new_width','new_height')) {
+                if ($null -eq $selection -or $selection.$field -ne $row.$field) { throw 'Submitted buffer does not match acquisition' }
+            }
+        }
+    }
+    if ($RequireIncrementalBuffers -and $row.viewport_role -eq 'detached' -and
+        $row.event -eq 'viewport_present' -and $row.backend -eq 'dxgi') {
+        throw 'Incremental experiment fell back to DXGI; not a valid performance comparison'
+    }
+    if ($row.event -in @('viewport_lifecycle','viewport_capture_boundary') -and $row.phase -eq 'end') {
+        $replacementFrames.Remove([string]$row.viewport_lifetime)
+        $selectedBuffers.Remove([string]$row.viewport_lifetime)
+    }
     if ($RequireFeedbackAcquireOnly -and $row.event -eq 'presentation_statistics_drain' -and
         $row.viewport_role -eq 'detached' -and $row.phase -eq 'begin') {
         $parent = $pending[[string]$row.parent_operation_id]
@@ -217,7 +280,8 @@ while ($null -ne ($line = $reader.ReadLine())) {
             $begin = $pending[$key]
             foreach ($field in @('event', 'parent_operation_id', 'viewport_lifetime', 'hwnd',
                 'old_width', 'old_height', 'new_width', 'new_height', 'backend', 'present_mode', 'timeout_ms',
-                'message_id', 'message_hwnd', 'buffer_slot', 'resource_kind')) {
+                'message_id', 'message_hwnd', 'buffer_slot', 'resource_kind', 'resize_request_serial',
+                'allocation_generation', 'bound_generation', 'logical_bytes', 'buffer_action', 'bound_buffer_slot')) {
                 if ($begin.$field -ne $row.$field) { throw "Operation changed $field" }
             }
             $pending.Remove($key)
@@ -256,6 +320,9 @@ if ($RequireClockSync -and $null -eq $clockSync) { throw 'Missing process/thread
 if ($RequireFeedbackBreakdown -and $feedbackCoverage.Count -ne 5) { throw 'Missing detached feedback/release breakdown coverage' }
 if ($RequireFeedbackAcquireOnly -and (!$feedbackAcquireOnly -or !$feedbackCoverage.ContainsKey('presentation_statistics_drain'))) {
     throw 'Missing acquisition-only experiment activation or drain coverage'
+}
+if ($RequireIncrementalBuffers -and (!$incrementalEnabled -or $feedbackAcquireOnly -or $replacementCount -eq 0)) {
+    throw 'Missing isolated incremental buffer experiment coverage'
 }
 if ($RedirectionArm -ne 'None' -and ($redirectionBuild -ne 'creation_time_ab' -or $redirectionSamples -eq 0)) {
     throw 'A/B evidence requires the isolated build and sampled detached sizes'

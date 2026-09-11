@@ -34,6 +34,9 @@ struct Event {
     std::uintptr_t message_hwnd = 0;
     int buffer_slot = -1;
     std::string_view resource_kind = "none";
+    std::uint64_t resize_request_serial = 0, allocation_generation = 0, bound_generation = 0, logical_bytes = 0;
+    std::string_view buffer_action = "none";
+    int bound_buffer_slot = -1;
 };
 using Callback = void (*)(void*, const Event&);
 using Enabled = bool (*)(void*);

@@ -84,6 +84,7 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     native_window_theme_callback_ = {};
     compositor_clock_paced_ = false;
     feedback_acquire_only_ = false;
+    incremental_buffers_ = false;
 }
 
 void D3D11ImGuiViewportRenderer::SetClearColor(
@@ -196,7 +197,7 @@ void D3D11ImGuiViewportRenderer::CreateViewportWindow(ImGuiViewport* viewport)
         instance->device_context_.Get(),
         hwnd,
         static_cast<UINT>(viewport->Size.x),
-        static_cast<UINT>(viewport->Size.y));
+        static_cast<UINT>(viewport->Size.y), D3D11CompositionPolicy::Prefer, instance->incremental_buffers_);
     if (FAILED(result)) {
         instance->RecordFailure(result, data->presentation.last_error_operation());
         delete data;
@@ -268,7 +269,7 @@ void D3D11ImGuiViewportRenderer::RenderViewportWindow(ImGuiViewport* viewport, v
     const HRESULT begin_result = data->presentation.BeginFrame(
         instance->clear_color_.data(),
         (viewport->Flags & ImGuiViewportFlags_NoRendererClear) == 0,
-        0);
+        0, static_cast<std::uint64_t>(ImGui::GetFrameCount()) + 1);
     if (begin_result == DXGI_ERROR_WAS_STILL_DRAWING) {
         data->frame_acquired = false;
         instance->CollectPresentationUpdate(*viewport, data->presentation);

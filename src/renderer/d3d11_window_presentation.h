@@ -92,7 +92,8 @@ public:
         UINT width,
         UINT height,
         D3D11CompositionPolicy composition_policy =
-            D3D11CompositionPolicy::Prefer);
+            D3D11CompositionPolicy::Prefer,
+        bool incremental_buffers = false);
     void Shutdown() noexcept;
 
     HRESULT Resize(UINT width, UINT height);
@@ -100,7 +101,8 @@ public:
     HRESULT BeginFrame(
         const float clear_color[4],
         bool clear = true,
-        DWORD availability_timeout_ms = 1'000);
+        DWORD availability_timeout_ms = 1'000,
+        std::uint64_t frame_id = 0);
     HRESULT Present(D3D11PresentMode mode);
     [[nodiscard]] ID3D11Texture2D*
     active_render_texture() const noexcept;
@@ -138,6 +140,7 @@ public:
     }
 
 private:
+    friend struct D3D11CompositionSwapChainTestAccess;
     HRESULT ActivateDxgiFallback(
         HRESULT reason,
         std::string_view operation,

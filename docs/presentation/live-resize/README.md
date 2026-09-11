@@ -1,19 +1,62 @@
 # 窗口缩放：调查结论与验证
 
-对应 [GitHub issue #56](https://github.com/SW26010/SpecForge/issues/56)。本目录集中保存本次调查；长期事件定义见 [presentation telemetry](../telemetry.md)。
+状态：**独立面板的候选优化已有初步收益，尚未完成产品修复。**
+独立面板卡顿对应 [#56](https://github.com/SW26010/SpecForge/issues/56)，主窗口原生缩放期间的刷新改进单独对应 [#101](https://github.com/SW26010/SpecForge/issues/101)。本页汇总技术范围、结论与下一步；日期报告保留当时的证据，不作为当前操作指令。
 
-## 基础观测阶段
+## 究竟要解决什么
 
-主窗口在原生 modal size/move 期间暂停绘制，松手后更新；独立面板持续绘制但有长帧。两者需要分别解决，内部 dock 分界线是流畅性对照。当前只建立观测能力，未改变 resize/presentation 策略，issue 保持开放。
+用户目标是拖动窗口外边框时，内容持续更新且交互流畅。最初描述包含两个不同问题，不能用同一个实验的结果一起宣告解决：
 
-- [00:33 基线](evidence/20260911-003332-baseline.md)：主窗口更新时机与独立面板耗时；存在已知历史 teardown role 缺陷。
-- [00:50 独立面板](evidence/20260911-005051-detached.md)：长帧落在 native size callback。
-- [00:55 内部分界线](evidence/20260911-005523-dock-divider.md)：内部布局没有 native resize，是对照而非修复对象。
+| 场景 | 已确认的行为 | 当前处理状态 |
+| --- | --- | --- |
+| 主窗口外边框 | Windows 原生 modal size/move 期间没有 RenderFrame / Present；松手后应用新尺寸 | #101 单独评估小范围刷新改进；尚未实现，不保证完美解决 |
+| 独立 Spectrum 面板外边框 | 拖动期间持续绘制，但 native size、buffer 释放、反馈读取、Present 等位置出现长帧 | **当前优化重点**：验证增量替换 Composition buffer 能否改善普通窗口样式下的体验 |
+| 主窗口内部 dock 分界线 | 只改变内部布局，不触发 native HWND / swap-chain resize，实测交互流畅 | 对照场景，保留回归检查 |
 
-下一步细分原生 callback 的消息处理、线程等待与资源调用，证据再决定策略实验。原始采样保留在忽略的本机 logs/ 中。
+2026-09-12 已将两项工作拆分：#56 只负责独立面板缩放卡顿，#101 负责主窗口刷新改进。两者独立实施与验收；主窗口任务不阻塞通过验证的独立面板修复，拆分也不表示主窗口现象已经解决。
 
-## 隔离实验阶段
+## 已经知道什么
 
-[重定向窗口样式实验](experiments/window-redirection.md)与[反馈频率实验](experiments/feedback-drain.md)仅由隔离目标启用，普通程序策略保持原样。
+1. **观测能力已建立。** 可按窗口 lifetime、frame、嵌套操作关联 resize、Present、原生消息、资源释放和统计读取；采集器能拒绝缺尾、丢事件和错误交互。
+2. **定位到具体等待路径。** 07:30 ETW 将选中的长停顿关联到 `SetWindowPos` → Windows 重定向位图重建 → fence 等待。后续记录还发现反馈读取、旧资源释放和 Present 中的等待。这不是所有卡顿只有一个根因的证明。
+3. **两个候选未通过体验验收。** 禁用重定向位图降低了某处 callback 长尾，但用户未感到改善；减少反馈 drain 次数也未改善体验。它们保持为默认关闭的诊断开关，不作为产品修复。
+4. **增量 buffer 替换值得继续验证。** 在 B 样式下，每个 resize 帧由重建三个槽位改为最多替换一个。完整配对样本的整帧 p95 为 14.86 → 12.63 ms，用户确认后者更流畅。样本短、手动路径不同，且仅在未获接受的 B 样式下验证，不能推广为默认收益。
 
-[重定向 A/B](evidence/20260911-redirection-ab.md)和[反馈 A/B](evidence/20260911-feedback-ab.md)均未通过体验验收。[后续等待记录](evidence/20260911-082026-feedback-release.md)与[调用点审查](design/feedback-and-buffer-review.md)支持另行评估 buffer 生命周期。不能把这些实验当作 #56 已解决。
+普通程序尚未启用任何实验策略。自动化测试验证实现边界和失败路径；它们不证明用户体验或物理显示完成。
+
+## 共同维护约束
+
+两项工作均限于小范围、可审查、可维护的改进，优先采用文档化 API 和现有 ImGui 集成接口。不得扩大为渲染线程架构重构、自制窗口系统、大规模 backend 分叉、未文档化系统钩子，或缺乏维护保证的平台补丁集合。现有实验只提供证据，不自动授权将其全部投入生产。
+
+收益必须与代码复杂度及维护成本相称。若小改动不安全或无效，应停止并记录限制；超出范围的方案另行提出。允许有限改善，不保证完美流畅或固定高刷新率；保留当前行为或延期也可以是合理的调查结论，但不能称为已经修复。
+
+## 下一步与停止条件
+
+| 顺序 | 要回答的问题 | 验收与后续动作 |
+| --- | --- | --- |
+| 1 | 收益是否在普通 HWND 样式 A 下仍成立？ | 固定 A 样式、数据、布局和反馈频率，只切换增量 buffer；比较主观体验、整帧长尾、skip/fallback。无收益则保留关闭状态并重新评估，不直接启用 B |
+| 2 | 候选是否稳定？ | 若第 1 步成立，再做持续尺寸振荡、多个独立面板、销毁重建、预算失败及回退验证；测量进程/GPU 内存趋势，不能用逻辑纹理预算代替实测 |
+| 3 | 是否可以作为产品修复？ | 汇总重复验证与窗口行为回归，明确支持条件，单独提交生产启用策略；保存内部 dock 流畅性及现有停靠、显示、ownership 行为 |
+| 独立任务 #101 | 主窗口如何在原生缩放期间更新？ | 在同样的维护约束下评估小改动，验证调度与重入安全；当前独立面板 buffer 方案不解决这一项 |
+
+下一次人工操作仅用于第 1 步，按[增量实验说明](experiments/incremental-buffers.md)执行。每组可先拖动 30–60 秒判断体验，再录制五秒短日志。需要记录的是**独立 Spectrum 最外侧边框**，不是主窗口边框或内部 dock 分界线。
+
+完成标准是对应场景的可重复体验改善、完整性能证据和资源/窗口行为回归通过；“测试通过”“某个函数更快”或“已经提交代码”均不等于 #56 完成。
+
+## 文档边界
+
+长期维护的事件、字段、采集与校验规则放在 [presentation telemetry](../telemetry.md)，生产约束仍以 [presentation policy](../../presentation_policy.md) 和 [ADR 0005](../../adr/0005-detached-panel-win32-ownership.md) 为准。本目录保存窗口缩放调查的方案和证据。后续更新当前结论时编辑本页；新增报告只有在产生新证据时才需要。
+
+## 证据索引
+
+| 材料 | 用途与限制 |
+| --- | --- |
+| [00:33 基线](evidence/20260911-003332-baseline.md)、[00:50 独立面板](evidence/20260911-005051-detached.md)、[00:55 内部分界线](evidence/20260911-005523-dock-divider.md) | 区分三个场景；第一份存在已知 teardown role 旧格式缺陷 |
+| [07:20 native size](evidence/20260911-072054-native-size.md)、[07:30 ETW 等待栈](evidence/20260911-073022-etw-waits.md) | 从 callback 定位到选中长帧的系统等待 |
+| [重定向实验](experiments/window-redirection.md)、[配对结果](evidence/20260911-redirection-ab.md) | 特定 callback 改善，整体 UX 未通过 |
+| [08:20 反馈与释放](evidence/20260911-082026-feedback-release.md)、[调用点审查](design/feedback-and-buffer-review.md) | 截断日志中的完整局部帧；不是完整验收样本 |
+| [反馈频率实验](experiments/feedback-drain.md)、[配对结果](evidence/20260911-feedback-ab.md) | 无正向 UX；停止作为修复方向推进 |
+| [buffer 设计](design/buffer-replacement.md)、[实现与复验](experiments/incremental-buffers.md) | 有界、默认关闭的候选策略 |
+| [10:13 错误交互](evidence/20260911-1013-wrong-interaction.md)、[10:23 完整配对](evidence/20260911-1023-incremental-ab.md) | 前者未录到目标 resize；后者有初步收益，普通样式尚未复验 |
+
+原始 JSONL、ETL、EXE/PDB 和派生分析保留在本机忽略的 `logs/`；这些报告不是完整数据集的发布。报告里的路径和 hash 标识历史采样，不能推断当前重建的程序与其相同。关联工单只用于追溯，不决定目录结构或技术结论。
