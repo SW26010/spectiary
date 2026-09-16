@@ -117,9 +117,11 @@ of the same source, roster, annotation, and task. The preservation contract is
 limited to unknown mapping entries in the supported YAML tree; label-local
 entries follow stable label code. It does not cover arbitrary extra blocks or
 sequence schemas, removed labels, metadata byte layout/padding, or an old block
-index/trailer. A values-only rewrite changes only values and `modified_at`,
-reuses only the encoded roster block, and recomputes the metadata and container
-layout.
+index/trailer. In task-content terms, a values-only rewrite changes only
+annotation values and `modified_at`; as generation provenance,
+`specforge_build` is still refreshed to the current binary as specified above.
+The rewrite reuses only the encoded roster block and recomputes the metadata and
+container layout.
 
 SpecForge labeling schema `1.0.0` and labeling cache schemas 1 through 3 have no
 migration path; current local state uses cache schema 4. Unsupported state is
