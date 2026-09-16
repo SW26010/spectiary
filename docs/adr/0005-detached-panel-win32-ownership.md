@@ -11,12 +11,13 @@ the main-window boundary, minimized, restored, focused, docked, or undocked.
 
 The window model converged through four related regressions:
 
-- [#35](https://github.com/SW26010/SpecForge/issues/35) showed that
-  `FLIP_DISCARD` combined with Dear ImGui viewport AutoMerge can expose a
-  cross-HWND presentation handoff gap while a floating panel repeatedly merges
-  into and separates from the main viewport. Keeping floating panels in stable
-  secondary viewports with `ConfigViewportsNoAutoMerge = true` avoided that
-  flicker without abandoning the modern presentation path.
+- [#35](https://github.com/SW26010/SpecForge/issues/35) showed visible flicker
+  in the tested `FLIP_DISCARD` + Dear ImGui viewport AutoMerge configurations.
+  The A/B results were consistent with a cross-HWND presentation handoff gap
+  while a floating panel repeatedly merges into and separates from the main
+  viewport. Keeping floating panels in stable secondary viewports with
+  `ConfigViewportsNoAutoMerge = true` avoided that observed flicker without
+  abandoning the modern presentation path.
 - [#48](https://github.com/SW26010/SpecForge/issues/48) then showed that stable
   secondary viewports implemented as unrelated top-level HWNDs do not naturally
   follow the main window's minimize/restore lifecycle and can become difficult
@@ -36,6 +37,53 @@ window ownership*, and *shell identity*. A detached panel should keep its own
 ImGui viewport, native HWND, swap chain, and presentation identity, while still
 being recognized by Windows as an auxiliary window belonging to the SpecForge
 main window and represented by that main window in the taskbar and Alt+Tab.
+
+### Evidence boundary for #35
+
+The #35 decision is based on reproduced behavior and controlled A/B comparisons,
+not on a proven upstream root cause.
+
+The recorded evidence includes:
+
+- Dear ImGui v1.92.8's official Win32 + DirectX 11 example, using its default
+  legacy `DXGI_SWAP_EFFECT_DISCARD` path with AutoMerge enabled, did not show
+  the observed flicker in the local test.
+- Changing that DX11 example's main swap chain to
+  `DXGI_SWAP_EFFECT_FLIP_DISCARD` made the flicker observable under the tested
+  merge/separate interaction.
+- Replacing SpecForge's custom secondary-viewport renderer with Dear ImGui's
+  official DX11 renderer did not remove the behavior.
+- Dear ImGui v1.92.8's unmodified official Win32 + DirectX 12 example, whose
+  tested main and secondary viewport presentation path used `FLIP_DISCARD`,
+  reproduced the same visible merge/separate flicker with AutoMerge enabled.
+- In SpecForge, `ConfigViewportsNoAutoMerge = true` removed the observed
+  flicker. Separately, the #36 compositor-clock boost/pacing work restored
+  smooth drag cadence, but enabling that pacing while leaving AutoMerge enabled
+  still reproduced the flicker. The presentation-handoff symptom and the DRR
+  cadence symptom are therefore treated as distinct problems.
+
+These results are sufficient for SpecForge to reject the tested AutoMerge path,
+but they do **not** establish that Dear ImGui itself has a confirmed defect at a
+specific source location, nor do they isolate responsibility among Dear ImGui's
+viewport policy, its platform/renderer backends, DXGI flip-model behavior, DWM
+composition, driver behavior, or their interaction. The "cross-HWND
+presentation handoff gap" is the project's best-supported working explanation
+for the observed single-refresh hole, not a formally proven mechanism.
+
+This ADR also does not claim that every future Dear ImGui version, every
+flip-model configuration, or every Windows/display stack must reproduce the
+problem. Re-evaluating AutoMerge is allowed if upstream or platform behavior
+changes and the original #35 interaction can be shown not to regress.
+
+Most importantly, `NoAutoMerge` is an **architectural workaround and accepted
+tradeoff**, not a root-cause fix for AutoMerge. SpecForge deliberately avoids
+ordinary merge/separate handoffs during free movement by keeping an undocked
+panel in one secondary platform viewport until the user explicitly docks it.
+The project accepts the resulting extra native windows/presentation resources
+and the loss of "move back inside the main client area and automatically become
+part of the main viewport" behavior in exchange for stable presentation while
+retaining `FLIP_DISCARD`. SpecForge does not maintain a Dear ImGui fork to make
+that handoff atomic.
 
 ## Decision
 
@@ -109,10 +157,12 @@ architecture review rather than an ad hoc owner toggle.
 
 ### `FLIP_DISCARD` with viewport AutoMerge
 
-Rejected for the current renderer because #35 demonstrated visible viewport
-handoff flicker during merge/separate transitions. Re-enabling AutoMerge must
-first demonstrate that the relevant presentation/composition behavior has
-changed and that the #35 regression no longer occurs.
+Rejected for the current renderer because #35 demonstrated visible flicker in
+the tested merge/separate configurations. The cross-HWND handoff-gap model
+explains the observations and motivates the current policy, but is not treated
+as a proven upstream root cause. Re-enabling AutoMerge must first demonstrate
+that the relevant presentation/composition behavior has changed and that the
+original #35 regression no longer occurs on a real interactive desktop.
 
 ### `NoAutoMerge` with unowned top-level secondary HWNDs
 
@@ -187,8 +237,10 @@ absence of a cross-HWND DWM composition flicker.
 
 ## Related History
 
-- #35 — AutoMerge + `FLIP_DISCARD` viewport handoff flicker.
-- #36 — floating viewport interaction/presentation cadence.
+- #35 — AutoMerge + `FLIP_DISCARD` viewport handoff flicker; official-example
+  reproduction and A/B evidence are recorded in the issue.
+- #36 — floating viewport interaction/presentation cadence; compositor-clock
+  pacing improved drag cadence without curing AutoMerge flicker.
 - #48 — detached-panel minimize/restore and reactivation gaps.
 - #53 — restore-time application-window-group z-order gap.
 - #57 — redundant detached-panel taskbar and Alt+Tab targets.
