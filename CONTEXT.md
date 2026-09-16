@@ -287,3 +287,13 @@ _Avoid_: Global-catalog-filter language, flat result list, sample filter
 The user's optional collection of alternative user grouping views for one
 catalog identity. It may be empty.
 _Avoid_: Catalog set, line-table variants
+
+## Architecture Constraints
+
+Enhancements, optimizations and compatibility work must keep implementation and
+maintenance cost proportionate to demonstrated user benefit. Prefer documented
+platform APIs, supported dependency interfaces and existing ownership boundaries.
+Local improvements do not implicitly authorize replacement infrastructure or
+open-ended patches. See [ADR 0010: Proportionate Complexity and Maintainable
+Integrations](docs/adr/0010-proportionate-complexity-and-maintainable-integrations.md)
+for scope, experimentation, escalation and bounded-outcome rules.
