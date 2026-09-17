@@ -38,6 +38,22 @@
 namespace specforge {
 
 struct ShellUiTestAccess {
+    static void RenderLayout(ShellUi& shell)
+    {
+        shell.RenderDockHost({});
+        shell.RenderSettingsPanel({});
+    }
+
+    static ApplicationSettingsView Settings(ShellUi& shell)
+    {
+        return shell.application_settings_.View();
+    }
+
+    static SettingsPanelUi& SettingsPanel(ShellUi& shell)
+    {
+        return shell.settings_panel_ui_;
+    }
+
     static std::unique_ptr<ShellUi> Create(
         SourceCollectionSession session,
         SourceCollectionLoadQueue source_load_queue)
@@ -6318,6 +6334,129 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     }
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+void TestRestoreDefaultLayout()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    auto shell = Access::Create(
+        MakePreparedDeferredSession("layout-recovery.csv"),
+        MakeSourceCollectionLoadQueueForTesting(
+            MakeFixtureLoadDependencies({{}, {}, {}, {}})));
+    const auto snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+    Access::SetLabelEditingState(*shell);
+    (void)Access::ApplySettingsUiIntent(*shell,
+        ApplicationSettingsIntent::SetUiScale(125));
+    (void)Access::ApplySettingsUiIntent(*shell,
+        ApplicationSettingsIntent::SetLiveNumericNavigation(false));
+    const auto before = Access::Settings(*shell);
+    const char* windows[] = {
+        SourceCollectionPanelUi::FilesWindowName(),
+        SourceCollectionPanelUi::NavigationWindowName(),
+        SourceCollectionPanelUi::AnnotationsWindowName(),
+        SampleWorkflowPanelUi::LabelingWindowName(),
+        SampleWorkflowPanelUi::FiltersWindowName(),
+        SampleWorkflowPanelUi::SortingWindowName(),
+        "Info###SpecForgeInfoTagsV2", "Curve Display###SpecForgeSmoothingV1",
+        "Spectrum###SpecForgeSpectrumV2", SpectralLinesPanelUi::WindowName()};
+    const ApplicationPanel panels[] = {
+        ApplicationPanel::Files, ApplicationPanel::Navigation,
+        ApplicationPanel::Annotations, ApplicationPanel::Labeling,
+        ApplicationPanel::Filters, ApplicationPanel::Sorting,
+        ApplicationPanel::Information, ApplicationPanel::Smoothing,
+        ApplicationPanel::Information, // Plot has no visibility toggle.
+        ApplicationPanel::SpectralLines};
+    std::string recovered;
+    {
+        test::WidgetHarness ui{[&] {
+            Access::RenderLayout(*shell);
+            const auto visibility = Access::Settings(*shell).panel_visibility;
+            for (std::size_t i = 0; i < std::size(windows); ++i) {
+                if (i != 8 && !ApplicationPanelVisible(visibility, panels[i])) {
+                    continue;
+                }
+                const char* name = windows[i];
+                ImGui::Begin(name);
+                ImGui::TextUnformatted("Recovery fixture");
+                ImGui::End();
+            }
+        }};
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        ui.Frames(3);
+        for (const char* name : windows) {
+            ImGui::DockBuilderDockWindow(name, 0);
+            ImGui::SetWindowPos(name, ImVec2(30000, -20000));
+            ImGui::SetWindowCollapsed(name, true);
+        }
+        for (std::size_t i = 0; i < kApplicationPanelCount; ++i) {
+            (void)Access::ApplySettingsUiIntent(*shell,
+                ApplicationSettingsIntent::SetPanelVisibility(
+                    static_cast<ApplicationPanel>(i), false));
+        }
+        ImGui::GetIO().DisplaySize = ImVec2(1000, 700);
+        ui.Frames(2);
+        ui.Click("SpecForgeViewMenu");
+        ui.Click("SpecForgeRestoreDefaultLayout");
+        ui.Frames(3);
+        const auto after = Access::Settings(*shell);
+        for (std::size_t i = 0; i < kApplicationPanelCount; ++i) {
+            Require(ApplicationPanelVisible(after.panel_visibility,
+                static_cast<ApplicationPanel>(i)), "Recovery must reveal every core panel");
+        }
+        for (const char* name : windows) {
+            const auto* window = ImGui::FindWindowByName(name);
+            Require(window && window->DockId != 0 && !window->Collapsed &&
+                    window->Pos.x >= 0 && window->Pos.y >= 0 &&
+                    window->Pos.x + window->Size.x <= 1001 &&
+                    window->Pos.y + window->Size.y <= 701,
+                "Recovery must dock and uncollapse panels inside the reduced viewport");
+        }
+        Require(before.language == after.language &&
+                before.theme_selection == after.theme_selection &&
+                before.ui_scale_percentage == after.ui_scale_percentage &&
+                before.live_numeric_navigation == after.live_numeric_navigation &&
+                before.open_external_source_as_folder == after.open_external_source_as_folder &&
+                before.profile_output_directory == after.profile_output_directory,
+            "Layout recovery must preserve unrelated preferences");
+        Require(Access::Session(*shell).CurrentSampleSnapshot() == snapshot &&
+                Access::HasLabelEditingState(*shell),
+            "Layout recovery must preserve the source and labeling editing state");
+        // Exercise the second entry point through rendered widgets and the
+        // shell's deferred consumption, after disturbing the layout again.
+        ImGui::DockBuilderDockWindow(windows[0], 0);
+        ImGui::SetWindowPos(windows[0], ImVec2(30000, -20000));
+        Access::SettingsPanel(*shell).Open();
+        ui.Frames(2);
+        ui.Click("SpecForgeSettingsDataAndRecovery");
+        ui.Click("SpecForgeResetWindowLayout");
+        ui.Frames(3);
+        const auto* files = ImGui::FindWindowByName(windows[0]);
+        Require(files && files->DockId != 0 && files->Pos.x < 1000 &&
+                !Access::SettingsPanel(*shell).open(),
+            "Settings entry must restore docking and hide Settings in the default layout");
+        recovered = ImGui::SaveIniSettingsToMemory();
+    }
+    {
+        test::WidgetHarness ui{[&] {
+            Access::RenderLayout(*shell);
+            for (const char* name : windows) {
+                ImGui::Begin(name);
+                ImGui::End();
+            }
+        }};
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        ImGui::GetIO().DisplaySize = ImVec2(1000, 700);
+        ImGui::LoadIniSettingsFromMemory(recovered.c_str());
+        ui.Frames(3);
+        for (const char* name : windows) {
+            const auto* window = ImGui::FindWindowByName(name);
+            Require(window && window->DockId != 0 && !window->Collapsed,
+                "Recovered layout must survive a new ImGui context via ordinary ini persistence");
+        }
+    }
+}
+#endif
+
 }  // namespace
 
 #define RUN_SHELL_TEST(test) do { \
@@ -6329,6 +6468,9 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
 int main()
 {
     try {
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+        RUN_SHELL_TEST(TestRestoreDefaultLayout);
+#endif
         RUN_SHELL_TEST(TestFixtureLoadDependenciesPreserveCacheIsolation);
         RUN_SHELL_TEST(TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence);
         RUN_SHELL_TEST(TestExplicitOpenTracesAcceptedPathThroughFirstPresent);

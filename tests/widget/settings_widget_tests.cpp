@@ -159,6 +159,34 @@ void TestClippedWidgetBounds()
     Require(clicks == 1, "Pointer input must use the visible part of a clipped widget");
 }
 
+void TestLayoutRecoveryControlAndSettingsPlacement()
+{
+    SettingsFixture f;
+    f.ui.Click("SpecForgeSettingsDataAndRecovery");
+    f.ui.Click("SpecForgeResetWindowLayout");
+    Require(f.panel.TakeRestoreDefaultLayoutRequest(),
+        "Layout recovery button must emit a request");
+    Require(!f.panel.TakeRestoreDefaultLayoutRequest() && f.intents == 0,
+        "Recovery is one-shot and must not emit unrelated settings intents");
+    ImGuiWindow* window = ImGui::FindWindowByName("###SpecForgeSettingsV1");
+    Require(window != nullptr, "Settings window should exist");
+    ImGui::SetWindowPos(window, ImVec2(30000, -20000));
+    ImGui::SetWindowSize(window, ImVec2(4000, 3000));
+    f.panel.CloseForLayoutRecovery();
+    f.ui.Frames(2);
+    Require(!f.panel.open(), "Settings is hidden in the default layout");
+    ImGui::GetIO().DisplaySize = ImVec2(800, 600);
+    f.panel.Open();
+    f.ui.Frames(3);
+    const auto* viewport = ImGui::GetMainViewport();
+    Require(window->Pos.x >= viewport->WorkPos.x &&
+            window->Pos.y >= viewport->WorkPos.y &&
+            window->Pos.x + window->Size.x <= viewport->WorkPos.x + viewport->WorkSize.x + 1 &&
+            window->Pos.y + window->Size.y <= viewport->WorkPos.y + viewport->WorkSize.y + 1,
+        "Settings must reopen within the reduced current work area");
+    Require(window->DockId == 0, "Settings must reopen undocked");
+}
+
 void TestBoundedFailures()
 {
     WidgetHarness ui{[] {
@@ -204,7 +232,7 @@ int main(int argc, char** argv)
         Require(name == "all" || name == "failures" || name == "input" ||
                 name == "theme" || name == "scale" || name == "recording", "Unknown widget test case");
         if (name == "all" || name == "failures") { TestBoundedFailures(); TestClippedWidgetBounds(); }
-        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); }
+        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestLayoutRecoveryControlAndSettingsPlacement(); }
         if (name == "all" || name == "theme") TestThemeCombo();
         if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();
         if (name == "all" || name == "recording") TestRecordingDisablesDirectoryReset();
