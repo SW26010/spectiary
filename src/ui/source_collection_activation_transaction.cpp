@@ -256,6 +256,7 @@ SourceCollectionActivationTransaction::Submit(
     if (supersedes_source_activation) {
         ++latest_automation_open_sequence_;
         BeginActivationIntent(false);
+        AcknowledgeLoadFailures();
     }
     if (trace_requested) {
         target_resolution.pending_activation_supersede_ns +=
@@ -922,6 +923,14 @@ void SourceCollectionActivationTransaction::
     }
     CancelPendingTasks(CancelNonExplicitFollowUps(
         *result.canceled_source_follow_up_path));
+    const auto path_key = SourcePathIdentityKey(*result.canceled_source_follow_up_path);
+    const auto& sources = session_.View().sources;
+    if (std::ranges::none_of(sources, [&](const auto& source) {
+            return SourcePathIdentityKey(source.path) == path_key;
+        })) {
+        terminal_outcomes_.erase(path_key);
+        RebuildErrorMessage();
+    }
 }
 
 void SourceCollectionActivationTransaction::
@@ -939,6 +948,17 @@ void SourceCollectionActivationTransaction::DrainCompletions(
     std::vector<SourceCollectionLoadCompletion> completions,
     SourceCollectionSessionAction& action)
 {
+    const auto record_failure = [&](const Ticket& ticket, SourceCollectionLoadError error) {
+        RecordTerminalOutcome(ticket, error);
+        if (ticket.purpose == Purpose::DeferredRestore) {
+            auto result = session_.RecordRestoreFailure(ticket.path, ticket.spectrum_index,
+                std::move(error));
+            MergeSourceCollectionSessionAction(action, result.action);
+            ApplyPresentationAction(result.action);
+            RetireSessionResources(result);
+            RestoreDeferredActiveSourceIfAvailable(action);
+        }
+    };
     for (SourceCollectionLoadCompletion& completion :
          completions) {
         if (active_snapshot_prefetch_ &&
@@ -997,7 +1017,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             continue;
         }
         if (!completion.prepared) {
-            RecordTerminalOutcome(
+            record_failure(
                 ticket,
                 SourceCollectionLoadError{
                     .kind =
@@ -1142,7 +1162,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 load_error.diagnostic_detail =
                     std::move(result.message);
             }
-            RecordTerminalOutcome(
+            record_failure(
                 ticket,
                 std::move(load_error));
             if (CancelFailedPendingSampleNavigation(
@@ -1512,8 +1532,9 @@ void SourceCollectionActivationTransaction::
             *view.current_source_index == index) {
             return;
         }
-        SourceCollectionSessionResult result =
-            session_.Submit(
+        SourceCollectionSessionResult result = view.sources[index].load_error
+            ? session_.RestoreEmptyActiveSource(index)
+            : session_.Submit(
                 SourceCollectionSessionIntent::
                     EditSourceCollection(
                         SourceCollectionIntent::
@@ -1525,6 +1546,14 @@ void SourceCollectionActivationTransaction::
         RetireSessionResources(result);
         QueueSessionFollowUp(result, true);
         return;
+    }
+    // Do not briefly display another restored source while the saved active
+    // source is still pending (and may ultimately fail).
+    if (view.snapshot) {
+        auto result = session_.RestoreEmptyActiveSource(std::nullopt);
+        MergeSourceCollectionSessionAction(action, result.action);
+        ApplyPresentationAction(result.action);
+        RetireSessionResources(result);
     }
 }
 
@@ -1910,7 +1939,10 @@ void SourceCollectionActivationTransaction::
                 snapshot
                     ? snapshot->current_spectrum.name
                     : std::string{},
-            .failure_acknowledged = false,
+            .failure_acknowledged =
+                ticket.purpose == Purpose::DeferredRestore &&
+                (!deferred_restore_active_path_ ||
+                 SourcePathIdentityKey(*deferred_restore_active_path_) != ticket.path_key),
         });
     RebuildErrorMessage();
 }

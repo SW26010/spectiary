@@ -152,6 +152,11 @@ bool SourceCollectionRoster::has_source(std::size_t source_index) const
     return source_index < sources_.size();
 }
 
+bool SourceCollectionRoster::can_activate_source(std::size_t source_index) const
+{
+    return has_source(source_index) && !sources_[source_index].load_error;
+}
+
 std::optional<std::string> SourceCollectionRoster::current_source_key() const
 {
     const SourceListEntry* source = current_source();
@@ -187,6 +192,7 @@ std::vector<SourceCollectionSourceView> SourceCollectionRoster::SourceViews() co
         source_view.display_name = entry.display_name;
         source_view.type = entry.type;
         source_view.state = entry.state;
+        source_view.load_error = entry.load_error;
         views.push_back(std::move(source_view));
     }
     return views;
@@ -420,6 +426,35 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     return result;
 }
 
+SourceCollectionRosterOpenResult SourceCollectionRoster::RecordRestoreFailure(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    SourceCollectionLoadError error)
+{
+    auto update = AddOrUpdateSource(path, nullptr, spectrum_index);
+    sources_[update.source_index].load_error = std::move(error);
+    SourceCollectionRosterOpenResult result;
+    result.retired_snapshots = std::move(update.retired_snapshots);
+    result.replaced_folder_listing_generation =
+        std::move(update.replaced_folder_listing_generation);
+    result.action.source_roster_changed = true;
+    if (current_source_index_ == update.source_index) {
+        SetSnapshot(nullptr, SourceCollectionSnapshotChangeReason::SourceCollectionCleared,
+            result.action);
+    }
+    return result;
+}
+
+SourceCollectionSessionAction SourceCollectionRoster::ClearActiveSourceForRestore()
+{
+    SourceCollectionSessionAction action;
+    if (snapshot_ || current_source_index_) {
+        current_source_index_.reset();
+        SetSnapshot(nullptr, SourceCollectionSnapshotChangeReason::SourceCollectionCleared, action);
+    }
+    return action;
+}
+
 SourceCollectionSessionAction SourceCollectionRoster::ActivateSource(std::size_t source_index)
 {
     SourceCollectionSessionAction action;
@@ -471,11 +506,20 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
 
     if (result.removed_current) {
         current_source_index_.reset();
+        if (next_current_index && !can_activate_source(*next_current_index)) {
+            next_current_index.reset();
+            for (std::size_t index = 0; index < sources_.size(); ++index) {
+                if (can_activate_source(index)) {
+                    next_current_index = index;
+                    break;
+                }
+            }
+        }
         if (next_current_index) {
             MergeSourceCollectionSessionAction(result.action, ActivateSource(*next_current_index));
         } else {
             SetSnapshot(
-                MakeSmallSyntheticSpectrumSnapshot(),
+                sources_.empty() ? MakeSmallSyntheticSpectrumSnapshot() : nullptr,
                 SourceCollectionSnapshotChangeReason::SourceCollectionCleared,
                 result.action);
             result.action.navigation_inputs_changed = true;
@@ -522,6 +566,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         match->display_name = SnapshotDisplayNameText(snapshot, path);
         match->type = SnapshotType(snapshot);
         match->state = SourceState(snapshot);
+        match->load_error.reset();
         const bool same_residency_boundary = ResidencyBoundariesMatch(
             match->context_reuse_proof,
             match->folder_listing_generation,

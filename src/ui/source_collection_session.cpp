@@ -631,7 +631,7 @@ bool SourceCollectionSession::SupersedesPendingSourceActivation(
     case SourceCollectionIntentKind::SwitchActive: {
         const std::size_t target_index = intent.source_collection.source_index;
         const std::optional<std::size_t> current_index = roster_->current_source_index();
-        return roster_->has_source(target_index) &&
+        return roster_->can_activate_source(target_index) &&
                (!current_index || *current_index != target_index);
     }
     case SourceCollectionIntentKind::Remove:
@@ -1159,7 +1159,7 @@ SampleWorkflowTransitionOutcome
 SourceCollectionSession::ActivateSource(
     std::size_t source_index)
 {
-    if (!roster_->has_source(source_index)) {
+    if (!roster_->can_activate_source(source_index)) {
         return {};
     }
 
@@ -1188,6 +1188,7 @@ SampleWorkflowTransitionOutcome SourceCollectionSession::RemoveSource(
         return outcome;
     }
     outcome.action.source_roster_changed = true;
+    (void)ForgetUnresolvedSourceIntent(remove_result.removed_path);
 
     if (canceled_source_follow_up_path != nullptr) {
         *canceled_source_follow_up_path = remove_result.removed_path;
@@ -1495,6 +1496,46 @@ void SourceCollectionSession::FinishDeferredRestore()
     deferred_restore_active_ = false;
 }
 
+SourceCollectionSessionResult SourceCollectionSession::RecordRestoreFailure(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    SourceCollectionLoadError error)
+{
+    SourceCollectionSessionResult result;
+    auto update = roster_->RecordRestoreFailure(path, spectrum_index, std::move(error));
+    result.action = update.action;
+    if (!update.retired_snapshots.empty()) {
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(update.retired_snapshots)));
+    }
+    if (update.replaced_folder_listing_generation) {
+        result.background_retirement.push_back(std::move(update.replaced_folder_listing_generation));
+    }
+    if (result.action.snapshot_changed) {
+        ApplyWorkflowTransitionOutcome(result,
+            workflow_->SyncKnownActiveSource(roster_->current_source_key(), roster_->snapshot()));
+    }
+    MarkSourceSessionCacheDirty();
+    InvalidateView();
+    return result;
+}
+
+SourceCollectionSessionResult SourceCollectionSession::RestoreEmptyActiveSource(
+    std::optional<std::size_t> source_index)
+{
+    SourceCollectionSessionResult result;
+    if (source_index && (!roster_->has_source(*source_index) || roster_->can_activate_source(*source_index))) {
+        return result;
+    }
+    result.action = source_index ? roster_->ActivateSource(*source_index)
+                                : roster_->ClearActiveSourceForRestore();
+    ApplyWorkflowTransitionOutcome(result,
+        workflow_->SyncKnownActiveSource(roster_->current_source_key(), roster_->snapshot()));
+    MarkSourceSessionCacheDirty();
+    InvalidateView();
+    return result;
+}
+
 bool SourceCollectionSession::HasUnresolvedSourceIntent(const std::filesystem::path& path) const
 {
     const std::string path_key = SourcePathIdentityKey(path);
@@ -1696,6 +1737,15 @@ std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWi
     for (const SourceCollectionSavedSource& unresolved : unresolved_deferred_restore_sources_) {
         if (saved_source_keys.insert(SourcePathIdentityKey(unresolved.path)).second) {
             sources.push_back(unresolved);
+        } else {
+            // Failed restore rows are in the roster, but their annotation
+            // associations still belong to the saved, unresolved intent.
+            for (auto& source : sources) {
+                if (SourcePathIdentityKey(source.path) == SourcePathIdentityKey(unresolved.path)) {
+                    source.annotation_paths = unresolved.annotation_paths;
+                    break;
+                }
+            }
         }
     }
     return sources;

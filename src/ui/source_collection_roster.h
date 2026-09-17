@@ -43,6 +43,7 @@ public:
     [[nodiscard]] const SpectrumSnapshotHandle& snapshot() const;
     [[nodiscard]] std::optional<std::size_t> current_source_index() const;
     [[nodiscard]] bool has_source(std::size_t source_index) const;
+    [[nodiscard]] bool can_activate_source(std::size_t source_index) const;
     [[nodiscard]] std::optional<std::string> current_source_key() const;
     [[nodiscard]] std::optional<std::string>
     current_source_collection_identity() const;
@@ -72,6 +73,11 @@ public:
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
             std::nullopt);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
+    [[nodiscard]] SourceCollectionSessionAction ClearActiveSourceForRestore();
+    [[nodiscard]] SourceCollectionRosterOpenResult RecordRestoreFailure(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        SourceCollectionLoadError error);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
     void RememberActiveSourceIndex(std::size_t spectrum_index);
 
@@ -105,6 +111,7 @@ private:
         std::optional<std::string> type;
         SourceCollectionSourceState state =
             SourceCollectionSourceState::Unavailable;
+        std::optional<SourceCollectionLoadError> load_error;
         // Stores the last domain snapshot for this source so reactivation can use
         // an explicit cache instead of reloading. Do not remove as a summary-only
         // optimization without retesting CSV/folder error snapshots: that change

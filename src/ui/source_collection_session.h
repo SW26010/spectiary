@@ -364,6 +364,15 @@ public:
         PreparedSampleWorkflowState prepared_workflow);
     [[nodiscard]] std::optional<SourceCollectionDeferredRestorePlan> TakeDeferredRestorePlan();
     void FinishDeferredRestore();
+    [[nodiscard]] SourceCollectionSessionResult RecordRestoreFailure(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        SourceCollectionLoadError error);
+    // Startup keeps the display empty for an unavailable active row, or while
+    // the saved active row is pending (null index). User selection cannot
+    // activate unavailable rows.
+    [[nodiscard]] SourceCollectionSessionResult RestoreEmptyActiveSource(
+        std::optional<std::size_t> source_index);
     [[nodiscard]] bool HasUnresolvedSourceIntent(const std::filesystem::path& path) const;
     [[nodiscard]] bool ForgetUnresolvedSourceIntent(const std::filesystem::path& path);
     [[nodiscard]] bool CancelPendingSampleNavigation(

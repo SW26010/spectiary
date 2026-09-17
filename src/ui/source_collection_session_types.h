@@ -298,6 +298,7 @@ struct SourceCollectionSourceView {
     std::optional<std::string> type;
     SourceCollectionSourceState state =
         SourceCollectionSourceState::Unavailable;
+    std::optional<SourceCollectionLoadError> load_error;
 };
 
 struct SourceCollectionSavedSource {

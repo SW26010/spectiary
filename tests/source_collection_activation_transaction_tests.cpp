@@ -4,6 +4,7 @@
 #include "profile/profile_sink.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
+#include "ui/source_collection_session_state_cache_io.h"
 #include "ui/source_collection_load_queue_internal.h"
 
 #include <algorithm>
@@ -846,6 +847,105 @@ void TestLaterSourceOpenReplacesHistoricalFailureStatus()
     std::filesystem::remove(loaded_path);
 }
 
+void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
+{
+    for (const bool active_fails : {false, true}) {
+        for (const bool failure_first : {false, true}) {
+            const auto saved_path = UniqueTempPath("_startup_state.json");
+            const auto navigation_path = UniqueTempPath("_startup_navigation.json");
+            const auto labeling_path = UniqueTempPath("_startup_labeling.json");
+            const auto workflow_path = UniqueTempPath("_startup_workflow.json");
+            const auto good_path = UniqueTempPath("_startup_good.csv");
+            const auto bad_path = UniqueTempPath("_startup_bad.csv");
+            const auto annotation_path = UniqueTempPath("_startup_annotation.csv");
+            WriteFixture(good_path);
+            WriteFixture(bad_path);
+            specforge::SourceCollectionSessionStateCache saved;
+            const specforge::SourceCollectionSavedSource good{good_path, 0, {}};
+            const specforge::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}};
+            saved.sources = failure_first ? std::vector{bad, good} : std::vector{good, bad};
+            saved.active_source_index = active_fails == failure_first ? 0 : 1;
+            Require(specforge::SaveSourceCollectionSessionStateCache(saved_path, saved),
+                "startup fixture should save");
+
+            // Restart from the saved result as well: an unavailable active row
+            // must survive shutdown without becoming a successful fallback.
+            for (int restart = 0; restart < 2; ++restart) {
+                auto dependencies = MakeDependencies(
+                    [bad_path](const auto& source, std::size_t index, const auto&) {
+                        if (source == bad_path) {
+                            throw std::runtime_error("startup source unavailable");
+                        }
+                        return MakeSnapshot(source, index);
+                    });
+                specforge::SourceCollectionSession session(saved_path, navigation_path,
+                    labeling_path, workflow_path);
+                Activation activation(session, specforge::MakeSourceCollectionLoadQueueForTesting(
+                    std::move(dependencies), {.foreground_limit = 1}));
+                activation.BeginDeferredRestore();
+                Require(DrainUntil(activation, [&]() { return !activation.status().loading; }),
+                    "startup should finish in either completion order");
+                const auto view = session.View();
+                Require(view.sources.size() == 2 && view.current_source_index,
+                    "failed and successful saved rows should both remain in Files");
+                const auto bad_index = view.sources[0].path == bad_path ? 0U : 1U;
+                const auto good_index = 1U - bad_index;
+                Require(view.sources[bad_index].load_error &&
+                        view.sources[bad_index].state == specforge::SourceCollectionSourceState::Unavailable &&
+                        view.sources[bad_index].load_error->diagnostic_detail.find("startup source unavailable") != std::string::npos,
+                    "failed row must retain an unavailable state and its hover diagnostic");
+                Require(view.sources[*view.current_source_index].path == (active_fails ? bad_path : good_path),
+                    "startup must retain the saved active path even when it fails");
+                Require(activation.status().failures.size() == (active_fails ? 1U : 0U),
+                    "only failure of the saved active source should affect startup status");
+                Require(active_fails ? (!view.snapshot && !view.current_sample_snapshot &&
+                            !view.navigation.has_active_source && !view.labeling.has_active_source)
+                        : (view.current_sample_snapshot && view.current_sample_snapshot->source.path == good_path),
+                    "an unavailable active source must leave plot and sample workflow empty");
+                Require(session.FlushStateCaches(), "startup state should flush");
+                const auto persisted = specforge::LoadSourceCollectionSessionStateCache(saved_path).cache;
+                Require(persisted.sources.size() == 2 && persisted.active_source_index &&
+                        persisted.sources[*persisted.active_source_index].path == (active_fails ? bad_path : good_path),
+                    "shutdown must persist the same active source identity");
+                const auto saved_bad = std::ranges::find_if(persisted.sources,
+                    [&](const auto& source) { return source.path == bad_path; });
+                Require(saved_bad != persisted.sources.end() && saved_bad->annotation_paths == std::vector{annotation_path},
+                    "failed rows must retain saved annotation associations");
+
+                if (restart == 1) {
+                    if (!active_fails || failure_first) {
+                        (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
+                            specforge::SourceCollectionIntent::SwitchActive(good_index)));
+                        (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
+                            specforge::SourceCollectionIntent::SwitchActive(bad_index)));
+                        Require(session.CurrentSampleSnapshot() &&
+                                session.CurrentSampleSnapshot()->source.path == good_path &&
+                                activation.status().failures.empty(),
+                            "unavailable rows cannot be selected and switching to a good row clears startup failure");
+                    }
+                    (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
+                        specforge::SourceCollectionIntent::Remove(bad_index)));
+                    Require(session.View().sources.size() == 1 && !session.HasUnresolvedSourceIntent(bad_path) &&
+                            session.CurrentSampleSnapshot() &&
+                            session.CurrentSampleSnapshot()->source.path == good_path &&
+                            activation.status().failures.empty(),
+                        "removing the failed row must forget its unresolved restore intent");
+                    Require(session.FlushStateCaches(), "removal should flush");
+                    const auto removed = specforge::LoadSourceCollectionSessionStateCache(saved_path).cache;
+                    Require(removed.sources.size() == 1 && removed.sources.front().path == good_path,
+                        "removed failures must not return at the next startup");
+                }
+            }
+            std::filesystem::remove(saved_path);
+            std::filesystem::remove(navigation_path);
+            std::filesystem::remove(labeling_path);
+            std::filesystem::remove(workflow_path);
+            std::filesystem::remove(good_path);
+            std::filesystem::remove(bad_path);
+        }
+    }
+}
+
 void TestCanceledGenerationDoesNotPublishFailure()
 {
     const std::filesystem::path path =
@@ -1639,6 +1739,7 @@ int main()
         TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();
         TestSuccessfulRetryClearsPreviousFailures();
         TestLaterSourceOpenReplacesHistoricalFailureStatus();
+        TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable();
         TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
         TestPublicInterfacePublishesPresentedOpenLifecycle();
