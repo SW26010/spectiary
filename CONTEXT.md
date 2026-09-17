@@ -66,6 +66,15 @@ navigation state and loaded sample annotation results for that collection, while
 the plot snapshot remains the current spectrum display view.
 _Avoid_: Plot snapshot, labeling task, file parser
 
+Startup restores the saved active source collection, rather than choosing a
+different source merely because it loaded successfully. A saved source that
+fails to load remains a gray, non-selectable Files row with a hover diagnostic
+and an enabled removal action. Removing it also removes its saved restore intent.
+If the saved active source fails, the spectrum and sample workflow remain empty
+and the status bar reports the failure. Failures of other restored sources appear
+only on their rows and do not replace the active source's normal status. Saved
+annotation associations remain intact until the source is removed or recovered.
+
 **Sample label**:
 A classification assigned to one spectrum sample within a source collection. It
 is separate from spectral-line marker labels and does not define spectral

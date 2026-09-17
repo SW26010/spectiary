@@ -361,10 +361,70 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
         ImGuiPopupFlags_AnyPopupLevel), "disabled action must leave the popup open");
 }
 }
+void TestFailedSourceRowWithoutSnapshotIsDisabledAndRemovable()
+{
+    ScopedImGuiContext context;
+    specforge::SourceCollectionSessionView view;
+    view.sources = {{
+        std::filesystem::path{"missing.csv"}, "missing.csv", {},
+        specforge::SourceCollectionSourceState::Unavailable,
+        specforge::SourceCollectionLoadError{
+            specforge::SourceCollectionLoadErrorKind::BackgroundLoadingFailed,
+            "The saved source no longer exists"},
+    }};
+    view.current_source_index = 0;
+    int submissions = 0;
+    specforge::PanelSessionInteraction interaction(
+        [&](auto, auto) {
+            ++submissions;
+            view.sources.clear();
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&]() -> const specforge::SourceCollectionSessionView& { return view; });
+    specforge::SourceCollectionPanelUi panel;
+    bool open = true;
+    const auto render_frame = [&]() {
+        ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+        ImGui::GetIO().DisplaySize = ImVec2(900, 700);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_Always);
+        panel.RenderFiles(interaction, specforge::UiLanguage::English, &open,
+            []() -> std::optional<std::filesystem::path> { return {}; },
+            []() -> std::optional<std::filesystem::path> { return {}; },
+            [](const auto&) {}, {});
+        ImGui::EndFrame();
+    };
+    specforge::test::WidgetHarness ui{render_frame,
+        specforge::test::WidgetHarness::FrameMode::ExistingContext};
+    ui.Frames(2);
+    for (const auto* cell : {"source", "type", "state"}) {
+        const auto widget = ui.Find(cell);
+        Require(widget.disabled, "every failed source cell must be disabled even without a snapshot");
+        const auto center = widget.bounds.GetCenter();
+        ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+        ui.Frames(2);
+        bool tooltip_visible = false;
+        for (const auto* window : GImGui->Windows) {
+            tooltip_visible |= window->Active && (window->Flags & ImGuiWindowFlags_Tooltip) != 0;
+        }
+        Require(tooltip_visible, "disabled source cells must still explain their failure on hover");
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        ui.Frames();
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        ui.Frames();
+        Require(submissions == 0, "clicking a failed row must not select it");
+    }
+    Require(!ui.Find("remove").disabled, "failed row removal must remain enabled");
+    ui.Click("remove");
+    Require(submissions == 1 && view.sources.empty(), "failed row removal must submit normally");
+}
+
 int main()
 {
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
     TestFilesPanelContextActionLaunchesWithoutMutatingSession();
     TestFilesPanelContextActionIsDisabledForIneligiblePath();
+    TestFailedSourceRowWithoutSnapshotIsDisabledAndRemovable();
     return 0;
 }

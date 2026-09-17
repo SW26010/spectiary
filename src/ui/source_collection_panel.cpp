@@ -979,7 +979,6 @@ void SourceCollectionPanelUi::RenderFiles(
     ImGui::SameLine();
     const std::vector<SourceCollectionSourceView>& sources = view.sources;
     const std::optional<std::size_t> current_source_index = view.current_source_index;
-    const SpectrumSnapshotHandle& snapshot = view.snapshot;
     const std::string source_count =
         std::to_string(sources.size()) + " " +
         std::string(UiText(
@@ -990,10 +989,7 @@ void SourceCollectionPanelUi::RenderFiles(
     RenderDisabledText(source_count);
 
     ImGui::Spacing();
-    const bool has_active_source =
-        !sources.empty() && current_source_index && *current_source_index < sources.size() && snapshot &&
-        !snapshot->source.path.empty();
-    if (!has_active_source) {
+    if (sources.empty()) {
         RenderDisabledText(
             UiText(language, UiTextId::NoSourcesInSession));
     } else if (ImGui::BeginTable(
@@ -1027,6 +1023,17 @@ void SourceCollectionPanelUi::RenderFiles(
         for (std::size_t index = 0; index < sources.size(); ++index) {
             const SourceCollectionSourceView& entry = sources[index];
             const bool is_current = current_source_index && *current_source_index == index;
+            const bool unavailable = entry.load_error.has_value();
+            const ImU32 row_text_color = ImGui::GetColorU32(
+                unavailable ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+            const auto show_failure_tooltip = [&]() {
+                if (unavailable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    const SourceCollectionLoadFailure failure{entry.path, *entry.load_error};
+                    const auto message = FormatSourceCollectionLoadFailures(language,
+                        std::span(&failure, 1));
+                    ImGui::SetTooltip("%s", message.c_str());
+                }
+            };
 
             ImGui::TableNextRow();
             if (is_current) {
@@ -1034,8 +1041,9 @@ void SourceCollectionPanelUi::RenderFiles(
             }
 
             ImGui::PushID(static_cast<int>(index));
+            ImGui::BeginDisabled(unavailable);
             ImGui::TableSetColumnIndex(0);
-            if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
+            if (TableCellTextButton("source", entry.display_name, row_text_color)) {
                 (void)interaction.Submit(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
@@ -1046,6 +1054,7 @@ void SourceCollectionPanelUi::RenderFiles(
                 const std::string path = NarrowPath(entry.path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
+            show_failure_tooltip();
 
             ImGui::TableSetColumnIndex(1);
             const std::string_view type = entry.type
@@ -1053,28 +1062,31 @@ void SourceCollectionPanelUi::RenderFiles(
                       language,
                       *entry.type)
                 : UiText(language, UiTextId::UnknownSourceType);
-            if (TableCellTextButton("type", type, ImGui::GetColorU32(ImGuiCol_Text))) {
+            if (TableCellTextButton("type", type, row_text_color)) {
                 (void)interaction.Submit(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
             }
             OpenSourceContextPopupForHoveredCell("source_context");
+            show_failure_tooltip();
 
             ImGui::TableSetColumnIndex(2);
-            ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+            ImU32 state_color = ImGui::GetColorU32(is_current && !unavailable ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             if (TableCellTextButton(
                     "state",
-                    UiText(language, entry.state),
+                    unavailable ? UiText(language, UiTextId::LoadFailed) : UiText(language, entry.state),
                     state_color)) {
                 (void)interaction.Submit(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
             }
             OpenSourceContextPopupForHoveredCell("source_context");
+            show_failure_tooltip();
+            ImGui::EndDisabled();
 
             if (ImGui::BeginPopup("source_context")) {
                 const bool can_reopen =
-                    IsReopenableSourcePath(entry.path) &&
+                    !unavailable && IsReopenableSourcePath(entry.path) &&
                     static_cast<bool>(launch_source_in_new_instance);
                 if (!can_reopen) {
                     ImGui::BeginDisabled();
