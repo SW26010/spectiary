@@ -725,7 +725,7 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
         "a new failure must not restore another source's acknowledged generation");
 }
 
-void TestSuccessfulRetryClearsOnlyItsSourceFailure()
+void TestSuccessfulRetryClearsPreviousFailures()
 {
     const std::filesystem::path retry_path =
         UniqueTempPath("_retry.csv");
@@ -770,18 +770,15 @@ void TestSuccessfulRetryClearsOnlyItsSourceFailure()
                 !activation.status().loading;
         });
     (void)activation.OpenSource(retry_path, 0);
-    const bool failure_retained_while_pending =
-        !activation.status().error_message.empty();
+    const bool loading_without_old_failures =
+        activation.status().loading &&
+        activation.status().error_message.empty() &&
+        activation.status().failures.empty();
     const bool retry_drained = DrainUntil(
         activation,
         [&]() {
-            const std::string_view error =
-                activation.status().error_message;
-            return error.find(
-                       "retryable source failure") ==
-                    std::string_view::npos &&
-                error.find("other source failure") !=
-                    std::string_view::npos &&
+            return activation.status().error_message.empty() &&
+                activation.status().failures.empty() &&
                 !activation.status().loading;
         });
 
@@ -791,11 +788,62 @@ void TestSuccessfulRetryClearsOnlyItsSourceFailure()
         failure_drained,
         "the first source attempt should publish its failure");
     Require(
-        failure_retained_while_pending,
-        "starting a retry must not clear its source failure prematurely");
+        loading_without_old_failures,
+        "starting a retry should display loading without historical failures");
     Require(
         retry_drained,
-        "a successful retry should clear only its source failure");
+        "a successful retry should leave no historical failure in the status bar");
+}
+
+void TestLaterSourceOpenReplacesHistoricalFailureStatus()
+{
+    const auto failed_path = UniqueTempPath("_historical_failure.csv");
+    const auto loaded_path = UniqueTempPath("_later_success.csv");
+    WriteFixture(failed_path);
+    WriteFixture(loaded_path);
+    auto dependencies = MakeDependencies(
+        [failed_path](const auto& source, std::size_t index, const auto&) {
+            if (source == failed_path) {
+                throw std::runtime_error("historical source failure");
+            }
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+
+    // All explicit-open entry points share the status lifecycle.
+    for (int origin = 0; origin < 3; ++origin) {
+        const auto failed_operation = activation.OpenSourceForAutomation(failed_path, 0);
+        Require(DrainUntil(activation, [&]() { return !activation.status().loading; }),
+            "failed open should complete before starting the next open");
+        Require(activation.status().failures.size() == 1 &&
+                !activation.status().error_message.empty() &&
+                activation.ObserveSourceOpenOperation(failed_operation).state ==
+                    Activation::SourceOpenOperationState::Failed,
+            "a new failure should be visible and reported to automation");
+
+        if (origin == 0) {
+            (void)activation.OpenSource(loaded_path, 0);
+        } else if (origin == 1) {
+            (void)activation.OpenExternalSource(loaded_path, false, 0);
+        } else {
+            (void)activation.OpenSourceForAutomation(loaded_path, 0);
+        }
+        Require(activation.status().loading && activation.status().failures.empty() &&
+                activation.status().error_message.empty(),
+            "a later open should show loading instead of an old failure");
+        Require(DrainUntil(activation, [&]() { return !activation.status().loading; }),
+            "later successful open should complete");
+        Require(activation.status().failures.empty() &&
+                activation.status().error_message.empty() &&
+                session.CurrentSampleSnapshot() &&
+                session.CurrentSampleSnapshot()->source.path == loaded_path,
+            "successful loading of another source should restore ready status");
+    }
+    std::filesystem::remove(failed_path);
+    std::filesystem::remove(loaded_path);
 }
 
 void TestCanceledGenerationDoesNotPublishFailure()
@@ -1589,7 +1637,8 @@ int main()
         TestSuccessfulSourceDoesNotHideConcurrentFailure();
         TestConcurrentFailuresRemainVisible();
         TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();
-        TestSuccessfulRetryClearsOnlyItsSourceFailure();
+        TestSuccessfulRetryClearsPreviousFailures();
+        TestLaterSourceOpenReplacesHistoricalFailureStatus();
         TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
         TestPublicInterfacePublishesPresentedOpenLifecycle();
