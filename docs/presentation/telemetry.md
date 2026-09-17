@@ -270,8 +270,16 @@ and pairing checks. It rejects invalid release slots/kinds, incorrect child pare
 and nonzero statistics polling timeout. Empty statistics queues need not produce GetNext;
 a capture without it fails the coverage gate rather than proving that path fast.
 
+The legacy `buffer_replacement_experiment.enabled` event name is retained for analyzer
+and historical capture compatibility. It now reports the detached incremental-buffer
+policy in production too (true by default); it does not assert that every viewport
+selected Composition. Read per-viewport backend transitions for capability/failure fallback.
+Only the isolated diagnostic executable reads `SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS`;
+there, an absent switch still selects baseline buffers for paired comparisons.
+
 Use `profile-live-resize.ps1 -Scenario NativeSize -FeedbackBreakdown` for a manually
-armed short capture with ordinary presentation policy. Prepare the detached Spectrum,
+armed short capture with the isolated baseline buffer policy. Add `-IncrementalBuffers`
+to exercise the production detached buffer strategy. Prepare the detached Spectrum,
 start recording, and drag its outer border during the five-second recording. Close
 normally afterwards. Extra events increase overhead and file volume; keep the recorder
 limits and reject dropped or truncated captures. Absolute timings from different

@@ -9,6 +9,8 @@
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <wincodec.h>
+#include <dxgi1_4.h>
+#include <psapi.h>
 
 #include <array>
 #include <cstdio>
@@ -23,6 +25,14 @@
 
 namespace specforge {
 struct D3D11CompositionSwapChainTestAccess {
+    static bool Released(const D3D11CompositionSwapChain& chain) {
+        for (const auto& buffer : chain.buffers_) {
+            if (buffer.texture || buffer.render_target || buffer.presentation || buffer.available_event ||
+                buffer.identity.generation != 0) return false;
+        }
+        return !chain.initialized() && !chain.surface_handle_ && !chain.statistics_event_ &&
+            chain.selected_buffer_ == -1 && chain.bound_buffer_ == -1;
+    }
     inline static unsigned fail_step = 0;
     static void Inject(D3D11CompositionSwapChain& chain, unsigned step) {
         fail_step = step;
@@ -58,7 +68,7 @@ public:
         window_class.hInstance = instance_;
         window_class.lpszClassName = kSwapChainTestWindowClass;
         atom_ = RegisterClassW(&window_class);
-        Require(atom_ != 0, "the swap-chain integration test should register its window class");
+        Require(atom_ != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS, "the swap-chain integration test should register its window class");
 
         hwnd_ = CreateWindowExW(
             extended_style,
@@ -442,6 +452,7 @@ public:
     {
         IMGUI_CHECKVERSION();
         context_ = ImGui::CreateContext();
+        ImGui::GetIO().IniFilename = nullptr;
         backend_initialized_ = context_ != nullptr &&
                                ImGui_ImplDX11_Init(device, context);
         renderer_initialized_ = backend_initialized_ &&
@@ -521,6 +532,12 @@ public:
 
     void PresentViewport()
     {
+        // Each invocation models a distinct application frame, including the
+        // production one-replacement-per-ImGui-frame guard.
+        ImGui::GetIO().DisplaySize = viewport_.Size;
+        ImGui_ImplDX11_NewFrame();
+        ImGui::NewFrame();
+        ImGui::EndFrame();
         ImGui::GetPlatformIO().Renderer_RenderWindow(&viewport_, nullptr);
         ImGui::GetPlatformIO().Renderer_SwapBuffers(&viewport_, nullptr);
     }
@@ -844,6 +861,88 @@ void TestIncrementalBufferPlanAndFailure()
         "replacement failure must use the existing DXGI fallback");
 }
 
+void TestIncrementalBufferRepeatedLifetimes()
+{
+    using namespace specforge;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    Require(SUCCEEDED(CreateTestDevice(device, context)), "repeated resize requires D3D11");
+    ComPtr<IDXGIDevice> dxgi_device;
+    ComPtr<IDXGIAdapter> adapter;
+    ComPtr<IDXGIAdapter3> adapter3;
+    if (SUCCEEDED(device.As(&dxgi_device)) && SUCCEEDED(dxgi_device->GetAdapter(&adapter)))
+        adapter.As(&adapter3);
+    // Observations, not exact reclamation assertions: DWM/driver retirement is asynchronous.
+    const auto sample = [&](unsigned cycle) {
+        DWORD handles = 0;
+        PROCESS_MEMORY_COUNTERS_EX memory{};
+        memory.cb = sizeof(memory);
+        Require(GetProcessHandleCount(GetCurrentProcess(), &handles) &&
+            K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)),
+            "resource observations must be available");
+        DXGI_QUERY_VIDEO_MEMORY_INFO local{}, nonlocal{};
+        const bool gpu = adapter3 && SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &local)) &&
+            SUCCEEDED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonlocal));
+        std::printf("[incremental resources] cycle=%u handles=%lu private_bytes=%llu gpu_available=%d local_bytes=%llu nonlocal_bytes=%llu\n",
+            cycle, handles, static_cast<unsigned long long>(memory.PrivateUsage), gpu,
+            static_cast<unsigned long long>(local.CurrentUsage), static_cast<unsigned long long>(nonlocal.CurrentUsage));
+    };
+    constexpr float color[4] = {0.1f, 0.1f, 0.1f, 1};
+    constexpr std::array<std::array<UINT, 2>, 8> sizes{{
+        {640,360}, {320,240}, {1280,720}, {480,800}, {320,240}, {960,540}, {640,360}, {320,240}}};
+    const ULONGLONG deadline = GetTickCount64() + 10'000;
+    unsigned submitted = 0;
+    for (unsigned cycle = 0; cycle < 24; ++cycle) {
+        {
+            // Two simultaneous ordinary HWNDs, destroyed and recreated each cycle.
+            SwapChainTestWindow first, second;
+            D3D11CompositionSwapChain chains[2];
+            const HWND windows[] = {first.hwnd(), second.hwnd()};
+            for (unsigned viewport = 0; viewport < 2; ++viewport) {
+                Win32DisplayRefreshState refresh;
+                Require(SUCCEEDED(QueryWin32DisplayRefreshState(windows[viewport], refresh)), "display timing must be available");
+                const HRESULT result = chains[viewport].Initialize(device.Get(), windows[viewport], 320,240,refresh,true);
+                if (cycle == 0 && viewport == 0 && FAILED(result)) {
+                    std::printf("[SKIP] repeated incremental Composition unavailable: 0x%08lx\n", static_cast<unsigned long>(result));
+                    return;
+                }
+                Require(SUCCEEDED(result), "both ordinary viewports must initialize on every lifetime");
+            }
+            for (unsigned frame = 0; frame < sizes.size(); ++frame) {
+                for (unsigned viewport = 0; viewport < 2; ++viewport) {
+                    auto& chain = chains[viewport];
+                    auto& other = chains[1 - viewport];
+                    const auto other_generations = D3D11CompositionSwapChainTestAccess::Generations(other);
+                    const auto size = sizes[(frame + viewport * 3) % sizes.size()];
+                    Require(SUCCEEDED(chain.Resize(device.Get(), context.Get(), size[0], size[1])), "oscillating resize must succeed");
+                    HRESULT acquired;
+                    do {
+                        Require(GetTickCount64() < deadline, "bounded resize workload must make progress within ten seconds");
+                        acquired = chain.BeginFrame(context.Get(), color, true, 0, frame + 1);
+                        if (acquired == DXGI_ERROR_WAS_STILL_DRAWING) Sleep(1);
+                    } while (acquired == DXGI_ERROR_WAS_STILL_DRAWING);
+                    Require(SUCCEEDED(acquired), "each viewport must acquire without fallback");
+                    D3D11_TEXTURE2D_DESC desc{};
+                    chain.active_render_texture()->GetDesc(&desc);
+                    Require(desc.Width == size[0] && desc.Height == size[1], "oscillation must render at the latest size");
+                    Require(SUCCEEDED(chain.Present(context.Get())), "each oscillating viewport must present");
+                    ++submitted;
+                    Require(D3D11CompositionSwapChainTestAccess::Generations(other) == other_generations,
+                        "one viewport's replacement must not mutate another viewport");
+                }
+            }
+            context->ClearState();
+            for (auto& chain : chains) {
+                chain.Shutdown();
+                Require(D3D11CompositionSwapChainTestAccess::Released(chain), "shutdown must clear owned buffers, handles and selection");
+            }
+            context->Flush();
+        }
+        Sleep(100);
+        sample(cycle + 1);
+    }
+    Require(submitted == 384, "both viewports must complete all bounded resize submissions");
+}
 void TestCreationTimeNoRedirectionCompatibility()
 {
     // Isolated HWND experiment only: production HWND creation is unchanged.
@@ -1346,6 +1445,7 @@ void TestImGuiViewportSwapChainLifecycle()
     Require(!fixture.has_viewport_swap_chain(), "redocking should destroy the viewport swap chain");
     unsigned present_completions = 0;
     bool resize_seen = false, wait_seen = false, draw_seen = false;
+    unsigned replacements = 0, rebuilds = 0;
     for (const auto& event : events) {
         if (event.phase != "end") continue;
         if (event.name == "viewport_resize") {
@@ -1360,14 +1460,24 @@ void TestImGuiViewportSwapChainLifecycle()
             draw_seen = true;
         }
         if (event.name == "presentation_available_wait") {
-            Require(event.timeout_ms == 0 && event.count == 3 && event.parent != 0,
-                "detached telemetry must observe the unchanged nonblocking triple-buffer wait");
+            Require(event.timeout_ms == 0 && event.count == 1 && event.parent != 0,
+                "production detached acquisition must poll individual slots without blocking");
             wait_seen = true;
+        }
+        if (event.name == "presentation_buffer_rebuild") ++rebuilds;
+        if (event.name == "presentation_buffer_replace") {
+            Require(event.result_valid && event.result == S_OK &&
+                event.new_width == 640 && event.new_height == 360 &&
+                event.logical_bytes <= specforge::kIncrementalBufferBudget,
+                "production replacement must use the requested dimensions within budget");
+            ++replacements;
         }
     }
     Require(resize_seen && draw_seen && present_completions == ordinary_presentations.size() + paced_presentations.size(),
         "telemetry completions must match actual detached completion policy");
     Require(!composition_selected || wait_seen, "composition acquire must emit actual available-event waits");
+    Require(!composition_selected || (rebuilds == 1 && replacements >= 1 && replacements <= 2),
+        "two production frames must replace at most one slot each instead of rebuilding the initial buffer set");
 
     // Exercise the actual detached callbacks, including a recreated lifetime.
     fixture.SetFeedbackAcquireOnly(true);
@@ -1471,6 +1581,7 @@ void TestPlatformTelemetryForwardsAndRestoresCallbacks()
     Require(io.Platform_SetWindowPos == position_callback && io.Platform_SetWindowSize == size_callback,
         "shutdown must restore original platform handlers");
     Require(renderer.Initialize(factory.Get(), device.Get(), context.Get()), "wrapper should reinstall");
+    Require(renderer.IncrementalBuffersEnabled(), "reinitialized renderer must retain production buffer policy");
     io.Platform_SetWindowPos = nullptr; // Another owner replaced the handler.
     renderer.Shutdown();
     Require(io.Platform_SetWindowPos == nullptr && io.Platform_SetWindowSize == size_callback,
@@ -1522,6 +1633,7 @@ struct TestCase {
 int main()
 {
     constexpr TestCase tests[] = {
+        {"TestIncrementalBufferRepeatedLifetimes", TestIncrementalBufferRepeatedLifetimes},
         {"TestPlatformTelemetryForwardsAndRestoresCallbacks", TestPlatformTelemetryForwardsAndRestoresCallbacks},
         {
             "TestSdrSwapChainUsesModernSrgbPresentationContract",

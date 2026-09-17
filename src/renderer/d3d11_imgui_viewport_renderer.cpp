@@ -84,7 +84,7 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     native_window_theme_callback_ = {};
     compositor_clock_paced_ = false;
     feedback_acquire_only_ = false;
-    incremental_buffers_ = false;
+    incremental_buffers_ = true;
 }
 
 void D3D11ImGuiViewportRenderer::SetClearColor(

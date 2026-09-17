@@ -805,15 +805,17 @@ void SpecForgeApp::InitializeUiBackends()
         GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY", feedback_experiment, 2) == 1 &&
         feedback_experiment[0] == L'1');
     wchar_t buffer_experiment[2] = {};
-    viewport_renderer_.SetIncrementalBuffersExperiment(
+    viewport_renderer_.SetIncrementalBuffersForDiagnostics(
         GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS", buffer_experiment, 2) == 1 &&
         buffer_experiment[0] == L'1');
 #endif
     profile_.WriteEvent("feedback_experiment", {
         ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
     });
+    // Retain the legacy event name for existing capture analyzers; this now also
+    // reports the production detached policy, independently of backend fallback.
     profile_.WriteEvent("buffer_replacement_experiment", {
-        ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersExperiment()),
+        ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersEnabled()),
     });
     imgui_initialized_ = true;
 }
@@ -927,7 +929,7 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         presentation_trace::capture_ready = true;
         presentation_trace::CaptureBoundary(true);
         profile_.WriteEvent("buffer_replacement_experiment", {
-            ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersExperiment()),
+            ProfileSink::Field::Bool("enabled", viewport_renderer_.IncrementalBuffersEnabled()),
         });
         profile_.WriteEvent("feedback_experiment", {
             ProfileSink::Field::Bool("acquire_only", viewport_renderer_.FeedbackAcquireOnlyExperiment()),
