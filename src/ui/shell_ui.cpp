@@ -2340,6 +2340,14 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
     const ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
 
+    if (std::exchange(restore_default_layout_requested_, false)) {
+        (void)application_settings_.Apply(
+            ApplicationSettingsIntent::ShowAllPanels(), {});
+        settings_panel_ui_.CloseForLayoutRecovery();
+        SeedInitialDockLayout(dockspace_id, dockspace_size);
+        layout_seeded_ = true;
+        ImGui::GetIO().WantSaveIniSettings = true;
+    }
     if (!layout_seeded_) {
         layout_seeded_ = true;
         if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
@@ -2544,16 +2552,14 @@ void ShellUi::RenderMainMenuBar(
             immersive_plot_toggle_requested_ = true;
         }
         ImGui::Separator();
-        const std::string show_all_panels =
+        const std::string restore_default_layout =
             StableUiLabel(
                 language,
-                UiTextId::ShowAllPanels,
-                "SpecForgeShowAllPanels");
+                UiTextId::RestoreDefaultLayout,
+                "SpecForgeRestoreDefaultLayout");
         if (ImGui::MenuItem(
-                show_all_panels.c_str())) {
-            (void)application_settings_.Apply(
-                ApplicationSettingsIntent::ShowAllPanels(),
-                {});
+                restore_default_layout.c_str())) {
+            restore_default_layout_requested_ = true;
         }
         ImGui::Separator();
         const auto render_panel_toggle =
@@ -3337,6 +3343,9 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
             .frame_capture_status_result =
                 status.frame_capture_status_result,
         });
+    if (settings_panel_ui_.TakeRestoreDefaultLayoutRequest()) {
+        restore_default_layout_requested_ = true;
+    }
     const ApplicationSettingsRuntimeState runtime{
         .profile_recording_in_progress =
             status.profile_open || status.profile_stopping,
@@ -3465,7 +3474,7 @@ void ShellUi::RenderSpectralLinesPanel(bool panel_open)
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
 {
     // DockBuilder is an internal docking-branch API, so keep it limited to the
-    // first-layout seed. Runtime docking and persistence remain standard ImGui.
+    // default layout seed and explicit recovery. Persistence remains standard ImGui.
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, size);
@@ -3507,6 +3516,23 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);
     ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), spectral_lines_id);
     ImGui::DockBuilderFinish(dockspace_id);
+    // Hidden windows may only exist in loaded settings; detached windows may
+    // already be live. Recover both without clearing other settings handlers.
+    for (const char* name : {
+             SourceCollectionPanelUi::FilesWindowName(),
+             SourceCollectionPanelUi::NavigationWindowName(),
+             SourceCollectionPanelUi::AnnotationsWindowName(),
+             SampleWorkflowPanelUi::LabelingWindowName(),
+             SampleWorkflowPanelUi::FiltersWindowName(),
+             SampleWorkflowPanelUi::SortingWindowName(),
+             kInfoTagsWindow, kCurveDisplayWindow, kMainPlotWindow,
+             SpectralLinesPanelUi::WindowName()}) {
+        ImGui::SetWindowCollapsed(name, false);
+        if (ImGuiWindowSettings* settings =
+                ImGui::FindWindowSettingsByID(ImHashStr(name))) {
+            settings->Collapsed = false;
+        }
+    }
 }
 
 }  // namespace specforge

@@ -873,6 +873,17 @@ void SettingsPanelUi::Open()
     focus_requested_ = true;
 }
 
+void SettingsPanelUi::CloseForLayoutRecovery()
+{
+    open_ = false;
+    settings_viewport_id_ = 0;
+}
+
+bool SettingsPanelUi::TakeRestoreDefaultLayoutRequest()
+{
+    return std::exchange(restore_default_layout_requested_, false);
+}
+
 void SettingsPanelUi::Render(
     const ApplicationSettingsView& settings,
     const SettingsPanelStatus& status)
@@ -882,7 +893,7 @@ void SettingsPanelUi::Render(
     }
 
     const ImGuiViewport* viewport =
-        settings_viewport_id_ != 0
+        !focus_requested_ && settings_viewport_id_ != 0
         ? ImGui::FindViewportByID(settings_viewport_id_)
         : nullptr;
     if (viewport == nullptr) {
@@ -920,13 +931,21 @@ void SettingsPanelUi::Render(
             std::max(0.0f, work_size.x - initial_size.x) * 0.5f,
         work_position.y +
             std::max(0.0f, work_size.y - initial_size.y) * 0.5f);
-    ImGui::SetNextWindowSize(initial_size, ImGuiCond_FirstUseEver);
+    // Opening Settings always recovers its placement on the current main
+    // monitor, including after monitor removal or a layout recovery.
+    const ImGuiCond placement_condition =
+        focus_requested_ ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+    if (focus_requested_) {
+        ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+        ImGui::SetNextWindowDockID(0);
+    }
+    ImGui::SetNextWindowSize(initial_size, placement_condition);
     ImGui::SetNextWindowSizeConstraints(
         initial_size,
         maximum_size);
     ImGui::SetNextWindowPos(
         initial_position,
-        ImGuiCond_FirstUseEver);
+        placement_condition);
     const bool focus_requested =
         std::exchange(focus_requested_, false);
     if (focus_requested) {
@@ -1628,7 +1647,7 @@ void SettingsPanelUi::RenderDataAndRecovery(
     const std::string reset_layout_label =
         StableUiLabel(
             language,
-            UiTextId::ResetWindowLayout,
+            UiTextId::RestoreDefaultLayout,
             "SpecForgeResetWindowLayout");
     const std::string reset_settings_label =
         StableUiLabel(
@@ -1640,8 +1659,10 @@ void SettingsPanelUi::RenderDataAndRecovery(
             language,
             UiTextId::EraseAllApplicationState,
             "SpecForgeEraseAllApplicationState");
+    if (ImGui::Button(reset_layout_label.c_str())) {
+        restore_default_layout_requested_ = true;
+    }
     ImGui::BeginDisabled();
-    ImGui::Button(reset_layout_label.c_str());
     ImGui::Button(reset_settings_label.c_str());
     ImGui::Button(erase_state_label.c_str());
     ImGui::EndDisabled();

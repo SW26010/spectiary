@@ -139,6 +139,8 @@ public:
     ~SettingsPanelUi();
 
     void Open();
+    void CloseForLayoutRecovery();
+    [[nodiscard]] bool TakeRestoreDefaultLayoutRequest();
     void Render(
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status = {});
@@ -213,6 +215,7 @@ private:
     SettingsPanelEnvironment environment_;
     SettingsSection selected_section_ = SettingsSection::General;
     bool open_ = false;
+    bool restore_default_layout_requested_ = false;
     bool focus_requested_ = false;
     bool content_scroll_reset_requested_ = false;
     bool action_failed_ = false;

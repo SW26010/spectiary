@@ -127,7 +127,6 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Open File as Annotation...", "将文件作为标注打开…"},
     UiTextEntry{"View", "视图"},
     UiTextEntry{"Immersive Plot Mode", "沉浸式绘图模式"},
-    UiTextEntry{"Show all panels", "显示所有面板"},
     UiTextEntry{"Files", "文件"},
     UiTextEntry{"Navigation", "导航"},
     UiTextEntry{"Annotations", "标注"},
@@ -249,12 +248,12 @@ constexpr std::array kTextCatalog = {
         "Not available yet. A public, versioned settings-file format has not been defined.",
         "暂不可用。尚未定义公开且带版本的设置文件格式。"},
     UiTextEntry{"Recovery and reset", "恢复与重置"},
-    UiTextEntry{"Reset Window Layout", "重置窗口布局"},
+    UiTextEntry{"Restore Default Layout", "恢复默认布局"},
     UiTextEntry{"Reset Application Settings", "重置应用设置"},
     UiTextEntry{"Erase All Application State...", "清除全部应用状态…"},
     UiTextEntry{
-        "Not available yet. Reset operations need explicit data boundaries and confirmation behavior.",
-        "暂不可用。重置操作需要明确的数据边界与确认流程。"},
+        "Layout recovery preserves data, tasks and preferences. Application settings reset and state erasure are not available yet.",
+        "恢复布局会保留数据、任务与偏好设置。重置应用设置与清除状态暂不可用。"},
     UiTextEntry{"Diagnostics", "诊断"},
     UiTextEntry{
         "Record bounded performance profiles for investigating interaction and loading latency.",

@@ -104,7 +104,9 @@ Files 表格中，恢复失败的来源保留为灰色行，文件名、类型�
 - 鼠标 pan 和 wheel zoom 优先使用 ImPlot 原生交互；Precision Touchpad 使用 Windows Direct Manipulation 采集双指 pan/pinch，再统一映射到 ImPlot axis limits，不引入自定义 renderer。
 - 触屏输入暂缓，不属于当前 Precision Touchpad 验收范围。未来实现前先确定一指输入用于直接 pan，还是保留给点击选择/标注，再确定双指 pan/pinch 语义；实现应复用现有 plot axis-limit controller，但为 `PT_TOUCH` 增加独立的多接触点捕获与真实触屏验收。
 - Immersive mode 为了 edge-to-edge plot，允许仅在 immersive display option 下使用内绘轴 overlay 和 edge-band wheel zoom；普通 docked plot 仍走 ImPlot 原生交互。
-- default layout 可以用 ImGui dockspace 建立，布局持久化交给 ImGui ini。DockBuilder 若用于初始布局，必须被隔离为一次性初始化逻辑。
+- default layout 可以用 ImGui dockspace 建立，布局持久化交给 ImGui ini。DockBuilder 必须隔离在默认布局初始化与用户显式恢复逻辑中。
+- 设置中的“恢复默认布局”与“视图 → 恢复默认布局”共用恢复逻辑：恢复标准停靠布局，显示所有核心面板，并将其收回当前主窗口工作区。仅修改布局和面板可见性，不清除数据源、标注、任务/草稿、标签定义、sample filtering/sorting 或无关偏好；恢复后的布局通过普通 ImGui ini 路径保存。
+- 默认布局不显示设置窗口。每次打开设置时，将其解除停靠并按当前主窗口所在显示器工作区居中、限制尺寸，避免旧显示器坐标或分辨率变化导致设置不可达。
 
 ### 不接受
 

@@ -480,6 +480,7 @@ private:
     SampleWorkflowShortcut sample_workflow_shortcut_;
     bool persist_local_state_ = true;
     bool layout_seeded_ = false;
+    bool restore_default_layout_requested_ = false;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
