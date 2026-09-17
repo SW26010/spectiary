@@ -112,6 +112,9 @@ SourceCollectionActivationTransaction::
         bool preserve_pending_explicit_opens,
         std::uint64_t automation_sequence)
 {
+    // A new open replaces historical status, but keeps terminal outcomes for
+    // observers. Failures from still-pending loads remain visible when drained.
+    AcknowledgeLoadFailures();
     CancelSnapshotPrefetch();
     SourceLoadLatencyTraceHandle source_load_trace =
         StartSourceLoadTrace(
