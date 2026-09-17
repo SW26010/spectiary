@@ -1566,6 +1566,64 @@ void TestRenderSmoke()
     }
 }
 
+void TestSettingsViewportStableAcrossOpeningFrames()
+{
+    ScopedImGuiContext imgui;
+    auto& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    io.ConfigViewportsNoAutoMerge = true;
+    io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports |
+                       ImGuiBackendFlags_RendererHasViewports;
+    io.DisplaySize = ImVec2(1600, 1000);
+    io.DeltaTime = 1.0f / 60.0f;
+    auto& platform = ImGui::GetPlatformIO();
+    platform.Platform_CreateWindow = [](ImGuiViewport* v) { v->PlatformHandle = v; };
+    platform.Platform_DestroyWindow = [](ImGuiViewport* v) { v->PlatformHandle = nullptr; };
+    platform.Platform_ShowWindow = [](ImGuiViewport*) {};
+    platform.Platform_SetWindowTitle = [](ImGuiViewport*, const char*) {};
+    platform.Platform_SetWindowPos = [](ImGuiViewport*, ImVec2) {};
+    platform.Platform_GetWindowPos = [](ImGuiViewport* v) { return v->Pos; };
+    platform.Platform_SetWindowSize = [](ImGuiViewport*, ImVec2) {};
+    platform.Platform_GetWindowSize = [](ImGuiViewport* v) { return v->Size; };
+    ImGui::GetMainViewport()->PlatformHandle = ImGui::GetMainViewport();
+    ImGuiPlatformMonitor monitor;
+    monitor.MainSize = monitor.WorkSize = ImVec2(1920, 1080);
+    monitor.DpiScale = 1.0f;
+    platform.Monitors.push_back(monitor);
+
+    auto panel = MakePanel();
+    const auto settings = MakeSettingsView();
+    const auto frame = [&] {
+        ImGui::NewFrame();
+        panel.Render(settings);
+        ImGui::EndFrame();
+        ImGui::UpdatePlatformWindows();
+    };
+    panel.Open();
+    ImGuiID settings_viewport = 0;
+    for (int i = 0; i < 3; ++i) {
+        frame();
+        const auto* window = ImGui::FindWindowByName("###SpecForgeSettingsV1");
+        Require(window && window->ViewportId != ImGui::GetMainViewport()->ID,
+            "Settings must own its detached viewport from its opening frame");
+        if (i == 0) settings_viewport = window->ViewportId;
+        Require(window->ViewportId == settings_viewport,
+            "Opening Settings must not migrate between viewports on successive frames");
+    }
+    panel.Open();
+    frame();
+    Require(ImGui::FindWindowByName("###SpecForgeSettingsV1")->ViewportId == settings_viewport,
+        "Focusing an open Settings panel must retain its detached viewport");
+    panel.CloseForLayoutRecovery();
+    frame();
+    frame();
+    panel.Open();
+    frame();
+    Require(ImGui::FindWindowByName("###SpecForgeSettingsV1")->ViewportId == settings_viewport,
+        "Reopening Settings after recovery must immediately use its detached viewport");
+    ImGui::DestroyPlatformWindows();
+}
+
 void TestSettingsWindowMinimumSizeTracksUiScale()
 {
     ScopedImGuiContext imgui;
@@ -1948,6 +2006,7 @@ int main()
     TestAppearanceThemeOptionsKeepStableOrderAndMapping();
     TestLanguageRenderKeepsStableImGuiIds();
     TestRenderSmoke();
+    TestSettingsViewportStableAcrossOpeningFrames();
     TestSettingsWindowMinimumSizeTracksUiScale();
     TestSettingsWindowConstraintsFollowCurrentViewport();
     TestSettingsWindowCanGrowAfterDetachedViewportShrink();

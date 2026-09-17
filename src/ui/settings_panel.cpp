@@ -936,7 +936,9 @@ void SettingsPanelUi::Render(
     const ImGuiCond placement_condition =
         focus_requested_ ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
     if (focus_requested_) {
-        ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+        // Recover screen coordinates without forcing main-viewport ownership.
+        // NoAutoMerge gives Settings its own viewport; forcing the main one
+        // for only this frame would migrate it again next frame and flash.
         ImGui::SetNextWindowDockID(0);
     }
     ImGui::SetNextWindowSize(initial_size, placement_condition);
