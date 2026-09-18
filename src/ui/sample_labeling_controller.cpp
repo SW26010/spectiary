@@ -2772,7 +2772,6 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     candidate.persistence.output_path = std::move(output_path);
     candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    candidate.persistence.initial_publication_pending = true;
 
     for (std::size_t index = 0;
          index < candidate.values.SampleCount();
@@ -2810,29 +2809,9 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         result.accepted = false;
         return result;
     }
-    // Publish the output path and its pending overlay before touching the
-    // external ASDF document. This is the write-ahead recovery checkpoint for
-    // the temporary-to-formal transition.
-    const SampleLabelingTask temporary_checkpoint = *task;
-    std::string checkpoint_error;
-    TaskOutputPersistenceAttempt persistence_attempt;
-    if (!state_cache_path_.empty() &&
-        !CommitTaskRecoveryCheckpoint(
-                *active_source_identity_,
-                *state,
-                candidate,
-                false,
-                &checkpoint_error)) {
-        SampleLabelingOperationResult rejected =
-            RejectOperation();
-        rejected.state_save_scheduled = true;
-        rejected.state_save_attempted = true;
-        return rejected;
-    }
-
     std::optional<SampleLabelingAsdfOpenSnapshot>
         candidate_asdf_snapshot;
-    persistence_attempt = PublishCanonicalTaskCreation(
+    TaskOutputPersistenceAttempt persistence_attempt = PublishCanonicalTaskCreation(
         candidate,
         candidate_output_lease,
         &candidate_asdf_snapshot);
@@ -2884,38 +2863,13 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         persistence_attempt.lease_status ==
             ExclusiveFileLeaseAcquireStatus::Acquired &&
         candidate_asdf_snapshot.has_value();
-    bool initial_publication_recovery_scheduled = false;
     if (formal_owner_adopted) {
         *task = std::move(candidate);
         adopt_formal_output_lease();
         ReplaceActiveAsdfSnapshot(
             std::move(candidate_asdf_snapshot));
     } else {
-        mark_persistence_failure(candidate);
-        SampleLabelingTask failed_temporary =
-            temporary_checkpoint;
-        mark_persistence_failure(failed_temporary);
-        std::string rollback_error;
-        const bool checkpoint_rolled_back =
-            state_cache_path_.empty() ||
-            CommitTaskRecoveryCheckpoint(
-                *active_source_identity_,
-                *state,
-                failed_temporary,
-                false,
-                &rollback_error);
-        if (checkpoint_rolled_back) {
-            *task = std::move(failed_temporary);
-        } else {
-            // Keep the durable formal checkpoint if its compensating write
-            // fails; it is the only safe recovery record for a partial write.
-            static_cast<void>(
-                DowngradeCanonicalSampleLabelingTaskToStructural(
-                    candidate));
-            *task = std::move(candidate);
-            adopt_formal_output_lease();
-            initial_publication_recovery_scheduled = true;
-        }
+        mark_persistence_failure(*task);
     }
 
     if (formal_owner_adopted) {
@@ -2927,17 +2881,13 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         *state,
         *task);
     QueueStateSave();
-    if (initial_publication_recovery_scheduled) {
-        QueueOutputRetry();
-    }
     SampleLabelingOperationResult result;
     result.accepted = true;
     result.changed = true;
     result.output_save_attempted =
         persistence_attempt.publication.attempted;
     result.output_saved = formal_owner_adopted;
-    result.output_retry_scheduled =
-        initial_publication_recovery_scheduled;
+    result.output_retry_scheduled = false;
     if (persistence_attempt.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         result.issue =
@@ -3003,7 +2953,6 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     candidate.persistence.output_path = std::move(output_path);
     candidate.persistence.output_format =
         SampleLabelingOutputArtifactFormat::CanonicalAsdf;
-    candidate.persistence.initial_publication_pending = false;
 
 
     TaskEditLeaseSet candidate_output_leases;
@@ -3023,34 +2972,6 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     }
     if (*latest_output_conflict) {
         return RejectOutputPathAlreadyUsed();
-    }
-
-    // Keep the legacy NPY+sidecar owner and its newest sparse overlay as the
-    // durable recovery record until the replacement ASDF has been published,
-    // reopened, and adopted. A crash anywhere before the second checkpoint
-    // therefore restores the old owner rather than a half-migrated task.
-    std::string checkpoint_error;
-    const bool legacy_checkpoint_saved =
-        state_cache_path_.empty() ||
-        CommitTaskRecoveryCheckpoint(
-            *active_source_identity_,
-            *state,
-            *task,
-            false,
-            &checkpoint_error);
-    if (!legacy_checkpoint_saved) {
-        SampleLabelingOperationResult rejected =
-            RejectOperation();
-        rejected.state_save_scheduled = true;
-        rejected.state_save_attempted = true;
-        rejected.issue =
-            SampleLabelingOperationResult::Issue::
-                OutputMigrationCheckpointFailed;
-        rejected.diagnostic = checkpoint_error.empty()
-            ? "could not checkpoint the legacy owner before ASDF migration"
-            : checkpoint_error;
-        rejected.revision = revision_;
-        return rejected;
     }
 
     std::optional<SampleLabelingAsdfOpenSnapshot>
@@ -3073,7 +2994,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
         failed.output_saved = false;
         failed.state_save_attempted =
             !state_cache_path_.empty();
-        failed.state_saved = legacy_checkpoint_saved;
+        failed.state_saved = false;
         failed.issue =
             SampleLabelingOperationResult::Issue::
                 OutputMigrationPublicationFailed;
@@ -3102,7 +3023,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     std::string adoption_error;
     const bool canonical_owner_saved =
         state_cache_path_.empty() ||
-        CommitTaskRecoveryCheckpoint(
+        CommitTaskRegistration(
             *active_source_identity_,
             *state,
             candidate,
@@ -3119,7 +3040,7 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
             SampleLabelingOperationResult::Issue::
                 OutputMigrationOwnerSwitchFailed;
         failed.diagnostic = adoption_error.empty()
-            ? "could not checkpoint the canonical owner after ASDF migration"
+            ? "could not register the canonical owner after ASDF migration"
             : adoption_error;
         failed.revision = revision_;
         return failed;
@@ -3342,6 +3263,20 @@ bool SampleLabelingController::CanDeactivateActiveTask() const
     return CanDeleteTask(*task);
 }
 
+bool SampleLabelingController::PrepareForInteractiveClose()
+{
+    bool has_draft = false;
+    for (const auto& [identity, source] : sources_) {
+        for (const auto& task : source.tasks) {
+            if (task.persistence.output_path && HasPendingOutputSave(task)) return false;
+            has_draft = has_draft || !task.persistence.output_path;
+        }
+    }
+    // Closing retains paused drafts via their best-effort checkpoint. A known
+    // failure must not silently abandon the only current in-memory contents.
+    return !has_draft || FlushStateCache();
+}
+
 bool SampleLabelingController::CanDeleteActiveTask() const
 {
     return CanDeactivateActiveTask();
@@ -3541,24 +3476,6 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
         task != nullptr && task->persistence.output_path) {
         const bool wait_for_commit_lock =
             persistence == PersistencePolicy::PersistOutputIfSelected;
-        // Interactive shortcut writes use a zero-wait checkpoint attempt;
-        // structural mutations retain the bounded synchronous contract.
-        // Persist the newest overlay before publishing the corresponding
-        // array. A failed clean-state commit can then replay only this same
-        // generation, never an older edit.
-        mark_task_upsert();
-        result.state_save_attempted = true;
-        result.state_saved = TrySaveStateCache(wait_for_commit_lock);
-        if (!result.state_saved) {
-            result.output_retry_scheduled =
-                ShouldRetryOutputSave(*task);
-            if (result.output_retry_scheduled) {
-                QueueOutputRetry();
-            }
-            result.revision = revision_;
-            return result;
-        }
-
         TaskOutputPersistenceAttempt attempt =
             PersistTaskOutput(
                 *task,
@@ -3597,6 +3514,7 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
         }
         mark_task_upsert();
         QueueStateSave();
+        result.state_save_attempted = true;
         result.state_saved = TrySaveStateCache(wait_for_commit_lock);
     } else if (persistence == PersistencePolicy::FlushStateSave) {
         mark_task_upsert();
@@ -3852,7 +3770,7 @@ SampleLabelingController::PublishCanonicalTaskCreation(
     return attempt;
 }
 
-bool SampleLabelingController::CommitTaskRecoveryCheckpoint(
+bool SampleLabelingController::CommitTaskRegistration(
     std::string_view source_identity,
     const SourceState& state,
     const SampleLabelingTask& task,
@@ -3873,18 +3791,23 @@ bool SampleLabelingController::CommitTaskRecoveryCheckpoint(
         source_patch.task_ids_expected_absent.insert(
             task.task_id);
     }
+    bool registered = false;
     const bool saved = CommitSampleLabelingStateCachePatch(
         runtime_paths_,
         state_cache_path_,
         checkpoint,
         error_message,
-        kSynchronousCommitLockWait);
-    if (saved) {
+        kSynchronousCommitLockWait, &registered);
+    if (registered) {
         ClearRecoveryTaskTrust(
             source_identity,
             task.task_id);
     }
-    return saved;
+    if (registered && !saved) {
+        MarkTaskUpsert(source_identity, state, task);
+        QueueStateSave();
+    }
+    return registered;
 }
 
 void SampleLabelingController::
@@ -4138,74 +4061,14 @@ SampleLabelingController::TaskOutputRetryResult
 SampleLabelingController::TryRetryOutputSaves()
 {
     EnsureStateCacheLoaded();
-    std::optional<std::pair<std::string, std::string>>
-        active_initial_publication;
-    if (const SourceState* active_state = ActiveSource();
-        active_source_identity_ &&
-        active_state != nullptr &&
-        active_state->active_task_id) {
-        const auto active = std::find_if(
-            active_state->tasks.begin(),
-            active_state->tasks.end(),
-            [active_state](const SampleLabelingTask& task) {
-                return task.task_id ==
-                    *active_state->active_task_id;
-            });
-        if (active != active_state->tasks.end() &&
-            active->persistence.initial_publication_pending) {
-            active_initial_publication =
-                std::pair{
-                    *active_source_identity_,
-                    active->task_id};
-        }
-    }
     // A metadata rewrite invalidates its input snapshot as soon as atomic
     // replacement succeeds. If the mandatory reopen failed, restore the
     // selected owner from the current file generation before any retry can
     // publish again.
-    const bool active_projection_changed =
-        RestoreActiveTaskLease();
+    static_cast<void>(RestoreActiveTaskLease());
 
     TaskOutputRetryResult result;
     bool cache_changed = false;
-    if (active_initial_publication) {
-        result.attempted = true;
-        const auto source = sources_.find(
-            active_initial_publication->first);
-        SampleLabelingTask* recovered = nullptr;
-        if (source != sources_.end()) {
-            const auto match = std::find_if(
-                source->second.tasks.begin(),
-                source->second.tasks.end(),
-                [&active_initial_publication](
-                    const SampleLabelingTask& task) {
-                    return task.task_id ==
-                        active_initial_publication->second;
-                });
-            if (match != source->second.tasks.end()) {
-                recovered = &*match;
-            }
-        }
-        if (source != sources_.end() &&
-            recovered != nullptr &&
-            !recovered->persistence.output_path &&
-            recovered->persistence.output_format ==
-                SampleLabelingOutputArtifactFormat::None &&
-            !recovered->persistence.initial_publication_pending) {
-            MarkTaskUpsert(
-                source->first,
-                source->second,
-                *recovered);
-            cache_changed = true;
-            if (active_projection_changed &&
-                active_source_identity_ &&
-                *active_source_identity_ == source->first) {
-                BumpActiveSourceTasksGeneration();
-            }
-        } else {
-            result.all_succeeded = false;
-        }
-    }
     for (auto& [identity, state] : sources_) {
         for (std::size_t task_index = 0;
              task_index < state.tasks.size();) {
@@ -4242,8 +4105,6 @@ SampleLabelingController::TryRetryOutputSaves()
                 ActiveTaskLeaseMatches(identity, task);
             TaskActivationPreparation preparation;
             if (!is_active_task) {
-                const bool recovering_initial_publication =
-                    task.persistence.initial_publication_pending;
                 preparation = PrepareTaskActivation(
                     identity,
                     task,
@@ -4287,17 +4148,6 @@ SampleLabelingController::TryRetryOutputSaves()
                     BumpActiveSourceTasksGeneration();
                 }
                 if (!ShouldRetryOutputSave(task)) {
-                    if (recovering_initial_publication &&
-                        !task.persistence.output_path &&
-                        task.persistence.output_format ==
-                            SampleLabelingOutputArtifactFormat::None &&
-                        !task.persistence.initial_publication_pending) {
-                        MarkTaskUpsert(
-                            identity,
-                            state,
-                            task);
-                        cache_changed = true;
-                    }
                     ++task_index;
                     continue;
                 }
@@ -4653,9 +4503,7 @@ SampleLabelingController::PrepareTaskActivation(
     const SampleLabelingTask* pending_overlay =
         deferred == deferred_task_leases_.end()
         ? nullptr
-        : PendingTaskUpsert(
-              source_identity,
-              known_task.task_id);
+        : &known_task;
     bool pending_canonical_owner_switch = false;
     if (pending_overlay != nullptr &&
         OutputEditLeaseKeys(*pending_overlay) !=
@@ -4799,14 +4647,10 @@ SampleLabelingController::PrepareTaskActivation(
     if (!structural_task->persistence.output_path) {
         preparation.task = *structural_task;
         if (deferred != deferred_task_leases_.end()) {
-            if (const SampleLabelingTask* pending =
-                    PendingTaskUpsert(
-                        source_identity,
-                        known_task.task_id);
-                pending != nullptr &&
-                !pending->persistence.output_path) {
-                preparation.task = *pending;
-            }
+            // A checkpoint may lag; an already-held draft lease protects the
+            // current process's working object, not the disk snapshot.
+            if (!known_task.persistence.output_path && known_task.values.IsComplete())
+                preparation.task = known_task;
         }
         preparation.refresh_status = TaskRefreshStatus::Ready;
         adopt_deferred_leases();
@@ -5630,6 +5474,11 @@ bool SampleLabelingController::PendingRecoveryPatchProtectsTaskLease(
     std::string_view source_identity,
     std::string_view task_id) const
 {
+    if (const auto live = sources_.find(std::string(source_identity)); live != sources_.end()) {
+        for (const auto& task : live->second.tasks) {
+            if (task.task_id == task_id && HasPendingOutputSave(task)) return true;
+        }
+    }
     const auto source = pending_cache_patch_.sources.find(
         std::string(source_identity));
     if (source == pending_cache_patch_.sources.end()) {
@@ -5676,6 +5525,10 @@ void SampleLabelingController::ReleaseDeferredTaskLeaseUnlessRecoveryPending(
 
 void SampleLabelingController::ReleaseActiveTaskLeaseForTransition()
 {
+    if (const auto* task = ActiveTask(); task && HasPendingOutputSave(*task)) {
+        DeferActiveTaskLeases();
+        return;
+    }
     if (state_cache_save_scheduler_.dirty() &&
         !FlushStateCache()) {
         DeferActiveTaskLeases();
@@ -6104,7 +5957,16 @@ bool SampleLabelingController::TrySaveStateCache(
         normalize_saved_states(sources_);
         pending_cache_patch_ = {};
         ReleaseUnneededActiveLeaseComponents();
-        deferred_task_leases_.clear();
+        std::erase_if(deferred_task_leases_, [this](const TaskEditLeaseSet& leases) {
+            for (const auto& [identity, source] : sources_) {
+                for (const auto& task : source.tasks) {
+                    if (HasPendingOutputSave(task) &&
+                        TaskIdentityEditLeaseKey(identity, task.task_id) == leases.task_identity_key)
+                        return false;
+                }
+            }
+            return true;
+        });
         for (const auto& [identity, source_patch] : patch.sources) {
             for (const SampleLabelingTask& task :
                  source_patch.task_upserts) {
@@ -6142,22 +6004,10 @@ SampleLabelingMaintenanceResult
 SampleLabelingController::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
 {
-    // Output retry is a consumer of the pending overlay. Never let it run
-    // ahead of a dirty cache patch that may contain a newer generation.
-    if (state_cache_save_scheduler_.dirty()) {
-        if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
-            return {};
-        }
-        if (!TrySaveStateCache()) {
-            state_cache_save_scheduler_.MarkSaveFailed();
-            return {};
-        }
-    }
-
+    // Canonical retry consumes runtime dirty state and has no checkpoint dependency.
     SampleLabelingMaintenanceResult result =
         MaybeRetryOutputSaves(now);
-    if (result.output_retry_attempted &&
-        state_cache_save_scheduler_.dirty() &&
+    if (state_cache_save_scheduler_.ShouldAttemptSave(now) &&
         !TrySaveStateCache()) {
         state_cache_save_scheduler_.MarkSaveFailed();
     }

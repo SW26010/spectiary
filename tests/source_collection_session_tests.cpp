@@ -3753,41 +3753,10 @@ void TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
-        "stale recovery fixture should write its damaged cache");
-    const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache);
-    Require(
-        salvaged.issue_kind ==
-                specforge::SampleLabelingStateCacheLoadIssueKind::
-                    InvalidDocument &&
-            salvaged.cache.sources.at(identity.id).tasks.size() == 2,
-        "stale recovery fixture should preserve duplicate drafts in an untrusted snapshot");
-
-    std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    PreparedSession session = MakePersistentSession(
-        loaded_snapshots,
-        {},
-        UniqueTempPath("_recovery_stale_navigation.json"),
-        labeling_cache,
-        {{source_path, 3}});
-    Require(
-        session.Open(source_path, 0).loaded,
-        "stale recovery fixture should open the source");
-    const specforge::SourceCollectionLabelingView& recovery_view =
-        session.View().labeling;
-    Require(
-        recovery_view.source_identity == identity.id &&
-            recovery_view.recovery_drafts.size() == 2 &&
-            std::all_of(
-                recovery_view.recovery_drafts.begin(),
-                recovery_view.recovery_drafts.end(),
-                [](const auto& draft) {
-                    return draft.status ==
-                        specforge::SampleLabelingRecoveryDraftStatus::Stale;
-                }) &&
-            !recovery_view.state_load_warning.empty(),
-        "untrusted salvaged drafts should remain visible as stale recovery rows");
+        !specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
+        "ambiguous task slots must be rejected before either owner is written");
+    Require(!std::filesystem::exists(labeling_cache),
+        "rejected ambiguous state must not become a recovery source");
 }
 
 void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
@@ -3822,40 +3791,10 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
-        "formal/temp identity conflict fixture should write its damaged cache");
-    const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache);
-    Require(
-        salvaged.issue_kind ==
-                specforge::SampleLabelingStateCacheLoadIssueKind::
-                    InvalidDocument &&
-            salvaged.cache.sources.at(identity.id).tasks.size() == 2,
-        "formal/temp identity conflict fixture should preserve both tasks");
-
-    std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    PreparedSession session = MakePersistentSession(
-        loaded_snapshots,
-        {},
-        UniqueTempPath("_recovery_formal_task_identity_conflict_navigation.json"),
-        labeling_cache,
-        {{source_path, 3}});
-    Require(
-        session.Open(source_path, 0).loaded,
-        "formal/temp identity conflict fixture should open the source");
-    const specforge::SourceCollectionLabelingView& view =
-        session.View().labeling;
-    const std::size_t shared_id_count = static_cast<std::size_t>(std::count(
-        view.task_ids.begin(),
-        view.task_ids.end(),
-        std::string{
-            "55555555-5555-4555-8555-555555555555"}));
-    Require(
-        view.recovery_drafts.size() == 1 &&
-            view.recovery_drafts.front().task_id ==
-                "55555555-5555-4555-8555-555555555555" &&
-            shared_id_count == 2,
-        "formal/temp identity conflict should project one recovery row and both task IDs");
+        !specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
+        "ambiguous task slots must be rejected before either owner is written");
+    Require(!std::filesystem::exists(labeling_cache),
+        "rejected ambiguous state must not become a recovery source");
 }
 
 void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
@@ -5964,8 +5903,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 before.filter.available_sources[0]
                     .options.end() &&
             good_filter->display_text == "good (9)" &&
-            good_filter->sample_count == 2,
-        "canonical filter projection should use the ASDF base plus the sparse pending overlay, not cache placeholders");
+            good_filter->sample_count == 1,
+        "canonical filter projection must use ASDF values without persisted pending edits");
 
     specforge::SampleLabelingDocument newer_document =
         document;
@@ -6042,7 +5981,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                     .options.end() &&
             generation_b_filter->display_text ==
                 "good generation B (9)" &&
-            generation_b_filter->sample_count == 3,
+            generation_b_filter->sample_count == 2,
         "filter projection should follow the hydrated controller generation instead of the stale attached document");
 
     const std::string canonical_source_id =
@@ -6077,7 +6016,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             edited.label_write->operation.output_retry_scheduled &&
             canonical_values_publication_attempts == 1 &&
             canonical_document_publication_attempts == 0,
-        "canonical session edit should retain its durable overlay after the injected publication failure");
+        "canonical session edit should retain its runtime dirty edits after the injected publication failure");
     Require(
         ReadBinaryFile(annotation_path) ==
             newer_generation_bytes,
@@ -6148,7 +6087,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             maintenance.action.navigation_inputs_changed &&
             persisted_generation.succeeded() &&
             persisted_generation.document->annotation.values ==
-                std::vector<std::int32_t>({5, 9, 9}) &&
+                std::vector<std::int32_t>({5, -1, 9}) &&
             persisted_generation.document->labeling.name ==
                 newer_document.labeling.name,
         "maintenance should expose canonical retry publication and persist only the newest values generation");
@@ -6158,7 +6097,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             refreshed_bad != nullptr &&
             refreshed_bad->sample_count == 1 &&
             refreshed_good != nullptr &&
-            refreshed_good->sample_count == 2 &&
+            refreshed_good->sample_count == 1 &&
             after_retry.sorting.active &&
             after_retry.sorting.active_source_id ==
                 "source-order",
@@ -6249,11 +6188,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             metadata_generation.document->labeling.labels[1].shortcut ==
                 "e" &&
             metadata_generation.document->annotation.values ==
-                std::vector<std::int32_t>({5, 11, 11}) &&
+                std::vector<std::int32_t>({5, -1, 11}) &&
             generation_c_option != nullptr &&
             generation_c_option->display_text ==
                 "excellent generation C (11)" &&
-            generation_c_option->sample_count == 2,
+            generation_c_option->sample_count == 1,
         "session retry should reopen a replaced metadata generation, publish recoded values and definitions together, and refresh the attached generation");
 
     const specforge::SourceCollectionSessionResult deactivated =
@@ -6575,8 +6514,8 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
         });
     Require(
         good != view.filter.available_sources[0].options.end() &&
-            good->sample_count == 2,
-        "the repaired canonical filter projection must apply sparse pending values above authoritative ASDF values");
+            good->sample_count == 1,
+        "the repaired canonical filter projection must ignore persisted pending values");
 }
 
 void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
@@ -11616,7 +11555,7 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         "rejected stale activation must remove the ghost projection and rebuild navigation");
 }
 
-void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
+void TestReloadedFormalOwnerDoesNotReplayPendingValues()
 {
     const LabelingProjectionHandoffFixture fixture =
         SeedLabelingProjectionHandoffFixture(
@@ -11672,37 +11611,12 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
         "retry projection fixture should preheat the stale derived state");
 
     WriteLatestLabelingProjection(fixture);
-    const auto deadline =
-        session.NextMaintenanceDeadline();
-    Require(
-        deadline.has_value(),
-        "pending output should schedule maintenance");
-    const specforge::SourceCollectionSessionResult maintenance =
-        session.RunMaintenance(*deadline);
-    Require(
-        maintenance.follow_up_spectrum_index == 0,
-        "retry handoff should request the latest filtered row when the visible row is no longer eligible");
-    Require(
-        session.OpenPreparedSource(
-                fixture.source_path,
-                0,
-                MakeSnapshot(
-                    fixture.source_path,
-                    3,
-                    0),
-                specforge::PreparedSourceCollectionReuse{
-                    fixture.context.identity})
-            .loaded,
-        "retry handoff should commit its reconciled row");
-
-    const specforge::SourceCollectionSessionView refreshed =
-        session.View();
-    Require(
-        refreshed.filter.evaluation.included_count == 1 &&
-            refreshed.navigation.sequence_count == 1 &&
-            refreshed.navigation.current_index == 0 &&
-            refreshed.navigation.current_sequence_position == 0,
-        "retry handoff must invalidate and reconcile active filter, sorting, and navigation state");
+    const auto latest_bytes = ReadBinaryFile(fixture.output_path);
+    Require(!session.NextMaintenanceDeadline().has_value(),
+        "ordinary registration must never restore a formal pending retry");
+    (void)session.RunMaintenance(specforge::LocalUserStateSaveScheduler::Clock::now());
+    Require(ReadBinaryFile(fixture.output_path) == latest_bytes,
+        "restarting must not replay application-managed values over the latest ASDF");
 }
 
 }  // namespace
@@ -11821,7 +11735,7 @@ void RunAllTests()
     TestSourceSessionFlushFailureKeepsDirtyState();
     TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
     TestRejectedStaleTaskActivationReconcilesNavigation();
-    TestOutputRetryRefreshReconcilesActiveLabelingProjections();
+    TestReloadedFormalOwnerDoesNotReplayPendingValues();
     TestRecoveringFormalizedTemporaryDraftReconcilesNavigation();
     TestDeletingFormalizedTemporaryDraftReconcilesNavigation();
 }

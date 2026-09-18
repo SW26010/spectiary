@@ -737,7 +737,7 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::Ascending, "Ascending", "升序"},
         ExpectedText{UiTextId::Descending, "Descending", "降序"},
         ExpectedText{UiTextId::RemoveSampleSorting, "Remove sample sorting", "移除样本排序"},
-        ExpectedText{UiTextId::InternalAutosaveDraft, "internal autosave draft", "内部自动保存草稿"},
+        ExpectedText{UiTextId::InternalAutosaveDraft, "unsaved draft", "未保存草稿"},
         ExpectedText{UiTextId::AutosavedToOutput, "autosaved to output", "已自动保存到输出"},
         ExpectedText{UiTextId::PendingSave, "pending", "等待保存"},
         ExpectedText{UiTextId::SaveFailedValue, "save failed", "保存失败"},
@@ -761,10 +761,6 @@ void TestSampleWorkflowMappingsAreExact()
             UiTextId::LabelingEditTargetChanged,
             "This labeling task changed on disk and could not be activated from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图激活。"},
-        ExpectedText{
-            UiTextId::LabelingMigrationCheckpointFailed,
-            "Could not checkpoint the legacy labeling owner before migration. The legacy owner remains active.",
-            "迁移前无法保存旧标注所有者的恢复检查点。旧所有者仍保持活动状态。"},
         ExpectedText{
             UiTextId::LabelingMigrationPublicationFailed,
             "Could not publish and reopen the migrated ASDF document. The legacy owner remains active.",
@@ -1239,7 +1235,7 @@ void TestSpectralLineMappingsAreExact()
         static_cast<std::size_t>(
             UiTextId::Count) ==
         static_cast<std::size_t>(
-            UiTextId::ViewportLockedTooltip) +
+            UiTextId::LabelingCloseBlocked) +
             1);
     Require(
         UiText(
@@ -1659,7 +1655,6 @@ void TestLabelingIssueDescriptorIsTheSingleMapping()
         Issue::EditLeaseFailed,
         Issue::EditTargetChanged,
         Issue::OutputPathAlreadyUsed,
-        Issue::OutputMigrationCheckpointFailed,
         Issue::OutputMigrationPublicationFailed,
         Issue::OutputMigrationOwnerSwitchFailed,
         Issue::LabelValuesExportInvalidPath,

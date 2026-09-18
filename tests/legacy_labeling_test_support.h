@@ -12,7 +12,6 @@ inline void SelectLegacyFixtureOutputPath(SampleLabelingTask& task, std::filesys
     task.persistence.output_path = std::move(output_path);
     task.persistence.output_format =
         SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    task.persistence.initial_publication_pending = false;
     task.persistence.pending_sample_indices.clear();
     task.persistence.metadata_save_pending = true;
 

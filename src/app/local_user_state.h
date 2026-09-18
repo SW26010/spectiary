@@ -13,6 +13,8 @@
 #include <vector>
 
 namespace specforge {
+// Internal recovery storage remains unobtrusive in the Windows shell.
+void HideUnsavedCheckpointDirectory(const std::filesystem::path& directory) noexcept;
 
 struct LocalUserStatePersistenceStatus {
     bool retrying = false;

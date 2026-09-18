@@ -207,6 +207,7 @@ public:
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] bool PrepareLabelingForInteractiveClose();
     [[nodiscard]] SampleWorkflowStateFlushResult
         FlushStateCachesWithStatus();
     [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;

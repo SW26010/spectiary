@@ -281,6 +281,7 @@ public:
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] ShellLocalStateFlushResult FlushLocalState();
+    [[nodiscard]] bool PrepareLabelingForInteractiveClose();
     void RegisterSourceLoadCompletionReadyCallback(
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();

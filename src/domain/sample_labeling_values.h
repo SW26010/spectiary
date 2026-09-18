@@ -57,6 +57,10 @@ public:
         if (index >= sparse.sample_count) throw std::out_of_range("pending labeling row");
         sparse.pending_values[index] = value;
     }
+    void ResetSparse(std::size_t sample_count)
+    {
+        storage_ = SampleLabelingSparseValues{.sample_count = sample_count};
+    }
     bool MakeSparse(const std::unordered_set<std::size_t>& pending_indices)
     {
         SampleLabelingSparseValues sparse{.sample_count = SampleCount()};

@@ -68,7 +68,7 @@ enum class SampleLabelSaveMessageKind {
 enum class SampleLabelingOutputArtifactFormat {
     None,
     // Transitional read-only import/recovery source. Never a save destination;
-    // pending schema-4 overlays are retained until explicit ASDF migration.
+    // only the legacy file pair supplies durable content for ASDF migration.
     LegacyNpyWithSidecar,
     CanonicalAsdf,
 };
@@ -129,17 +129,13 @@ struct SampleLabelingSessionState {
     std::optional<std::size_t> remembered_position;
 };
 
-// Local output ownership, write-ahead recovery and save presentation.
+// Local output registration and runtime-only dirty/retry presentation.
 struct SampleLabelingPersistenceState {
     // Formal output ownership is explicit state. A path is present exactly
     // when the format is not None; callers must not infer it from a suffix.
     std::optional<std::filesystem::path> output_path;
     SampleLabelingOutputArtifactFormat output_format =
         SampleLabelingOutputArtifactFormat::None;
-    // Durable write-ahead phase used only while a temporary task is becoming
-    // its first canonical owner. A cache reader rolls this phase back to a
-    // real temporary draft if the process exits before publication completes.
-    bool initial_publication_pending = false;
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;

@@ -15,6 +15,8 @@ struct SampleLabelingTaskRegistration {
     SampleLabelingOutputArtifactFormat output_format =
         SampleLabelingOutputArtifactFormat::None;
     SampleLabelingSessionState session;
+    // Only for unopened list presentation; hydration always replaces it from ASDF.
+    std::optional<std::string> display_name_hint;
 };
 
 struct SampleLabelingSourceRegistration {

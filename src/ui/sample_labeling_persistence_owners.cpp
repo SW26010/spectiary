@@ -125,7 +125,7 @@ SampleLabelingTaskCanonicalMetadata DecodeMetadata(const Json& value)
     Require(result.origin.kind != "manual" || !result.origin.annotation, "manual annotation origin");
     Require(result.origin.kind != "annotation_promotion" || result.origin.annotation.has_value(),
         "missing annotation origin");
-    if (value.contains("description")) result.description = Text(value, "description");
+    if (value.contains("description")) result.description = Text(value, "description", true);
     if (const auto* authors = JsonObjectMember(value, "authors")) {
         Require(authors->is_array(), "invalid authors");
         for (const auto& author : *authors) {
@@ -174,9 +174,10 @@ SampleLabelingOrdinaryState DecodeState(const RuntimePaths& paths, const Json& r
         Require(tasks.is_array(), "invalid task registrations");
         std::unordered_set<std::string> ids;
         for (const auto& task : tasks) {
-            Keys(task, {"task_id", "output", "auto_advance", "skip_labeled_on_advance", "remembered_position"});
+            Keys(task, {"task_id", "output", "auto_advance", "skip_labeled_on_advance", "remembered_position", "display_name_hint"});
             SampleLabelingTaskRegistration registration;
             registration.task_id = TaskId(task);
+            if (task.contains("display_name_hint")) registration.display_name_hint = Text(task, "display_name_hint");
             Require(ids.insert(registration.task_id).second, "duplicate task registration");
             registration.session.auto_advance = Boolean(task, "auto_advance");
             registration.session.skip_labeled_on_advance = Boolean(task, "skip_labeled_on_advance");
@@ -318,6 +319,8 @@ bool SaveSampleLabelingOrdinaryState(const RuntimePaths& paths, const std::files
             value["tasks"].push_back({{"task_id", task.task_id}, {"output", std::move(output)},
                 {"auto_advance", task.session.auto_advance}, {"skip_labeled_on_advance", task.session.skip_labeled_on_advance},
                 {"remembered_position", task.session.remembered_position ? Json(*task.session.remembered_position) : Json(nullptr)}});
+            if (task.output_path && task.display_name_hint)
+                value["tasks"].back()["display_name_hint"] = *task.display_name_hint;
         }
         body["sources"].push_back(std::move(value));
     }
@@ -346,6 +349,8 @@ bool SaveSampleLabelingDraftCheckpoints(const std::filesystem::path& path,
     }
     try { static_cast<void>(DecodeDrafts(body, {})); }
     catch (const InvalidOwner& failure) { if (error) *error = failure.what(); return false; }
-    return WriteVersionedJsonCacheDocument(path, kDraftFormat, kSchema, "unsaved labeling checkpoint", body, error);
+    const bool saved = WriteVersionedJsonCacheDocument(path, kDraftFormat, kSchema, "unsaved labeling checkpoint", body, error);
+    if (saved) HideUnsavedCheckpointDirectory(path.parent_path());
+    return saved;
 }
 } // namespace specforge

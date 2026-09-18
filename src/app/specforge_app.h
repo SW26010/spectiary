@@ -233,6 +233,7 @@ private:
     std::optional<WindowedPlacement> fullscreen_restore_;
     bool immersive_plot_entered_fullscreen_ = false;
     bool shutdown_complete_ = false;
+    bool os_session_ending_ = false;
     ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     ProfileRecordingStatus profile_status_;
     std::uint64_t frame_index_ = 0;

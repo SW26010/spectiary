@@ -6070,7 +6070,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         "an immersive frame without a normal Shell panel draw must not publish panel visibility");
 }
 
-void TestMaintenanceResynchronizesRetainedNavigationTopology()
+void TestReloadDoesNotSchedulePersistedFormalRetry()
 {
     using Access = specforge::ShellUiTestAccess;
     std::string task_id;
@@ -6269,30 +6269,9 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
             editor.DeactivateActiveTask().state_saved,
         "maintenance topology editor should publish the latest task and release it");
 
-    const auto deadline =
-        Access::Session(*shell).NextMaintenanceDeadline();
     Require(
-        deadline.has_value(),
-        "pending output should schedule Shell maintenance");
-    shell->RunMaintenance(*deadline);
-    const specforge::SourceCollectionSessionView latest =
-        Access::Session(*shell).View();
-    const std::optional<std::uint64_t> synchronized_revision =
-        Access::SynchronizedNavigationTopologyRevision(
-            *shell);
-    Require(
-        Access::PendingLoadCount(*shell) == 0 &&
-            latest.navigation.sequence_count == 1 &&
-            latest.navigation.current_index == 1 &&
-            latest.navigation.current_sequence_position == 0,
-        "maintenance topology change should cancel the invalid row-two follow-up and retain the visible row");
-    Require(
-        old_revision &&
-            synchronized_revision &&
-            *synchronized_revision ==
-                latest.navigation.sequence_topology_revision &&
-            *synchronized_revision != *old_revision,
-        "Shell maintenance must route navigation topology actions through retained-input synchronization");
+        !Access::Session(*shell).NextMaintenanceDeadline().has_value(),
+        "reloaded formal state must not recreate a persisted output retry");
     release_row_two_promise.set_value();
 }
 
@@ -6881,7 +6860,7 @@ int main()
         RUN_SHELL_TEST(TestCanceledPrefetchReportsOnlyAfterWorkerExit);
         RUN_SHELL_TEST(TestAutomationSettingsUseApplicationSettingsOwner);
         RUN_SHELL_TEST(TestAutomationPanelProjectionRequiresExactNormalShellPresent);
-        RUN_SHELL_TEST(TestMaintenanceResynchronizesRetainedNavigationTopology);
+        RUN_SHELL_TEST(TestReloadDoesNotSchedulePersistedFormalRetry);
         RUN_SHELL_TEST(TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip);
         RUN_SHELL_TEST(TestShellWorkflowResetPreservesSameFrameLabelingIssue);
         RUN_SHELL_TEST(TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState);

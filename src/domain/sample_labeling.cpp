@@ -445,7 +445,6 @@ SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sa
 
 void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveStateKind clean_state)
 {
-    task.persistence.initial_publication_pending = false;
     task.persistence.pending_sample_indices.clear();
     task.persistence.metadata_save_pending = false;
     task.persistence.save_state.pending_count = 0;

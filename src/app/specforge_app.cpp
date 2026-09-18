@@ -512,7 +512,7 @@ int SpecForgeApp::Run(
     }
     const ShellLocalStateFlushResult local_state_flush =
         ui_.FlushLocalState();
-    if (!local_state_flush.all_saved()) {
+    if (!local_state_flush.all_saved() && !os_session_ending_) {
         const UiLanguage language = ui_.ui_language();
         const std::string failure_message =
             local_state_flush.FailureMessage(language);
@@ -3910,6 +3910,21 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     }
 
     switch (message) {
+    case WM_QUERYENDSESSION:
+        os_session_ending_ = true;
+        return TRUE; // Unsaved drafts never veto OS shutdown/logoff.
+    case WM_ENDSESSION:
+        os_session_ending_ = wparam != FALSE;
+        return 0;
+    case WM_CLOSE:
+        if (!os_session_ending_ && !automation_shutdown_requested_ &&
+            !ui_.PrepareLabelingForInteractiveClose()) {
+            const auto text = Utf8ToWide(UiText(ui_.ui_language(), UiTextId::LabelingCloseBlocked));
+            const auto title = Utf8ToWide(UiText(ui_.ui_language(), UiTextId::LocalStateWarningTitle));
+            MessageBoxW(hwnd, text.c_str(), title.c_str(), MB_OK | MB_ICONWARNING);
+            return 0;
+        }
+        break;
     case WM_SIZE: {
         if (wparam == SIZE_MINIMIZED) {
             if (!minimized_) {

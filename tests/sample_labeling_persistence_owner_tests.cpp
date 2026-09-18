@@ -25,6 +25,7 @@ void TestOwners(const std::filesystem::path& root)
     const auto drafts_path = root / "unsaved" / "sample-labeling-drafts.json";
     const std::string id = "12345678-1234-4234-8234-123456789abc";
     auto task = CreateSampleLabelingTask(id, "Unsaved work", 2);
+    task.canonical_metadata.description = "";
     Require(UpsertSampleLabel(task.label_set, {1, "Galaxy", 'g'}), "create label");
     task.values.Complete() = {1, -1};
     SampleLabelingDraftCheckpoints drafts;
@@ -51,6 +52,8 @@ void TestOwners(const std::filesystem::path& root)
         loaded_state.owner.sources.at("source").tasks[0].session.auto_advance, "session roundtrip");
     Require(loaded_drafts.issue_kind == VersionedJsonCacheLoadIssueKind::None &&
         loaded_drafts.owner.sources.at("source").draft.values == std::vector<int>({1, -1}), "draft content roundtrip");
+    Require(loaded_drafts.owner.sources.at("source").draft.canonical_metadata.description == std::optional<std::string>{""},
+        "valid empty canonical description must roundtrip through a draft checkpoint");
 
     // Sharing denial forces atomic replacement to fail, preserving the complete previous checkpoint.
     const auto previous = Read(drafts_path);

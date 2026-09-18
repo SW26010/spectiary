@@ -1728,6 +1728,7 @@ add_test(
 set_tests_properties(specforge_live_resize_resource_observation_tests specforge_presentation_profile_schema_tests specforge_presentation_trace_tests
     PROPERTIES TIMEOUT 15)
 set(SPECFORGE_FAST_TESTS
+    specforge_sample_labeling_persistence_owner_tests
     specforge_live_resize_resource_observation_tests
     specforge_presentation_trace_tests
     specforge_presentation_profile_schema_tests

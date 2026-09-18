@@ -369,7 +369,6 @@ enum class UiTextId {
     LabelingEditLeaseUnavailable,
     LabelingEditLeaseFailed,
     LabelingEditTargetChanged,
-    LabelingMigrationCheckpointFailed,
     LabelingMigrationPublicationFailed,
     LabelingMigrationOwnerSwitchFailed,
     LabelValuesExportInvalidPath,
@@ -533,6 +532,7 @@ enum class UiTextId {
     DefaultGroupPrefix,
     ViewportUnlockedTooltip,
     ViewportLockedTooltip,
+    LabelingCloseBlocked,
     Count,  // Non-display sentinel.
 };
 

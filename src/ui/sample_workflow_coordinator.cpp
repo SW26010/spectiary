@@ -2635,6 +2635,11 @@ bool SampleWorkflowCoordinator::FlushStateCaches()
     return FlushStateCachesWithStatus().all_saved();
 }
 
+bool SampleWorkflowCoordinator::PrepareLabelingForInteractiveClose()
+{
+    return labeling_.PrepareForInteractiveClose();
+}
+
 SampleWorkflowStateFlushResult
 SampleWorkflowCoordinator::FlushStateCachesWithStatus()
 {

@@ -74,6 +74,8 @@ enum class SampleLabelingStateCacheLoadPolicy {
 };
 
 [[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath(const RuntimePaths& runtime_paths);
+[[nodiscard]] std::filesystem::path SampleLabelingDraftCheckpointPath(
+    const RuntimePaths& runtime_paths, const std::filesystem::path& state_path);
 
 [[nodiscard]] std::filesystem::path
 SampleLabelingStateCoordinationDirectory(
@@ -98,7 +100,12 @@ SampleLabelingStateCoordinationDirectories(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCache& cache,
-    std::string* error_message = nullptr);
+    std::string* error_message = nullptr,
+    bool* ordinary_state_saved = nullptr);
+
+// Explicit, read-only schema-4 import for pinned automation fixtures.
+[[nodiscard]] SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingDraftSeed(
+    const std::filesystem::path& path);
 
 [[nodiscard]] bool CommitSampleLabelingStateCachePatch(
     const RuntimePaths& runtime_paths,
@@ -106,7 +113,8 @@ SampleLabelingStateCoordinationDirectories(
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message = nullptr,
     std::chrono::milliseconds commit_lock_wait =
-        std::chrono::milliseconds::zero());
+        std::chrono::milliseconds::zero(),
+    bool* ordinary_state_saved = nullptr);
 
 [[nodiscard]] bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,

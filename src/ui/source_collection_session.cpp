@@ -1672,6 +1672,11 @@ bool SourceCollectionSession::FlushStateCaches()
     return FlushStateCachesWithStatus().all_saved();
 }
 
+bool SourceCollectionSession::PrepareLabelingForInteractiveClose()
+{
+    return workflow_->PrepareLabelingForInteractiveClose();
+}
+
 SourceCollectionStateFlushResult
 SourceCollectionSession::FlushStateCachesWithStatus()
 {

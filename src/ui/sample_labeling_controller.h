@@ -78,7 +78,6 @@ struct SampleLabelingOperationResult {
         EditLeaseFailed,
         EditTargetChanged,
         OutputPathAlreadyUsed,
-        OutputMigrationCheckpointFailed,
         OutputMigrationPublicationFailed,
         OutputMigrationOwnerSwitchFailed,
         LabelValuesExportInvalidPath,
@@ -276,7 +275,7 @@ public:
     // Explicitly migrates an active legacy NPY+sidecar owner to a new
     // canonical ASDF document. The legacy artifacts remain unchanged and stay
     // authoritative unless the new document is published, reopened, and the
-    // owner switch is durably checkpointed.
+    // owner switch is registered in ordinary state.
     [[nodiscard]] SampleLabelingOperationResult
         MigrateActiveLegacyTaskToCanonicalAsdf(
             std::filesystem::path output_path);
@@ -292,6 +291,7 @@ public:
             const std::filesystem::path& output_path,
             SampleLabelExportFormat format) const;
     [[nodiscard]] bool CanDeactivateActiveTask() const;
+    [[nodiscard]] bool PrepareForInteractiveClose();
     [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();
     [[nodiscard]] SampleLabelingOperationResult DeleteActiveTask();
@@ -463,7 +463,7 @@ private:
             TaskEditLeaseSet& leases,
             std::optional<SampleLabelingAsdfOpenSnapshot>*
                 asdf_snapshot);
-    [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
+    [[nodiscard]] bool CommitTaskRegistration(
         std::string_view source_identity,
         const SourceState& state,
         const SampleLabelingTask& task,

@@ -22,6 +22,15 @@
 #include <windows.h>
 
 namespace specforge {
+void HideUnsavedCheckpointDirectory(const std::filesystem::path& directory) noexcept
+{
+    // Avoid allocating a filename inside this best-effort noexcept helper.
+    const auto& native = directory.native();
+    if (!(native.ends_with(L"\\unsaved") || native.ends_with(L"/unsaved"))) return;
+    const DWORD attributes = GetFileAttributesW(directory.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+        (void)SetFileAttributesW(directory.c_str(), attributes | FILE_ATTRIBUTE_HIDDEN);
+}
 
 std::string LocalUserStatePathToUtf8(
     const std::filesystem::path& path)

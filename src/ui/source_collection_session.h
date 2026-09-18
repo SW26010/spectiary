@@ -390,6 +390,7 @@ public:
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] bool PrepareLabelingForInteractiveClose();
     [[nodiscard]] SourceCollectionStateFlushResult
         FlushStateCachesWithStatus();
     [[nodiscard]] std::vector<BackgroundRetirementHandle>

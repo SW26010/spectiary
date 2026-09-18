@@ -317,12 +317,7 @@ bool ValidateLabelingStateSeed(
     }
     const specforge::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
-                seed.path(),
-                {},
-                specforge::
-                    SampleLabelingStateCacheLoadPolicy::
-                        InternalDraftsOnly);
+            specforge::LoadLegacySampleLabelingDraftSeed(seed.path());
     if (!loaded.warning.empty()) {
         error_message =
             loaded.warning ==
@@ -408,7 +403,7 @@ bool MaterializeLabelingStateSeed(
     const std::wstring destination_name =
         std::filesystem::path(
             specforge::local_user_state_paths::
-                kSampleLabelingState)
+                kLegacySampleLabelingState)
             .wstring();
     const std::filesystem::path destination =
         state_root.path() /
@@ -423,12 +418,7 @@ bool MaterializeLabelingStateSeed(
     }
     const specforge::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
-                destination,
-                {},
-                specforge::
-                    SampleLabelingStateCacheLoadPolicy::
-                        InternalDraftsOnly);
+            specforge::LoadLegacySampleLabelingDraftSeed(destination);
     if (!loaded.warning.empty()) {
         error_message =
             loaded.warning ==

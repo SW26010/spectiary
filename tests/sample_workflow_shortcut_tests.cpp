@@ -4470,9 +4470,6 @@ void TestLabelingPanelLocalizesMigrationNotices()
             Issue::OutputPathAlreadyUsed,
             specforge::UiTextId::OutputPathAlreadyUsed},
         std::pair{
-            Issue::OutputMigrationCheckpointFailed,
-            specforge::UiTextId::LabelingMigrationCheckpointFailed},
-        std::pair{
             Issue::OutputMigrationPublicationFailed,
             specforge::UiTextId::LabelingMigrationPublicationFailed},
         std::pair{

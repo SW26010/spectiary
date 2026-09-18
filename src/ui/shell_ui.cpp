@@ -1236,6 +1236,11 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
     return result;
 }
 
+bool ShellUi::PrepareLabelingForInteractiveClose()
+{
+    return session_.PrepareLabelingForInteractiveClose();
+}
+
 void ShellUi::Render(const ShellStatus& status)
 {
     automation_panel_presentation_candidate_.reset();

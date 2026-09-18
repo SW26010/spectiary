@@ -1,4 +1,5 @@
 #include "ui/sample_labeling_state_cache_io.h"
+#include "ui/sample_labeling_persistence_owners.h"
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
@@ -566,12 +567,12 @@ ParsedTask ParseTask(
             nlohmann::json::value_t::boolean) {
         malformed = true;
     }
-    task.persistence.initial_publication_pending =
+    const bool legacy_initial_publication_pending =
         ReadBoolMember(
             task_object,
             "initial_publication_pending",
             false);
-    if (task.persistence.initial_publication_pending &&
+    if (legacy_initial_publication_pending &&
         (!task.persistence.output_path ||
          task.persistence.output_format !=
              SampleLabelingOutputArtifactFormat::CanonicalAsdf)) {
@@ -767,17 +768,13 @@ ParsedTask ParseTask(
     } else if (!task.persistence.output_path && task.persistence.save_state.kind == SampleLabelSaveStateKind::Pending) {
         task.persistence.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
     }
-    if (task.persistence.initial_publication_pending) {
-        // The cache is the write-ahead side of a first-publication
-        // transaction. Without an adopted canonical generation, its sparse
-        // overlay is the complete non-default draft state. Restore that state
-        // as a genuine temporary task so Save As remains available. A normal
-        // formal owner never carries this phase and still fails closed if its
-        // output later disappears.
+    if (legacy_initial_publication_pending) {
+        // Historical schema-4 import only: an unadopted first publication
+        // encoded all non-default draft values here. Convert it once into an
+        // output-free draft; never resume or serialize the old WAL protocol.
         task.persistence.output_path.reset();
         task.persistence.output_format =
             SampleLabelingOutputArtifactFormat::None;
-        task.persistence.initial_publication_pending = false;
         needs_projection = false;
         task.persistence.pending_sample_indices.clear();
         task.persistence.metadata_save_pending = false;
@@ -826,8 +823,7 @@ bool ValidateOutputOwnership(
         (void)source_identity;
         for (const SampleLabelingTask& task : state.tasks) {
             if (!task.persistence.output_path) {
-                if (!task.persistence.initial_publication_pending &&
-                    task.persistence.output_format ==
+                if (task.persistence.output_format ==
                     SampleLabelingOutputArtifactFormat::None) {
                     continue;
                 }
@@ -850,14 +846,6 @@ bool ValidateOutputOwnership(
                 SetError(
                     error_message,
                     "sample-labeling cache contains an invalid output path or format");
-                return false;
-            }
-            if (task.persistence.initial_publication_pending &&
-                task.persistence.output_format !=
-                    SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
-                SetError(
-                    error_message,
-                    "sample-labeling cache contains an invalid initial publication owner");
                 return false;
             }
         }
@@ -1202,8 +1190,18 @@ bool ApplyPatch(
 
 std::filesystem::path DefaultSampleLabelingStateCachePath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSampleLabelingState, runtime_paths);
+    return runtime_paths.sample_labeling_state_path;
+}
+
+std::filesystem::path SampleLabelingDraftCheckpointPath(
+    const RuntimePaths& runtime_paths, const std::filesystem::path& state_path)
+{
+    if (state_path.empty()) return {};
+    if (state_path == runtime_paths.sample_labeling_state_path)
+        return runtime_paths.sample_labeling_drafts_path;
+    // Explicit controller/test roots remain isolated from the process default.
+    return state_path.parent_path() / "unsaved" /
+        (state_path.stem().wstring() + L".drafts.json");
 }
 
 std::filesystem::path
@@ -1311,7 +1309,7 @@ SampleLabelingStateCoordinationDirectories(
     return directories;
 }
 
-SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
+static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint,
@@ -1533,244 +1531,201 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     return result;
 }
 
-bool SaveSampleLabelingStateCache(
+SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingDraftSeed(
+    const std::filesystem::path& path)
+{
+    return LoadLegacySampleLabelingStateCache(RuntimePaths{}, path, {},
+        SampleLabelingStateCacheLoadPolicy::InternalDraftsOnly);
+}
+
+SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
-    const SampleLabelingStateCache& cache,
-    std::string* error_message)
+    const std::function<void()>& cancellation_checkpoint,
+    SampleLabelingStateCacheLoadPolicy policy)
 {
-    if (path.empty()) {
-        return false;
+    const auto draft_path = SampleLabelingDraftCheckpointPath(runtime_paths, path);
+    std::error_code state_error, draft_error;
+    const bool state_exists = std::filesystem::exists(path, state_error);
+    const bool draft_exists = std::filesystem::exists(draft_path, draft_error);
+    // One bounded pre-release cutover. Once either new owner exists, the old
+    // monolith is never consulted again and is never a write destination.
+    if (!state_exists && !draft_exists && !state_error && !draft_error &&
+        path == runtime_paths.sample_labeling_state_path) {
+        auto legacy = LoadLegacySampleLabelingStateCache(runtime_paths,
+            runtime_paths.legacy_sample_labeling_state_path, cancellation_checkpoint, policy);
+        for (auto& [identity, source] : legacy.cache.sources) {
+            for (auto& task : source.tasks) {
+                if (!task.persistence.output_path) continue;
+                task.persistence.pending_sample_indices.clear();
+                task.persistence.metadata_save_pending = false;
+                task.persistence.save_state = {.kind = SampleLabelSaveStateKind::AutosavedToOutput};
+                task.values.ResetSparse(source.sample_count);
+                task.label_set = {};
+                task.canonical_metadata = {};
+                if (task.persistence.output_format == SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar &&
+                    policy == SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs) {
+                    auto loaded = SampleAnnotationIoAdapter{}.LoadLabelResult(
+                        *task.persistence.output_path, source.sample_count, cancellation_checkpoint);
+                    if (loaded && loaded->metadata && loaded->metadata->task_id == task.task_id) {
+                        task.values = SampleLabelingValues{};
+                        task.values.Complete() = std::move(loaded->values);
+                        task.task_name = loaded->metadata->task_name;
+                        task.label_set = loaded->metadata->label_set;
+                    }
+                }
+                RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
+            }
+        }
+        return legacy;
     }
-    if (!ValidateCacheTaskIds(cache, error_message) ||
-        !ValidateOutputOwnership(cache, error_message)) {
-        return false;
+
+    auto ordinary = LoadSampleLabelingOrdinaryState(runtime_paths, path, cancellation_checkpoint);
+    auto drafts = LoadSampleLabelingDraftCheckpoints(draft_path, cancellation_checkpoint);
+    SampleLabelingStateCacheLoadResult result;
+    const auto report = [&](VersionedJsonCacheLoadIssueKind issue, const std::string& diagnostic) {
+        if (issue == VersionedJsonCacheLoadIssueKind::None) return;
+        switch (issue) {
+        case VersionedJsonCacheLoadIssueKind::ReadFailed:
+            result.issue_kind = SampleLabelingStateCacheLoadIssueKind::ReadFailed; break;
+        case VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema:
+            result.issue_kind = SampleLabelingStateCacheLoadIssueKind::UnsupportedFormatOrSchema; break;
+        default: result.issue_kind = SampleLabelingStateCacheLoadIssueKind::InvalidDocument; break;
+        }
+        result.warning = "Could not read labeling state or unsaved checkpoint.";
+        result.diagnostic_detail = diagnostic;
+    };
+    report(ordinary.issue_kind, ordinary.diagnostic);
+    report(drafts.issue_kind, drafts.diagnostic);
+    for (const auto& [identity, registration] : ordinary.owner.sources) {
+        auto& source = result.cache.sources[identity];
+        source.sample_count = registration.sample_count;
+        source.source_name = registration.source_name;
+        source.source_fingerprint = registration.source_fingerprint;
+        source.context_fingerprint = registration.context_fingerprint;
+        source.active_task_id = registration.active_task_id;
+        for (const auto& record : registration.tasks) {
+            if (!record.output_path) continue; // Joined with its checkpoint below.
+            if (policy == SampleLabelingStateCacheLoadPolicy::InternalDraftsOnly) {
+                result.cache = {};
+                report(VersionedJsonCacheLoadIssueKind::InvalidDocument,
+                    "Persistent labeling output paths are not permitted in an automation state seed.");
+                result.warning = result.diagnostic_detail;
+                return result;
+            }
+            auto task = CreateSampleLabelingTask(record.task_id, record.display_name_hint.value_or(record.task_id), 0);
+            task.values.ResetSparse(source.sample_count);
+            task.session = record.session;
+            task.persistence.output_path = record.output_path;
+            task.persistence.output_format = record.output_format;
+            task.persistence.save_state.kind = SampleLabelSaveStateKind::AutosavedToOutput;
+            if (record.output_format == SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar &&
+                policy == SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs) {
+                std::string error;
+                auto loaded = SampleAnnotationIoAdapter{}.LoadLabelResult(*record.output_path,
+                    source.sample_count, cancellation_checkpoint, &error);
+                if (loaded && loaded->metadata && loaded->metadata->task_id == record.task_id) {
+                    task.values = SampleLabelingValues{};
+                    task.values.Complete() = std::move(loaded->values);
+                    task.task_name = loaded->metadata->task_name;
+                    task.label_set = loaded->metadata->label_set;
+                    RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
+                }
+            }
+            source.tasks.push_back(std::move(task));
+        }
     }
-
-    const std::vector<std::string> keys = SortedCacheKeys(cache.sources);
-
-    return WriteVersionedJsonCacheFile(
-        path,
-        kStateFormatKind,
-        kStateSchemaVersion,
-        "sample-labeling task record",
-        [&](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            stream << "  \"sources\": [";
-            if (!keys.empty()) {
-                stream << "\n";
+    for (const auto& [identity, checkpoint] : drafts.owner.sources) {
+        if (cancellation_checkpoint) cancellation_checkpoint();
+        auto& source = result.cache.sources[identity];
+        const auto formal = std::find_if(source.tasks.begin(), source.tasks.end(), [&](const auto& task) {
+            return task.task_id == checkpoint.draft.task_id && task.persistence.output_path;
+        });
+        if (formal != source.tasks.end()) continue; // Canonical registration supersedes stale checkpoint.
+        if (source.sample_count != 0 &&
+            (source.sample_count != checkpoint.sample_count ||
+             source.source_fingerprint != checkpoint.source_fingerprint ||
+             source.context_fingerprint != checkpoint.context_fingerprint)) {
+            report(VersionedJsonCacheLoadIssueKind::InvalidDocument,
+                "Draft checkpoint conflicts with registered source compatibility information.");
+            continue;
+        }
+        source.sample_count = checkpoint.sample_count;
+        source.source_name = checkpoint.source_name;
+        source.source_fingerprint = checkpoint.source_fingerprint;
+        source.context_fingerprint = checkpoint.context_fingerprint;
+        const auto& draft = checkpoint.draft;
+        auto task = CreateSampleLabelingTask(draft.task_id, draft.task_name, 0, draft.canonical_metadata);
+        task.label_set = draft.label_set;
+        task.values.Complete() = draft.values;
+        if (const auto registration = ordinary.owner.sources.find(identity);
+            registration != ordinary.owner.sources.end()) {
+            for (const auto& record : registration->second.tasks) {
+                if (record.task_id == draft.task_id && !record.output_path) task.session = record.session;
             }
+        }
+        RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
+        source.tasks.push_back(std::move(task));
+    }
+    for (auto& [identity, source] : result.cache.sources) {
+        if (source.active_task_id && std::none_of(source.tasks.begin(), source.tasks.end(),
+                [&](const auto& task) { return task.task_id == *source.active_task_id; }))
+            source.active_task_id.reset(); // Missing best-effort checkpoint is not document corruption.
+    }
+    return result;
+}
 
-            for (std::size_t source_index = 0; source_index < keys.size(); ++source_index) {
-                const std::string& key = keys[source_index];
-                const SampleLabelingSourceState& state = cache.sources.at(key);
-                stream << "    {\n";
-                stream << "      \"identity\": ";
-                WriteJsonString(stream, key);
-                stream << ",\n";
-                stream << "      \"sample_count\": " << state.sample_count << ",\n";
-                stream << "      \"source_name\": ";
-                WriteJsonString(stream, state.source_name);
-                stream << ",\n";
-                stream << "      \"source_fingerprint\": ";
-                WriteJsonString(stream, state.source_fingerprint);
-                stream << ",\n";
-                stream << "      \"context_fingerprint\": ";
-                WriteJsonString(stream, state.context_fingerprint);
-                stream << ",\n";
-                stream << "      \"active_task_id\": ";
-                WriteJsonString(stream, state.active_task_id.value_or(""));
-                stream << ",\n";
-                stream << "      \"tasks\": [";
-                if (!state.tasks.empty()) {
-                    stream << "\n";
-                }
-                for (std::size_t task_index = 0; task_index < state.tasks.size(); ++task_index) {
-                    const SampleLabelingTask& task = state.tasks[task_index];
-                    stream << "        {\n";
-                    stream << "          \"task_id\": ";
-                    WriteJsonString(stream, task.task_id);
-                    stream << ",\n";
-                    stream << "          \"task_name\": ";
-                    WriteJsonString(stream, task.task_name);
-                    stream << ",\n";
-                    stream << "          \"canonical_metadata\": {\n";
-                    stream << "            \"created_at\": ";
-                    WriteJsonString(
-                        stream,
-                        FormatCanonicalTimestamp(
-                            task.canonical_metadata.created_at));
-                    stream << ",\n";
-                    stream << "            \"modified_at\": ";
-                    WriteJsonString(
-                        stream,
-                        FormatCanonicalTimestamp(
-                            task.canonical_metadata.modified_at));
-                    stream << ",\n";
-                    stream << "            \"origin\": {\n";
-                    stream << "              \"kind\": ";
-                    WriteJsonString(
-                        stream,
-                        task.canonical_metadata.origin.kind);
-                    if (task.canonical_metadata.origin.annotation) {
-                        const SampleLabelingAnnotationOrigin& annotation =
-                            *task.canonical_metadata.origin.annotation;
-                        stream << ",\n";
-                        stream << "              \"annotation\": { \"name\": ";
-                        WriteJsonString(stream, annotation.name);
-                        stream << ", \"format\": ";
-                        WriteJsonString(stream, annotation.format);
-                        if (annotation.fingerprint) {
-                            stream << ", \"fingerprint\": ";
-                            WriteJsonString(stream, *annotation.fingerprint);
-                        }
-                        stream << " }\n";
-                    } else {
-                        stream << "\n";
-                    }
-                    stream << "            }";
-                    if (task.canonical_metadata.description) {
-                        stream << ",\n";
-                        stream << "            \"description\": ";
-                        WriteJsonString(
-                            stream,
-                            *task.canonical_metadata.description);
-                    }
-                    if (!task.canonical_metadata.authors.empty()) {
-                        stream << ",\n";
-                        stream << "            \"authors\": [";
-                        for (std::size_t author_index = 0;
-                             author_index < task.canonical_metadata.authors.size();
-                             ++author_index) {
-                            const SampleLabelingAuthor& author =
-                                task.canonical_metadata.authors[author_index];
-                            if (author_index != 0) {
-                                stream << ", ";
-                            }
-                            stream << "{ \"name\": ";
-                            WriteJsonString(stream, author.name);
-                            if (author.identifier) {
-                                stream << ", \"identifier\": ";
-                                WriteJsonString(stream, *author.identifier);
-                            }
-                            if (author.email) {
-                                stream << ", \"email\": ";
-                                WriteJsonString(stream, *author.email);
-                            }
-                            stream << " }";
-                        }
-                        stream << "]";
-                    }
-                    stream << "\n";
-                    stream << "          },\n";
-                    stream << "          \"auto_advance\": " << (task.session.auto_advance ? "true" : "false") << ",\n";
-                    stream << "          \"skip_labeled_on_advance\": "
-                           << (task.session.skip_labeled_on_advance ? "true" : "false") << ",\n";
-                    stream << "          \"remembered_position\": ";
-                    if (task.session.remembered_position) {
-                        stream << *task.session.remembered_position;
-                    } else {
-                        stream << "null";
-                    }
-                    stream << ",\n";
-                    stream << "          \"output\": {\n";
-                    stream << "            \"path\": ";
-                    if (task.persistence.output_path) {
-                        WritePersistedPathReference(stream, *task.persistence.output_path, runtime_paths);
-                    } else {
-                        stream << "null";
-                    }
-                    stream << ",\n";
-                    stream << "            \"format\": ";
-                    WriteJsonString(
-                        stream,
-                        OutputFormatText(task.persistence.output_format));
-                    stream << "\n";
-                    stream << "          },\n";
-                    if (task.persistence.initial_publication_pending) {
-                        stream << "          \"initial_publication_pending\": true,\n";
-                    }
-                    stream << "          \"labels\": [";
-                    if (!task.label_set.labels.empty()) {
-                        stream << "\n";
-                    }
-                    for (std::size_t label_index = 0; label_index < task.label_set.labels.size(); ++label_index) {
-                        const SampleLabelDefinition& label = task.label_set.labels[label_index];
-                        stream << "            { \"code\": " << label.code << ", \"name\": ";
-                        WriteJsonString(stream, label.name);
-                        stream << ", \"shortcut\": ";
-                        const std::string shortcut =
-                            label.shortcut == '\0' ? std::string{} : std::string(1, label.shortcut);
-                        WriteJsonString(stream, shortcut);
-                        stream << " }" << (label_index + 1 == task.label_set.labels.size() ? "\n" : ",\n");
-                    }
-                    if (!task.label_set.labels.empty()) {
-                        stream << "          ";
-                    }
-                    stream << "],\n";
-                    stream << "          \"save_state\": ";
-                    WriteJsonString(stream, SaveStateKindText(task.persistence.save_state.kind));
-                    stream << ",\n";
-                    stream << "          \"save_message\": ";
-                    WriteJsonString(stream, task.persistence.save_state.message);
-                    stream << ",\n";
-                    stream << "          \"save_message_kind\": ";
-                    WriteJsonString(
-                        stream,
-                        SaveMessageKindText(
-                            task.persistence.save_state.message_kind));
-                    if (task.persistence.output_path && task.persistence.metadata_save_pending) {
-                        stream << ",\n";
-                        stream << "          \"metadata_pending\": true";
-                    }
-                    if (!task.persistence.output_path) {
-                        stream << ",\n";
-                        stream << "          \"values\": [";
-                        for (std::size_t value_index = 0; value_index < task.values.SampleCount(); ++value_index) {
-                            stream << task.values.Complete()[value_index];
-                            if (value_index + 1 != task.values.SampleCount()) {
-                                stream << ", ";
-                            }
-                        }
-                        stream << "]";
-                    } else if (!task.persistence.pending_sample_indices.empty()) {
-                        std::vector<std::size_t> pending_indices(
-                            task.persistence.pending_sample_indices.begin(),
-                            task.persistence.pending_sample_indices.end());
-                        std::sort(pending_indices.begin(), pending_indices.end());
-
-                        stream << ",\n";
-                        stream << "          \"pending_values\": [";
-                        bool wrote_pending_value = false;
-                        for (const std::size_t sample_index : pending_indices) {
-                            if (sample_index >= task.values.SampleCount()) {
-                                continue;
-                            }
-                            if (wrote_pending_value) {
-                                stream << ", ";
-                            }
-                            stream << "{ \"index\": " << sample_index << ", \"value\": " << task.values.PendingValue(sample_index)
-                                   << " }";
-                            wrote_pending_value = true;
-                        }
-                        stream << "]";
-                    }
-                    stream << "\n";
-                    stream << "        }" << (task_index + 1 == state.tasks.size() ? "\n" : ",\n");
-                }
-                if (!state.tasks.empty()) {
-                    stream << "      ";
-                }
-                stream << "]\n";
-                stream << "    }" << (source_index + 1 == keys.size() ? "\n" : ",\n");
+bool SaveSampleLabelingStateCache(const RuntimePaths& runtime_paths,
+    const std::filesystem::path& path, const SampleLabelingStateCache& cache,
+    std::string* error_message, bool* ordinary_state_saved)
+{
+    if (ordinary_state_saved) *ordinary_state_saved = false;
+    if (path.empty() || !ValidateCacheStructure(cache, error_message)) return false;
+    SampleLabelingOrdinaryState ordinary;
+    SampleLabelingDraftCheckpoints drafts;
+    for (const auto& [identity, source] : cache.sources) {
+        auto& registration = ordinary.sources[identity];
+        registration.sample_count = source.sample_count;
+        registration.source_name = source.source_name;
+        registration.source_fingerprint = source.source_fingerprint;
+        registration.context_fingerprint = source.context_fingerprint;
+        registration.active_task_id = source.active_task_id;
+        for (const auto& task : source.tasks) {
+            registration.tasks.push_back({task.task_id, task.persistence.output_path,
+                task.persistence.output_format, task.session,
+                task.persistence.output_path ? std::optional{task.task_name} : std::nullopt});
+            if (task.persistence.output_path) continue;
+            if (!task.values.IsComplete() || drafts.sources.contains(identity)) {
+                SetError(error_message, "A source must have at most one complete unsaved draft checkpoint.");
+                return false;
             }
-            if (!keys.empty()) {
-                stream << "  ";
-            }
-            stream << "]\n";
-            return true;
-        },
-        error_message);
+            drafts.sources.emplace(identity, SampleLabelingSourceDraftCheckpoint{
+                source.sample_count, source.source_name, source.source_fingerprint, source.context_fingerprint,
+                {task.task_id, task.task_name, task.canonical_metadata, task.label_set, task.values.Complete()}});
+        }
+    }
+    std::string state_error, draft_error;
+    const bool state_saved = SaveSampleLabelingOrdinaryState(runtime_paths, path, ordinary, &state_error);
+    if (ordinary_state_saved) *ordinary_state_saved = state_saved;
+    const auto checkpoint_path = SampleLabelingDraftCheckpointPath(runtime_paths, path);
+    if (!state_saved) {
+        // Draft edits may still checkpoint when ordinary state is unavailable.
+        // Do not remove an old slot until its replacement registration landed.
+        auto previous = LoadSampleLabelingDraftCheckpoints(checkpoint_path);
+        if (previous.issue_kind != VersionedJsonCacheLoadIssueKind::None) {
+            SetError(error_message, std::move(state_error));
+            return false;
+        }
+        for (auto& [identity, checkpoint] : previous.owner.sources)
+            drafts.sources.try_emplace(identity, std::move(checkpoint));
+    }
+    // Cleanup follows canonical registration. Failure cannot roll back an ASDF
+    // publication; the controller reports output and local-state status separately.
+    const bool drafts_saved = SaveSampleLabelingDraftCheckpoints(
+        checkpoint_path, drafts, &draft_error);
+    if (!state_saved || !drafts_saved)
+        SetError(error_message, !state_saved ? std::move(state_error) : std::move(draft_error));
+    return state_saved && drafts_saved;
 }
 
 bool CommitSampleLabelingStateCachePatch(
@@ -1778,8 +1733,9 @@ bool CommitSampleLabelingStateCachePatch(
     const std::filesystem::path& path,
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message,
-    std::chrono::milliseconds commit_lock_wait)
+    std::chrono::milliseconds commit_lock_wait, bool* ordinary_state_saved)
 {
+    if (ordinary_state_saved) *ordinary_state_saved = false;
     if (error_message != nullptr) {
         error_message->clear();
     }
@@ -1875,7 +1831,7 @@ bool CommitSampleLabelingStateCachePatch(
         runtime_paths,
         path,
         latest.cache,
-        error_message);
+        error_message, ordinary_state_saved);
 }
 
 bool HasSampleLabelingOutputPathConflict(

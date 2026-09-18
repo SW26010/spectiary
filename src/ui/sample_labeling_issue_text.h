@@ -42,11 +42,6 @@ SampleLabelingIssueTextFor(
             UiTextId::OutputPathAlreadyUsed,
             "Output path is already used by another local labeling task.",
             "该输出路径已被另一个本地标注任务使用。"};
-    case Issue::OutputMigrationCheckpointFailed:
-        return {
-            UiTextId::LabelingMigrationCheckpointFailed,
-            "Could not checkpoint the legacy labeling owner before migration. The legacy owner remains active.",
-            "迁移前无法保存旧标注所有者的恢复检查点。旧所有者仍保持活动状态。"};
     case Issue::OutputMigrationPublicationFailed:
         return {
             UiTextId::LabelingMigrationPublicationFailed,

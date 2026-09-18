@@ -566,8 +566,8 @@ constexpr std::array kTextCatalog = {
         "Remove sample sorting",
         "移除样本排序"},
     UiTextEntry{
-        "internal autosave draft",
-        "内部自动保存草稿"},
+        "unsaved draft",
+        "未保存草稿"},
     UiTextEntry{
         "autosaved to output",
         "已自动保存到输出"},
@@ -600,13 +600,6 @@ constexpr std::array kTextCatalog = {
         SampleLabelingIssueTextFor(
             SampleLabelingOperationResult::Issue::
                 EditTargetChanged).simplified_chinese},
-    UiTextEntry{
-        SampleLabelingIssueTextFor(
-            SampleLabelingOperationResult::Issue::
-                OutputMigrationCheckpointFailed).english,
-        SampleLabelingIssueTextFor(
-            SampleLabelingOperationResult::Issue::
-                OutputMigrationCheckpointFailed).simplified_chinese},
     UiTextEntry{
         SampleLabelingIssueTextFor(
             SampleLabelingOperationResult::Issue::
@@ -970,6 +963,9 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Keep View is on: switching samples keeps the current X/Y range, and pan and zoom remain available. Click to turn it off.",
         "保持视野已开启：切换样本时保留当前 X/Y 范围，仍可平移和缩放。点击可关闭。"},
+    UiTextEntry{
+        "Labeling work could not be saved. Return to the task to retry saving, or explicitly delete an unwanted draft before closing.",
+        "标注工作尚未成功保存。请返回任务重试保存，或明确删除不需要的草稿后再关闭。"},
 };
 
 static_assert(kTextCatalog.size() == kUiTextCount);
