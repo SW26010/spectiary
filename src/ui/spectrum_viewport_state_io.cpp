@@ -1,8 +1,6 @@
 #include "ui/spectrum_viewport_state_io.h"
 
-#include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
-#include "app/local_user_state_paths.h"
 
 #include <array>
 #include <charconv>
@@ -20,6 +18,7 @@ namespace {
 constexpr const char* kStateFormatKind =
     "specforge.spectrum_viewport.state";
 constexpr int kStateSchemaVersion = 1;
+
 void AppendWarning(
     std::string& warning,
     std::string_view message)
@@ -137,7 +136,7 @@ SpectrumViewportStateLoadResult LoadSpectrumViewportState(
         !x_max || !y_min || !y_max) {
         AppendWarning(
             loaded.warning,
-            "Locked spectrum view state is incomplete; automatic range was used.");
+            "Locked spectrum viewport state is incomplete; automatic range was used.");
         return loaded;
     }
 
@@ -150,7 +149,7 @@ SpectrumViewportStateLoadResult LoadSpectrumViewportState(
     if (!LimitsAreUsable(restored_limits)) {
         AppendWarning(
             loaded.warning,
-            "Locked spectrum view state has invalid axis ranges; automatic range was used.");
+            "Locked spectrum viewport state has invalid axis ranges; automatic range was used.");
         return loaded;
     }
     loaded.state.locked = true;
@@ -178,7 +177,7 @@ bool SaveSpectrumViewportState(
          !LimitsAreUsable(state.limits))) {
         if (error_message != nullptr) {
             *error_message =
-                "Locked spectrum view state is incomplete or invalid.";
+                "Locked spectrum viewport state is incomplete or invalid.";
         }
         return false;
     }
@@ -198,7 +197,7 @@ bool SaveSpectrumViewportState(
         if (!x_min || !x_max || !y_min || !y_max) {
             if (error_message != nullptr) {
                 *error_message =
-                    "Spectrum view axis ranges could not be encoded.";
+                    "Spectrum viewport axis ranges could not be encoded.";
             }
             return false;
         }

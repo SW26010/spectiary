@@ -38,6 +38,11 @@ void RequireCompleteLocalUserStatePathMapping(
     const std::filesystem::path& root)
 {
     using namespace specforge::local_user_state_paths;
+    Require(paths.spectrum_plot_preferences_path ==
+                paths.application_data_root / "config" / kSpectrumPlotPreferences &&
+            paths.spectrum_viewport_state_path ==
+                paths.application_data_root / "state" / kSpectrumViewportState,
+        "spectrum owners must use final role roots in every deployment and override mode");
     Require(
         paths.profile_log_directory ==
             root / kProfileLogDirectory,

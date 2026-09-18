@@ -556,13 +556,26 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
                 locked.limits.y_min &&
             loaded.state.limits.y_max ==
                 locked.limits.y_max,
-        "spectrum view state should round-trip its viewport and complete Auto/explicit curve colors");
+        "viewport state should round-trip lock, identity and all axis limits");
+    {
+        std::ifstream stream(path);
+        const auto document = nlohmann::json::parse(stream);
+        Require(document.contains("locked") && !document.contains("series_colors"),
+            "viewport JSON must contain no preference-owned fields");
+    }
 
     const auto preferences_path = path.string() + ".preferences";
     Require(specforge::SaveSpectrumPlotPreferences(preferences_path, preferences, &error),
         "preferences save should not require a source or locked viewport");
     Require(specforge::LoadSpectrumPlotPreferences(preferences_path).state.plot_colors == preferences.plot_colors,
         "all Auto and explicit RGBA colors should round trip independently");
+    {
+        std::ifstream stream(preferences_path);
+        const auto document = nlohmann::json::parse(stream);
+        Require(document.contains("series_colors") && !document.contains("locked") &&
+                !document.contains("source_collection_identity") && !document.contains("x_min"),
+            "preference JSON must contain no viewport-owned fields");
+    }
     std::filesystem::remove(preferences_path);
 
     Require(
@@ -605,7 +618,10 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
         "partial migration must retain the legacy input and retry only the failed destination");
     Require(preferences.document_present && viewport.state.locked &&
             viewport.state.source_collection_identity == "source-A" &&
-            viewport.state.limits.x_min == 1.25,
+            viewport.state.limits.x_min == 1.25 && viewport.state.limits.x_max == 8.5 &&
+            viewport.state.limits.y_min == -2 && viewport.state.limits.y_max == 3 &&
+            LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors.raw_spectrum ==
+                PlotSeriesColor::ExplicitColor({0.25f, 0.5f, 0.75f, 1}),
         "a failed migration write must retain supported legacy values for runtime and retry");
     // A user changes the established config before the next startup.
     preferences.state.plot_colors.raw_spectrum = PlotSeriesColor::Auto();
@@ -620,6 +636,41 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
             preferences.state.plot_colors.raw_spectrum.mode() == PlotSeriesColorMode::Auto &&
             LoadSpectrumViewportState(paths.spectrum_viewport_state_path).state == viewport.state,
         "restart must fill only the missing viewport and retire legacy after both targets exist");
+    std::filesystem::remove(paths.spectrum_plot_preferences_path);
+    std::filesystem::remove(paths.spectrum_viewport_state_path);
+    std::ofstream(paths.legacy_spectrum_view_state_path) <<
+        R"({"format_kind":"specforge.spectrum_view.state","schema_version":1,"locked":false})";
+    preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(preferences.document_present && viewport.document_present &&
+            preferences.state.plot_colors == SpectrumPlotColors{} && !viewport.state.locked &&
+            !std::filesystem::exists(paths.legacy_spectrum_view_state_path),
+        "legacy schema 1 should establish independent Auto preferences and automatic viewport");
+    // Established split files must not decode even an unreadable legacy input.
+    std::filesystem::create_directory(paths.legacy_spectrum_view_state_path);
+    preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(preferences.warning.empty() && viewport.warning.empty(),
+        "both established owners must bypass legacy decoding entirely");
+    std::filesystem::remove(paths.legacy_spectrum_view_state_path);
+    // A present unsupported destination must not be replaced with legacy data.
+    const std::string future = R"({"format_kind":"specforge.spectrum_plot.preferences","schema_version":999})";
+    std::ofstream(paths.spectrum_plot_preferences_path) << future;
+    std::ofstream(paths.legacy_spectrum_view_state_path) << legacy;
+    std::filesystem::remove(paths.spectrum_viewport_state_path);
+    preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    {
+        std::ifstream stream(paths.spectrum_plot_preferences_path);
+        Require(std::string((std::istreambuf_iterator<char>(stream)), {}) == future &&
+                preferences.issue_kind == VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema &&
+                viewport.document_present && viewport.state.locked &&
+                std::filesystem::exists(paths.legacy_spectrum_view_state_path),
+            "migration must preserve protected split config while establishing the missing viewport");
+    }
     std::filesystem::remove_all(root);
 }
 

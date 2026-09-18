@@ -163,12 +163,13 @@ explicit persistent-output fixture opt-in and a runner-owned shared temporary
 root to exercise the production target leases; it is not a user-facing
 automation or state-sharing mode.
 
-The spectrum view cache is also an ordinary complete-snapshot setting. It owns
-both global curve-color selections and the optional source-scoped locked
-viewport. Raw-spectrum, Gaussian-smoothing, and median-smoothing colors are
+Spectrum persistence has two independent complete-snapshot owners (see
+[ADR 0014](0014-spectrum-persistence-ownership.md)): global curve-color
+preferences in `config/spectrum-plot-preferences.json`, and the optional
+source-scoped locked viewport in `state/spectrum-viewport-state.json`. Raw-spectrum, Gaussian-smoothing, and median-smoothing colors are
 recorded regardless of viewport lock state. Each selection stores either Auto
 or an explicit RGBA value; Auto does not persist a theme-resolved color. These
-color preferences are global to the local user-state root rather than associated
+color preferences are global to the application data root rather than associated
 with a source collection.
 
 Axis limits are recorded only when the logical spectrum view is locked and are
@@ -178,5 +179,5 @@ only after deferred source restoration resolves to the same source-collection
 identity. A missing, malformed, changed, or unavailable identity leaves the view
 in automatic-fit mode without discarding otherwise valid global curve colors.
 Concurrent GUI instances do not merge or live-synchronize either part of the
-spectrum view state. Every atomic replacement writes the complete cache, and the
-last completed replacement wins for both curve colors and viewport state.
+spectrum view. Each atomic replacement writes one complete owner document; the
+last completed replacement wins independently for preferences and viewport state.

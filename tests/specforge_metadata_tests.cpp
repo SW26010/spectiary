@@ -663,6 +663,10 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
                 state_root / "source-session.json" &&
             startup.runtime_paths().legacy_spectrum_view_state_path ==
                 state_root / "spectrum-view-state.json" &&
+            startup.runtime_paths().spectrum_plot_preferences_path ==
+                state_root / "config" / "spectrum-plot-preferences.json" &&
+            startup.runtime_paths().spectrum_viewport_state_path ==
+                state_root / "state" / "spectrum-viewport-state.json" &&
             startup.runtime_paths().sample_workflow_state_path ==
                 state_root / "sample-workflow-state.json" &&
             startup.runtime_paths().spectral_line_user_state_path ==

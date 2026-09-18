@@ -208,6 +208,26 @@ struct ShellUiTestAccess {
         return shell.spectrum_viewport_state_persistence_.PersistenceStatus();
     }
 
+    static LocalUserStatePersistenceStatus PlotPreferencesPersistenceStatus(const ShellUi& shell)
+    {
+        return shell.spectrum_plot_preferences_persistence_.PersistenceStatus();
+    }
+
+    static void ObserveSpectrumPersistence(ShellUi& shell)
+    {
+        shell.ObserveSpectrumPersistenceChanges(LocalUserStateSaveScheduler::Clock::now());
+    }
+
+    static bool PlotPreferencesDirty(const ShellUi& shell)
+    {
+        return shell.spectrum_plot_preferences_persistence_.dirty();
+    }
+
+    static bool ViewportStateDirty(const ShellUi& shell)
+    {
+        return shell.spectrum_viewport_state_persistence_.dirty();
+    }
+
     static std::optional<PlotViewLimits>
     LockedViewportLimits(const ShellUi& shell)
     {
@@ -3873,6 +3893,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
     result.application_settings.panel_visibility_saved = false;
     result.source_collection.navigation_saved = false;
     result.source_collection.workflow_saved = false;
+    result.spectrum_plot_preferences_saved = false;
     result.spectrum_viewport_state_saved = false;
     result.spectral_lines_saved = false;
     const std::string message = result.FailureMessage();
@@ -3890,7 +3911,8 @@ void TestShellFlushResultNamesEveryFailedOwner()
                 std::string::npos &&
             message.find("Sample workflow") !=
                 std::string::npos &&
-            message.find("Spectrum view") !=
+            message.find("Spectrum plot preferences") != std::string::npos &&
+            message.find("Spectrum viewport state") !=
                 std::string::npos &&
             message.find("Spectral-line state") !=
                 std::string::npos,
@@ -5023,6 +5045,257 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
     Require(
         resolved_trace,
         "a superseded external FITS trace should retain the resolved preferred member index");
+}
+
+
+std::string SpectrumPersistenceBytes(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    Require(stream.good(), "persistence fixture must be readable");
+    return std::string((std::istreambuf_iterator<char>(stream)), {});
+}
+
+void TestSpectrumOwnersWriteAndResetIndependently()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_split_owners");
+    const auto startup = PrepareSpecForgeStartup({
+        .executable_path = CurrentExecutablePath(),
+        .local_user_state_root_override = root,
+    });
+    const auto& paths = startup.runtime_paths();
+    const auto config = paths.spectrum_plot_preferences_path;
+    const auto state = paths.spectrum_viewport_state_path;
+    Require(SaveSpectrumPlotPreferences(config, {}), "seed default preferences");
+    Require(SaveSpectrumViewportState(state, {}), "seed automatic viewport");
+    const auto fixed_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+    std::filesystem::last_write_time(state, fixed_time);
+    const auto initial_state = SpectrumPersistenceBytes(state);
+    const auto custom = PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 0.5f});
+    {
+        ShellUi shell(startup);
+        Require(!Access::PlotPreferencesDirty(shell) && !Access::ViewportStateDirty(shell),
+            "supported startup reads must not dirty either owner");
+        Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum, custom);
+        Require(Access::PlotPreferencesDirty(shell) && !Access::ViewportStateDirty(shell),
+            "color mutation must dirty config only");
+        shell.RunMaintenance(LocalUserStateSaveScheduler::Clock::now() + std::chrono::seconds(2));
+        Require(!Access::PlotPreferencesDirty(shell) &&
+                LoadSpectrumPlotPreferences(config).state.plot_colors.raw_spectrum == custom,
+            "color maintenance must flush the config owner");
+        Require(shell.FlushLocalState().all_saved(), "color-only final flush should succeed");
+    }
+    Require(SpectrumPersistenceBytes(state) == initial_state &&
+            std::filesystem::last_write_time(state) == fixed_time,
+        "color maintenance and shutdown must not rewrite viewport bytes or timestamp");
+    const auto saved_colors = SpectrumPersistenceBytes(config);
+    std::filesystem::last_write_time(config, fixed_time);
+    {
+        ShellUi shell(startup);
+        Access::RequestSpectrumViewportFit(shell);
+        Access::ObserveSpectrumPersistence(shell);
+        Require(!Access::PlotPreferencesDirty(shell) && Access::ViewportStateDirty(shell),
+            "viewport revision must dirty state only");
+        shell.RunMaintenance(LocalUserStateSaveScheduler::Clock::now() + std::chrono::seconds(2));
+        Require(!Access::ViewportStateDirty(shell), "viewport maintenance should consume its dirty state");
+        Require(shell.FlushLocalState().all_saved(), "viewport-only final flush should succeed");
+    }
+    Require(SpectrumPersistenceBytes(config) == saved_colors &&
+            std::filesystem::last_write_time(config) == fixed_time,
+        "viewport maintenance and shutdown must not rewrite preferences bytes or timestamp");
+    // Losing ordinary state must not discard colors or recreate state on shutdown.
+    std::filesystem::remove(state);
+    {
+        ShellUi shell(startup);
+        Require(Access::SpectrumView(shell).plot_colors.raw_spectrum == custom,
+            "viewport loss must preserve saved colors");
+        Require(shell.FlushLocalState().all_saved() && !std::filesystem::exists(state),
+            "a clean fallback viewport must not become an unconditional shutdown write");
+    }
+    Require(SpectrumPersistenceBytes(config) == saved_colors &&
+            std::filesystem::last_write_time(config) == fixed_time,
+        "state loss and fallback flush must leave config untouched");
+    // Reset colors to Auto must not reset a deferred locked viewport.
+    const SpectrumViewportState locked{true, "pending-source", {1, 2, 3, 4}};
+    Require(SaveSpectrumViewportState(state, locked), "seed deferred locked viewport");
+    std::filesystem::last_write_time(state, fixed_time);
+    const auto locked_bytes = SpectrumPersistenceBytes(state);
+    {
+        ShellUi shell(startup);
+        Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum, PlotSeriesColor::Auto());
+        Require(shell.FlushLocalState().all_saved(), "color reset flush should succeed");
+    }
+    Require(LoadSpectrumPlotPreferences(config).state.plot_colors == SpectrumPlotColors{} &&
+            SpectrumPersistenceBytes(state) == locked_bytes &&
+            std::filesystem::last_write_time(state) == fixed_time,
+        "color reset and early shutdown must preserve pending locked viewport restore");
+    std::filesystem::remove_all(root);
+}
+
+void TestSpectrumOwnerFailuresAreIndependent()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    for (const bool preferences_failed : {false, true}) {
+        for (int failure = 0; failure < 4; ++failure) {
+            const auto root = UniqueTempPath("_split_failure");
+            const auto startup = PrepareSpecForgeStartup({
+                .executable_path = CurrentExecutablePath(),
+                .local_user_state_root_override = root,
+            });
+            const auto& paths = startup.runtime_paths();
+            const auto bad = preferences_failed ? paths.spectrum_plot_preferences_path : paths.spectrum_viewport_state_path;
+            const auto good = preferences_failed ? paths.spectrum_viewport_state_path : paths.spectrum_plot_preferences_path;
+            const auto saved_color = PlotSeriesColor::ExplicitColor({0.1f, 0.2f, 0.3f, 1});
+            if (preferences_failed) {
+                Require(SaveSpectrumViewportState(good, {}), "seed healthy viewport counterpart");
+            } else {
+                Require(SaveSpectrumPlotPreferences(good, {{.raw_spectrum = saved_color}}),
+                    "seed healthy preference counterpart");
+            }
+            const auto old_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+            std::filesystem::last_write_time(good, old_time);
+            const std::string format = preferences_failed ? "specforge.spectrum_plot.preferences" : "specforge.spectrum_viewport.state";
+            const std::string original = failure == 0
+                ? "{\"format_kind\":\"" + format + "\",\"schema_version\":999}"
+                : failure == 1 ? "{invalid" : failure == 2 ? "[]" : "unreadable then accessible";
+            std::filesystem::create_directories(bad.parent_path());
+            if (failure == 3) std::filesystem::create_directory(bad);
+            else std::ofstream(bad, std::ios::binary) << original;
+            {
+                ShellUi shell(startup);
+                if (!preferences_failed) {
+                    Require(Access::SpectrumView(shell).plot_colors.raw_spectrum == saved_color,
+                        "invalid viewport state must still load valid saved preferences");
+                }
+                const auto before = preferences_failed ? Access::PlotPreferencesPersistenceStatus(shell)
+                    : Access::SpectrumViewPersistenceStatus(shell);
+                Require(!before.load_warning.empty(), "failed owner must retain its load warning");
+                const auto health = Access::PersistenceHealth(shell);
+                const auto expected_area = preferences_failed ? LocalUserStateArea::SpectrumPlotPreferences
+                    : LocalUserStateArea::SpectrumViewportState;
+                Require(std::any_of(health.messages.begin(), health.messages.end(), [expected_area](const auto& message) {
+                    return message.area == expected_area;
+                }), "health must identify which spectrum owner failed");
+                if (failure == 3) {
+                    std::filesystem::remove(bad);
+                    std::ofstream(bad, std::ios::binary) << original;
+                }
+                Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                    PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1}));
+                Access::RequestSpectrumViewportFit(shell);
+                Access::ObserveSpectrumPersistence(shell);
+                shell.RunMaintenance(LocalUserStateSaveScheduler::Clock::now() + std::chrono::seconds(2));
+                Require(std::filesystem::is_regular_file(good) &&
+                        std::filesystem::last_write_time(good) != old_time &&
+                        SpectrumPersistenceBytes(bad) == original,
+                    "a protected owner must not block the other owner's maintenance or overwrite its original");
+                Require(shell.FlushLocalState().all_saved(), "skipping protected writes is not a save failure");
+                const auto after = preferences_failed ? Access::PlotPreferencesPersistenceStatus(shell)
+                    : Access::SpectrumViewPersistenceStatus(shell);
+                Require(before.load_warning == after.load_warning &&
+                        before.load_diagnostic_detail == after.load_diagnostic_detail && !after.retrying,
+                    "protected writes must retain diagnostics without retrying");
+            }
+            Require(SpectrumPersistenceBytes(bad) == original, "destruction must preserve failed-load bytes");
+            std::filesystem::remove_all(root);
+        }
+    }
+}
+
+
+void TestSpectrumSaveFailureRetriesOnlyItsOwner()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    for (const bool preferences_failed : {false, true}) {
+        const auto root = UniqueTempPath("_split_save_retry");
+        const auto startup = PrepareSpecForgeStartup({
+            .executable_path = CurrentExecutablePath(),
+            .local_user_state_root_override = root,
+        });
+        const auto& paths = startup.runtime_paths();
+        const auto blocked = preferences_failed ? paths.spectrum_plot_preferences_path : paths.spectrum_viewport_state_path;
+        const auto healthy = preferences_failed ? paths.spectrum_viewport_state_path : paths.spectrum_plot_preferences_path;
+        {
+            ShellUi shell(startup);
+            // A runtime write failure, after startup granted normal authority.
+            std::filesystem::create_directories(blocked);
+            Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1}));
+            Access::RequestSpectrumViewportFit(shell);
+            Access::ObserveSpectrumPersistence(shell);
+            const auto now = LocalUserStateSaveScheduler::Clock::now();
+            shell.RunMaintenance(now + std::chrono::seconds(2));
+            const auto failed_status = preferences_failed ? Access::PlotPreferencesPersistenceStatus(shell)
+                : Access::SpectrumViewPersistenceStatus(shell);
+            Require(failed_status.retrying && std::filesystem::is_regular_file(healthy),
+                "one runtime save failure must not stop the other owner's write");
+            const auto healthy_bytes = SpectrumPersistenceBytes(healthy);
+            const auto healthy_time = std::filesystem::last_write_time(healthy);
+            std::filesystem::remove(blocked);
+            shell.RunMaintenance(now + std::chrono::seconds(4));
+            Require(std::filesystem::is_regular_file(blocked) &&
+                    !Access::PlotPreferencesDirty(shell) && !Access::ViewportStateDirty(shell),
+                "failed owner should independently retry and recover");
+            Require(shell.FlushLocalState().all_saved() && SpectrumPersistenceBytes(healthy) == healthy_bytes &&
+                    std::filesystem::last_write_time(healthy) == healthy_time,
+                "retry and shutdown must not rewrite an already-clean healthy owner");
+        }
+        std::filesystem::remove_all(root);
+    }
+}
+
+void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    for (int failure = 0; failure < 4; ++failure) {
+        const auto root = UniqueTempPath("_legacy_failure");
+        const auto startup = PrepareSpecForgeStartup({
+            .executable_path = CurrentExecutablePath(),
+            .local_user_state_root_override = root,
+        });
+        const auto& paths = startup.runtime_paths();
+        const auto legacy = paths.legacy_spectrum_view_state_path;
+        const std::string original = failure == 0
+            ? R"({"format_kind":"specforge.spectrum_view.state","schema_version":999})"
+            : failure == 1 ? "{invalid" : failure == 2 ? "[]" : "unreadable legacy";
+        std::filesystem::create_directories(root);
+        if (failure == 3) std::filesystem::create_directory(legacy);
+        else std::ofstream(legacy, std::ios::binary) << original;
+        {
+            ShellUi shell(startup);
+            if (failure == 3) {
+                std::filesystem::remove(legacy);
+                std::ofstream(legacy, std::ios::binary) << original;
+            }
+            Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1}));
+            Access::RequestSpectrumViewportFit(shell);
+            Access::ObserveSpectrumPersistence(shell);
+            shell.RunMaintenance(LocalUserStateSaveScheduler::Clock::now() + std::chrono::seconds(2));
+            Require(shell.FlushLocalState().all_saved(), "failed migration is a protected skip");
+        }
+        Require(SpectrumPersistenceBytes(legacy) == original &&
+                !std::filesystem::exists(paths.spectrum_plot_preferences_path) &&
+                !std::filesystem::exists(paths.spectrum_viewport_state_path),
+            "failed legacy load must preserve original and prohibit split fallback writes");
+        // A valid split config remains independent even if the missing state
+        // is still protected by the unreadable/unsupported legacy input.
+        Require(SaveSpectrumPlotPreferences(paths.spectrum_plot_preferences_path, {}), "establish config explicitly");
+        {
+            ShellUi shell(startup);
+            Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1}));
+            Require(shell.FlushLocalState().all_saved(), "healthy config should remain writable during failed migration");
+        }
+        Require(LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors.raw_spectrum.mode() ==
+                PlotSeriesColorMode::ExplicitColor && !std::filesystem::exists(paths.spectrum_viewport_state_path),
+            "legacy failure must restrict only the missing destination");
+        std::filesystem::remove_all(root);
+    }
 }
 
 void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
@@ -6615,6 +6888,10 @@ int main()
         RUN_SHELL_TEST(TestShellFlushResultNamesEveryFailedOwner);
         RUN_SHELL_TEST(TestRealShellFlushAndHealthKeepIndependentSettingsOwners);
         RUN_SHELL_TEST(TestSpectrumViewLoadFailurePreservesOriginalOnFlush);
+        RUN_SHELL_TEST(TestSpectrumOwnersWriteAndResetIndependently);
+        RUN_SHELL_TEST(TestSpectrumOwnerFailuresAreIndependent);
+        RUN_SHELL_TEST(TestSpectrumSaveFailureRetriesOnlyItsOwner);
+        RUN_SHELL_TEST(TestLegacySpectrumLoadFailureCannotCreateSplitDefaults);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

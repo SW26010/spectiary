@@ -1,13 +1,9 @@
 #include "ui/legacy_spectrum_view_state_io.h"
 
-#include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
-#include "app/local_user_state_paths.h"
 
-#include <array>
 #include <charconv>
 #include <cmath>
-#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>

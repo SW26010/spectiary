@@ -2,6 +2,10 @@
 
 Status: Accepted. Date: 2026-09-19.
 
+The combined owner described below was split by #111. See
+[ADR 0014](0014-spectrum-persistence-ownership.md) for the current two-owner
+implementation; each retains this startup-load writeback policy.
+
 `LoadSpectrumViewStateCache` retains the existing
 `VersionedJsonCacheLoadIssueKind`. ShellUi owns a startup-snapshot boolean:
 missing files and supported loads permit automatic writes; `ReadFailed`,

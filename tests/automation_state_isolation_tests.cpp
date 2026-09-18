@@ -722,7 +722,11 @@ int wmain(int argc, wchar_t** argv)
             startup.runtime_paths()
                     .legacy_spectrum_view_state_path ==
                 automation_root /
-                    "spectrum-view-state.json",
+                    "spectrum-view-state.json" &&
+            startup.runtime_paths().spectrum_plot_preferences_path ==
+                automation_root / "config" / "spectrum-plot-preferences.json" &&
+            startup.runtime_paths().spectrum_viewport_state_path ==
+                automation_root / "state" / "spectrum-viewport-state.json",
         "automation override should remap the complete local-state path family");
 
     {

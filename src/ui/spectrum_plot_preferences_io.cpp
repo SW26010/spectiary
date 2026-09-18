@@ -1,8 +1,6 @@
 #include "ui/spectrum_plot_preferences_io.h"
 
-#include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
-#include "app/local_user_state_paths.h"
 
 #include <array>
 #include <charconv>
@@ -17,9 +15,9 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kStateFormatKind =
+constexpr const char* kPreferencesFormatKind =
     "specforge.spectrum_plot.preferences";
-constexpr int kStateSchemaVersion = 1;
+constexpr int kPreferencesSchemaVersion = 1;
 constexpr std::string_view kSeriesColorsMember =
     "series_colors";
 constexpr std::string_view kAutoColorMode = "auto";
@@ -214,8 +212,8 @@ SpectrumPlotPreferencesLoadResult LoadSpectrumPlotPreferences(
     VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(
             path,
-            kStateFormatKind,
-            {kStateSchemaVersion},
+            kPreferencesFormatKind,
+            {kPreferencesSchemaVersion},
             "spectrum plot preferences");
     loaded.document_present = result.document.has_value();
     loaded.issue_kind = result.issue_kind;
@@ -252,7 +250,6 @@ SpectrumPlotPreferencesLoadResult LoadSpectrumPlotPreferences(
             "Saved spectrum series colors were invalid; Auto colors were used.");
     }
 
-
     return loaded;
 }
 
@@ -285,8 +282,8 @@ bool SaveSpectrumPlotPreferences(
 
     return WriteVersionedJsonCacheDocument(
         path,
-        kStateFormatKind,
-        kStateSchemaVersion,
+        kPreferencesFormatKind,
+        kPreferencesSchemaVersion,
         "spectrum plot preferences",
         body,
         error_message);

@@ -1033,12 +1033,12 @@ ShellUi::ShellUi(
       touchpad_gestures_(touchpad_gestures),
       sample_workflow_panel_ui_(startup.runtime_paths())
 {
-    SpectrumViewportStateLoadResult spectrum_view_state =
+    SpectrumViewportStateLoadResult viewport_state =
         LoadSpectrumViewportState(
             spectrum_viewport_state_path_);
     auto preferences = LoadSpectrumPlotPreferences(spectrum_plot_preferences_path_);
     const auto migration = MigrateLegacySpectrumViewState(
-        startup.runtime_paths(), preferences, spectrum_view_state);
+        startup.runtime_paths(), preferences, viewport_state);
     if (migration.preferences_save_pending) {
         spectrum_plot_preferences_persistence_.MarkDirty();
     }
@@ -1046,13 +1046,13 @@ ShellUi::ShellUi(
         spectrum_viewport_state_persistence_.MarkDirty();
     }
     spectrum_viewport_state_writeback_allowed_ =
-        spectrum_view_state.issue_kind ==
+        viewport_state.issue_kind ==
         VersionedJsonCacheLoadIssueKind::None;
-    if (!spectrum_view_state.warning.empty()) {
+    if (!viewport_state.warning.empty()) {
         spectrum_viewport_state_persistence_.SetLoadWarning(
-            std::move(spectrum_view_state.warning),
+            std::move(viewport_state.warning),
             std::move(
-                spectrum_view_state.diagnostic_detail));
+                viewport_state.diagnostic_detail));
     }
     spectrum_plot_preferences_writeback_allowed_ =
         preferences.issue_kind == VersionedJsonCacheLoadIssueKind::None;
@@ -1061,9 +1061,9 @@ ShellUi::ShellUi(
     spectrum_view_session_.Submit(
         SpectrumViewSessionCommand::SetPlotColors(preferences.state.plot_colors));
     observed_plot_colors_ = preferences.state.plot_colors;
-    if (spectrum_view_state.state.locked) {
+    if (viewport_state.state.locked) {
         startup_spectrum_viewport_state_ =
-            std::move(spectrum_view_state.state);
+            std::move(viewport_state.state);
         startup_spectrum_view_mutation_revision_ =
             spectrum_view_session_.
                 ViewportMutationRevision();
@@ -2961,7 +2961,6 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                         SetPlotSeriesColor(
                             series,
                             selection));
-
             }
             if (ImGui::IsItemHovered()) {
                 const std::string_view color_tooltip =
@@ -2994,7 +2993,6 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                             SetPlotSeriesColor(
                                 series,
                                 PlotSeriesColor::Auto()));
-
                 }
                 ImGui::EndPopup();
             }

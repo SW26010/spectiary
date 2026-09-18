@@ -1485,15 +1485,20 @@ void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
         specforge::UiText(
             specforge::UiLanguage::English,
             specforge::LocalUserStateArea::
-                SpectrumView) ==
-            "Spectrum view" &&
+                SpectrumViewportState) ==
+            "Spectrum viewport state" &&
         specforge::UiText(
             specforge::UiLanguage::
                 SimplifiedChinese,
             specforge::LocalUserStateArea::
-                SpectrumView) ==
-            "光谱视图",
+                SpectrumViewportState) ==
+            "光谱视口状态",
         "spectrum view persistence area should be localized");
+    Require(specforge::UiText(specforge::UiLanguage::English,
+                specforge::LocalUserStateArea::SpectrumPlotPreferences) == "Spectrum plot preferences" &&
+            specforge::UiText(specforge::UiLanguage::SimplifiedChinese,
+                specforge::LocalUserStateArea::SpectrumPlotPreferences) == "光谱曲线偏好",
+        "plot preference persistence area should be distinct and localized");
     specforge::LocalUserStateHealthMessage retrying{
         .area =
             specforge::LocalUserStateArea::
