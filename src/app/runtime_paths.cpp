@@ -151,9 +151,9 @@ void SetLocalUserStatePaths(
     paths.sample_navigation_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kSampleNavigationState;
-    paths.sample_labeling_state_path =
+    paths.legacy_sample_labeling_state_path =
         paths.local_user_state_root /
-        local_user_state_paths::kSampleLabelingState;
+        local_user_state_paths::kLegacySampleLabelingState;
     paths.sample_workflow_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kSampleWorkflowState;
@@ -256,6 +256,10 @@ RuntimePaths RuntimePathsForDeployment(
         paths.state_root / local_user_state_paths::kSpectrumViewportState;
     paths.logs_root = paths.application_data_root / "logs";
     paths.unsaved_root = paths.application_data_root / "unsaved";
+    paths.sample_labeling_state_path =
+        paths.state_root / local_user_state_paths::kSampleLabelingState;
+    paths.sample_labeling_drafts_path =
+        paths.unsaved_root / local_user_state_paths::kSampleLabelingDrafts;
     const auto disposable = CheckedRoot(inputs.system_temp_directory
         ? inputs.system_temp_directory() : std::filesystem::temp_directory_path());
     paths.temp_root = disposable / project_identity::kApplicationId / "temp";

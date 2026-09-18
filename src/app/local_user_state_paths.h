@@ -21,6 +21,10 @@ inline constexpr char kSourceSessionState[] = "source-session.json";
 inline constexpr char kSampleNavigationState[] =
     "sample-navigation-state.json";
 inline constexpr char kSampleLabelingState[] =
+    "sample-labeling-state.json";
+inline constexpr char kSampleLabelingDrafts[] =
+    "sample-labeling-drafts.json";
+inline constexpr char kLegacySampleLabelingState[] =
     "sample-labeling-tasks.json";
 inline constexpr char kSampleWorkflowState[] =
     "sample-workflow-state.json";

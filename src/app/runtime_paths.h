@@ -52,6 +52,8 @@ struct RuntimePaths {
     std::filesystem::path source_session_state_path;
     std::filesystem::path sample_navigation_state_path;
     std::filesystem::path sample_labeling_state_path;
+    std::filesystem::path sample_labeling_drafts_path;
+    std::filesystem::path legacy_sample_labeling_state_path;
     std::filesystem::path sample_workflow_state_path;
     std::filesystem::path spectral_line_user_state_path;
 };

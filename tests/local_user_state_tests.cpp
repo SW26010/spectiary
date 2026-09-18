@@ -96,7 +96,11 @@ void RequireCompleteLocalUserStatePathMapping(
         "navigation state should use the canonical name");
     Require(
         paths.sample_labeling_state_path ==
-            root / kSampleLabelingState,
+            paths.state_root / kSampleLabelingState &&
+        paths.sample_labeling_drafts_path ==
+            paths.unsaved_root / kSampleLabelingDrafts &&
+        paths.legacy_sample_labeling_state_path ==
+            root / kLegacySampleLabelingState,
         "labeling state should use the canonical name");
     Require(
         paths.sample_workflow_state_path ==

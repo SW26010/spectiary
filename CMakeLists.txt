@@ -368,6 +368,7 @@ add_library(specforge_sessions STATIC
     src/ui/sample_annotation_labeling_rules.cpp
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_state_cache_io.cpp
+    src/ui/sample_labeling_persistence_owners.cpp
     src/ui/sample_name_autocomplete.cpp
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_sequence.cpp
@@ -710,6 +711,11 @@ add_test(
 specforge_add_test(
     specforge_local_user_state_tests
     tests/local_user_state_tests.cpp
+    specforge_sessions
+)
+specforge_add_test(
+    specforge_sample_labeling_persistence_owner_tests
+    tests/sample_labeling_persistence_owner_tests.cpp
     specforge_sessions
 )
 specforge_add_portable_only_test(
