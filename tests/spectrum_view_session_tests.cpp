@@ -602,6 +602,7 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
         specforge::LoadSpectrumViewStateCache(path);
     Require(
         legacy.warning.empty() &&
+            legacy.issue_kind == specforge::VersionedJsonCacheLoadIssueKind::None &&
             legacy.state.plot_colors ==
                 specforge::SpectrumPlotColors{},
         "schema 1 viewport state should migrate to canonical Auto colors without a warning");
@@ -629,6 +630,7 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             explicit_color();
     Require(
         !damaged.warning.empty() &&
+            damaged.issue_kind == specforge::VersionedJsonCacheLoadIssueKind::None &&
             damaged.state.plot_colors.raw_spectrum.mode() ==
                 specforge::PlotSeriesColorMode::Auto &&
             damaged.state.plot_colors.gaussian_smoothing.mode() ==

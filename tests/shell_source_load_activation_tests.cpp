@@ -201,6 +201,12 @@ struct ShellUiTestAccess {
             MarkDirtyAt(now);
     }
 
+    static LocalUserStatePersistenceStatus SpectrumViewPersistenceStatus(
+        const ShellUi& shell)
+    {
+        return shell.spectrum_view_state_persistence_.PersistenceStatus();
+    }
+
     static std::optional<PlotViewLimits>
     LockedViewportLimits(const ShellUi& shell)
     {
@@ -5016,6 +5022,100 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
         "a superseded external FITS trace should retain the resolved preferred member index");
 }
 
+void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
+{
+    using namespace specforge;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_view_writeback_safety");
+    std::filesystem::create_directories(root);
+    RuntimePathInputs inputs;
+    inputs.executable_path = CurrentExecutablePath();
+    inputs.local_user_state_root_override = root;
+    const auto startup = PrepareSpecForgeStartup(std::move(inputs));
+    const auto path = startup.runtime_paths().spectrum_view_state_path;
+    const std::array<std::string, 4> documents{
+        "{\"format_kind\":\"specforge.spectrum_view.state\",\"schema_version\":999}",
+        "{broken json",
+        "[]",
+        "temporarily unreadable original",
+    };
+    for (std::size_t i = 0; i < documents.size(); ++i) {
+        if (i == 3) {
+            std::filesystem::create_directory(path);
+        } else {
+            std::ofstream(path, std::ios::binary) << documents[i];
+        }
+        const auto loaded = LoadSpectrumViewStateCache(path);
+        const auto expected_issue = i == 3
+            ? VersionedJsonCacheLoadIssueKind::ReadFailed
+            : i == 0 ? VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema
+                     : VersionedJsonCacheLoadIssueKind::InvalidDocument;
+        Require(loaded.issue_kind == expected_issue,
+            "failed view load must retain the exact structured issue");
+        {
+            ShellUi shell(startup);
+            const auto load_status = Access::SpectrumViewPersistenceStatus(shell);
+            Require(!load_status.load_warning.empty(),
+                "protected view state must expose the original load warning");
+            Require(Access::SpectrumView(shell).plot_colors == SpectrumPlotColors{} &&
+                    !Access::LockedViewportLimits(shell),
+                "failed loads must still allow default colors and an automatic viewport");
+            if (i == 3) {
+                Require(loaded.issue_kind == VersionedJsonCacheLoadIssueKind::ReadFailed,
+                    "directory fixture must exercise a read failure");
+                std::filesystem::remove(path);
+                std::ofstream(path, std::ios::binary) << documents[i];
+            }
+            Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1.0f}));
+            const auto now = LocalUserStateSaveScheduler::Clock::now();
+            const auto previous_deadline = shell.NextMaintenanceDeadline();
+            Access::MarkSpectrumViewStateDirtyAt(shell, now);
+            Require(shell.NextMaintenanceDeadline() == previous_deadline,
+                "protected view mutations must not schedule an automatic write wakeup");
+            shell.RunMaintenance(now + std::chrono::seconds(2));
+            {
+                std::ifstream original(path, std::ios::binary);
+                Require(std::string((std::istreambuf_iterator<char>(original)), {}) == documents[i],
+                    "routine maintenance must preserve the original bytes before shutdown");
+            }
+            Require(shell.FlushLocalState().spectrum_view_saved,
+                "skipping protected view state is not a save failure");
+            const auto skipped_status = Access::SpectrumViewPersistenceStatus(shell);
+            Require(skipped_status.load_warning == load_status.load_warning &&
+                    skipped_status.load_diagnostic_detail == load_status.load_diagnostic_detail &&
+                    !skipped_status.retrying && skipped_status.save_message.empty(),
+                "skipping automatic writes must retain load diagnostics without a save failure");
+        }
+        {
+            // Exercise destruction without an earlier explicit final flush too.
+            ShellUi shell(startup);
+        }
+        std::ifstream stream(path, std::ios::binary);
+        const std::string contents((std::istreambuf_iterator<char>(stream)), {});
+        Require(contents == documents[i],
+            "maintenance, shutdown and destruction must preserve failed-load bytes");
+        stream.close();
+        std::filesystem::remove(path);
+    }
+    {
+        ShellUi shell(startup);
+        Require(shell.FlushLocalState().spectrum_view_saved && std::filesystem::exists(path),
+            "missing view state must permit normal first-write creation");
+    }
+    {
+        ShellUi shell(startup);
+        Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+            PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1.0f}));
+        Require(shell.FlushLocalState().spectrum_view_saved,
+            "supported view state must remain writable after restart");
+    }
+    Require(LoadSpectrumViewStateCache(path).state.plot_colors.raw_spectrum.mode() ==
+            PlotSeriesColorMode::ExplicitColor,
+        "supported startup load must persist subsequent runtime color changes");
+    std::filesystem::remove_all(root);
+}
+
 void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
 {
     using namespace std::chrono_literals;
@@ -6510,6 +6610,7 @@ int main()
         RUN_SHELL_TEST(TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState);
         RUN_SHELL_TEST(TestShellFlushResultNamesEveryFailedOwner);
         RUN_SHELL_TEST(TestRealShellFlushAndHealthKeepIndependentSettingsOwners);
+        RUN_SHELL_TEST(TestSpectrumViewLoadFailurePreservesOriginalOnFlush);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
