@@ -6,6 +6,9 @@ Status: Accepted. Date: 2026-09-19.
 reads/writes `config/spectrum-plot-preferences.json` beneath the resolved
 `application_data_root`. `SpectrumViewportState` owns lock state, source
 collection identity and x/y limits in `state/spectrum-viewport-state.json`.
+An explicit runtime/automation root override redirects both owners in either
+storage profile, including Portable. Package-relative locators continue to use
+the executable-based `package_root`, independently of this isolated data root.
 Both use schema 1 and separate format kinds in the existing `specforge.*`
 machine-format namespace. Neither changes source identity or rendering.
 

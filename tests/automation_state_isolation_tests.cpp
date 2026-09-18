@@ -26,6 +26,22 @@
 #include <utility>
 #include <vector>
 
+namespace specforge {
+struct ShellUiTestAccess {
+    static SpectrumViewSessionView SpectrumView(const ShellUi& shell)
+    {
+        return shell.spectrum_view_session_.View();
+    }
+
+    static void ChangeSpectrumPreferencesAndViewport(ShellUi& shell, PlotSeriesColor color)
+    {
+        shell.spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotSeriesColor(
+            SpectrumPlotSeries::RawSpectrum, std::move(color)));
+        shell.spectrum_view_session_.Submit(SpectrumViewSessionCommand::RequestFitView());
+    }
+};
+}  // namespace specforge
+
 namespace {
 
 constexpr char kLabelingTaskId[] =
@@ -62,6 +78,65 @@ std::filesystem::path UniqueRoot()
            ("specforge-automation-state-isolation-" +
             std::to_string(GetCurrentProcessId()) +
             "-" + std::to_string(suffix));
+}
+
+void TestPortableSpectrumOwnerIsolation(const std::filesystem::path& fixture_root)
+{
+    using namespace specforge;
+    const auto package = fixture_root / "portable-package";
+    const auto isolated_root = fixture_root / "portable-automation";
+    std::filesystem::create_directories(package);
+    // Deployment selection is independent of optional build provenance.
+    std::ofstream(package / project_identity::kMetadataFilename) <<
+        R"({"schema_version":6,"deployment":{"distribution":"portable","storage_profile":"portable"}})";
+    RuntimePathInputs inputs{.executable_path = package / "renamed.exe"};
+    const auto ordinary = PrepareSpecForgeStartup(inputs);
+    Require(ordinary.runtime_paths().storage_profile == StorageProfile::Portable,
+        "isolation fixture must exercise actual Portable startup");
+    const auto config = ordinary.runtime_paths().spectrum_plot_preferences_path;
+    const auto state = ordinary.runtime_paths().spectrum_viewport_state_path;
+    const SpectrumPlotPreferences preferences{{
+        .raw_spectrum = PlotSeriesColor::ExplicitColor({0.1f, 0.2f, 0.3f, 1}),
+    }};
+    Require(SaveSpectrumPlotPreferences(config, preferences), "seed ordinary Portable preferences");
+    Require(SaveSpectrumViewportState(state, {true, "ordinary-source", {1, 2, 3, 4}}),
+        "seed ordinary Portable viewport");
+    const auto config_bytes = ReadFile(config);
+    const auto state_bytes = ReadFile(state);
+    const auto fixed_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+    std::filesystem::last_write_time(config, fixed_time);
+    std::filesystem::last_write_time(state, fixed_time);
+
+    inputs.local_user_state_root_override = isolated_root;
+    const auto isolated = PrepareSpecForgeStartup(inputs);
+    const auto& paths = isolated.runtime_paths();
+    Require(paths.package_root == package && paths.application_data_root == isolated_root &&
+            paths.spectrum_plot_preferences_path == isolated_root / "config" / "spectrum-plot-preferences.json" &&
+            paths.spectrum_viewport_state_path == isolated_root / "state" / "spectrum-viewport-state.json",
+        "Portable automation must isolate both final spectrum paths");
+    const auto isolated_color = PlotSeriesColor::ExplicitColor({0.7f, 0.6f, 0.5f, 1});
+    {
+        ShellUi shell(isolated);
+        const auto view = ShellUiTestAccess::SpectrumView(shell);
+        Require(view.plot_colors == SpectrumPlotColors{} &&
+                view.viewport_range_mode == SpectrumViewportRangeMode::Automatic,
+            "Portable automation must not import ordinary spectrum preferences or viewport");
+        ShellUiTestAccess::ChangeSpectrumPreferencesAndViewport(shell, isolated_color);
+        Require(shell.FlushLocalState().all_saved(), "isolated spectrum mutations must flush normally");
+    }
+    Require(LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors.raw_spectrum == isolated_color &&
+            LoadSpectrumViewportState(paths.spectrum_viewport_state_path).document_present,
+        "Portable spectrum writes must establish only isolated owner files");
+    {
+        ShellUi shell(isolated);
+        Require(ShellUiTestAccess::SpectrumView(shell).plot_colors.raw_spectrum == isolated_color,
+            "Portable automation restart must load its own preferences");
+        Require(shell.FlushLocalState().all_saved(), "isolated restart should flush normally");
+    }
+    Require(ReadFile(config) == config_bytes && ReadFile(state) == state_bytes &&
+            std::filesystem::last_write_time(config) == fixed_time &&
+            std::filesystem::last_write_time(state) == fixed_time,
+        "Portable automation startup, write, shutdown and restart must leave ordinary owner files untouched");
 }
 
 std::optional<std::filesystem::path> ArgumentPath(
@@ -755,6 +830,8 @@ int wmain(int argc, wchar_t** argv)
         std::filesystem::exists(
             automation_root),
         "automation state should remain scoped to the launcher-provided root");
+
+    TestPortableSpectrumOwnerIsolation(fixture_root);
 
     std::filesystem::remove_all(
         fixture_root,

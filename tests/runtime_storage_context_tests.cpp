@@ -76,10 +76,28 @@ void TestStorageContext(const fs::path& test_root)
             "override injects an already resolved root without platform lookup");
     Require(overridden.local_user_state_root == overridden.application_data_root, "isolated business writes");
     const auto portable_override = RuntimePathsForDeployment(portable, inputs);
-    Require(portable_override.package_root == package && portable_override.application_data_root == package,
-            "Portable override must not change package-relative identity");
+    Require(portable_override.package_root == package &&
+            portable_override.application_data_root == *inputs.local_user_state_root_override,
+            "Portable override isolates managed storage without changing package identity");
     Require(portable_override.local_user_state_root == *inputs.local_user_state_root_override,
             "Portable runtime override isolates existing persistence");
+    Require(portable_override.spectrum_plot_preferences_path ==
+                *inputs.local_user_state_root_override / "config" / "spectrum-plot-preferences.json" &&
+            portable_override.spectrum_viewport_state_path ==
+                *inputs.local_user_state_root_override / "state" / "spectrum-viewport-state.json",
+            "Portable override must isolate both spectrum owners");
+    Require(portable_override.config_root == overridden.config_root &&
+            portable_override.state_root == overridden.state_root &&
+            portable_override.logs_root == overridden.logs_root &&
+            portable_override.unsaved_root == overridden.unsaved_root,
+            "both profiles must use the injected root for managed role namespaces");
+    const auto source = package / "work" / "source.npy";
+    const auto locator = PersistedPathReferenceJson(source, portable_override);
+    Require(locator.at("path_kind") == "package_relative" &&
+            ReadPersistedPathReference(locator, portable_override) == source &&
+            ReadPersistedPathReference(locator, paths) == source &&
+            portable_override.public_spectral_line_catalog_path == paths.public_spectral_line_catalog_path,
+            "storage isolation must not rebase Portable source locators or public resources");
     inputs.local_user_state_root_override = fs::path{};
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
     inputs.local_user_state_root_override = "relative";

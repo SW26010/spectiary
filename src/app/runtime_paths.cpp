@@ -242,12 +242,11 @@ RuntimePaths RuntimePathsForDeployment(
     }
 
     if (inputs.local_user_state_root_override) {
-        SetLocalUserStatePaths(
-            paths,
-            CheckedRoot(*inputs.local_user_state_root_override));
-        // Portable package-relative identity remains tied to the executable.
-        // The override isolates existing persistence; LocalAppData also uses it
-        // as the final application root. Portable always keeps root == package.
+        // Isolation covers both transitional files and final role namespaces.
+        // Portable locators and public resources still use package_root, which
+        // remains tied to the executable rather than this injected data root.
+        paths.application_data_root = CheckedRoot(*inputs.local_user_state_root_override);
+        SetLocalUserStatePaths(paths, paths.application_data_root);
     }
     paths.config_root = paths.application_data_root / "config";
     paths.state_root = paths.application_data_root / "state";

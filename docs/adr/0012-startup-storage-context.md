@@ -12,7 +12,8 @@ startup. Locator codecs require a context argument. Detached controllers with no
 storage paths have no implicit persistence; all-empty preparation paths use only
 their supplied context, and partial path sets remain invalid.
 
-The final `application_data_root` is `package_root` for Portable and
+Without an explicit isolation override, the final `application_data_root` is
+`package_root` for Portable and
 `%LOCALAPPDATA%\Spectiary` for local-app-data deployments. The latter consumes
 `project_identity::kLocalAppDataLeaf` directly. LocalAppData is queried only when
 selected and not already supplied. Missing, relative, inaccessible or non-directory
@@ -38,9 +39,10 @@ reads, dual writes, copying or migration.
 
 An injected `local_app_data_user_state_root` supplies a resolved physical root for
 both local-app-data views. The runtime/automation `local_user_state_root_override`
-isolates existing persistence in either profile. In local-app-data it also
-supplies `application_data_root`; in Portable it does not change the invariant
-`application_data_root == package_root` or the basis of package-relative locators.
+isolates transitional persistence and supplies `application_data_root` in both
+profiles, including its final config/state/logs/unsaved role roots. This explicit
+isolation exception also applies to Portable; `package_root`, public resources
+and the basis of package-relative locators remain tied to the executable.
 Overrides must themselves be valid absolute roots; they are not fallback policies.
 
 The eventual physical cutover remains part of #103 after the #109 labeling and
