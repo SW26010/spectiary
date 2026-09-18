@@ -21,7 +21,7 @@ namespace specforge::metadata_validation {
     std::string_view source_mode,
     const std::optional<std::string>& source_revision);
 
-// Validates every field emitted by the schema 5 build/artifact contract. The
+// Validates every field emitted by the schema 6 build/artifact contract. The
 // build identity comparison against the running executable remains the
 // parser's responsibility; this function validates the serialized values.
 [[nodiscard]] bool ValidateSchema6BuildMetadata(

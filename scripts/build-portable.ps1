@@ -2,7 +2,7 @@
 param(
     [string]$Preset = 'vs2022-x64-release-static',
     [string]$Configuration = 'Release',
-    [string]$PackageName = 'Spectiary-portable',
+    [string]$PackageName,
     [string]$BuildRoot,
     [string]$DistRoot,
     [Parameter(DontShow = $true)]
@@ -16,6 +16,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'project-identity.ps1')
+if (-not $PSBoundParameters.ContainsKey('PackageName')) {
+    $PackageName = "$($ProjectIdentity.artifact_basename)-portable"
+}
 Import-Module `
     (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
     -Force `
@@ -253,7 +256,8 @@ $productName = Get-RequiredMetadataString `
     -Metadata $productMetadata `
     -PropertyName 'version')
 $metadataApplicationId = Get-RequiredMetadataString -Metadata $sourceMetadata -PropertyName 'application_id'
-if ($metadataApplicationId -cne $ApplicationId) {
+if ($sourceMetadata.PSObject.Properties.Name -cnotcontains 'application_id' -or
+    $metadataApplicationId -cne $ApplicationId) {
     throw 'Build metadata application_id does not match the founding identity.'
 }
 foreach ($propertyName in @(

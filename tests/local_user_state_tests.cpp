@@ -161,7 +161,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         std::filesystem::temp_directory_path() / "specforge_runtime_path_installed";
 
     specforge::RuntimePathInputs inputs;
-    inputs.executable_path = package_root / "Spectiary.exe";
+    inputs.executable_path = package_root / "arbitrarily-renamed-program.exe";
     inputs.local_app_data_user_state_root = installed_root;
 
     const specforge::RuntimePaths portable_paths =
@@ -217,6 +217,17 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         winget_paths.local_user_state_root ==
             installed_paths.local_user_state_root,
         "WinGet distribution should not override LocalAppData storage");
+
+    for (const auto& invalid_path : {std::filesystem::path("relative.exe"), package_root / ""}) {
+        inputs.executable_path = invalid_path;
+        bool rejected = false;
+        try {
+            (void)specforge::RuntimePathsForDeployment({}, inputs);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        Require(rejected, "invalid executable locations must not invent a package root");
+    }
 }
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()

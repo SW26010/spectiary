@@ -1,38 +1,34 @@
-# Schema 5 Release Artifacts
+# Schema 6 Release Artifacts
 
-This document describes the build and release contract for the schema 5
-`SpecForge.exe` artifact. The general developer setup and entrypoints remain in
+This document describes the build and release contract for the schema 6
+`Spectiary.exe` artifact. The general developer setup and entrypoints remain in
 [`engineering_setup.md`](engineering_setup.md); this page records the points
 that make an executable and its metadata a single release unit.
 
 ## Metadata files and compatibility
 
-The current sidecar is `specforge_metadata.json`, placed beside the executable.
-Production native builds create it as schema 5 after the final executable link.
-The runtime still reads schema 3, 4, and 5 for compatibility:
-
-- `specforge_metadata.json` accepts schema 4 or 5.
-- The legacy `specforge_build_metadata.json` name accepts schema 3.
-- Schema 3 and 4 remain readable, but they do not carry the schema 5 finalized
-  timestamp and executable digest.
+The current sidecar is `spectiary_metadata.json`, placed beside the executable.
+Production native builds create it as schema 6 after the final executable link.
+Only schema 6 is accepted. Retired schema 3/4/5 sidecars and their old filenames are not compatibility aliases.
 
 The build-output sidecar has no `deployment` object. Portable packaging adds
 that object to the copy inside the package, so deployment identity remains
 separate from the channel-neutral executable and its build identity.
 
-## Schema 5 contract
+## Schema 6 contract
 
-Schema 5 retains the product and build provenance fields and adds two required
-finalization fields:
+Schema 6 separates application identity from display/product naming. The explicit naming source is `config/project_identity.json`; product text never determines a storage path or IPC identity.
 
 | Location | Requirement |
 | --- | --- |
-| `schema_version` | Integer `5`. |
-| `build.cfitsio` | Current producers and Portable packages require the non-empty, unpadded CFITSIO package version parsed from the installed vcpkg SPDX metadata. The checked-in CFITSIO notice heading must carry the same version. Runtime readers retain compatibility with schema 5 sidecars produced before this field existed. |
-| `build.yaml_cpp` | Current producers write the non-empty, unpadded yaml-cpp package version. Runtime readers keep schema 5 sidecars created before this field was introduced compatible by treating an absent member as legacy provenance; a present but malformed member remains unavailable. |
+| `schema_version` | Integer `6`. |
+| `application_id` | Full immutable founding identity `0238d5bf7b34bb99c006f9807537d31234ca2e3d`. |
+| `product.name` | Display metadata; does not participate in machine identity matching. |
+| `build.cfitsio` | Current producers and Portable packages require the non-empty, unpadded CFITSIO package version parsed from the installed vcpkg SPDX metadata. The checked-in CFITSIO notice heading must carry the same version. The field is required. |
+| `build.yaml_cpp` | Current producers write the non-empty, unpadded yaml-cpp package version. A missing or malformed member makes build provenance unavailable. |
 | `build.completed_at_utc` | A valid UTC timestamp in exactly `YYYY-MM-DDTHH:mm:ssZ` form. It has no fractional seconds or offset. |
-| `artifact.file` | Exactly `SpecForge.exe`. On Windows, the finalizer accepts this filename case-insensitively; another filename is rejected. |
-| `artifact.sha256` | The lowercase, 64-character SHA-256 digest of that final `SpecForge.exe`. |
+| `artifact.file` | Exactly `Spectiary.exe`. On Windows, the finalizer accepts this filename case-insensitively; another filename is rejected. |
+| `artifact.sha256` | The lowercase, 64-character SHA-256 digest of that final `Spectiary.exe`. |
 
 The existing required build strings must be non-empty, unpadded, and free of
 control characters where applicable. Compiler and CMake versions use dotted
@@ -40,13 +36,7 @@ numeric forms. `source_mode` is `working_tree` with a JSON `null`
 `source_revision`, or `head` with a full 40-character lowercase Git object ID.
 The executable architecture is `amd64`.
 
-The schema number stays at 5 for the CFITSIO and yaml-cpp provenance additions
-because the runtime reader distinguishes legacy absence from malformed
-presence. New finalizer output and Portable packages are stricter: they must
-contain both fields, and each Portable dependency-notice heading must carry the
-same parsed package version. Thus old schema 5 development sidecars remain
-readable without permitting a newly published package to omit or falsify a
-dependency.
+CFITSIO and yaml-cpp are both mandatory in schema 6. Package dependency notices must match those versions.
 
 `windows_sdk_version` may be JSON `null` for a development build when CMake
 does not expose an authoritative SDK selection. A formal Portable package must
@@ -67,13 +57,13 @@ The production build has an explicit ordering contract:
 1. CMake builds `specforge_metadata_finalizer_tool` as a dependency of the
    native target.
 2. A pre-link command removes the executable-adjacent
-   `specforge_metadata.json`, invalidating any sidecar from an older EXE.
-3. `specforge_native` links the final `SpecForge.exe`.
-4. A future signing step signs the finished `SpecForge.exe`.
+   `spectiary_metadata.json`, invalidating any sidecar from an older EXE.
+3. `specforge_native` links the final `Spectiary.exe`.
+4. A future signing step signs the finished `Spectiary.exe`.
 5. A post-build command invokes the finalizer with the signed EXE and its
-   adjacent `specforge_metadata.json` path.
+   adjacent `spectiary_metadata.json` path.
 6. The finalizer hashes the signed EXE, obtains the UTC completion time,
-   fills the schema 5 fields, and runs the same strict validation used by the
+   fills the schema 6 fields, and runs the same strict validation used by the
    metadata reader.
 7. It writes a temporary JSON file and atomically replaces the metadata target.
 
@@ -82,9 +72,9 @@ The release sequence is therefore `link → sign → hash → metadata finalizat
 the equivalent unsigned path `link → hash/finalize`; signing must not be added
 after metadata finalization or packaging.
 
-The executable path must name the canonical `SpecForge.exe` artifact. The
+The executable path must name the canonical `Spectiary.exe` artifact. The
 metadata path must be exactly its normalized, executable-adjacent
-`specforge_metadata.json`; another filename or a path resolving anywhere else
+`spectiary_metadata.json`; another filename or a path resolving anywhere else
 is rejected before any cleanup. After validation, the finalizer derives its
 write and cleanup target from the executable path rather than deleting the
 caller-provided path. The pre-link invalidation occurs before the linker and
@@ -98,10 +88,9 @@ would reject; a later native relink can recreate the sidecar.
 Finalization occurs after `specforge_native` links and its post-build commands
 run. The `specforge_metadata` target declares the executable-adjacent sidecar
 as a byproduct, depends on the native executable and finalizer tool, and runs a
-freshness check. That check proves
-performs exactly four identity checks: `schema_version` is 5,
+freshness check. It checks the canonical `application_id`, `schema_version` equal to 6,
 `build.completed_at_utc` is present and non-empty, `artifact.file` is exactly
-`SpecForge.exe`, and `artifact.sha256` matches the current EXE hash. A missing
+`Spectiary.exe`, and `artifact.sha256` matches the current EXE hash. A missing
 or invalid sidecar, or any failed identity check, invokes the finalizer again.
 A timestamp-only edit that leaves those checks valid is intentionally preserved
 by a CMake no-op; the CTest regression verifies that it does not rewrite the
@@ -121,12 +110,12 @@ environment.
 Run the working-tree or isolated-`HEAD` entrypoint described in
 [`engineering_setup.md`](engineering_setup.md). The shared Portable builder:
 
-1. builds the release executable and requires schema 5 metadata beside it;
+1. builds the release executable and requires schema 6 metadata beside it;
 2. validates the strict schema, source tuple, canonical artifact filename,
    completion timestamp, dependency provenance, and formal Portable SDK
    requirement;
 3. checks that `artifact.sha256` equals the hash of the build-directory EXE;
-4. copies `SpecForge.exe` and metadata to a package root containing only the
+4. copies `Spectiary.exe` and metadata to a package root containing only the
    executable file, metadata file, and `Data/` directory; exact enumeration
    includes hidden entries and validates each entry type;
 5. adds `deployment.distribution: "portable"` and
@@ -146,16 +135,16 @@ The three executable values below must be identical before a package is
 accepted:
 
 ```text
-SHA256(build-directory SpecForge.exe)
+SHA256(build-directory Spectiary.exe)
         == artifact.sha256 in metadata
-        == SHA256(packaged SpecForge.exe)
+        == SHA256(packaged Spectiary.exe)
 ```
 
 The standalone verifier is also available for an existing package:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-portable.ps1 `
-    -BuildExecutable <path-to-build-SpecForge.exe> `
+    -BuildExecutable <path-to-build-Spectiary.exe> `
     -PackageRoot <path-to-SpecForge-portable> `
     -ZipPath <path-to-SpecForge-portable.zip>
 ```

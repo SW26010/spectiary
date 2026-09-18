@@ -1108,7 +1108,7 @@ Assert-Contains $packageScript `
     '"-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"' `
     'Portable packaging source-revision binding'
 Assert-Contains $packageScript `
-    "Join-Path `$sourceExecutableDirectory 'spectiary_metadata.json'" `
+    'Join-Path $sourceExecutableDirectory $MetadataFileName' `
     'Portable packaging metadata binding'
 Assert-Contains $packageScript `
     "Join-Path `$scriptRoot 'verify-portable.ps1'" `
@@ -1389,6 +1389,10 @@ try {
     New-Item -ItemType Directory -Path $snapshotPackageScriptsRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $snapshotPackageScriptsLibRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $snapshotPackageLegalRoot -Force | Out-Null
+    $snapshotIdentityRoot = Join-Path $snapshotPackageRoot 'config'
+    New-Item -ItemType Directory -Path $snapshotIdentityRoot -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'config\project_identity.json') -Destination $snapshotIdentityRoot
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\project-identity.ps1') -Destination $snapshotPackageScriptsRoot
     $snapshotPackageScriptPath = Join-Path `
         $snapshotPackageScriptsRoot `
         'build-portable.ps1'
@@ -1407,12 +1411,12 @@ try {
         [pscustomobject]@{
             Mode = 'working_tree'
             Revision = ''
-            PackageName = 'SpecForge-portable-working-tree-test'
+            PackageName = 'Spectiary-portable-working-tree-test'
         },
         [pscustomobject]@{
             Mode = 'head'
             Revision = $headRevision
-            PackageName = 'SpecForge-portable-head-test'
+            PackageName = 'Spectiary-portable-head-test'
         }
     )
 
@@ -1430,6 +1434,7 @@ try {
             -Destination (Join-Path $fixtureBuildRoot 'Spectiary.exe')
 
         $fixtureMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
+        $fixtureMetadata.product.name = 'Display-only rename fixture'
         $fixtureMetadata.build.source_mode = $fixture.Mode
         $fixtureMetadata.build.source_revision = if ($fixture.Mode -ceq 'working_tree') {
             $null
@@ -1509,7 +1514,7 @@ try {
             '-DistRoot',
             $testDistRoot,
             '-PackageName',
-            'SpecForge-portable-tampered-metadata',
+            'Spectiary-portable-tampered-metadata',
             '-Configuration',
             $Configuration
         ) `
@@ -1540,7 +1545,7 @@ try {
             '-DistRoot',
             $testDistRoot,
             '-PackageName',
-            'SpecForge-portable-tampered-executable',
+            'Spectiary-portable-tampered-executable',
             '-Configuration',
             $Configuration
         ) `
@@ -1844,6 +1849,22 @@ try {
 
     $invalidMetadataCases = @(
         [pscustomobject]@{
+            CaseId = 'reject-metadata-missing-application-id'
+            Description = 'Missing machine application identity'
+            PropertyName = 'application_id'
+            Remove = $true
+            Value = $null
+            ExpectedMessage = "missing non-empty string 'application_id'"
+        },
+        [pscustomobject]@{
+            CaseId = 'reject-metadata-foreign-application-id'
+            Description = 'Foreign machine application identity'
+            PropertyName = 'application_id'
+            Remove = $false
+            Value = 'SpecForge'
+            ExpectedMessage = 'application_id does not match the founding identity'
+        },
+        [pscustomobject]@{
             CaseId = 'reject-metadata-schema-string'
             Description = 'Metadata schema as string'
             PropertyName = 'schema_version'
@@ -1992,7 +2013,7 @@ try {
         $invalidMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
             ConvertFrom-Json
         $invalidMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
-        $metadataContainer = if ($invalidCase.PropertyName -ceq 'schema_version') {
+        $metadataContainer = if ($invalidCase.PropertyName -cin @('schema_version', 'application_id')) {
             $invalidMetadata
         }
         else {
@@ -2029,7 +2050,7 @@ try {
                 '-DistRoot',
                 $testDistRoot,
                 '-PackageName',
-                "SpecForge-portable-invalid-$($invalidCase.PropertyName)",
+                "Spectiary-portable-invalid-$($invalidCase.PropertyName)",
                 '-Configuration',
                 $Configuration
             ) `
@@ -2074,7 +2095,7 @@ try {
             '-DistRoot',
             $testDistRoot,
             '-PackageName',
-            'SpecForge-portable-invalid-head-revision-array',
+            'Spectiary-portable-invalid-head-revision-array',
             '-Configuration',
             $Configuration,
             '-SourceMode',

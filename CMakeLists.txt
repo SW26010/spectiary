@@ -536,7 +536,7 @@ target_link_libraries(
 set_target_properties(
     specforge_automation_launcher
     PROPERTIES
-        OUTPUT_NAME SpectiaryAutomation
+        OUTPUT_NAME "${PROJECT_artifact_basename}Automation"
         VS_DEBUGGER_WORKING_DIRECTORY
             "${CMAKE_SOURCE_DIR}"
 )
@@ -629,7 +629,7 @@ add_custom_target(specforge_portable_test_metadata
     DEPENDS
         specforge_metadata
         "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
-    COMMENT "Preparing schema 5 Portable runtime metadata for deterministic tests"
+    COMMENT "Preparing schema 6 Portable runtime metadata for deterministic tests"
     VERBATIM
 )
 

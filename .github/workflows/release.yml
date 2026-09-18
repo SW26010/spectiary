@@ -64,7 +64,8 @@ jobs:
             throw "Release commit $commitSha is not contained in origin/master."
           }
 
-          $packageName = "SpecForge-$version-windows-x64-portable"
+          $identity = Get-Content -Raw -LiteralPath config/project_identity.json | ConvertFrom-Json
+          $packageName = "$($identity.artifact_basename)-$version-windows-x64-portable"
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "package_name=$packageName" -Encoding utf8
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "commit_sha=$commitSha" -Encoding utf8
 

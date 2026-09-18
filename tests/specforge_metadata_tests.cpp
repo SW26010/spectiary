@@ -151,6 +151,20 @@ void TestIdentitySeparationAndSchemaCutover()
     identity.application_id = "wrong-application";
     Require(specforge::ReadSpecForgeMetadata(path, identity).build_metadata.status ==
         specforge::BuildMetadataStatus::Mismatch, "application identity must be matched independently");
+    auto renamed = Schema6Metadata();
+    renamed.replace(renamed.find("Spectiary\""), 9, "Other product");
+    WriteTextFile(path, renamed);
+    Require(specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity()).build_metadata.status ==
+        specforge::BuildMetadataStatus::Available, "sidecar display text is not machine identity");
+    for (const auto invalid_identity : {"", "SpecForge", "0238d5bf7b34bb99"}) {
+        auto document = CurrentMetadata(R"({"distribution":"portable","storage_profile":"portable"})");
+        document.replace(document.find(specforge::project_identity::kApplicationId), 40, invalid_identity);
+        WriteTextFile(path, document);
+        const auto result = specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
+        Require(!result.startup_error && result.deployment.storage_profile == specforge::StorageProfile::Portable &&
+            result.build_metadata.status != specforge::BuildMetadataStatus::Available,
+            "invalid application identity must reject provenance independently of deployment");
+    }
     for (const int version : {3, 4, 5, 7}) {
         auto document = Schema6Metadata();
         const auto offset = document.find("\"schema_version\": 6");

@@ -3,9 +3,9 @@
   <assemblyIdentity
     version="@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
     processorArchitecture="*"
-    name="@PROJECT_shell_identity@"
+    name="SpecForge"
     type="win32" />
-  <description>@PROJECT_product_display_name@</description>
+  <description>SpecForge</description>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>

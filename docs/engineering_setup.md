@@ -57,7 +57,7 @@ manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT`
 DirectX 11 来自 Windows SDK；`specforge_renderer` 封装 DX11/DXGI presentation，`specforge_native` 负责 Win32/DWM shell。
 FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
 `x64-windows`，允许 vcpkg 依赖以 DLL 形式存在；当前正式 Release preset
-统一继承 `x64-windows-static`，因此 CFITSIO 链入 `SpecForge.exe`，Portable
+统一继承 `x64-windows-static`，因此 CFITSIO 链入 `Spectiary.exe`，Portable
 包不携带 `cfitsio.dll`。这是当前 CFITSIO/Release 的具体选择，不是“所有依赖
 必须静态”的全局规则；依赖链接策略仍按组件和分发需求分别决定。
 `yaml-cpp` 用于 production ASDF sample-labeling 文档的受限 YAML metadata
@@ -261,11 +261,11 @@ Stop-Process -Id <cmakeId>,<ninjaId> -Force
 生成程序位于：
 
 ```text
-build/ninja-msvc-debug/SpecForge.exe
-build/ninja-msvc-release-static/SpecForge.exe
+build/ninja-msvc-debug/Spectiary.exe
+build/ninja-msvc-release-static/Spectiary.exe
 ```
 
-普通构建输出的 `specforge_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
+普通构建输出的 `spectiary_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
 panel 显示状态、profile 设置和默认日志分别写入 `%LOCALAPPDATA%\SpecForge` 下的对应文件或目录。
 Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，并可选择 profile 输出目录。
 设置 `SPECFORGE_PROFILE=1` 则从启动阶段自动录制；`SPECFORGE_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
@@ -275,8 +275,8 @@ Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，
 
 ## Portable release
 
-第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe`、
-`specforge_metadata.json` 和 `Data\`。第三方声明与数据来源内嵌在所有分发形式
+第一版 portable 是 no-launcher 包：zip 根目录包含 `Spectiary.exe`、
+`spectiary_metadata.json` 和 `Data\`。第三方声明与数据来源内嵌在所有分发形式
 共用的 EXE 中，可从 About 阅读。直接从当前工作区文件构建：
 
 ```powershell
@@ -305,26 +305,26 @@ Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
-目录和 ZIP 根部只保留文件 `SpecForge.exe`、文件 `specforge_metadata.json` 和
+目录和 ZIP 根部只保留文件 `Spectiary.exe`、文件 `spectiary_metadata.json` 和
 目录 `Data\`；根目录枚举包含隐藏项，不允许用隐藏文件绕过精确条目合同，也不要求
 EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt` 仍是可审查、可维护的唯一来源，
 构建时原样嵌入 EXE。
-当前 Release 验证还直接读取 `SpecForge.exe` 的普通与 delay-load PE import table，拒绝
+当前 Release 验证还直接读取 `Spectiary.exe` 的普通与 delay-load PE import table，拒绝
 `cfitsio.dll`、PThreads4W runtime DLL，以及因误开 CFITSIO 可选功能而出现的
 curl/bzip2 runtime DLL；
 Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`specforge_native` 完成最终链接后，
-CMake 的 post-build finalizer tool 读取实际 `SpecForge.exe`，计算 SHA-256 和 UTC 完成时间，
-并原子发布 schema 5 `specforge_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
-`deployment` 是独立维度。普通 build 输出只含 product/build/artifact，因此运行身份为 Standalone，
-数据目录为 `%LOCALAPPDATA%\SpecForge`。
+CMake 的 post-build finalizer tool 读取实际 `Spectiary.exe`，计算 SHA-256 和 UTC 完成时间，
+并原子发布 schema 6 `spectiary_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
+`deployment` 与顶层 `application_id` 是独立维度。普通 build 输出不含 deployment，因此运行身份为 Standalone，
+数据目录仍为 `%LOCALAPPDATA%\SpecForge`。#106-A 在 `config/project_identity.json` 中明确最终 leaf 为 `Spectiary`，实际目录切换由 #103 完成。
 
 `build` 中的构建环境字段为 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
 `target_architecture` 和 `windows_sdk_version`，另有严格的 `completed_at_utc`；这些值来自实际配置
 当前 target 的 CMake 或 finalizer。制品 ISA 统一记录为 `amd64`，Visual Studio platform、vcpkg triplet
-和 preset 中仍保留工具原生的 `x64` 拼写。`artifact.file` 必须是 `SpecForge.exe`，
+和 preset 中仍保留工具原生的 `x64` 拼写。`artifact.file` 必须是 `Spectiary.exe`，
 `artifact.sha256` 必须是该最终 EXE 的小写 64 字符十六进制 SHA-256。`completed_at_utc` 必须是
 `YYYY-MM-DDTHH:mm:ssZ` 的有效 UTC 时间；它表示 link 后 finalization 完成时间，不是可复现构建输入。
 
@@ -332,7 +332,7 @@ CMake 的 post-build finalizer tool 读取实际 `SpecForge.exe`，计算 SHA-25
 不会从 SDK 工具安装路径猜测。正式 Portable 打包仍要求 MSVC、x64 和非空合法的 Windows SDK 版本；
 PowerShell 不会从调用 shell 的环境重复推导构建信息。Portable 打包阶段只为复制出的 metadata 增加
 `deployment: { distribution: "portable", storage_profile: "portable" }`，并验证 build 目录 EXE、
-metadata artifact digest、包内 `SpecForge.exe` 以及 ZIP 对应 entry 的 SHA-256 一致；EXE 本身不含渠道或
+metadata artifact digest、包内 `Spectiary.exe` 以及 ZIP 对应 entry 的 SHA-256 一致；EXE 本身不含渠道或
 storage profile 差异。共同打包脚本接受两种严格组合：`working_tree` 必须使用 JSON `null` revision；
 `head` 必须显式携带完整 40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口
 负责解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，将 build provenance 原样保留到 Portable
@@ -346,8 +346,8 @@ metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 
 `build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
 并编译进 EXE。该身份包含产品版本、configuration、目标架构和构建来源，不包含 distribution 或
 storage profile。About 以这些 EXE 内字段为 build provenance 权威；它消费现有启动预检从 EXE 同目录
-metadata 读取并验证后形成的快照，覆盖受支持的 schema 3/4/5，而不是在 About 中重新读取文件；
-且仅在版本、configuration、架构、source mode/revision 全部匹配时显示
+metadata 读取并验证后形成的快照，覆盖受支持的 schema 6，而不是在 About 中重新读取文件；
+且仅在 application_id、版本、configuration、架构、source mode/revision 全部匹配时显示
 compiler、CMake、generator、Windows SDK 和依赖版本。About 始终显示当前运行中
 EXE 的 SHA-256；metadata 缺失，或 metadata 成功解析为受支持 envelope 但其中
 build-provenance/artifact 部分无效、不完整、核心字段不匹配或 artifact hash 不匹配时，
@@ -359,14 +359,13 @@ deployment 仍遵循既有启动失败契约，应用不会进入 About。
 `Source: Working tree`；对隔离提交构建直接显示完整 40 位 `source_revision`，不显示相对的
 `HEAD` 标签。复制诊断信息始终包含 source mode，且只有隔离提交构建包含完整 40 位 revision。
 About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
-无 metadata 或 schema 4/5 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
-仅兼容映射到 `portable|local_app_data` 存储。About 另外按需校验当前 EXE 的 SHA-256，并显示 schema 5
+无 metadata 或 schema 6 无 deployment 时显示 Standalone。旧 schema 3/4/5 和旧 sidecar 文件名不再兼容读取。About 另外按需校验当前 EXE 的 SHA-256，并显示 schema 6
 的完成时间；无法读取 EXE 时不显示该 hash。合法 storage selection 不受
 build provenance 或 artifact identity mismatch 影响；deployment 存在但字段缺失、类型错误或值未知时，
 `wWinMain` 在构造任何应用状态对象前明确失败。
 
-schema 5 只记录 link 完成后的 finalization 时间，不把 configure、compile 或 package 时间混为一谈；
-该 UTC 时间不参与 EXE 输入，因此不会改变受控构建下的二进制内容。schema 5 build provenance 字段仍只用于
+schema 6 只记录 link 完成后的 finalization 时间，不把 configure、compile 或 package 时间混为一谈；
+该 UTC 时间不参与 EXE 输入，因此不会改变受控构建下的二进制内容。schema 6 build provenance 字段仍只用于
 诊断和比较，`artifact.sha256` 提供 sidecar 与最终 EXE 的 identity binding，最终 Portable ZIP 仍由自己的
 SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` 分别属于独立契约。
 

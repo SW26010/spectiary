@@ -3,6 +3,5 @@
   "product_display_name": "Spectiary",
   "local_app_data_leaf": "Spectiary",
   "artifact_basename": "Spectiary",
-  "metadata_filename": "spectiary_metadata.json",
-  "shell_identity": "Spectiary.Desktop"
+  "metadata_filename": "spectiary_metadata.json"
 }

@@ -177,7 +177,7 @@ LauncherOptions ParseOptions(int argc, wchar_t** argv)
         specforge::CurrentExecutablePath();
     options.app_path =
         launcher_path.parent_path() /
-        "Spectiary.exe";
+        specforge::project_identity::kExecutableFilename;
 
     for (int index = 1; index < argc; ++index) {
         const std::wstring_view argument(argv[index]);

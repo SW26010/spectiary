@@ -8,7 +8,10 @@
 namespace specforge {
 
 struct RuntimePathInputs {
+    // Absolute actual executable location; package_root is its parent only.
     std::filesystem::path executable_path;
+    // Fully resolved physical root, independent of product display/artifact names.
+    // #103 owns adoption of project_identity::kLocalAppDataLeaf.
     std::filesystem::path local_app_data_user_state_root;
     std::optional<std::filesystem::path>
         local_user_state_root_override;

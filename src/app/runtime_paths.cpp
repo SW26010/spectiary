@@ -25,25 +25,12 @@
 namespace specforge {
 namespace {
 
-std::filesystem::path FallbackExecutablePath()
-{
-    std::error_code error;
-    std::filesystem::path current = std::filesystem::current_path(error);
-    if (error) {
-        current = std::filesystem::temp_directory_path();
-    }
-    return current / "SpecForge.exe";
-}
-
 std::filesystem::path PackageRootForExecutable(const std::filesystem::path& executable_path)
 {
-    if (executable_path.has_parent_path()) {
+    if (executable_path.is_absolute() && executable_path.has_filename()) {
         return executable_path.parent_path();
     }
-
-    std::error_code error;
-    std::filesystem::path current = std::filesystem::current_path(error);
-    return error ? std::filesystem::temp_directory_path() : current;
+    throw std::invalid_argument("An absolute executable path is required for the package root.");
 }
 
 std::optional<std::filesystem::path>
@@ -157,11 +144,13 @@ std::filesystem::path CurrentExecutablePath()
     }
 #endif
 
-    return FallbackExecutablePath();
+    throw std::runtime_error("Could not resolve the current executable path.");
 }
 
 std::filesystem::path DefaultLocalAppDataUserStateRoot()
 {
+    // Existing physical storage remains unchanged in #106-A. #103 will adopt
+    // project_identity::kLocalAppDataLeaf; do not add dual-root discovery here.
 #ifdef _WIN32
     PWSTR local_app_data_path = nullptr;
     const HRESULT result =
@@ -191,11 +180,6 @@ RuntimePaths RuntimePathsForDeployment(
     paths.public_spectral_line_catalog_path =
         paths.package_root / "config" / "spectral_lines.public.tsv";
 
-    std::filesystem::path local_app_data_root =
-        inputs.local_app_data_user_state_root.empty()
-        ? DefaultLocalAppDataUserStateRoot()
-        : std::move(inputs.local_app_data_user_state_root);
-
     switch (deployment.storage_profile) {
     case StorageProfile::Portable:
         SetLocalUserStatePaths(
@@ -205,7 +189,11 @@ RuntimePaths RuntimePathsForDeployment(
     case StorageProfile::LocalAppData:
         SetLocalUserStatePaths(
             paths,
-            std::move(local_app_data_root));
+            inputs.local_user_state_root_override
+                ? *inputs.local_user_state_root_override
+                : inputs.local_app_data_user_state_root.empty()
+                    ? DefaultLocalAppDataUserStateRoot()
+                    : std::move(inputs.local_app_data_user_state_root));
         break;
     }
 
@@ -242,8 +230,6 @@ RuntimePathInputs CurrentProcessRuntimePathInputs(
 {
     return {
         .executable_path = std::move(executable_path),
-        .local_app_data_user_state_root =
-            DefaultLocalAppDataUserStateRoot(),
         .local_user_state_root_override =
             RuntimeResourceUserStateRootOverride(),
     };

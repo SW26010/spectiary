@@ -4,9 +4,9 @@ namespace specforge::project_identity {
 // Permanent lineage token, not a runtime Git revision or a display name.
 inline constexpr char kApplicationId[] = "@PROJECT_founding_identity@";
 inline constexpr char kProductDisplayName[] = "@PROJECT_product_display_name@";
+// Final destination contract; physical adoption is owned by #103.
 inline constexpr char kLocalAppDataLeaf[] = "@PROJECT_local_app_data_leaf@";
 inline constexpr char kArtifactBasename[] = "@PROJECT_artifact_basename@";
 inline constexpr char kExecutableFilename[] = "@PROJECT_artifact_basename@.exe";
 inline constexpr char kMetadataFilename[] = "@PROJECT_metadata_filename@";
-inline constexpr char kShellIdentity[] = "@PROJECT_shell_identity@";
 }  // namespace specforge::project_identity
