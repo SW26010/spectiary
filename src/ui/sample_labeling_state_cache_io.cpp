@@ -1454,12 +1454,8 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
                         task_object,
                         state.sample_count,
                         cancellation_checkpoint,
-                        policy !=
-                            SampleLabelingStateCacheLoadPolicy::
-                                AllowPersistentOutputsWithoutResultHydration &&
-                        policy !=
-                            SampleLabelingStateCacheLoadPolicy::
-                                    InternalDraftsOnly, runtime_paths);
+                        policy == SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+                        runtime_paths);
                     if (policy ==
                             SampleLabelingStateCacheLoadPolicy::
                                 InternalDraftsOnly &&
@@ -1581,7 +1577,9 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     }
 
     auto ordinary = LoadSampleLabelingOrdinaryState(runtime_paths, path, cancellation_checkpoint);
-    auto drafts = LoadSampleLabelingDraftCheckpoints(draft_path, cancellation_checkpoint);
+    auto drafts = policy == SampleLabelingStateCacheLoadPolicy::OrdinaryRegistrationsOnly
+        ? SampleLabelingOwnerLoadResult<SampleLabelingDraftCheckpoints>{}
+        : LoadSampleLabelingDraftCheckpoints(draft_path, cancellation_checkpoint);
     SampleLabelingStateCacheLoadResult result;
     const auto report = [&](VersionedJsonCacheLoadIssueKind issue, const std::string& diagnostic) {
         if (issue == VersionedJsonCacheLoadIssueKind::None) return;

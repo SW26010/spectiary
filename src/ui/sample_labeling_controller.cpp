@@ -5862,7 +5862,7 @@ SampleLabelingController::LatestCacheHasOutputConflict(
             state_cache_path_,
             {},
             SampleLabelingStateCacheLoadPolicy::
-                AllowPersistentOutputsWithoutResultHydration);
+                OrdinaryRegistrationsOnly);
     if (latest.issue_kind !=
         SampleLabelingStateCacheLoadIssueKind::None) {
         return std::nullopt;

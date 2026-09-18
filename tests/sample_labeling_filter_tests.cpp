@@ -11721,6 +11721,17 @@ void TestSplitDraftCheckpointCleanupAndClose()
     Require(controller.FlushStateCache(), "retry registration and checkpoint cleanup");
     Require(nlohmann::json::parse(ReadTextFile(draft_path))["sources"].empty(),
         "successful registration retry should clean the retained checkpoint");
+
+    Require(controller.DeactivateActiveTask().accepted && controller.StartOrResumeTemporaryTask().accepted,
+        "create draft before checkpoint corruption");
+    Require(controller.UpsertActiveLabel({5, "Current", 'c'}).changed &&
+        controller.AssignLabel(2, 5).write.changed && controller.FlushStateCache(), "prepare authoritative memory");
+    { std::ofstream corrupt(draft_path, std::ios::trunc); corrupt << "{invalid checkpoint"; }
+    const auto third_output = directory / "third.asdf";
+    const auto third_save = controller.SaveActiveTemporaryTaskToOutput(third_output);
+    Require(third_save.output_saved && !third_save.state_saved &&
+        ReadCanonicalTestValues(third_output) == std::vector<std::int32_t>({-1, -1, 5}),
+        "an unreadable checkpoint must not gate Save As from current memory");
 }
 
 }  // namespace

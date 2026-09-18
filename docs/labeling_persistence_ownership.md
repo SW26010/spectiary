@@ -68,6 +68,8 @@ file is rewritten, rather than accumulating historical checkpoint generations.
 
 Save As constructs the full canonical document from current memory, acquires its
 output leases, checks conflicts, publishes atomically, and reopens/validates it.
+Output conflict checks read ordinary registrations, so a damaged best-effort
+checkpoint cannot prevent publishing an already-held in-memory draft.
 Only then does the controller adopt the canonical owner and update registration.
 Checkpoint cleanup is best-effort. A crash in that interval may leave a complete
 canonical document and a stale checkpoint. No publication WAL is needed.

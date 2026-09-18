@@ -70,6 +70,8 @@ struct SampleLabelingStateCachePatch {
 enum class SampleLabelingStateCacheLoadPolicy {
     AllowPersistentOutputs,
     AllowPersistentOutputsWithoutResultHydration,
+    // Output conflict checks must not depend on best-effort draft contents.
+    OrdinaryRegistrationsOnly,
     InternalDraftsOnly,
 };
 
