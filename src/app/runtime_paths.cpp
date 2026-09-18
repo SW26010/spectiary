@@ -27,10 +27,40 @@ namespace {
 
 std::filesystem::path PackageRootForExecutable(const std::filesystem::path& executable_path)
 {
-    if (executable_path.is_absolute() && executable_path.has_filename()) {
+    if (executable_path.is_absolute() && executable_path.has_filename() &&
+        executable_path.filename() != "." && executable_path.filename() != "..") {
         return executable_path.parent_path();
     }
     throw std::invalid_argument("An absolute executable path is required for the package root.");
+}
+
+std::filesystem::path CheckedRoot(const std::filesystem::path& root)
+{
+    if (root.empty() || !root.is_absolute() || root.native().find(L'\0') != std::wstring::npos) {
+        throw std::invalid_argument("Storage roots must be resolved absolute paths.");
+    }
+    std::error_code error;
+    // Also checks existing ancestors; no directories are created during resolution.
+    const auto resolved = std::filesystem::weakly_canonical(root, error);
+    if (error) {
+        throw std::filesystem::filesystem_error("Could not resolve storage root", root, error);
+    }
+    for (auto ancestor = resolved; !ancestor.empty();) {
+        const auto status = std::filesystem::status(ancestor, error);
+        if (error && error != std::errc::no_such_file_or_directory) {
+            throw std::filesystem::filesystem_error("Could not inspect storage root", ancestor, error);
+        }
+        if (std::filesystem::exists(status)) {
+            if (!std::filesystem::is_directory(status)) {
+                throw std::invalid_argument("Storage root has a non-directory ancestor.");
+            }
+            break;
+        }
+        const auto parent = ancestor.parent_path();
+        if (parent == ancestor) break;
+        ancestor = parent;
+    }
+    return root.lexically_normal();
 }
 
 std::optional<std::filesystem::path>
@@ -147,10 +177,9 @@ std::filesystem::path CurrentExecutablePath()
     throw std::runtime_error("Could not resolve the current executable path.");
 }
 
-std::filesystem::path DefaultLocalAppDataUserStateRoot()
+namespace {
+std::filesystem::path LocalAppDataDirectory()
 {
-    // Existing physical storage remains unchanged in #106-A. #103 will adopt
-    // project_identity::kLocalAppDataLeaf; do not add dual-root discovery here.
 #ifdef _WIN32
     PWSTR local_app_data_path = nullptr;
     const HRESULT result =
@@ -158,14 +187,20 @@ std::filesystem::path DefaultLocalAppDataUserStateRoot()
     if (SUCCEEDED(result) && local_app_data_path != nullptr) {
         std::filesystem::path root(local_app_data_path);
         CoTaskMemFree(local_app_data_path);
-        return root / L"SpecForge";
+        return CheckedRoot(root);
     }
     if (local_app_data_path != nullptr) {
         CoTaskMemFree(local_app_data_path);
     }
 #endif
 
-    return std::filesystem::temp_directory_path() / "SpecForge";
+    throw std::runtime_error("Could not resolve LocalAppData for persistent storage.");
+}
+}  // namespace
+
+std::filesystem::path DefaultLocalAppDataUserStateRoot()
+{
+    return CheckedRoot(LocalAppDataDirectory() / project_identity::kLocalAppDataLeaf);
 }
 
 RuntimePaths RuntimePathsForDeployment(
@@ -176,33 +211,52 @@ RuntimePaths RuntimePathsForDeployment(
     paths.distribution = deployment.distribution;
     paths.storage_profile = deployment.storage_profile;
     paths.executable_path = inputs.executable_path.empty() ? CurrentExecutablePath() : std::move(inputs.executable_path);
-    paths.package_root = PackageRootForExecutable(paths.executable_path);
+    paths.package_root = CheckedRoot(PackageRootForExecutable(paths.executable_path));
     paths.public_spectral_line_catalog_path =
         paths.package_root / "config" / "spectral_lines.public.tsv";
 
     switch (deployment.storage_profile) {
     case StorageProfile::Portable:
+        paths.application_data_root = paths.package_root;
         SetLocalUserStatePaths(
             paths,
             paths.package_root / "Data");
         break;
     case StorageProfile::LocalAppData:
-        SetLocalUserStatePaths(
-            paths,
-            inputs.local_user_state_root_override
-                ? *inputs.local_user_state_root_override
-                : inputs.local_app_data_user_state_root.empty()
-                    ? DefaultLocalAppDataUserStateRoot()
-                    : std::move(inputs.local_app_data_user_state_root));
+        if (inputs.local_user_state_root_override) {
+            paths.application_data_root = CheckedRoot(*inputs.local_user_state_root_override);
+            SetLocalUserStatePaths(paths, paths.application_data_root);
+        } else if (!inputs.local_app_data_user_state_root.empty()) {
+            paths.application_data_root = CheckedRoot(inputs.local_app_data_user_state_root);
+            SetLocalUserStatePaths(paths, paths.application_data_root);
+        } else {
+            const auto local = CheckedRoot(inputs.local_app_data_directory
+                ? inputs.local_app_data_directory() : LocalAppDataDirectory());
+            paths.application_data_root = CheckedRoot(local / project_identity::kLocalAppDataLeaf);
+            // #103-A deliberately preserves the existing business-file layout.
+            SetLocalUserStatePaths(paths, CheckedRoot(local / "SpecForge"));
+        }
         break;
+    default:
+        throw std::invalid_argument("Unknown storage profile.");
     }
 
     if (inputs.local_user_state_root_override) {
         SetLocalUserStatePaths(
             paths,
-            std::move(
-                *inputs.local_user_state_root_override));
+            CheckedRoot(*inputs.local_user_state_root_override));
+        // Portable package-relative identity remains tied to the executable.
+        // The override isolates existing persistence; LocalAppData also uses it
+        // as the final application root. Portable always keeps root == package.
     }
+    paths.config_root = paths.application_data_root / "config";
+    paths.state_root = paths.application_data_root / "state";
+    paths.logs_root = paths.application_data_root / "logs";
+    paths.unsaved_root = paths.application_data_root / "unsaved";
+    const auto disposable = CheckedRoot(inputs.system_temp_directory
+        ? inputs.system_temp_directory() : std::filesystem::temp_directory_path());
+    paths.temp_root = disposable / project_identity::kApplicationId / "temp";
+    paths.cache_root = disposable / project_identity::kApplicationId / "cache";
     return paths;
 }
 

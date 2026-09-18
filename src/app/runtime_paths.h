@@ -3,6 +3,7 @@
 #include "app/specforge_metadata.h"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 
 namespace specforge {
@@ -11,10 +12,12 @@ struct RuntimePathInputs {
     // Absolute actual executable location; package_root is its parent only.
     std::filesystem::path executable_path;
     // Fully resolved physical root, independent of product display/artifact names.
-    // #103 owns adoption of project_identity::kLocalAppDataLeaf.
     std::filesystem::path local_app_data_user_state_root;
     std::optional<std::filesystem::path>
         local_user_state_root_override;
+    // Platform seams. Invoked only when the selected profile needs them.
+    std::function<std::filesystem::path()> local_app_data_directory;
+    std::function<std::filesystem::path()> system_temp_directory;
 };
 
 struct RuntimePaths {
@@ -22,7 +25,16 @@ struct RuntimePaths {
     StorageProfile storage_profile = StorageProfile::LocalAppData;
     std::filesystem::path executable_path;
     std::filesystem::path package_root;
+    std::filesystem::path application_data_root;
+    std::filesystem::path config_root;
+    std::filesystem::path state_root;
+    std::filesystem::path logs_root;
+    std::filesystem::path unsaved_root;
+    std::filesystem::path cache_root;
+    std::filesystem::path temp_root;
     std::filesystem::path public_spectral_line_catalog_path;
+    // Transitional business-file placement until #109/#111 and the #103 cutover.
+    // This is not the root for new managed namespaces.
     std::filesystem::path local_user_state_root;
     std::filesystem::path profile_log_directory;
     std::filesystem::path frame_capture_directory;
