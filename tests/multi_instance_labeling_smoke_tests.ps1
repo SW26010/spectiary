@@ -1076,7 +1076,7 @@ function Get-PortableApp {
     )
 
     [void][System.IO.Directory]::CreateDirectory($Destination)
-    $destinationExecutable = Join-Path $Destination 'SpecForge.exe'
+    $destinationExecutable = Join-Path $Destination 'Spectiary.exe'
     Copy-Item -LiteralPath $ResolvedExecutable -Destination $destinationExecutable
     $buildRoot = Split-Path -Parent $ResolvedExecutable
     foreach ($runtimeFile in @(
@@ -1093,7 +1093,7 @@ function Get-PortableApp {
     if (Test-Path -LiteralPath $runtimeConfig -PathType Container) {
         Copy-Item -LiteralPath $runtimeConfig -Destination (Join-Path $Destination 'config') -Recurse
     }
-    $metadata = Get-Content -Raw -LiteralPath (Join-Path $buildRoot 'specforge_metadata.json') |
+    $metadata = Get-Content -Raw -LiteralPath (Join-Path $buildRoot 'spectiary_metadata.json') |
         ConvertFrom-Json
     [void]$metadata.PSObject.Properties.Remove('deployment')
     $metadata | Add-Member -NotePropertyName deployment -NotePropertyValue ([pscustomobject][ordered]@{
@@ -1101,7 +1101,7 @@ function Get-PortableApp {
             storage_profile = 'portable'
         }) -Force
     Write-Utf8File `
-        -Path (Join-Path $Destination 'specforge_metadata.json') `
+        -Path (Join-Path $Destination 'spectiary_metadata.json') `
         -Contents ($metadata | ConvertTo-Json -Depth 10)
     [void][System.IO.Directory]::CreateDirectory((Join-Path $Destination 'Data'))
     return $destinationExecutable

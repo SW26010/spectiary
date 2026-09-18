@@ -41,9 +41,9 @@ string(JSON portable_metadata
 string(JSON schema_version
     GET "${portable_metadata}" schema_version
 )
-if(NOT schema_version STREQUAL "5")
+if(NOT schema_version STREQUAL "6")
     message(FATAL_ERROR
-        "Portable runtime metadata must use schema 5; found ${schema_version}."
+        "Portable runtime metadata must use schema 6; found ${schema_version}."
     )
 endif()
 

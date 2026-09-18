@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SpecForge VERSION 0.9.0 LANGUAGES CXX RC)
+include("${CMAKE_SOURCE_DIR}/cmake/project_identity.cmake")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -244,6 +245,7 @@ function(specforge_enable_warnings target_name)
 endfunction()
 
 function(specforge_configure_production_target target_name)
+    target_include_directories(${target_name} PUBLIC "${CMAKE_BINARY_DIR}/generated")
     target_include_directories(${target_name} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(${target_name} PRIVATE
         NOMINMAX
@@ -497,13 +499,13 @@ target_link_libraries(specforge_metadata_finalizer_tool PRIVATE
 add_dependencies(specforge_native specforge_metadata_finalizer_tool)
 
 set_target_properties(specforge_native PROPERTIES
-    OUTPUT_NAME SpecForge
+    OUTPUT_NAME "${PROJECT_artifact_basename}"
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
 add_custom_command(TARGET specforge_native PRE_LINK
     COMMAND "${CMAKE_COMMAND}" -E rm -f
-        "$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+        "$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
     COMMENT "Invalidating stale SpecForge metadata before linking"
     VERBATIM
 )
@@ -534,7 +536,7 @@ target_link_libraries(
 set_target_properties(
     specforge_automation_launcher
     PROPERTIES
-        OUTPUT_NAME SpecForgeAutomation
+        OUTPUT_NAME SpectiaryAutomation
         VS_DEBUGGER_WORKING_DIRECTORY
             "${CMAKE_SOURCE_DIR}"
 )
@@ -573,16 +575,16 @@ add_custom_command(TARGET specforge_native POST_BUILD
 add_custom_command(TARGET specforge_native POST_BUILD
     COMMAND "$<TARGET_FILE:specforge_metadata_finalizer_tool>"
         "$<TARGET_FILE:specforge_native>"
-        "$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
-    COMMENT "Finalizing schema 5 SpecForge metadata"
+        "$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
+    COMMENT "Finalizing schema 6 Spectiary metadata"
     VERBATIM
 )
 set(SPECFORGE_METADATA_BYPRODUCT
-    "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/specforge_metadata.json")
+    "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${PROJECT_metadata_filename}")
 add_custom_target(specforge_metadata
     COMMAND "${CMAKE_COMMAND}"
         "-DSPECFORGE_EXECUTABLE=$<TARGET_FILE:specforge_native>"
-        "-DSPECFORGE_METADATA=$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+        "-DSPECFORGE_METADATA=$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
         "-DSPECFORGE_FINALIZER=$<TARGET_FILE:specforge_metadata_finalizer_tool>"
         -P "${CMAKE_SOURCE_DIR}/cmake/ensure_specforge_metadata.cmake"
     DEPENDS specforge_native
@@ -615,13 +617,13 @@ set(SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY
     "${CMAKE_BINARY_DIR}/portable-tests/$<CONFIG>"
 )
 set(SPECFORGE_PORTABLE_TEST_METADATA
-    "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/specforge_metadata.json"
+    "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/${PROJECT_metadata_filename}"
 )
 add_custom_target(specforge_portable_test_metadata
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
     COMMAND "${CMAKE_COMMAND}"
-        "-DINPUT=$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+        "-DINPUT=$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
         "-DOUTPUT=${SPECFORGE_PORTABLE_TEST_METADATA}"
         -P "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     DEPENDS

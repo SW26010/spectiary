@@ -137,13 +137,13 @@ function Assert-SchemaVersionFive {
     $property = $Metadata.PSObject.Properties['schema_version']
     if ($null -eq $property -or
         $Metadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
-        throw "$Description schema_version must be the integer 5."
+        throw "$Description schema_version must be the integer 6."
     }
     $schemaVersion = $property.Value
     if (($schemaVersion -isnot [int] -and
          $schemaVersion -isnot [long]) -or
-        $schemaVersion -ne 5) {
-        throw "$Description schema_version must be the integer 5."
+        $schemaVersion -ne 6) {
+        throw "$Description schema_version must be the integer 6."
     }
 }
 
@@ -300,8 +300,8 @@ function Assert-ArtifactHashContract {
     if ($null -eq $fileProperty -or
         $artifact.PSObject.Properties.Name -cnotcontains 'file' -or
         $fileProperty.Value -isnot [string] -or
-        $fileProperty.Value -cne 'SpecForge.exe') {
-        throw "$Description artifact.file must be 'SpecForge.exe'."
+        $fileProperty.Value -cne 'Spectiary.exe') {
+        throw "$Description artifact.file must be 'Spectiary.exe'."
     }
     if ($null -eq $shaProperty -or
         $artifact.PSObject.Properties.Name -cnotcontains 'sha256' -or
@@ -328,8 +328,8 @@ function Assert-PortablePackage {
 
     $expectedPackageEntries = @(
         'Data',
-        'SpecForge.exe',
-        'specforge_metadata.json'
+        'Spectiary.exe',
+        'spectiary_metadata.json'
     )
     $actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
     $actualPackageEntries = @(
@@ -342,27 +342,27 @@ function Assert-PortablePackage {
         $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
     )
     $executableEntry = @(
-        $actualPackageItems | Where-Object { $_.Name -ceq 'SpecForge.exe' }
+        $actualPackageItems | Where-Object { $_.Name -ceq 'Spectiary.exe' }
     )
     $metadataEntry = @(
         $actualPackageItems |
-            Where-Object { $_.Name -ceq 'specforge_metadata.json' }
+            Where-Object { $_.Name -ceq 'spectiary_metadata.json' }
     )
     if ($dataEntry.Count -ne 1 -or -not $dataEntry[0].PSIsContainer) {
         throw "$Description package root Data must be a directory."
     }
     if ($executableEntry.Count -ne 1 -or $executableEntry[0].PSIsContainer) {
-        throw "$Description package root SpecForge.exe must be a file."
+        throw "$Description package root Spectiary.exe must be a file."
     }
     if ($metadataEntry.Count -ne 1 -or $metadataEntry[0].PSIsContainer) {
-        throw "$Description package root specforge_metadata.json must be a file."
+        throw "$Description package root spectiary_metadata.json must be a file."
     }
-    $packagedExecutablePath = Join-Path $PackageRoot 'SpecForge.exe'
+    $packagedExecutablePath = Join-Path $PackageRoot 'Spectiary.exe'
     Assert-FilesMatch `
         -ExpectedPath $ExpectedExecutablePath `
         -ActualPath $packagedExecutablePath `
         -Description "$Description packaged executable"
-    $packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
+    $packageMetadataPath = Join-Path $PackageRoot 'spectiary_metadata.json'
     $packageMetadata = Get-Content -Raw -LiteralPath $packageMetadataPath |
         ConvertFrom-Json
     Assert-SchemaVersionFive `
@@ -407,8 +407,8 @@ function Assert-PortablePackage {
     try {
         $expectedZipEntries = @(
             'Data/',
-            'SpecForge.exe',
-            'specforge_metadata.json'
+            'Spectiary.exe',
+            'spectiary_metadata.json'
         )
         $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
         $cfitsioDllEntries = @(
@@ -423,9 +423,9 @@ function Assert-PortablePackage {
             throw "$Description ZIP entries are wrong: $($actualZipEntries -join ', ')."
         }
 
-        $metadataEntry = $archive.GetEntry('specforge_metadata.json')
+        $metadataEntry = $archive.GetEntry('spectiary_metadata.json')
         if ($null -eq $metadataEntry) {
-            throw "$Description ZIP is missing specforge_metadata.json."
+            throw "$Description ZIP is missing spectiary_metadata.json."
         }
         $metadataStream = $metadataEntry.Open()
         try {
@@ -447,9 +447,9 @@ function Assert-PortablePackage {
             throw "$Description ZIP metadata does not byte-match package metadata."
         }
 
-        $executableEntry = $archive.GetEntry('SpecForge.exe')
+        $executableEntry = $archive.GetEntry('Spectiary.exe')
         if ($null -eq $executableEntry) {
-            throw "$Description ZIP is missing SpecForge.exe."
+            throw "$Description ZIP is missing Spectiary.exe."
         }
         $executableStream = $executableEntry.Open()
         try {
@@ -712,9 +712,9 @@ function Assert-NoticeSectionContains {
 $resolvedBuiltExecutable = (Resolve-Path -LiteralPath $BuiltExecutable).Path
 $buildMetadataPath = Join-Path `
     (Split-Path -Parent $resolvedBuiltExecutable) `
-    'specforge_metadata.json'
+    'spectiary_metadata.json'
 if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
-    throw "Built executable metadata is missing beside SpecForge.exe: $buildMetadataPath"
+    throw "Built executable metadata is missing beside Spectiary.exe: $buildMetadataPath"
 }
 
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
@@ -770,14 +770,14 @@ foreach ($expectedProperty in $expectedBuildMetadata.GetEnumerator()) {
         throw "Built executable metadata '$($expectedProperty.Key)' expected '$($expectedProperty.Value)'; found '$actualValue'."
     }
 }
-if ($buildMetadata.product.name -cne 'SpecForge' -or
+if ($buildMetadata.product.name -cne 'Spectiary' -or
     $buildMetadata.product.version -cne $SpecForgeVersion) {
     throw "Built executable product metadata does not match SpecForge $SpecForgeVersion."
 }
 if ($Configuration -ceq 'Release') {
     Assert-StaticCfitsioPeImports `
         -ExecutablePath $resolvedBuiltExecutable `
-        -Description 'Release build SpecForge.exe'
+        -Description 'Release build Spectiary.exe'
 }
 
 $legalRoot = Join-Path $RepoRoot 'legal'
@@ -1108,7 +1108,7 @@ Assert-Contains $packageScript `
     '"-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"' `
     'Portable packaging source-revision binding'
 Assert-Contains $packageScript `
-    "Join-Path `$sourceExecutableDirectory 'specforge_metadata.json'" `
+    "Join-Path `$sourceExecutableDirectory 'spectiary_metadata.json'" `
     'Portable packaging metadata binding'
 Assert-Contains $packageScript `
     "Join-Path `$scriptRoot 'verify-portable.ps1'" `
@@ -1140,8 +1140,8 @@ Assert-Contains $packageScript `
 Assert-NotContains $packageScript `
     "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
     'Portable packaging script'
-Assert-Contains $cmakeSource 'specforge_metadata.json' 'CMake metadata'
-Assert-NotContains $cmakeSource 'specforge_metadata.json.in' 'CMake obsolete pre-link metadata template'
+Assert-Contains $cmakeSource '${PROJECT_metadata_filename}' 'CMake metadata'
+Assert-NotContains $cmakeSource 'spectiary_metadata.json.in' 'CMake obsolete pre-link metadata template'
 Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
 Assert-NotContains `
     $cmakeSource `
@@ -1217,7 +1217,7 @@ Assert-Contains $cmakeSource `
     'scripts/build-ninja-msvc-debug.ps1' `
     'CMake Ninja/MSVC build regression wrapper binding'
 Assert-Contains $cmakeSource `
-    'Finalizing schema 5 SpecForge metadata' `
+    'Finalizing schema 6 Spectiary metadata' `
     'CMake post-link finalizer command'
 Assert-Contains $cmakeSource `
     'DEPENDS specforge_native' `
@@ -1427,7 +1427,7 @@ try {
         New-Item -ItemType Directory -Path $fixtureBuildRoot -Force | Out-Null
         Copy-Item `
             -LiteralPath $resolvedBuiltExecutable `
-            -Destination (Join-Path $fixtureBuildRoot 'SpecForge.exe')
+            -Destination (Join-Path $fixtureBuildRoot 'Spectiary.exe')
 
         $fixtureMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
         $fixtureMetadata.build.source_mode = $fixture.Mode
@@ -1438,7 +1438,7 @@ try {
             $fixture.Revision
         }
         $fixtureMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
-        $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'specforge_metadata.json'
+        $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'spectiary_metadata.json'
         $fixtureMetadata |
             ConvertTo-Json -Depth 10 |
             Set-Content -LiteralPath $fixtureMetadataPath -Encoding UTF8
@@ -1471,7 +1471,7 @@ try {
             -ZipPath $fixtureZipPath `
             -Description "$($fixture.Mode) Portable fixture"
         $packagedMetadata = Get-Content -Raw `
-            -LiteralPath (Join-Path $fixturePackageRoot 'specforge_metadata.json') |
+            -LiteralPath (Join-Path $fixturePackageRoot 'spectiary_metadata.json') |
             ConvertFrom-Json
         Assert-BuildSourceContract `
             -Metadata $packagedMetadata.build `
@@ -1489,7 +1489,7 @@ try {
     New-Item -ItemType Directory -Path $tamperedMetadataBuildRoot -Force | Out-Null
     Copy-Item `
         -LiteralPath $resolvedBuiltExecutable `
-        -Destination (Join-Path $tamperedMetadataBuildRoot 'SpecForge.exe')
+        -Destination (Join-Path $tamperedMetadataBuildRoot 'Spectiary.exe')
     $tamperedMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
         ConvertFrom-Json
     $tamperedMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
@@ -1497,7 +1497,7 @@ try {
     $tamperedMetadata |
         ConvertTo-Json -Depth 10 |
         Set-Content `
-            -LiteralPath (Join-Path $tamperedMetadataBuildRoot 'specforge_metadata.json') `
+            -LiteralPath (Join-Path $tamperedMetadataBuildRoot 'spectiary_metadata.json') `
             -Encoding UTF8
     Assert-ScriptFails `
         -CaseId 'reject-tampered-build-metadata-hash' `
@@ -1513,12 +1513,12 @@ try {
             '-Configuration',
             $Configuration
         ) `
-        -ExpectedMessage 'does not match build directory SpecForge.exe hash' `
+        -ExpectedMessage 'does not match build directory Spectiary.exe hash' `
         -Description 'Portable packaging rejects tampered metadata hash'
 
     $tamperedExecutableBuildRoot = Join-Path $testRoot 'tampered-executable-build'
     New-Item -ItemType Directory -Path $tamperedExecutableBuildRoot -Force | Out-Null
-    $tamperedExecutablePath = Join-Path $tamperedExecutableBuildRoot 'SpecForge.exe'
+    $tamperedExecutablePath = Join-Path $tamperedExecutableBuildRoot 'Spectiary.exe'
     Copy-Item -LiteralPath $resolvedBuiltExecutable -Destination $tamperedExecutablePath
     Add-Content -LiteralPath $tamperedExecutablePath -Value 'tampered' -Encoding ASCII
     $tamperedExecutableMetadata =
@@ -1528,7 +1528,7 @@ try {
     $tamperedExecutableMetadata |
         ConvertTo-Json -Depth 10 |
         Set-Content `
-            -LiteralPath (Join-Path $tamperedExecutableBuildRoot 'specforge_metadata.json') `
+            -LiteralPath (Join-Path $tamperedExecutableBuildRoot 'spectiary_metadata.json') `
             -Encoding UTF8
     Assert-ScriptFails `
         -CaseId 'reject-tampered-build-executable' `
@@ -1544,13 +1544,13 @@ try {
             '-Configuration',
             $Configuration
         ) `
-        -ExpectedMessage 'does not match build directory SpecForge.exe hash' `
+        -ExpectedMessage 'does not match build directory Spectiary.exe hash' `
         -Description 'Portable packaging rejects tampered build executable'
 
     $verifiedPackage = $packageFixtures[0]
     $verifiedPackageRoot = Join-Path $testDistRoot $verifiedPackage.PackageName
     $verifiedPackageZip = Join-Path $testDistRoot "$($verifiedPackage.PackageName).zip"
-    $verifiedPackageMetadataPath = Join-Path $verifiedPackageRoot 'specforge_metadata.json'
+    $verifiedPackageMetadataPath = Join-Path $verifiedPackageRoot 'spectiary_metadata.json'
 
     $hiddenEntryPackageRoot = Join-Path $testRoot 'hidden-entry-package'
     New-Item `
@@ -1559,12 +1559,12 @@ try {
         -Force |
         Out-Null
     Copy-Item `
-        -LiteralPath (Join-Path $verifiedPackageRoot 'SpecForge.exe') `
-        -Destination (Join-Path $hiddenEntryPackageRoot 'SpecForge.exe')
+        -LiteralPath (Join-Path $verifiedPackageRoot 'Spectiary.exe') `
+        -Destination (Join-Path $hiddenEntryPackageRoot 'Spectiary.exe')
     Copy-Item `
         -LiteralPath $verifiedPackageMetadataPath `
         -Destination (
-            Join-Path $hiddenEntryPackageRoot 'specforge_metadata.json')
+            Join-Path $hiddenEntryPackageRoot 'spectiary_metadata.json')
     $hiddenEntryPath = Join-Path `
         $hiddenEntryPackageRoot `
         'hidden-cfitsio.dll'
@@ -1593,12 +1593,12 @@ try {
         -Force |
         Out-Null
     Copy-Item `
-        -LiteralPath (Join-Path $verifiedPackageRoot 'SpecForge.exe') `
-        -Destination (Join-Path $wrongDataTypePackageRoot 'SpecForge.exe')
+        -LiteralPath (Join-Path $verifiedPackageRoot 'Spectiary.exe') `
+        -Destination (Join-Path $wrongDataTypePackageRoot 'Spectiary.exe')
     Copy-Item `
         -LiteralPath $verifiedPackageMetadataPath `
         -Destination (
-            Join-Path $wrongDataTypePackageRoot 'specforge_metadata.json')
+            Join-Path $wrongDataTypePackageRoot 'spectiary_metadata.json')
     [IO.File]::WriteAllText(
         (Join-Path $wrongDataTypePackageRoot 'Data'),
         'not a directory')
@@ -1646,7 +1646,7 @@ try {
             $originalPackageMetadataBytes)
     }
 
-    $verifiedPackageExecutablePath = Join-Path $verifiedPackageRoot 'SpecForge.exe'
+    $verifiedPackageExecutablePath = Join-Path $verifiedPackageRoot 'Spectiary.exe'
     $originalPackageExecutableBytes = [IO.File]::ReadAllBytes(
         $verifiedPackageExecutablePath)
     try {
@@ -1687,7 +1687,7 @@ try {
     Copy-ZipWithMutations `
         -SourcePath $verifiedPackageZip `
         -DestinationPath $tamperedZipPath `
-        -TamperedEntryName 'specforge_metadata.json'
+        -TamperedEntryName 'spectiary_metadata.json'
     Assert-ScriptFails `
         -CaseId 'reject-zip-metadata-tamper' `
         -ScriptPath $portableVerifierPath `
@@ -1709,7 +1709,7 @@ try {
     Copy-ZipWithMutations `
         -SourcePath $verifiedPackageZip `
         -DestinationPath $tamperedExecutableZipPath `
-        -TamperedEntryName 'SpecForge.exe'
+        -TamperedEntryName 'Spectiary.exe'
     Assert-ScriptFails `
         -CaseId 'reject-zip-executable-tamper' `
         -ScriptPath $portableVerifierPath `
@@ -1849,7 +1849,7 @@ try {
             PropertyName = 'schema_version'
             Remove = $false
             Value = '4'
-            ExpectedMessage = 'schema_version must be the integer 5'
+            ExpectedMessage = 'schema_version must be the integer 6'
         },
         [pscustomobject]@{
             CaseId = 'reject-metadata-schema-decimal'
@@ -1858,7 +1858,7 @@ try {
             Remove = $false
             Value = 4
             RawSchemaJson = '4.0'
-            ExpectedMessage = 'schema_version must be the integer 5'
+            ExpectedMessage = 'schema_version must be the integer 6'
         },
         [pscustomobject]@{
             CaseId = 'reject-metadata-schema-array'
@@ -1866,7 +1866,7 @@ try {
             PropertyName = 'schema_version'
             Remove = $false
             Value = @(4)
-            ExpectedMessage = 'schema_version must be the integer 5'
+            ExpectedMessage = 'schema_version must be the integer 6'
         },
         [pscustomobject]@{
             CaseId = 'reject-metadata-legacy-schema'
@@ -1874,7 +1874,7 @@ try {
             PropertyName = 'schema_version'
             Remove = $false
             Value = 2
-            ExpectedMessage = 'schema_version must be the integer 5'
+            ExpectedMessage = 'schema_version must be the integer 6'
         },
         [pscustomobject]@{
             CaseId = 'reject-metadata-missing-compiler-id'
@@ -1988,7 +1988,7 @@ try {
         New-Item -ItemType Directory -Path $invalidBuildRoot -Force | Out-Null
         Copy-Item `
             -LiteralPath $resolvedBuiltExecutable `
-            -Destination (Join-Path $invalidBuildRoot 'SpecForge.exe')
+            -Destination (Join-Path $invalidBuildRoot 'Spectiary.exe')
         $invalidMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
             ConvertFrom-Json
         $invalidMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
@@ -2016,7 +2016,7 @@ try {
                 '${1}' + $rawSchemaJsonProperty.Value)
         }
         Set-Content `
-            -LiteralPath (Join-Path $invalidBuildRoot 'specforge_metadata.json') `
+            -LiteralPath (Join-Path $invalidBuildRoot 'spectiary_metadata.json') `
             -Value $invalidMetadataJson `
             -Encoding UTF8
         Assert-ScriptFails `
@@ -2047,7 +2047,7 @@ try {
         Out-Null
     Copy-Item `
         -LiteralPath $resolvedBuiltExecutable `
-        -Destination (Join-Path $invalidHeadRevisionBuildRoot 'SpecForge.exe')
+        -Destination (Join-Path $invalidHeadRevisionBuildRoot 'Spectiary.exe')
     $invalidHeadRevisionMetadata =
         Get-Content -Raw -LiteralPath $buildMetadataPath |
         ConvertFrom-Json
@@ -2061,7 +2061,7 @@ try {
             -LiteralPath (
                 Join-Path `
                     $invalidHeadRevisionBuildRoot `
-                    'specforge_metadata.json'
+                    'spectiary_metadata.json'
             ) `
             -Encoding UTF8
     Assert-ScriptFails `

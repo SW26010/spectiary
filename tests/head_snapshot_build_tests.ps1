@@ -142,7 +142,7 @@ exit 1
         throw 'HEAD wrapper did not accept the child builder generation-owned legacy output.'
     }
     if (Test-Path -LiteralPath (
-        Join-Path $testRoot 'dist\head\SpecForge-portable\specforge_metadata.json'
+        Join-Path $testRoot 'dist\head\SpecForge-portable\spectiary_metadata.json'
     )) {
         throw 'HEAD snapshot fixture unexpectedly produced current-generation metadata.'
     }

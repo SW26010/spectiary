@@ -31,7 +31,7 @@ Import-Module `
 $resolvedBuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $resolvedBuiltExecutable = [IO.Path]::GetFullPath($BuiltExecutable)
 $executableDirectory = Split-Path -Parent $resolvedBuiltExecutable
-$metadataPath = Join-Path $executableDirectory 'specforge_metadata.json'
+$metadataPath = Join-Path $executableDirectory 'spectiary_metadata.json'
 $resolvedBuildWrapper = ''
 if (-not [string]::IsNullOrWhiteSpace($BuildWrapper)) {
     $resolvedBuildWrapper = (Resolve-Path -LiteralPath $BuildWrapper).Path
@@ -144,8 +144,8 @@ function Assert-FreshMetadata {
     $metadata = Read-Metadata
     if (($metadata.schema_version -isnot [int] -and
          $metadata.schema_version -isnot [long]) -or
-        $metadata.schema_version -ne 5) {
-        throw "$Description did not produce schema 5 metadata."
+        $metadata.schema_version -ne 6) {
+        throw "$Description did not produce schema 6 metadata."
     }
     if ($null -eq $metadata.build -or
         $null -eq $metadata.build.completed_at_utc -or
@@ -154,7 +154,7 @@ function Assert-FreshMetadata {
         throw "$Description did not produce a finalized UTC timestamp."
     }
     if ($null -eq $metadata.artifact -or
-        $metadata.artifact.file -cne 'SpecForge.exe') {
+        $metadata.artifact.file -cne 'Spectiary.exe') {
         throw "$Description did not produce canonical artifact metadata."
     }
 

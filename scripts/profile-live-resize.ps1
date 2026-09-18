@@ -25,9 +25,9 @@ if ($FeedbackBreakdown -and $Scenario -ne 'NativeSize') { throw 'FeedbackBreakdo
 $repo = Split-Path -Parent $PSScriptRoot
 if ($RedirectionArm -ne 'None') {
     if ($Scenario -ne 'NativeSize') { throw 'Redirection A/B requires -Scenario NativeSize' }
-    if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/redirection-experiment/SpecForge.exe' }
+    if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/redirection-experiment/Spectiary.exe' }
 }
-if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/SpecForge.exe' }
+if (!$Executable) { $Executable = Join-Path $repo 'build/ninja-msvc-debug/Spectiary.exe' }
 $Executable = (Resolve-Path -LiteralPath $Executable).Path
 $directory = Join-Path $repo ('logs/live-resize-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $directory | Out-Null

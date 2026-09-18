@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/project_identity.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -9,11 +11,11 @@ namespace specforge {
 
 namespace metadata_contract {
 
-inline constexpr int kSchema5Version = 5;
+inline constexpr int kSchema6Version = 6;
 inline constexpr std::string_view kCanonicalExecutableFileName =
-    "SpecForge.exe";
+    project_identity::kExecutableFilename;
 inline constexpr std::string_view kCanonicalMetadataFileName =
-    "specforge_metadata.json";
+    project_identity::kMetadataFilename;
 
 }  // namespace metadata_contract
 
@@ -42,6 +44,7 @@ enum class BuildMetadataStatus {
 };
 
 struct BuildIdentity {
+    std::string application_id = project_identity::kApplicationId;
     std::string product_name;
     std::string specforge_version;
     std::string configuration;

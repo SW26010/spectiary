@@ -134,7 +134,7 @@ bool ValidatePaths(
         return false;
     }
     if (!IsCanonicalExecutableFilename(options.executable_path)) {
-        error = "the executable filename must be SpecForge.exe";
+        error = "the executable filename must be Spectiary.exe";
         return false;
     }
     std::error_code equivalent_error;
@@ -176,7 +176,7 @@ bool ValidatePaths(
     }
     if (!IsCanonicalMetadataFilename(options.metadata_path)) {
         error =
-            "the metadata filename must be specforge_metadata.json";
+            "the metadata filename must be spectiary_metadata.json";
         return false;
     }
 
@@ -195,7 +195,7 @@ bool ValidatePaths(
             *normalized_expected_metadata_path)) {
         error =
             "the metadata path must be the executable-adjacent "
-            "specforge_metadata.json";
+            "spectiary_metadata.json";
         return false;
     }
     return true;
@@ -257,7 +257,7 @@ void WriteOptionalString(
     }
 }
 
-bool WriteSchema5Metadata(
+bool WriteSchema6Metadata(
     std::ostream& stream,
     const BuildIdentity& identity,
     const BuildMetadata& build,
@@ -265,7 +265,10 @@ bool WriteSchema5Metadata(
 {
     stream << "{\n"
            << "  \"schema_version\": " <<
-               metadata_contract::kSchema5Version << ",\n"
+               metadata_contract::kSchema6Version << ",\n"
+           << "  \"application_id\": ";
+    WriteJsonString(stream, identity.application_id);
+    stream << ",\n"
            << "  \"product\": {\n"
            << "    \"name\": ";
     WriteJsonString(stream, identity.product_name);
@@ -432,7 +435,7 @@ bool FinalizeSpecForgeMetadata(
             .sha256 = executable_sha256,
         },
     };
-    if (!metadata_validation::ValidateSchema5BuildMetadata(
+    if (!metadata_validation::ValidateSchema6BuildMetadata(
             options.build_identity,
             finalized_build,
             &error)) {
@@ -450,7 +453,7 @@ bool FinalizeSpecForgeMetadata(
                 metadata_path,
                 write_options,
                 [&](std::ostream& stream, std::string& writer_error) {
-                    return WriteSchema5Metadata(
+                    return WriteSchema6Metadata(
                         stream,
                         options.build_identity,
                         finalized_build,

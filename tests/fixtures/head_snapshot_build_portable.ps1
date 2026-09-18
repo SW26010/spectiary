@@ -31,7 +31,7 @@ if (Test-Path -LiteralPath (Join-Path $snapshotRoot 'untracked-sentinel.txt')) {
 $packageRoot = Join-Path $DistRoot $PackageName
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Set-Content `
-    -LiteralPath (Join-Path $packageRoot 'SpecForge.exe') `
+    -LiteralPath (Join-Path $packageRoot 'Spectiary.exe') `
     -Value 'fixture executable' `
     -Encoding ASCII
 [ordered]@{

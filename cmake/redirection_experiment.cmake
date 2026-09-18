@@ -20,7 +20,7 @@ specforge_configure_production_target(specforge_redirection_experiment)
 target_compile_definitions(specforge_redirection_experiment PRIVATE SPECFORGE_REDIRECTION_AB_BUILD=1)
 target_link_libraries(specforge_redirection_experiment PRIVATE ${native_libraries})
 set_target_properties(specforge_redirection_experiment PROPERTIES
-    OUTPUT_NAME SpecForge RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/redirection-experiment")
+    OUTPUT_NAME "${PROJECT_artifact_basename}" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/redirection-experiment")
 if(MSVC)
     target_link_options(specforge_redirection_experiment PRIVATE /Brepro /INCREMENTAL:NO /DEBUG:FULL)
 endif()
@@ -30,7 +30,7 @@ add_custom_command(TARGET specforge_redirection_experiment POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
         "$<TARGET_FILE_DIR:specforge_redirection_experiment>/config/spectral_lines.public.tsv"
     COMMAND "$<TARGET_FILE:specforge_metadata_finalizer_tool>" "$<TARGET_FILE:specforge_redirection_experiment>"
-        "$<TARGET_FILE_DIR:specforge_redirection_experiment>/specforge_metadata.json"
+        "$<TARGET_FILE_DIR:specforge_redirection_experiment>/spectiary_metadata.json"
     VERBATIM)
 add_executable(specforge_redirection_backend_tests
     tests/redirection_backend_tests.cpp "${experiment_backend}")

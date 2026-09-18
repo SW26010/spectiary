@@ -211,7 +211,7 @@ void TestWindowsArgumentQuotingRoundTrips()
         "embedded quotes should be escaped");
 
     const std::wstring executable =
-        L"C:\\Program Files\\SpecForge\\SpecForge.exe";
+        L"C:\\Program Files\\SpecForge\\Spectiary.exe";
     const std::vector<std::wstring> values = {
         L"",
         L"plain",
@@ -405,7 +405,7 @@ int RunChildIfRequested(int argc, wchar_t** argv)
     try {
         const std::filesystem::path production_executable =
             specforge::CurrentExecutablePath().parent_path() /
-            L"SpecForge.exe";
+            L"Spectiary.exe";
         if (!std::filesystem::is_regular_file(
                 production_executable)) {
             return 4;

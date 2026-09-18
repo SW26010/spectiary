@@ -1024,7 +1024,7 @@ function Invoke-RuntimeResourceStability {
         $TimeoutSec = [int]$tier.timeout_sec
     }
     if (-not $Executable) {
-        $Executable = Join-Path $repoRoot 'build\ninja-msvc-debug\SpecForge.exe'
+        $Executable = Join-Path $repoRoot 'build\ninja-msvc-debug\Spectiary.exe'
     }
     if (-not $OutputDirectory) {
         $OutputDirectory = Join-Path $repoRoot 'logs\runtime-resource-stability'

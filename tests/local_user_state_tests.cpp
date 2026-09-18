@@ -161,7 +161,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         std::filesystem::temp_directory_path() / "specforge_runtime_path_installed";
 
     specforge::RuntimePathInputs inputs;
-    inputs.executable_path = package_root / "SpecForge.exe";
+    inputs.executable_path = package_root / "Spectiary.exe";
     inputs.local_app_data_user_state_root = installed_root;
 
     const specforge::RuntimePaths portable_paths =

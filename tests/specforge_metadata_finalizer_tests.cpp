@@ -62,7 +62,7 @@ bool HasTemporarySibling(const std::filesystem::path& root)
 specforge::BuildIdentity WorkingTreeIdentity()
 {
     return {
-        .product_name = "SpecForge",
+        .product_name = "Spectiary",
         .specforge_version = "0.4.1",
         .configuration = "Debug",
         .target_architecture = "amd64",
@@ -96,10 +96,10 @@ std::filesystem::path TestRoot(std::string_view name)
 specforge::SpecForgeMetadataFinalizerOptions OptionsFor(
     const std::filesystem::path& root)
 {
-    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path executable_path = root / "Spectiary.exe";
     return {
         .executable_path = executable_path,
-        .metadata_path = root / "specforge_metadata.json",
+        .metadata_path = root / "spectiary_metadata.json",
         .build_identity = WorkingTreeIdentity(),
         .configured_build_metadata = ConfiguredBuildMetadata(),
     };
@@ -119,14 +119,14 @@ std::chrono::system_clock::time_point FixedUtcTime()
             std::chrono::seconds{32}));
 }
 
-void TestFinalizerWritesSchema5AndHashesFinalExecutable()
+void TestFinalizerWritesSchema6AndHashesFinalExecutable()
 {
     const std::filesystem::path root = TestRoot("success");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path executable_path = root / "Spectiary.exe";
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "abc");
 
     specforge::SpecForgeMetadataFinalizerOptions options =
@@ -137,7 +137,7 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
         specforge::FinalizeSpecForgeMetadata(options, &error);
     Require(
         finalized,
-        "finalizer should write schema 5 metadata: " + error);
+        "finalizer should write schema 6 metadata: " + error);
     Require(
         std::filesystem::exists(metadata_path),
         "successful finalization should replace the metadata target");
@@ -151,7 +151,7 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
             result.build_metadata.status ==
                 specforge::BuildMetadataStatus::Available &&
             result.build_metadata.metadata,
-        "finalizer output should be readable as available schema 5 metadata");
+        "finalizer output should be readable as available schema 6 metadata");
     const specforge::BuildMetadata& metadata =
         *result.build_metadata.metadata;
     Require(
@@ -159,7 +159,7 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
             metadata.finalized_artifact &&
             metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
-            metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
+            metadata.finalized_artifact->artifact.file == "Spectiary.exe" &&
             metadata.finalized_artifact->artifact.sha256 ==
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         "finalizer should record the fixed UTC time and SHA-256 of abc");
@@ -172,9 +172,9 @@ void TestFailedFinalizationRemovesStaleTargetAndRecovers()
     const std::filesystem::path root = TestRoot("pre-replace-failure");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path executable_path = root / "Spectiary.exe";
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "old executable bytes");
 
     specforge::SpecForgeMetadataFinalizerOptions options =
@@ -182,7 +182,7 @@ void TestFailedFinalizationRemovesStaleTargetAndRecovers()
     options.utc_now = [] { return FixedUtcTime(); };
     Require(
         specforge::FinalizeSpecForgeMetadata(options),
-        "fixture finalization should create the old schema 5 sidecar");
+        "fixture finalization should create the old schema 6 sidecar");
     const std::string original_metadata = ReadTextFile(metadata_path);
 
     WriteTextFile(executable_path, "new executable bytes");
@@ -236,9 +236,9 @@ void TestReplacementFailureRemovesStaleTargetAndRecovers()
     const std::filesystem::path root = TestRoot("replacement-failure");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path executable_path = root / "Spectiary.exe";
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "old executable bytes");
 
     specforge::SpecForgeMetadataFinalizerOptions options =
@@ -246,7 +246,7 @@ void TestReplacementFailureRemovesStaleTargetAndRecovers()
     options.utc_now = [] { return FixedUtcTime(); };
     Require(
         specforge::FinalizeSpecForgeMetadata(options),
-        "replacement fixture should create the old schema 5 sidecar");
+        "replacement fixture should create the old schema 6 sidecar");
 
     Require(
         std::filesystem::remove(metadata_path, cleanup_error) &&
@@ -291,7 +291,7 @@ void TestHashFailureDoesNotCreateMetadataOrTemporaryFile()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
     WriteTextFile(metadata_path, "old metadata\n");
 
     specforge::SpecForgeMetadataFinalizerOptions options =
@@ -318,7 +318,7 @@ void TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects()
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path executable_path = root / "Other.exe";
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
     const std::string original_metadata = "old metadata\n";
     WriteTextFile(executable_path, "other executable bytes");
     WriteTextFile(metadata_path, original_metadata);
@@ -344,7 +344,7 @@ void TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects()
         !finalized,
         "a non-canonical executable filename should fail finalization");
     Require(
-        error.find("SpecForge.exe") != std::string::npos,
+        error.find("Spectiary.exe") != std::string::npos,
         "wrong executable filename should identify the canonical artifact name");
     Require(
         !clock_called && !checkpoint_called,
@@ -370,14 +370,14 @@ void TestRejectsArbitraryMetadataPathsBeforeSideEffects()
 
     for (const std::filesystem::path& metadata_path : {
              root / "unrelated.txt",
-             root / "elsewhere" / "specforge_metadata.json",
+             root / "elsewhere" / "spectiary_metadata.json",
          }) {
         std::filesystem::remove_all(root, cleanup_error);
         WriteTextFile(metadata_path, original_metadata);
 
         specforge::SpecForgeMetadataFinalizerOptions options =
             OptionsFor(root);
-        options.executable_path = root / "app" / "SpecForge.exe";
+        options.executable_path = root / "app" / "Spectiary.exe";
         options.metadata_path = metadata_path;
         bool clock_called = false;
         options.utc_now = [&] {
@@ -392,7 +392,7 @@ void TestRejectsArbitraryMetadataPathsBeforeSideEffects()
             !finalized,
             "an arbitrary metadata path should fail validation");
         Require(
-            error.find("specforge_metadata.json") != std::string::npos,
+            error.find("spectiary_metadata.json") != std::string::npos,
             "arbitrary metadata path failure should identify the canonical sidecar");
         Require(
             !clock_called,
@@ -413,13 +413,13 @@ void TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects()
     const std::filesystem::path root = TestRoot("same-path");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path executable_path = root / "Spectiary.exe";
     const std::filesystem::path original_metadata_path =
-        root / "specforge_metadata.json";
+        root / "spectiary_metadata.json";
 
     for (const std::filesystem::path& metadata_path : {
              executable_path,
-             root / "." / "SpecForge.exe",
+             root / "." / "Spectiary.exe",
          }) {
         std::filesystem::remove_all(root, cleanup_error);
         WriteTextFile(executable_path, "final executable bytes");
@@ -468,14 +468,14 @@ void TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
+void TestRejectsSchema6InvalidBuildValuesWithoutPublishingMetadata()
 {
-    const std::filesystem::path root = TestRoot("schema5-validation-failure");
+    const std::filesystem::path root = TestRoot("schema6-validation-failure");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path metadata_path =
-        root / "specforge_metadata.json";
-    const std::string original_metadata = "old schema 5 metadata\n";
+        root / "spectiary_metadata.json";
+    const std::string original_metadata = "old schema 6 metadata\n";
 
     const std::vector<std::function<void(specforge::BuildMetadata&)>> invalid_cases = {
         [](specforge::BuildMetadata& build) {
@@ -500,7 +500,7 @@ void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
 
     for (const auto& make_invalid : invalid_cases) {
         std::filesystem::remove_all(root, cleanup_error);
-        WriteTextFile(root / "SpecForge.exe", "abc");
+        WriteTextFile(root / "Spectiary.exe", "abc");
         WriteTextFile(metadata_path, original_metadata);
 
         specforge::SpecForgeMetadataFinalizerOptions options =
@@ -513,16 +513,16 @@ void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
             specforge::FinalizeSpecForgeMetadata(options, &error);
         Require(
             !finalized,
-            "schema 5-invalid build values should fail finalization");
+            "schema 6-invalid build values should fail finalization");
         Require(
             !error.empty(),
-            "schema 5 validation failure should report a diagnostic");
+            "schema 6 validation failure should report a diagnostic");
         Require(
             !std::filesystem::exists(metadata_path),
-            "schema 5 validation failure should remove stale metadata");
+            "schema 6 validation failure should remove stale metadata");
         Require(
             !HasTemporarySibling(root),
-            "schema 5 validation failure should not leave a temporary file");
+            "schema 6 validation failure should not leave a temporary file");
     }
 
     std::filesystem::remove_all(root, cleanup_error);
@@ -532,14 +532,14 @@ void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
 
 int main()
 {
-    TestFinalizerWritesSchema5AndHashesFinalExecutable();
+    TestFinalizerWritesSchema6AndHashesFinalExecutable();
     TestFailedFinalizationRemovesStaleTargetAndRecovers();
     TestReplacementFailureRemovesStaleTargetAndRecovers();
     TestHashFailureDoesNotCreateMetadataOrTemporaryFile();
     TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects();
     TestRejectsArbitraryMetadataPathsBeforeSideEffects();
     TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects();
-    TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata();
+    TestRejectsSchema6InvalidBuildValuesWithoutPublishingMetadata();
     std::cout << "SpecForge metadata finalizer tests passed\n";
     return 0;
 }

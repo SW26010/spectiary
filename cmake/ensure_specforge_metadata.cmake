@@ -14,25 +14,31 @@ if(NOT EXISTS "${SPECFORGE_FINALIZER}")
         "SpecForge metadata finalizer is missing: ${SPECFORGE_FINALIZER}")
 endif()
 
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../config/project_identity.json" identity_json)
+string(JSON application_id GET "${identity_json}" founding_identity)
+string(JSON artifact_basename GET "${identity_json}" artifact_basename)
 file(SHA256 "${SPECFORGE_EXECUTABLE}" executable_sha256)
 set(metadata_current FALSE)
 if(EXISTS "${SPECFORGE_METADATA}")
     file(READ "${SPECFORGE_METADATA}" metadata_json)
     string(JSON schema_version ERROR_VARIABLE schema_error
         GET "${metadata_json}" schema_version)
+    string(JSON metadata_application_id ERROR_VARIABLE identity_error
+        GET "${metadata_json}" application_id)
     string(JSON completed_at_utc ERROR_VARIABLE completed_at_error
         GET "${metadata_json}" build completed_at_utc)
     string(JSON artifact_file ERROR_VARIABLE artifact_file_error
         GET "${metadata_json}" artifact file)
     string(JSON artifact_sha256 ERROR_VARIABLE artifact_sha256_error
         GET "${metadata_json}" artifact sha256)
-    if(NOT schema_error AND
+    if(NOT schema_error AND NOT identity_error AND
+       metadata_application_id STREQUAL application_id AND
        NOT completed_at_error AND
        NOT artifact_file_error AND
        NOT artifact_sha256_error AND
-       schema_version STREQUAL "5" AND
+       schema_version STREQUAL "6" AND
        completed_at_utc AND
-       artifact_file STREQUAL "SpecForge.exe" AND
+       artifact_file STREQUAL "${artifact_basename}.exe" AND
        artifact_sha256 STREQUAL "${executable_sha256}")
         set(metadata_current TRUE)
     endif()

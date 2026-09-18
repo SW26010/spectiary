@@ -2,7 +2,7 @@
 param(
     [string]$Preset = 'vs2022-x64-release-static',
     [string]$Configuration = 'Release',
-    [string]$PackageName = 'SpecForge-portable',
+    [string]$PackageName = 'Spectiary-portable',
     [string]$BuildRoot,
     [string]$DistRoot,
     [Parameter(DontShow = $true)]
@@ -15,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'project-identity.ps1')
 Import-Module `
     (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
     -Force `
@@ -207,18 +208,18 @@ if (-not $PackageUnverifiedTestFixture) {
 }
 
 $candidateExecutables = @(
-    (Join-Path $buildRoot "$Configuration\SpecForge.exe"),
-    (Join-Path $buildRoot 'SpecForge.exe')
+    (Join-Path $buildRoot "$Configuration\$ArtifactFileName"),
+    (Join-Path $buildRoot $ArtifactFileName)
 )
 $sourceExecutable = $candidateExecutables | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $sourceExecutable) {
-    throw "SpecForge.exe was not found under $buildRoot."
+    throw "Spectiary.exe was not found under $buildRoot."
 }
 
 $sourceExecutableDirectory = Split-Path -Parent $sourceExecutable
-$sourceMetadataPath = Join-Path $sourceExecutableDirectory 'specforge_metadata.json'
+$sourceMetadataPath = Join-Path $sourceExecutableDirectory $MetadataFileName
 if (-not (Test-Path -LiteralPath $sourceMetadataPath -PathType Leaf)) {
-    throw "SpecForge metadata was not found beside SpecForge.exe: $sourceMetadataPath"
+    throw "SpecForge metadata was not found beside Spectiary.exe: $sourceMetadataPath"
 }
 $buildExecutableHash = (
     Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
@@ -228,13 +229,13 @@ $schemaVersionProperty =
     $sourceMetadata.PSObject.Properties['schema_version']
 if ($null -eq $schemaVersionProperty -or
     $sourceMetadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
-    throw 'SpecForge metadata schema_version must be the integer 5.'
+    throw 'SpecForge metadata schema_version must be the integer 6.'
 }
 $schemaVersion = $schemaVersionProperty.Value
 if (($schemaVersion -isnot [int] -and
      $schemaVersion -isnot [long]) -or
-    $schemaVersion -ne 5) {
-    throw 'SpecForge metadata schema_version must be the integer 5.'
+    $schemaVersion -ne 6) {
+    throw 'SpecForge metadata schema_version must be the integer 6.'
 }
 if ($sourceMetadata.PSObject.Properties.Name -ccontains 'deployment') {
     throw 'Build-output SpecForge metadata must not contain deployment; the packaging flow owns distribution identity.'
@@ -251,8 +252,9 @@ $productName = Get-RequiredMetadataString `
 [void](Get-RequiredMetadataString `
     -Metadata $productMetadata `
     -PropertyName 'version')
-if ($productName -cne 'SpecForge') {
-    throw "SpecForge metadata has product name '$productName'; expected 'SpecForge'."
+$metadataApplicationId = Get-RequiredMetadataString -Metadata $sourceMetadata -PropertyName 'application_id'
+if ($metadataApplicationId -cne $ApplicationId) {
+    throw 'Build metadata application_id does not match the founding identity.'
 }
 foreach ($propertyName in @(
     'source_mode',
@@ -299,10 +301,10 @@ else {
     }
 }
 if ($buildMetadata.configuration -cne $Configuration) {
-    throw "SpecForge.exe has configuration '$($buildMetadata.configuration)'; expected '$Configuration'."
+    throw "Spectiary.exe has configuration '$($buildMetadata.configuration)'; expected '$Configuration'."
 }
 if ($buildMetadata.compiler_id -cne 'MSVC') {
-    throw "SpecForge.exe has compiler '$($buildMetadata.compiler_id)'; expected 'MSVC'."
+    throw "Spectiary.exe has compiler '$($buildMetadata.compiler_id)'; expected 'MSVC'."
 }
 if ($buildMetadata.compiler_version -cnotmatch '^[0-9]+(?:\.[0-9]+){1,3}$') {
     throw "Build metadata has invalid compiler_version '$($buildMetadata.compiler_version)'."
@@ -314,7 +316,7 @@ if ($buildMetadata.generator -match '[\x00-\x1f]') {
     throw "Build metadata has invalid generator '$($buildMetadata.generator)'."
 }
 if ($buildMetadata.target_architecture -cne 'amd64') {
-    throw "SpecForge.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'amd64'."
+    throw "Spectiary.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'amd64'."
 }
 $windowsSdkProperty = $buildMetadata.PSObject.Properties['windows_sdk_version']
 if ($null -eq $windowsSdkProperty -or
@@ -338,8 +340,8 @@ $artifactMetadata = Get-RequiredMetadataObject `
 $artifactFile = Get-RequiredMetadataString `
     -Metadata $artifactMetadata `
     -PropertyName 'file'
-if ($artifactFile -cne 'SpecForge.exe') {
-    throw "Build metadata artifact file '$artifactFile'; expected 'SpecForge.exe'."
+if ($artifactFile -cne $ArtifactFileName) {
+    throw "Build metadata artifact file '$artifactFile'; expected $ArtifactFileName."
 }
 $artifactSha256 = Get-RequiredMetadataString `
     -Metadata $artifactMetadata `
@@ -348,7 +350,7 @@ if ($artifactSha256 -cnotmatch '^[0-9a-f]{64}$') {
     throw "Build metadata artifact sha256 is not a lowercase SHA-256 digest: '$artifactSha256'."
 }
 if ($artifactSha256 -cne $buildExecutableHash) {
-    throw "Build metadata artifact sha256 '$artifactSha256' does not match build directory SpecForge.exe hash '$buildExecutableHash'."
+    throw "Build metadata artifact sha256 '$artifactSha256' does not match build directory Spectiary.exe hash '$buildExecutableHash'."
 }
 
 if (-not (Test-Path -LiteralPath $thirdPartyNoticesPath -PathType Leaf)) {
@@ -392,16 +394,16 @@ if (Test-Path -LiteralPath $packageRoot) {
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-Null
-Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot 'SpecForge.exe') -Force
+Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot $ArtifactFileName) -Force
 $packagedExecutableHash = (
     Get-FileHash `
         -Algorithm SHA256 `
-        -LiteralPath (Join-Path $packageRoot 'SpecForge.exe')
+        -LiteralPath (Join-Path $packageRoot $ArtifactFileName)
 ).Hash.ToLowerInvariant()
 if ($buildExecutableHash -cne $packagedExecutableHash) {
-    throw "Packaged SpecForge.exe hash '$packagedExecutableHash' does not match build directory SpecForge.exe hash '$buildExecutableHash'."
+    throw "Packaged Spectiary.exe hash '$packagedExecutableHash' does not match build directory Spectiary.exe hash '$buildExecutableHash'."
 }
-$packageMetadataPath = Join-Path $packageRoot 'specforge_metadata.json'
+$packageMetadataPath = Join-Path $packageRoot $MetadataFileName
 $portableMetadata = $sourceMetadata |
     ConvertTo-Json -Depth 10 |
     ConvertFrom-Json
@@ -429,7 +431,7 @@ $packagedArtifactSha256 = Get-RequiredMetadataString `
     -Metadata $packagedArtifactMetadata `
     -PropertyName 'sha256'
 if ($packagedArtifactSha256 -cne $packagedExecutableHash) {
-    throw "Packaged metadata artifact sha256 '$packagedArtifactSha256' does not match packaged SpecForge.exe hash '$packagedExecutableHash'."
+    throw "Packaged metadata artifact sha256 '$packagedArtifactSha256' does not match packaged Spectiary.exe hash '$packagedExecutableHash'."
 }
 
 if (Test-Path -LiteralPath $zipPath) {
@@ -445,13 +447,13 @@ try {
     try {
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $archive,
-            (Join-Path $packageRoot 'SpecForge.exe'),
-            'SpecForge.exe',
+            (Join-Path $packageRoot $ArtifactFileName),
+            $ArtifactFileName,
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $archive,
             $packageMetadataPath,
-            'specforge_metadata.json',
+            $MetadataFileName,
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [void]$archive.CreateEntry('Data/')
     }
@@ -474,4 +476,4 @@ Set-Content -LiteralPath $hashPath -Value ("{0}  {1}" -f $hash.Hash.ToLowerInvar
 Write-Host "Portable package: $packageRoot"
 Write-Host "Portable zip: $zipPath"
 Write-Host "SHA256: $hashPath"
-Write-Host "SpecForge.exe SHA256: $packagedExecutableHash"
+Write-Host "Spectiary.exe SHA256: $packagedExecutableHash"

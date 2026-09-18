@@ -179,7 +179,7 @@ function Get-OrdinaryStateRoot {
     )
 
     $appDirectory = Split-Path -Parent $AppPath
-    $metadataPath = Join-Path $appDirectory 'specforge_metadata.json'
+    $metadataPath = Join-Path $appDirectory 'spectiary_metadata.json'
     if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
         $metadata = Get-Content -Raw -LiteralPath $metadataPath |
             ConvertFrom-Json
@@ -1399,7 +1399,7 @@ try {
             -Recurse
     }
     $metadataPath =
-        Join-Path $buildRoot 'specforge_metadata.json'
+        Join-Path $buildRoot 'spectiary_metadata.json'
     $portableMetadata =
         Get-Content -Raw -LiteralPath $metadataPath |
             ConvertFrom-Json
@@ -1412,7 +1412,7 @@ try {
             }) `
             -Force
     [System.IO.File]::WriteAllText(
-        (Join-Path $portableAppRoot 'specforge_metadata.json'),
+        (Join-Path $portableAppRoot 'spectiary_metadata.json'),
         ($portableMetadata | ConvertTo-Json -Depth 10),
         [System.Text.UTF8Encoding]::new($false))
 

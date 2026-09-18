@@ -40,7 +40,7 @@ int RunFinalizer(int argc, Character** argv)
 {
     if (argc != 3) {
         std::cerr << "usage: specforge_metadata_finalizer_tool "
-                     "<SpecForge.exe> <specforge_metadata.json>\n";
+                     "<Spectiary.exe> <spectiary_metadata.json>\n";
         return 2;
     }
 

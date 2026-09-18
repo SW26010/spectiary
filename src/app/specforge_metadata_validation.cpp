@@ -159,7 +159,7 @@ bool IsValidSidecarSourceTuple(
     return true;
 }
 
-bool ValidateSchema5BuildMetadata(
+bool ValidateSchema6BuildMetadata(
     const BuildIdentity& identity,
     const BuildMetadata& metadata,
     std::string* error_message)
@@ -173,6 +173,9 @@ bool ValidateSchema5BuildMetadata(
         return false;
     };
 
+    if (identity.application_id != project_identity::kApplicationId) {
+        return fail("application_id must equal the canonical founding identity");
+    }
     if (!IsRequiredMetadataString(identity.product_name) ||
         !IsRequiredMetadataString(identity.specforge_version) ||
         !IsRequiredMetadataString(identity.configuration) ||
@@ -230,7 +233,7 @@ bool ValidateSchema5BuildMetadata(
     if (metadata.finalized_artifact->artifact.file !=
             metadata_contract::kCanonicalExecutableFileName ||
         !IsValidSha256(metadata.finalized_artifact->artifact.sha256)) {
-        return fail("artifact must contain SpecForge.exe and a lowercase SHA-256 digest");
+        return fail("artifact must contain Spectiary.exe and a lowercase SHA-256 digest");
     }
     return true;
 }

@@ -248,7 +248,7 @@ specforge::BuildMetadataReadResult MakeArtifactMetadata(
     metadata.finalized_artifact = specforge::FinalizedArtifactMetadata{
         .completed_at_utc = "2026-08-05T09:21:32Z",
         .artifact = specforge::BuildArtifactMetadata{
-            .file = "SpecForge.exe",
+            .file = "Spectiary.exe",
             .sha256 = std::move(sha256),
         },
     };
@@ -709,7 +709,7 @@ void TestArtifactIdentityVerification()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path executable_path =
-        root / "SpecForge.exe";
+        root / "Spectiary.exe";
     {
         std::ofstream stream(executable_path, std::ios::binary);
         Require(stream.good(), "artifact identity fixture should open");
@@ -928,7 +928,7 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path executable_path =
-        root / "SpecForge.exe";
+        root / "Spectiary.exe";
     {
         std::ofstream stream(executable_path, std::ios::binary);
         Require(stream.good(), "metadata gate fixture should open");
@@ -1011,7 +1011,7 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path executable_path =
-        root / "SpecForge.exe";
+        root / "Spectiary.exe";
     {
         std::ofstream stream(executable_path, std::ios::binary);
         Require(stream.good(), "on-demand identity fixture should open");
@@ -1109,7 +1109,7 @@ void TestArtifactIdentityRetriesAfterHashFailure()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path executable_path =
-        root / "SpecForge.exe";
+        root / "Spectiary.exe";
 
     specforge::SettingsPanelUi panel({
         .version = "test",

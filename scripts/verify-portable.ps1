@@ -11,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'project-identity.ps1')
 
 Import-Module `
     (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
@@ -106,8 +107,8 @@ if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
 
 $expectedPackageEntries = @(
     'Data',
-    'SpecForge.exe',
-    'specforge_metadata.json'
+    $ArtifactFileName,
+    $MetadataFileName
 )
 $actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
 $actualPackageEntries = @($actualPackageItems | ForEach-Object { $_.Name })
@@ -120,11 +121,11 @@ $packageDataEntry = @(
     $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
 )
 $packageExecutableEntry = @(
-    $actualPackageItems | Where-Object { $_.Name -ceq 'SpecForge.exe' }
+    $actualPackageItems | Where-Object { $_.Name -ceq $ArtifactFileName }
 )
 $packageMetadataEntry = @(
     $actualPackageItems |
-        Where-Object { $_.Name -ceq 'specforge_metadata.json' }
+        Where-Object { $_.Name -ceq $MetadataFileName }
 )
 if ($packageDataEntry.Count -ne 1 -or
     -not $packageDataEntry[0].PSIsContainer) {
@@ -132,15 +133,15 @@ if ($packageDataEntry.Count -ne 1 -or
 }
 if ($packageExecutableEntry.Count -ne 1 -or
     $packageExecutableEntry[0].PSIsContainer) {
-    throw 'Portable package root SpecForge.exe must be a file.'
+    throw 'Portable package root Spectiary.exe must be a file.'
 }
 if ($packageMetadataEntry.Count -ne 1 -or
     $packageMetadataEntry[0].PSIsContainer) {
-    throw 'Portable package root specforge_metadata.json must be a file.'
+    throw 'Portable package root spectiary_metadata.json must be a file.'
 }
 
-$packageExecutable = Join-Path $PackageRoot 'SpecForge.exe'
-$packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
+$packageExecutable = Join-Path $PackageRoot $ArtifactFileName
+$packageMetadataPath = Join-Path $PackageRoot $MetadataFileName
 $metadata = Get-Content -Raw -LiteralPath $packageMetadataPath | ConvertFrom-Json
 $schemaVersion = Get-RequiredProperty `
     -Object $metadata `
@@ -148,8 +149,13 @@ $schemaVersion = Get-RequiredProperty `
     -Description 'Portable metadata'
 if (($schemaVersion -isnot [int] -and
      $schemaVersion -isnot [long]) -or
-    $schemaVersion -ne 5) {
-    throw 'Portable metadata schema_version must be the integer 5.'
+    $schemaVersion -ne 6) {
+    throw 'Portable metadata schema_version must be the integer 6.'
+}
+
+$metadataApplicationId = Get-RequiredProperty -Object $metadata -Name 'application_id' -Description 'Portable metadata'
+if ($metadataApplicationId -isnot [string] -or $metadataApplicationId -cne $ApplicationId) {
+    throw 'Portable metadata application_id does not match the founding identity.'
 }
 
 $build = Get-RequiredProperty `
@@ -216,8 +222,8 @@ $artifact = Get-RequiredProperty `
 if ($artifact -isnot [pscustomobject]) {
     throw 'Portable metadata artifact must be an object.'
 }
-if ((Get-RequiredProperty $artifact 'file' 'Portable artifact') -cne 'SpecForge.exe') {
-    throw "Portable artifact file must be 'SpecForge.exe'."
+if ((Get-RequiredProperty $artifact 'file' 'Portable artifact') -cne $ArtifactFileName) {
+    throw "Portable artifact file must be $ArtifactFileName."
 }
 $artifactSha256 = [string](Get-RequiredProperty $artifact 'sha256' 'Portable artifact')
 if ($artifactSha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -235,10 +241,10 @@ if ($artifactSha256 -cne $packageExecutableHash) {
 if ($configuration -ceq 'Release') {
     Assert-StaticCfitsioPeImports `
         -ExecutablePath $BuildExecutable `
-        -Description 'Release build SpecForge.exe'
+        -Description 'Release build Spectiary.exe'
     Assert-StaticCfitsioPeImports `
         -ExecutablePath $packageExecutable `
-        -Description 'Portable Release SpecForge.exe'
+        -Description 'Portable Release Spectiary.exe'
 }
 
 Add-Type -AssemblyName System.IO.Compression
@@ -247,8 +253,8 @@ $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
     $expectedZipEntries = @(
         'Data/',
-        'SpecForge.exe',
-        'specforge_metadata.json'
+        $ArtifactFileName,
+        $MetadataFileName
     )
     $actualZipEntries = @($archive.Entries.FullName)
     $cfitsioDllEntries = @(
@@ -265,12 +271,12 @@ try {
         -Description 'Portable ZIP'
     Assert-ZipEntryMatchesFile `
         -Archive $archive `
-        -EntryName 'SpecForge.exe' `
+        -EntryName $ArtifactFileName `
         -FilePath $packageExecutable `
         -Description 'Portable ZIP executable'
     Assert-ZipEntryMatchesFile `
         -Archive $archive `
-        -EntryName 'specforge_metadata.json' `
+        -EntryName $MetadataFileName `
         -FilePath $packageMetadataPath `
         -Description 'Portable ZIP metadata'
 }

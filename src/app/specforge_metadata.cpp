@@ -14,17 +14,6 @@
 namespace specforge {
 namespace {
 
-constexpr int kLegacySchemaVersion = 3;
-constexpr int kSchema4Version = 4;
-constexpr std::string_view kLegacyMetadataFileName =
-    "specforge_build_metadata.json";
-
-enum class MetadataSchemaRequirement {
-    Any,
-    CurrentFilename,
-    LegacyFilename,
-};
-
 std::optional<std::string> ReadRequiredMetadataString(
     const nlohmann::json& root,
     std::string_view key)
@@ -71,21 +60,6 @@ bool MatchesSourceRevision(
         *actual_revision == expected_identity.source_revision;
 }
 
-bool MatchesTargetArchitecture(
-    std::string_view actual_architecture,
-    int schema_version,
-    std::string_view expected_architecture)
-{
-    if (actual_architecture == expected_architecture) {
-        return true;
-    }
-    return schema_version == kLegacySchemaVersion &&
-        ((actual_architecture == "x64" &&
-          expected_architecture == "amd64") ||
-         (actual_architecture == "amd64" &&
-          expected_architecture == "x64"));
-}
-
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
@@ -105,25 +79,15 @@ BuildMetadataReadResult ReadBuildMetadata(
     int schema_version,
     const BuildIdentity& expected_identity)
 {
-    const nlohmann::json* product = &root;
-    const nlohmann::json* build = &root;
-    std::optional<std::string> product_name = std::string("SpecForge");
-    if (schema_version >= kSchema4Version) {
-        product = JsonObjectMember(root, "product");
-        build = JsonObjectMember(root, "build");
-        if (product == nullptr || product->type() != nlohmann::json::value_t::object ||
-            build == nullptr || build->type() != nlohmann::json::value_t::object) {
-            return {};
-        }
-        product_name = ReadRequiredMetadataString(*product, "name");
+    const nlohmann::json* product = JsonObjectMember(root, "product");
+    const nlohmann::json* build = JsonObjectMember(root, "build");
+    if (product == nullptr || !product->is_object() ||
+        build == nullptr || !build->is_object()) {
+        return {};
     }
-
-    const std::optional<std::string> specforge_version =
-        ReadRequiredMetadataString(
-            *product,
-            schema_version >= kSchema4Version
-                ? "version"
-                : "specforge_version");
+    const auto application_id = ReadRequiredMetadataString(root, "application_id");
+    const auto product_name = ReadRequiredMetadataString(*product, "name");
+    const auto specforge_version = ReadRequiredMetadataString(*product, "version");
     const std::optional<std::string> configuration =
         ReadRequiredMetadataString(*build, "configuration");
     const std::optional<std::string> target_architecture =
@@ -148,30 +112,13 @@ BuildMetadataReadResult ReadBuildMetadata(
         ReadRequiredMetadataString(*build, "dear_imgui");
     const std::optional<std::string> implot =
         ReadRequiredMetadataString(*build, "implot");
-    // cfitsio was added after schema 5 had already shipped. A missing member
-    // denotes the legacy schema 5 shape and is completed from the executable's
-    // generated build identity. A present member must remain fully valid.
-    const nlohmann::json* cfitsio_member = JsonObjectMember(*build, "cfitsio");
-    const std::optional<std::string> cfitsio =
-        schema_version == metadata_contract::kSchema5Version &&
-            cfitsio_member != nullptr
-        ? ReadRequiredMetadataString(*build, "cfitsio")
-        : std::optional<std::string>{build_info::kBuildCfitsioVersion};
-    // yaml_cpp was added after schema 5 had already shipped.  A missing member
-    // therefore denotes the legacy schema 5 shape and is completed from the
-    // executable's generated build identity.  If the member is present it must
-    // still satisfy the ordinary required-string contract.
-    const nlohmann::json* yaml_cpp_member = JsonObjectMember(*build, "yaml_cpp");
-    const std::optional<std::string> yaml_cpp =
-        schema_version == metadata_contract::kSchema5Version &&
-            yaml_cpp_member != nullptr
-        ? ReadRequiredMetadataString(*build, "yaml_cpp")
-        : std::optional<std::string>{build_info::kBuildYamlCppVersion};
+    const auto cfitsio = ReadRequiredMetadataString(*build, "cfitsio");
+    const auto yaml_cpp = ReadRequiredMetadataString(*build, "yaml_cpp");
     const std::optional<std::string> zlib =
         ReadRequiredMetadataString(*build, "zlib");
 
     std::optional<FinalizedArtifactMetadata> finalized_artifact;
-    if (schema_version == metadata_contract::kSchema5Version) {
+    if (schema_version == metadata_contract::kSchema6Version) {
         const std::optional<std::string> completed_at_utc =
             ReadRequiredMetadataString(*build, "completed_at_utc");
         const nlohmann::json* artifact_value =
@@ -197,7 +144,7 @@ BuildMetadataReadResult ReadBuildMetadata(
         }
     }
 
-    if (!product_name || !specforge_version || !configuration ||
+    if (!application_id || !product_name || !specforge_version || !configuration ||
         !target_architecture || !source_mode || !source_revision ||
         !compiler_id || !compiler_version || !cmake_version || !generator ||
         !windows_sdk_version || !dear_imgui || !implot || !cfitsio ||
@@ -216,8 +163,9 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.zlib_version = *zlib;
     metadata.finalized_artifact = std::move(finalized_artifact);
 
-    if (schema_version == metadata_contract::kSchema5Version) {
+    if (schema_version == metadata_contract::kSchema6Version) {
         const BuildIdentity actual_identity = {
+            .application_id = *application_id,
             .product_name = *product_name,
             .specforge_version = *specforge_version,
             .configuration = *configuration,
@@ -227,38 +175,17 @@ BuildMetadataReadResult ReadBuildMetadata(
                 ? **source_revision
                 : "",
         };
-        if (!metadata_validation::ValidateSchema5BuildMetadata(
+        if (!metadata_validation::ValidateSchema6BuildMetadata(
                 actual_identity,
                 metadata)) {
             return {};
         }
-    } else if (!metadata_validation::IsDottedNumericVersion(
-                   *compiler_version,
-                   1U,
-                   3U) ||
-               !metadata_validation::IsDottedNumericVersion(
-                   *cmake_version,
-                   2U,
-                   3U) ||
-               metadata_validation::ContainsControlCharacter(*generator) ||
-               (*windows_sdk_version &&
-                !metadata_validation::IsDottedNumericVersion(
-                    **windows_sdk_version,
-                    2U,
-                    3U)) ||
-               !metadata_validation::IsValidSidecarSourceTuple(
-                   *source_mode,
-                   *source_revision)) {
-        return {};
     }
 
-    if (*product_name != expected_identity.product_name ||
+    if (*application_id != expected_identity.application_id ||
         *specforge_version != expected_identity.specforge_version ||
         *configuration != expected_identity.configuration ||
-        !MatchesTargetArchitecture(
-            *target_architecture,
-            schema_version,
-            expected_identity.target_architecture) ||
+        *target_architecture != expected_identity.target_architecture ||
         *source_mode != expected_identity.source_mode ||
         !MatchesSourceRevision(*source_revision, expected_identity)) {
         return {
@@ -275,26 +202,8 @@ BuildMetadataReadResult ReadBuildMetadata(
 
 std::optional<std::string> ReadDeployment(
     const nlohmann::json& root,
-    int schema_version,
     DeploymentMetadata& deployment)
 {
-    if (schema_version == kLegacySchemaVersion) {
-        const std::optional<std::string> release_profile =
-            ReadRequiredMetadataString(root, "release_profile");
-        if (!release_profile) {
-            return "schema 3 requires a non-empty string release_profile";
-        }
-        if (*release_profile == "Portable") {
-            deployment.storage_profile = StorageProfile::Portable;
-            return std::nullopt;
-        }
-        if (*release_profile == "Installed") {
-            deployment.storage_profile = StorageProfile::LocalAppData;
-            return std::nullopt;
-        }
-        return "schema 3 release_profile must be exactly Portable or Installed";
-    }
-
     const nlohmann::json* deployment_value =
         JsonObjectMember(root, "deployment");
     if (deployment_value == nullptr) {
@@ -340,38 +249,6 @@ std::optional<std::string> ReadDeployment(
 SpecForgeMetadataReadResult MissingMetadataResult()
 {
     return {};
-}
-
-bool IsSchemaAllowedForRequirement(
-    int schema_version,
-    MetadataSchemaRequirement requirement)
-{
-    switch (requirement) {
-    case MetadataSchemaRequirement::Any:
-        return schema_version == kLegacySchemaVersion ||
-            schema_version == kSchema4Version ||
-            schema_version == metadata_contract::kSchema5Version;
-    case MetadataSchemaRequirement::CurrentFilename:
-        return schema_version == kSchema4Version ||
-            schema_version == metadata_contract::kSchema5Version;
-    case MetadataSchemaRequirement::LegacyFilename:
-        return schema_version == kLegacySchemaVersion;
-    }
-    return false;
-}
-
-std::string SchemaRequirementDescription(
-    MetadataSchemaRequirement requirement)
-{
-    switch (requirement) {
-    case MetadataSchemaRequirement::Any:
-        return "schema 3, 4, or 5";
-    case MetadataSchemaRequirement::CurrentFilename:
-        return "schema 4 or 5";
-    case MetadataSchemaRequirement::LegacyFilename:
-        return "schema 3";
-    }
-    return "a supported schema";
 }
 
 bool PathExists(
@@ -424,8 +301,7 @@ namespace {
 
 SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
     const std::filesystem::path& path,
-    const BuildIdentity& expected_identity,
-    MetadataSchemaRequirement schema_requirement)
+    const BuildIdentity& expected_identity)
 {
     SpecForgeMetadataReadResult result;
     result.metadata_path = path;
@@ -463,27 +339,13 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
 
     const std::optional<int> schema_version =
         ReadJsonIntMember(*root, "schema_version");
-    if (!schema_version ||
-        !IsSchemaAllowedForRequirement(
-            *schema_version,
-            MetadataSchemaRequirement::Any)) {
-        result.startup_error = MetadataError(
-            path,
-            "schema_version must be exactly 3, 4, or 5");
-        return result;
-    }
-    if (!IsSchemaAllowedForRequirement(
-            *schema_version,
-            schema_requirement)) {
-        result.startup_error = MetadataError(
-            path,
-            "this metadata filename requires " +
-                SchemaRequirementDescription(schema_requirement));
+    if (!schema_version || *schema_version != metadata_contract::kSchema6Version) {
+        result.startup_error = MetadataError(path, "schema_version must be exactly 6");
         return result;
     }
 
     if (const std::optional<std::string> deployment_error =
-            ReadDeployment(*root, *schema_version, result.deployment)) {
+            ReadDeployment(*root, result.deployment)) {
         result.startup_error = MetadataError(path, *deployment_error);
     }
     result.build_metadata =
@@ -499,8 +361,7 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadata(
 {
     return ReadSpecForgeMetadataForSchema(
         path,
-        expected_identity,
-        MetadataSchemaRequirement::Any);
+        expected_identity);
 }
 
 SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
@@ -515,8 +376,7 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
     if (PathExists(current_path, exists_error)) {
         return ReadSpecForgeMetadataForSchema(
             current_path,
-            expected_identity,
-            MetadataSchemaRequirement::CurrentFilename);
+            expected_identity);
     }
     if (exists_error) {
         SpecForgeMetadataReadResult result;
@@ -525,27 +385,13 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
         return result;
     }
 
-    const std::filesystem::path legacy_path =
-        package_root / kLegacyMetadataFileName;
-    if (PathExists(legacy_path, exists_error)) {
-        return ReadSpecForgeMetadataForSchema(
-            legacy_path,
-            expected_identity,
-            MetadataSchemaRequirement::LegacyFilename);
-    }
-    if (exists_error) {
-        SpecForgeMetadataReadResult result;
-        result.metadata_path = legacy_path;
-        result.startup_error = std::move(exists_error);
-        return result;
-    }
     return MissingMetadataResult();
 }
 
 BuildIdentity CompiledBuildIdentity()
 {
     return {
-        .product_name = "SpecForge",
+        .product_name = project_identity::kProductDisplayName,
         .specforge_version = build_info::kSpecForgeVersion,
         .configuration = build_info::kBuildConfiguration,
         .target_architecture =

@@ -33,7 +33,7 @@ void Require(bool condition, const std::string& message)
 specforge::BuildIdentity WorkingTreeIdentity()
 {
     return {
-        .product_name = "SpecForge",
+        .product_name = "Spectiary",
         .specforge_version = "0.4.1",
         .configuration = "Debug",
         .target_architecture = "amd64",
@@ -69,46 +69,11 @@ std::string ReadTextFile(const std::filesystem::path& path)
         std::istreambuf_iterator<char>());
 }
 
-std::string Schema4Metadata(
-    std::string_view deployment = {},
-    std::string_view compiler_version = "19.44")
-{
-    std::string document =
-        "{\n"
-        "  \"schema_version\": 4,\n"
-        "  \"product\": {\n"
-        "    \"name\": \"SpecForge\",\n"
-        "    \"version\": \"0.4.1\"\n"
-        "  },\n"
-        "  \"build\": {\n"
-        "    \"source_mode\": \"working_tree\",\n"
-        "    \"source_revision\": null,\n"
-        "    \"configuration\": \"Debug\",\n"
-        "    \"compiler_id\": \"MSVC\",\n"
-        "    \"compiler_version\": \"" +
-        std::string(compiler_version) +
-        "\",\n"
-        "    \"cmake_version\": \"4.1.0\",\n"
-        "    \"generator\": \"Ninja\",\n"
-        "    \"target_architecture\": \"amd64\",\n"
-        "    \"windows_sdk_version\": null,\n"
-        "    \"dear_imgui\": \"1.92.5\",\n"
-        "    \"implot\": \"0.17\",\n"
-        "    \"zlib\": \"1.3.1\"\n"
-        "  }";
-    if (!deployment.empty()) {
-        document += ",\n  \"deployment\": ";
-        document += deployment;
-    }
-    document += "\n}\n";
-    return document;
-}
-
-std::string Schema5Metadata(
+std::string Schema6Metadata(
     std::string_view completed_at_json =
         R"("2026-08-05T09:21:32Z")",
     std::string_view artifact_json =
-        R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})",
+        R"({"file":"Spectiary.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})",
     bool include_completed_at = true,
     bool include_artifact = true,
     std::string_view deployment = {})
@@ -118,13 +83,14 @@ std::string Schema5Metadata(
     }
     if (artifact_json.empty()) {
         artifact_json =
-            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})";
+            R"({"file":"Spectiary.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})";
     }
     std::string document =
         "{\n"
-        "  \"schema_version\": 5,\n"
+        "  \"schema_version\": 6,\n"
+        "  \"application_id\": \"0238d5bf7b34bb99c006f9807537d31234ca2e3d\",\n"
         "  \"product\": {\n"
-        "    \"name\": \"SpecForge\",\n"
+        "    \"name\": \"Spectiary\",\n"
         "    \"version\": \"0.4.1\"\n"
         "  },\n"
         "  \"build\": {\n"
@@ -162,6 +128,48 @@ std::string Schema5Metadata(
     return document;
 }
 
+std::string CurrentMetadata(std::string_view deployment = {}, std::string_view compiler_version = "19.44")
+{
+    std::string document = Schema6Metadata({}, {}, true, true, deployment);
+    const auto offset = document.find("19.44");
+    document.replace(offset, 5, compiler_version);
+    return document;
+}
+
+void TestIdentitySeparationAndSchemaCutover()
+{
+    const auto root = std::filesystem::temp_directory_path() / "spectiary-identity-cutover";
+    std::filesystem::create_directories(root);
+    const auto path = root / "spectiary_metadata.json";
+    auto identity = WorkingTreeIdentity();
+    Require(identity.application_id == "0238d5bf7b34bb99c006f9807537d31234ca2e3d",
+        "application identity must retain the entire founding seed");
+    WriteTextFile(path, Schema6Metadata());
+    identity.product_name = "A completely different display name";
+    Require(specforge::ReadSpecForgeMetadata(path, identity).build_metadata.status ==
+        specforge::BuildMetadataStatus::Available, "display name must not control machine identity");
+    identity.application_id = "wrong-application";
+    Require(specforge::ReadSpecForgeMetadata(path, identity).build_metadata.status ==
+        specforge::BuildMetadataStatus::Mismatch, "application identity must be matched independently");
+    for (const int version : {3, 4, 5, 7}) {
+        auto document = Schema6Metadata();
+        const auto offset = document.find("\"schema_version\": 6");
+        document.replace(offset, std::string("\"schema_version\": 6").size(),
+            "\"schema_version\": " + std::to_string(version));
+        WriteTextFile(path, document);
+        Require(specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity()).startup_error.has_value(),
+            "retired and unknown metadata schemas must be rejected");
+    }
+    std::filesystem::remove(path);
+    WriteTextFile(root / "specforge_build_metadata.json", Schema6Metadata());
+    WriteTextFile(root / "specforge_metadata.json", Schema6Metadata());
+    Require(specforge::ReadAdjacentSpecForgeMetadata(root, WorkingTreeIdentity()).metadata_path.empty(),
+        "retired filenames must not be active aliases");
+    WriteTextFile(path, Schema6Metadata());
+    Require(specforge::ReadAdjacentSpecForgeMetadata(root, WorkingTreeIdentity()).metadata_path == path,
+        "discovery must use the explicit sidecar contract");
+    std::filesystem::remove_all(root);
+}
 void RequireDefaultDeployment(
     const specforge::SpecForgeMetadataReadResult& result,
     std::string_view description)
@@ -193,140 +201,35 @@ void TestMissingMetadataDefaultsToStandalone()
         "missing metadata should make build provenance unavailable");
 }
 
-void TestSchema3Compatibility()
-{
-    const specforge::SpecForgeMetadataReadResult portable =
-        specforge::ReadSpecForgeMetadata(
-            FixturePath("available-working-tree.json"),
-            WorkingTreeIdentity());
-    Require(
-        !portable.startup_error &&
-            portable.deployment.distribution ==
-                specforge::Distribution::Standalone &&
-            portable.deployment.storage_profile ==
-                specforge::StorageProfile::Portable,
-        "schema 3 Portable should retain package-local storage "
-        "without inventing a distribution");
-    Require(
-        portable.build_metadata.status ==
-                specforge::BuildMetadataStatus::Available &&
-            portable.build_metadata.metadata,
-        "matching schema 3 build provenance should normalize legacy x64 "
-        "to amd64");
-
-    const std::filesystem::path root =
-        std::filesystem::temp_directory_path() /
-        "specforge-metadata-schema3-installed";
-    std::error_code cleanup_error;
-    std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path path = root / "metadata.json";
-    const std::string installed =
-        "{\n"
-        "  \"schema_version\": 3,\n"
-        "  \"source_mode\": \"working_tree\",\n"
-        "  \"source_revision\": null,\n"
-        "  \"specforge_version\": \"0.4.1\",\n"
-        "  \"release_profile\": \"Installed\",\n"
-        "  \"configuration\": \"Debug\",\n"
-        "  \"compiler_id\": \"MSVC\",\n"
-        "  \"compiler_version\": \"19.44\",\n"
-        "  \"cmake_version\": \"4.1.0\",\n"
-        "  \"generator\": \"Ninja\",\n"
-        "  \"target_architecture\": \"x64\",\n"
-        "  \"windows_sdk_version\": null,\n"
-        "  \"dear_imgui\": \"1.92.5\",\n"
-        "  \"implot\": \"0.17\",\n"
-        "  \"zlib\": \"1.3.1\"\n"
-        "}\n";
-    WriteTextFile(path, installed);
-    const specforge::SpecForgeMetadataReadResult local_app_data =
-        specforge::ReadSpecForgeMetadata(
-            path,
-            WorkingTreeIdentity());
-    RequireDefaultDeployment(
-        local_app_data,
-        "schema 3 Installed metadata");
-    std::filesystem::remove_all(root, cleanup_error);
-}
-
-void TestSchema3BuildValidationRemainsIndependent()
-{
-    struct Case {
-        std::string_view fixture;
-        bool startup_error;
-    };
-    const std::vector<Case> cases = {
-        {"invalid-json.json", true},
-        {"unsupported-schema.json", true},
-        {"missing-field.json", false},
-        {"wrong-type.json", false},
-        {"working-tree-empty-revision.json", false},
-        {"empty-required-string.json", false},
-        {"whitespace-required-string.json", false},
-        {"padded-required-string.json", false},
-        {"invalid-toolchain-format.json", false},
-        {"working-tree-nonempty-revision.json", false},
-        {"unknown-source-mode.json", false},
-        {"head-null-revision.json", false},
-        {"head-short-revision.json", false},
-        {"head-invalid-revision.json", false},
-    };
-
-    for (const Case& test_case : cases) {
-        const specforge::SpecForgeMetadataReadResult result =
-            specforge::ReadSpecForgeMetadata(
-                FixturePath(test_case.fixture),
-                WorkingTreeIdentity());
-        Require(
-            result.startup_error.has_value() ==
-                test_case.startup_error,
-            std::string(test_case.fixture) +
-                " should classify startup validity correctly");
-        Require(
-            result.build_metadata.status ==
-                    specforge::BuildMetadataStatus::Unavailable &&
-                !result.build_metadata.metadata,
-            std::string(test_case.fixture) +
-                " should make malformed build provenance unavailable");
-        if (!test_case.startup_error) {
-            Require(
-                result.deployment.storage_profile ==
-                    specforge::StorageProfile::Portable,
-                std::string(test_case.fixture) +
-                    " should preserve its valid schema 3 storage mapping");
-        }
-    }
-}
-
-void TestSchema4DeploymentSelection()
+void TestCurrentDeploymentSelection()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
         "specforge-metadata-schema4-deployment";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path path = root / "specforge_metadata.json";
+    const std::filesystem::path path = root / "spectiary_metadata.json";
 
-    WriteTextFile(path, Schema4Metadata());
+    WriteTextFile(path, CurrentMetadata());
     const specforge::SpecForgeMetadataReadResult standalone =
         specforge::ReadSpecForgeMetadata(
             path,
             WorkingTreeIdentity());
     RequireDefaultDeployment(
         standalone,
-        "schema 4 without deployment");
+        "schema 6 without deployment");
     Require(
         standalone.build_metadata.status ==
                 specforge::BuildMetadataStatus::Available,
-        "schema 4 without deployment should still expose build provenance");
+        "schema 6 without deployment should still expose build provenance");
     Require(
         standalone.build_metadata.metadata &&
-            !standalone.build_metadata.metadata->finalized_artifact,
-        "schema 4 should not invent schema 5 finalized-artifact fields");
+            standalone.build_metadata.metadata->finalized_artifact.has_value(),
+        "schema 6 should not invent schema 6 finalized-artifact fields");
 
     WriteTextFile(
         path,
-        Schema4Metadata(
+        CurrentMetadata(
             R"({"distribution":"portable","storage_profile":"portable"})"));
     const specforge::SpecForgeMetadataReadResult portable =
         specforge::ReadSpecForgeMetadata(
@@ -338,11 +241,11 @@ void TestSchema4DeploymentSelection()
                 specforge::Distribution::Portable &&
             portable.deployment.storage_profile ==
                 specforge::StorageProfile::Portable,
-        "schema 4 Portable should select package-local Data");
+        "schema 6 Portable should select package-local Data");
 
     WriteTextFile(
         path,
-        Schema4Metadata(
+        CurrentMetadata(
             R"({"distribution":"winget","storage_profile":"local_app_data"})"));
     const specforge::SpecForgeMetadataReadResult winget =
         specforge::ReadSpecForgeMetadata(
@@ -354,7 +257,7 @@ void TestSchema4DeploymentSelection()
                 specforge::Distribution::WinGet &&
             winget.deployment.storage_profile ==
                 specforge::StorageProfile::LocalAppData,
-        "schema 4 WinGet should retain LocalAppData storage");
+        "schema 6 WinGet should retain LocalAppData storage");
 
     for (const auto& [value, expected] :
          std::vector<std::pair<std::string_view, specforge::Distribution>>{
@@ -363,7 +266,7 @@ void TestSchema4DeploymentSelection()
          }) {
         WriteTextFile(
             path,
-            Schema4Metadata(
+            CurrentMetadata(
                 "{\"distribution\":\"" + std::string(value) +
                 "\",\"storage_profile\":\"local_app_data\"}"));
         const specforge::SpecForgeMetadataReadResult result =
@@ -380,18 +283,18 @@ void TestSchema4DeploymentSelection()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestSchema5StrictParsing()
+void TestSchema6StrictParsing()
 {
     const specforge::SpecForgeMetadataReadResult fixture =
         specforge::ReadSpecForgeMetadata(
-            FixturePath("available-schema5-working-tree.json"),
+            FixturePath("available-schema6-working-tree.json"),
             WorkingTreeIdentity());
-    RequireDefaultDeployment(fixture, "schema 5 fixture");
+    RequireDefaultDeployment(fixture, "schema 6 fixture");
     Require(
         fixture.build_metadata.status ==
                 specforge::BuildMetadataStatus::Available &&
             fixture.build_metadata.metadata,
-        "matching schema 5 build provenance should be available");
+        "matching schema 6 build provenance should be available");
     const specforge::BuildMetadata& metadata =
         *fixture.build_metadata.metadata;
     Require(
@@ -400,78 +303,70 @@ void TestSchema5StrictParsing()
             metadata.finalized_artifact &&
             metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
-            metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
+            metadata.finalized_artifact->artifact.file == "Spectiary.exe" &&
             metadata.finalized_artifact->artifact.sha256 ==
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "schema 5 should expose dependency, timestamp, and artifact identity");
+        "schema 6 should expose dependency, timestamp, and artifact identity");
 
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-metadata-schema5-strict";
+        "specforge-metadata-schema6-strict";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path path = root / "metadata.json";
 
-    std::string legacy_schema5 = Schema5Metadata();
+    std::string legacy_schema6 = Schema6Metadata();
     const std::size_t yaml_cpp_begin =
-        legacy_schema5.find("    \"yaml_cpp\": ");
+        legacy_schema6.find("    \"yaml_cpp\": ");
     Require(
         yaml_cpp_begin != std::string::npos,
-        "schema 5 compatibility fixture should contain yaml_cpp before mutation");
+        "schema 6 compatibility fixture should contain yaml_cpp before mutation");
     const std::size_t yaml_cpp_end =
-        legacy_schema5.find('\n', yaml_cpp_begin);
+        legacy_schema6.find('\n', yaml_cpp_begin);
     Require(
         yaml_cpp_end != std::string::npos,
-        "schema 5 yaml_cpp fixture line should terminate");
-    legacy_schema5.erase(
+        "schema 6 yaml_cpp fixture line should terminate");
+    legacy_schema6.erase(
         yaml_cpp_begin,
         yaml_cpp_end - yaml_cpp_begin + 1U);
-    WriteTextFile(path, legacy_schema5);
+    WriteTextFile(path, legacy_schema6);
     const specforge::SpecForgeMetadataReadResult legacy_without_yaml_cpp =
         specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
-    Require(
-        !legacy_without_yaml_cpp.startup_error &&
-            legacy_without_yaml_cpp.build_metadata.status ==
-                specforge::BuildMetadataStatus::Available &&
-            legacy_without_yaml_cpp.build_metadata.metadata,
-        "schema 5 sidecars created before yaml-cpp provenance must remain available");
+    Require(!legacy_without_yaml_cpp.startup_error &&
+        legacy_without_yaml_cpp.build_metadata.status == specforge::BuildMetadataStatus::Unavailable,
+        "schema 6 requires yaml_cpp");
 
-    std::string legacy_without_cfitsio_document = Schema5Metadata();
+    std::string legacy_without_cfitsio_document = Schema6Metadata();
     const std::size_t cfitsio_begin =
         legacy_without_cfitsio_document.find("    \"cfitsio\": ");
     Require(
         cfitsio_begin != std::string::npos,
-        "schema 5 compatibility fixture should contain cfitsio before mutation");
+        "schema 6 compatibility fixture should contain cfitsio before mutation");
     const std::size_t cfitsio_end =
         legacy_without_cfitsio_document.find('\n', cfitsio_begin);
     Require(
         cfitsio_end != std::string::npos,
-        "schema 5 cfitsio fixture line should terminate");
+        "schema 6 cfitsio fixture line should terminate");
     legacy_without_cfitsio_document.erase(
         cfitsio_begin,
         cfitsio_end - cfitsio_begin + 1U);
     WriteTextFile(path, legacy_without_cfitsio_document);
     const specforge::SpecForgeMetadataReadResult legacy_without_cfitsio =
         specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
-    Require(
-        !legacy_without_cfitsio.startup_error &&
-            legacy_without_cfitsio.build_metadata.status ==
-                specforge::BuildMetadataStatus::Available &&
-            legacy_without_cfitsio.build_metadata.metadata &&
-            legacy_without_cfitsio.build_metadata.metadata->cfitsio_version ==
-                SPECFORGE_EXPECTED_CFITSIO_VERSION,
-        "legacy schema 5 without cfitsio should use the executable's compiled version");
+    Require(!legacy_without_cfitsio.startup_error &&
+        legacy_without_cfitsio.build_metadata.status == specforge::BuildMetadataStatus::Unavailable,
+        "schema 6 requires cfitsio");
 
     for (std::string_view malformed_value : {
              std::string_view{"\"\""},
              std::string_view{"\"4.6.x\""},
          }) {
-        std::string malformed_cfitsio = Schema5Metadata();
+        std::string malformed_cfitsio = Schema6Metadata();
         const std::size_t cfitsio_value =
             malformed_cfitsio.find("\"cfitsio\": \"4.6.4\"");
         Require(
             cfitsio_value != std::string::npos,
-            "schema 5 malformed cfitsio fixture should contain its value");
+            "schema 6 malformed cfitsio fixture should contain its value");
         malformed_cfitsio.replace(
             cfitsio_value,
             std::string_view("\"cfitsio\": \"4.6.4\"").size(),
@@ -487,12 +382,12 @@ void TestSchema5StrictParsing()
             "present but empty or malformed cfitsio provenance must be unavailable");
     }
 
-    std::string malformed_yaml_cpp = Schema5Metadata();
+    std::string malformed_yaml_cpp = Schema6Metadata();
     const std::size_t yaml_cpp_value =
         malformed_yaml_cpp.find("\"yaml_cpp\": \"0.9.0\"");
     Require(
         yaml_cpp_value != std::string::npos,
-        "schema 5 malformed yaml_cpp fixture should contain its value");
+        "schema 6 malformed yaml_cpp fixture should contain its value");
     malformed_yaml_cpp.replace(
         yaml_cpp_value,
         std::string_view("\"yaml_cpp\": \"0.9.0\"").size(),
@@ -509,7 +404,7 @@ void TestSchema5StrictParsing()
 
     WriteTextFile(
         path,
-        Schema5Metadata(R"("2024-02-29T23:59:59Z")"));
+        Schema6Metadata(R"("2024-02-29T23:59:59Z")"));
     const specforge::SpecForgeMetadataReadResult leap_day =
         specforge::ReadSpecForgeMetadata(
             path,
@@ -523,33 +418,33 @@ void TestSchema5StrictParsing()
             leap_day.build_metadata.metadata->finalized_artifact
                     ->completed_at_utc ==
                 "2024-02-29T23:59:59Z",
-        "schema 5 should accept the valid leap day 2024-02-29");
+        "schema 6 should accept the valid leap day 2024-02-29");
 
     const std::vector<std::string> invalid_documents = {
-        Schema5Metadata({}, {}, false, true),
-        Schema5Metadata({}, {}, true, false),
-        Schema5Metadata("false"),
-        Schema5Metadata(R"("2026-02-29T00:00:00Z")"),
-        Schema5Metadata(R"("2024-04-31T00:00:00Z")"),
-        Schema5Metadata(R"("2024-01-01T24:00:00Z")"),
-        Schema5Metadata(R"("2024-01-01T00:00:00+00:00")"),
-        Schema5Metadata(R"("2024-01-01T00:00:00.000Z")"),
-        Schema5Metadata(
+        Schema6Metadata({}, {}, false, true),
+        Schema6Metadata({}, {}, true, false),
+        Schema6Metadata("false"),
+        Schema6Metadata(R"("2026-02-29T00:00:00Z")"),
+        Schema6Metadata(R"("2024-04-31T00:00:00Z")"),
+        Schema6Metadata(R"("2024-01-01T24:00:00Z")"),
+        Schema6Metadata(R"("2024-01-01T00:00:00+00:00")"),
+        Schema6Metadata(R"("2024-01-01T00:00:00.000Z")"),
+        Schema6Metadata(
             R"("2024-02-29T23:59:59Z")",
             R"({"file":"specforge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
-        Schema5Metadata(
+        Schema6Metadata(
             {},
-            R"({"file":"SpecForge.exe","sha256":"0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"})"),
-        Schema5Metadata(
+            R"({"file":"Spectiary.exe","sha256":"0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"})"),
+        Schema6Metadata(
             {},
-            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef"})"),
-        Schema5Metadata(
+            R"({"file":"Spectiary.exe","sha256":"0123456789abcdef"})"),
+        Schema6Metadata(
             {},
-            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"})"),
-        Schema5Metadata(
+            R"({"file":"Spectiary.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"})"),
+        Schema6Metadata(
             {},
             R"({"file":false,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
-        Schema5Metadata({}, "false"),
+        Schema6Metadata({}, "false"),
     };
     for (const std::string& document : invalid_documents) {
         WriteTextFile(path, document);
@@ -562,7 +457,7 @@ void TestSchema5StrictParsing()
                 result.build_metadata.status ==
                     specforge::BuildMetadataStatus::Unavailable &&
                 !result.build_metadata.metadata,
-            "malformed schema 5 build fields should make provenance unavailable without changing deployment");
+            "malformed schema 6 build fields should make provenance unavailable without changing deployment");
     }
 
     std::filesystem::remove_all(root, cleanup_error);
@@ -575,7 +470,7 @@ void TestInvalidDeploymentFailsClosed()
         "specforge-metadata-invalid-deployment";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path path = root / "specforge_metadata.json";
+    const std::filesystem::path path = root / "spectiary_metadata.json";
 
     const std::vector<std::string> invalid_deployments = {
         "null",
@@ -588,7 +483,7 @@ void TestInvalidDeploymentFailsClosed()
         R"({"distribution":"portable","storage_profile":"unknown"})",
     };
     for (const std::string& deployment : invalid_deployments) {
-        WriteTextFile(path, Schema4Metadata(deployment));
+        WriteTextFile(path, CurrentMetadata(deployment));
         const specforge::SpecForgeMetadataReadResult result =
             specforge::ReadSpecForgeMetadata(
                 path,
@@ -612,11 +507,11 @@ void TestBuildProvenanceDoesNotControlDeployment()
         "specforge-metadata-provenance-boundary";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
-    const std::filesystem::path path = root / "specforge_metadata.json";
+    const std::filesystem::path path = root / "spectiary_metadata.json";
     const std::string portable_deployment =
         R"({"distribution":"portable","storage_profile":"portable"})";
 
-    WriteTextFile(path, Schema4Metadata(portable_deployment));
+    WriteTextFile(path, CurrentMetadata(portable_deployment));
     specforge::BuildIdentity mismatched_identity =
         WorkingTreeIdentity();
     mismatched_identity.specforge_version = "9.9.9";
@@ -634,7 +529,7 @@ void TestBuildProvenanceDoesNotControlDeployment()
 
     WriteTextFile(
         path,
-        Schema4Metadata(portable_deployment, "latest"));
+        CurrentMetadata(portable_deployment, "latest"));
     const specforge::SpecForgeMetadataReadResult unavailable =
         specforge::ReadSpecForgeMetadata(
             path,
@@ -649,9 +544,9 @@ void TestBuildProvenanceDoesNotControlDeployment()
 
     WriteTextFile(
         path,
-        Schema5Metadata(
+        Schema6Metadata(
             {},
-            R"({"file":"SpecForge.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000"})",
+            R"({"file":"Spectiary.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000"})",
             true,
             true,
             portable_deployment));
@@ -671,106 +566,6 @@ void TestBuildProvenanceDoesNotControlDeployment()
                     ->artifact.sha256 ==
                 "0000000000000000000000000000000000000000000000000000000000000000",
         "an artifact digest mismatch must not discard valid Portable deployment selection");
-
-    std::filesystem::remove_all(root, cleanup_error);
-}
-
-void TestAdjacentMetadataSelectionAndLegacyFallback()
-{
-    const std::filesystem::path root =
-        std::filesystem::temp_directory_path() /
-        "specforge-adjacent-metadata-selection";
-    std::error_code cleanup_error;
-    std::filesystem::remove_all(root, cleanup_error);
-    std::filesystem::create_directories(root);
-
-    WriteTextFile(
-        root / "specforge_build_metadata.json",
-        ReadTextFile(
-            FixturePath("available-working-tree.json")));
-    const specforge::SpecForgeMetadataReadResult legacy =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        !legacy.startup_error &&
-            legacy.deployment.storage_profile ==
-                specforge::StorageProfile::Portable &&
-            legacy.metadata_path.filename() ==
-                "specforge_build_metadata.json",
-        "legacy filename should preserve old Portable packages");
-
-    WriteTextFile(
-        root / "specforge_metadata.json",
-        Schema4Metadata());
-    const specforge::SpecForgeMetadataReadResult current =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        !current.startup_error &&
-            current.deployment.storage_profile ==
-                specforge::StorageProfile::LocalAppData &&
-            current.metadata_path.filename() ==
-                "specforge_metadata.json",
-        "current metadata filename should take precedence over legacy metadata");
-
-    WriteTextFile(
-        root / "specforge_metadata.json",
-        "{ invalid");
-    const specforge::SpecForgeMetadataReadResult invalid_current =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        invalid_current.startup_error.has_value() &&
-            invalid_current.metadata_path.filename() ==
-                "specforge_metadata.json",
-        "invalid current metadata must not fall back to a legacy declaration");
-
-    WriteTextFile(
-        root / "specforge_metadata.json",
-        ReadTextFile(
-            FixturePath("available-working-tree.json")));
-    const specforge::SpecForgeMetadataReadResult schema3_current =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        schema3_current.startup_error.has_value() &&
-            schema3_current.startup_error->find("schema 4") !=
-                std::string::npos,
-        "the current metadata filename should reject legacy schema 3");
-
-    WriteTextFile(
-        root / "specforge_metadata.json",
-        ReadTextFile(
-            FixturePath("available-schema5-working-tree.json")));
-    const specforge::SpecForgeMetadataReadResult schema5_current =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        !schema5_current.startup_error &&
-            schema5_current.build_metadata.status ==
-                specforge::BuildMetadataStatus::Available,
-        "the current metadata filename should accept schema 5");
-
-    std::filesystem::remove(
-        root / "specforge_metadata.json",
-        cleanup_error);
-    WriteTextFile(
-        root / "specforge_build_metadata.json",
-        Schema4Metadata());
-    const specforge::SpecForgeMetadataReadResult schema4_legacy =
-        specforge::ReadAdjacentSpecForgeMetadata(
-            root,
-            WorkingTreeIdentity());
-    Require(
-        schema4_legacy.startup_error.has_value() &&
-            schema4_legacy.startup_error->find("schema 3") !=
-                std::string::npos,
-        "the legacy metadata filename should accept only schema 3");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -795,7 +590,7 @@ void TestMetadataNames()
             std::string_view(specforge::StorageProfileName(
                 specforge::StorageProfile::LocalAppData)) ==
                 "local_app_data",
-        "storage profile names should match schema 4 values");
+        "storage profile names should match schema 6 values");
 }
 
 void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
@@ -811,11 +606,11 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
     std::filesystem::remove_all(root, cleanup_error);
 
     const std::filesystem::path executable_path =
-        root / "SpecForge.exe";
+        root / "Spectiary.exe";
     const std::filesystem::path state_root =
         root / "local-user-state";
     WriteTextFile(
-        root / "specforge_metadata.json",
+        root / "spectiary_metadata.json",
         "{ invalid metadata");
 
     bool startup_rejected = false;
@@ -838,7 +633,7 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
         "construction");
 
     std::filesystem::remove(
-        root / "specforge_metadata.json",
+        root / "spectiary_metadata.json",
         cleanup_error);
     const specforge::SpecForgeStartup startup =
         specforge::PrepareSpecForgeStartup({
@@ -874,13 +669,13 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
 int main()
 {
     TestMissingMetadataDefaultsToStandalone();
-    TestSchema3Compatibility();
-    TestSchema3BuildValidationRemainsIndependent();
-    TestSchema4DeploymentSelection();
-    TestSchema5StrictParsing();
+
+
+    TestCurrentDeploymentSelection();
+    TestSchema6StrictParsing();
     TestInvalidDeploymentFailsClosed();
     TestBuildProvenanceDoesNotControlDeployment();
-    TestAdjacentMetadataSelectionAndLegacyFallback();
+    TestIdentitySeparationAndSchemaCutover();
     TestMetadataNames();
     TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction();
     std::cout << "SpecForge metadata tests passed\n";

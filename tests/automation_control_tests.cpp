@@ -1238,7 +1238,7 @@ void TestStartupAndNoActivationContract()
     Require(!error, "startup fixture root should exist");
 
     const std::vector<std::wstring> arguments = {
-        L"SpecForge.exe",
+        L"Spectiary.exe",
         L"--automation-pipe",
         specforge::AutomationPipeNameForInstance(
             instance_id),

@@ -24,7 +24,7 @@ namespace specforge::metadata_validation {
 // Validates every field emitted by the schema 5 build/artifact contract. The
 // build identity comparison against the running executable remains the
 // parser's responsibility; this function validates the serialized values.
-[[nodiscard]] bool ValidateSchema5BuildMetadata(
+[[nodiscard]] bool ValidateSchema6BuildMetadata(
     const BuildIdentity& identity,
     const BuildMetadata& metadata,
     std::string* error_message = nullptr);

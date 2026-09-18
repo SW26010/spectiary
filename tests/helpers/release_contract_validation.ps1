@@ -128,7 +128,7 @@ function Get-ReleaseContractRuleId {
         'production FITS reader and loader sources' {
             return 'SF-CFG-PRODUCTION-SOURCES'
         }
-        'Static Release SpecForge.exe must link the static PThreads4W dependency' {
+        'Static Release Spectiary.exe must link the static PThreads4W dependency' {
             return 'SF-CFG-RELEASE-PTHREADS'
         }
         'Configured CTest graph must register .* exactly once' {
@@ -677,7 +677,7 @@ function Assert-CMakeAndFitsTestContract {
     if ($Configuration -ceq 'Release') {
         $nativeRule = [regex]::Match(
             $BuildGraphText,
-            '(?ms)^build SpecForge\.exe:[^\r\n]*\r?\n' +
+            '(?ms)^build Spectiary\.exe:[^\r\n]*\r?\n' +
                 '(?<variables>(?:^  [^\r\n]*(?:\r?\n|\z))*)')
         $nativeLinkLibraries = [regex]::Match(
             $nativeRule.Groups['variables'].Value,
@@ -689,7 +689,7 @@ function Assert-CMakeAndFitsTestContract {
                 $nativeLinkLibraries.Groups['value'].Value -match
                     '(?:^|[\\/])lib[\\/]pthreadVC3\.lib(?:\s|$)'
             ) `
-            -Message 'Static Release SpecForge.exe must link the static PThreads4W dependency.'
+            -Message 'Static Release Spectiary.exe must link the static PThreads4W dependency.'
     }
 
     Assert-ConfiguredTestExecutable `
@@ -1888,7 +1888,7 @@ $configuredMutations = @(
             param($text)
             $nativeRule = [regex]::Match(
                 $text,
-                '(?ms)^build SpecForge\.exe:[^\r\n]*\r?\n' +
+                '(?ms)^build Spectiary\.exe:[^\r\n]*\r?\n' +
                     '(?:^  [^\r\n]*(?:\r?\n|\z))*')
             if (-not $nativeRule.Success) {
                 return $text
