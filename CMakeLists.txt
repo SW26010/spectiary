@@ -409,6 +409,8 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_name_localization.cpp
     src/ui/spectral_lines_panel.cpp
+    src/ui/spectrum_plot_preferences_io.cpp
+    src/ui/spectrum_viewport_state_io.cpp
     src/ui/spectrum_view_state_cache_io.cpp
     src/ui/spectrum_view_session.cpp
     src/ui/theme.cpp

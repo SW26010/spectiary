@@ -142,7 +142,7 @@ void SetLocalUserStatePaths(
     paths.panel_visibility_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kPanelVisibilityState;
-    paths.spectrum_view_state_path =
+    paths.legacy_spectrum_view_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kSpectrumViewState;
     paths.source_session_state_path =
@@ -251,6 +251,10 @@ RuntimePaths RuntimePathsForDeployment(
     }
     paths.config_root = paths.application_data_root / "config";
     paths.state_root = paths.application_data_root / "state";
+    paths.spectrum_plot_preferences_path =
+        paths.config_root / local_user_state_paths::kSpectrumPlotPreferences;
+    paths.spectrum_viewport_state_path =
+        paths.state_root / local_user_state_paths::kSpectrumViewportState;
     paths.logs_root = paths.application_data_root / "logs";
     paths.unsaved_root = paths.application_data_root / "unsaved";
     const auto disposable = CheckedRoot(inputs.system_temp_directory

@@ -218,7 +218,7 @@ struct ShellUiTestAccess {
         ShellUi& shell,
         std::filesystem::path path)
     {
-        shell.spectrum_view_state_path_ =
+        shell.legacy_spectrum_view_state_path_ =
             std::move(path);
         shell.persist_local_state_ = true;
         shell.local_state_flush_result_.reset();
@@ -5032,7 +5032,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
     inputs.executable_path = CurrentExecutablePath();
     inputs.local_user_state_root_override = root;
     const auto startup = PrepareSpecForgeStartup(std::move(inputs));
-    const auto path = startup.runtime_paths().spectrum_view_state_path;
+    const auto path = startup.runtime_paths().legacy_spectrum_view_state_path;
     const std::array<std::string, 4> documents{
         "{\"format_kind\":\"specforge.spectrum_view.state\",\"schema_version\":999}",
         "{broken json",

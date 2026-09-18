@@ -661,7 +661,7 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
                 state_root &&
             startup.runtime_paths().source_session_state_path ==
                 state_root / "source-session.json" &&
-            startup.runtime_paths().spectrum_view_state_path ==
+            startup.runtime_paths().legacy_spectrum_view_state_path ==
                 state_root / "spectrum-view-state.json" &&
             startup.runtime_paths().sample_workflow_state_path ==
                 state_root / "sample-workflow-state.json" &&

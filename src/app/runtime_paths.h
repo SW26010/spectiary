@@ -46,7 +46,9 @@ struct RuntimePaths {
     std::filesystem::path external_source_settings_path;
     std::filesystem::path profile_settings_path;
     std::filesystem::path panel_visibility_state_path;
-    std::filesystem::path spectrum_view_state_path;
+    std::filesystem::path legacy_spectrum_view_state_path; // Legacy migration input only.
+    std::filesystem::path spectrum_plot_preferences_path;
+    std::filesystem::path spectrum_viewport_state_path;
     std::filesystem::path source_session_state_path;
     std::filesystem::path sample_navigation_state_path;
     std::filesystem::path sample_labeling_state_path;

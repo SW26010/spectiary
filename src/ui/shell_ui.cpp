@@ -1020,8 +1020,8 @@ ShellUi::ShellUi(
       application_settings_(
           ApplicationSettingsStorageForRuntimePaths(
               startup.runtime_paths())),
-      spectrum_view_state_path_(
-          startup.runtime_paths().spectrum_view_state_path),
+      legacy_spectrum_view_state_path_(
+          startup.runtime_paths().legacy_spectrum_view_state_path),
       spectrum_view_state_persistence_(
           std::chrono::milliseconds(250),
           std::chrono::seconds(1)),
@@ -1030,7 +1030,7 @@ ShellUi::ShellUi(
 {
     SpectrumViewStateCacheLoadResult spectrum_view_state =
         LoadSpectrumViewStateCache(
-            spectrum_view_state_path_);
+            legacy_spectrum_view_state_path_);
     spectrum_view_writeback_allowed_ =
         spectrum_view_state.issue_kind ==
         VersionedJsonCacheLoadIssueKind::None;
@@ -1136,7 +1136,7 @@ ShellUi::SaveSpectrumViewState()
 {
     std::string error;
     const bool saved = SaveSpectrumViewStateCache(
-        spectrum_view_state_path_,
+        legacy_spectrum_view_state_path_,
         CurrentSpectrumViewStateCache(),
         &error);
     return {
