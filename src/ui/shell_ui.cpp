@@ -1031,6 +1031,9 @@ ShellUi::ShellUi(
     SpectrumViewStateCacheLoadResult spectrum_view_state =
         LoadSpectrumViewStateCache(
             spectrum_view_state_path_);
+    spectrum_view_writeback_allowed_ =
+        spectrum_view_state.issue_kind ==
+        VersionedJsonCacheLoadIssueKind::None;
     if (!spectrum_view_state.warning.empty()) {
         spectrum_view_state_persistence_.SetLoadWarning(
             std::move(spectrum_view_state.warning),
@@ -1154,14 +1157,16 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
             application_settings_.Flush();
         result.source_collection =
             session_.FlushStateCachesWithStatus();
-        spectrum_view_state_persistence_.MarkDirty();
-        result.spectrum_view_saved =
-            spectrum_view_state_persistence_.Flush(
-                [this]() {
-                    return SaveSpectrumViewState();
-                }) !=
-            LocalUserStatePersistenceLifecycle::
-                FlushOutcome::Failed;
+        if (spectrum_view_writeback_allowed_) {
+            spectrum_view_state_persistence_.MarkDirty();
+            result.spectrum_view_saved =
+                spectrum_view_state_persistence_.Flush(
+                    [this]() {
+                        return SaveSpectrumViewState();
+                    }) !=
+                LocalUserStatePersistenceLifecycle::
+                    FlushOutcome::Failed;
+        }
         result.spectral_lines_saved =
             spectral_lines_panel_.Flush();
     }
@@ -1306,7 +1311,7 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
     HandleSessionAction(
         source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);
-    if (persist_local_state_) {
+    if (persist_local_state_ && spectrum_view_writeback_allowed_) {
         (void)spectrum_view_state_persistence_.
             RunMaintenance(
                 now,
@@ -1329,7 +1334,7 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
         source_activation_.
             NextMaintenanceDeadline());
     consider(spectral_lines_panel_.NextMaintenanceDeadline());
-    if (persist_local_state_) {
+    if (persist_local_state_ && spectrum_view_writeback_allowed_) {
         consider(
             spectrum_view_state_persistence_.
                 NextMaintenanceDeadline());

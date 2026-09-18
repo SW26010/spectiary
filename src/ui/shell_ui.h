@@ -467,6 +467,8 @@ private:
     SettingsPanelUi settings_panel_ui_;
     ApplicationSettings application_settings_;
     std::filesystem::path spectrum_view_state_path_;
+    // Runtime fallback does not authorize replacement of a failed startup load.
+    bool spectrum_view_writeback_allowed_ = true;
     std::optional<SpectrumViewStateCache>
         startup_spectrum_view_state_;
     std::optional<std::uint64_t>
