@@ -12,7 +12,8 @@
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session.h"
-#include "ui/spectrum_view_state_cache_io.h"
+#include "ui/spectrum_plot_preferences_io.h"
+#include "ui/spectrum_viewport_state_io.h"
 #include "ui/spectrum_view_session.h"
 #include "ui/top_bar_status_layout.h"
 
@@ -98,14 +99,16 @@ struct ShellRuntimeResourceObservation {
 struct ShellLocalStateFlushResult {
     ApplicationSettingsFlushResult application_settings;
     SourceCollectionStateFlushResult source_collection;
-    bool spectrum_view_saved = true;
+    bool spectrum_plot_preferences_saved = true;
+    bool spectrum_viewport_state_saved = true;
     bool spectral_lines_saved = true;
 
     [[nodiscard]] bool all_saved() const noexcept
     {
         return application_settings.all_saved() &&
                source_collection.all_saved() &&
-               spectrum_view_saved &&
+               spectrum_plot_preferences_saved &&
+               spectrum_viewport_state_saved &&
                spectral_lines_saved;
     }
 
@@ -418,10 +421,14 @@ private:
     void BeginDeferredSourceRestore();
     void RestoreDeferredSpectrumViewport(
         std::optional<std::string> source_collection_identity);
-    [[nodiscard]] SpectrumViewStateCache
-    CurrentSpectrumViewStateCache() const;
+    [[nodiscard]] SpectrumViewportState
+    CurrentSpectrumViewportState() const;
     [[nodiscard]] LocalUserStatePersistenceLifecycle::
-        SaveResult SaveSpectrumViewState();
+        SaveResult SaveSpectrumViewportState();
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
+        SaveSpectrumPlotPreferences();
+    void ObserveSpectrumPersistenceChanges(
+        LocalUserStateSaveScheduler::TimePoint now);
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,
@@ -466,15 +473,22 @@ private:
     SourceCollectionPanelUi source_collection_panel_ui_;
     SettingsPanelUi settings_panel_ui_;
     ApplicationSettings application_settings_;
-    std::filesystem::path legacy_spectrum_view_state_path_;
+    std::filesystem::path spectrum_plot_preferences_path_;
+    bool spectrum_plot_preferences_writeback_allowed_ = true;
+    LocalUserStatePersistenceLifecycle spectrum_plot_preferences_persistence_{
+        std::chrono::milliseconds(250), std::chrono::seconds(1)};
+    SpectrumPlotColors observed_plot_colors_;
+    SpectrumViewportState observed_viewport_state_;
+    std::uint64_t observed_viewport_revision_ = 0;
+    std::filesystem::path spectrum_viewport_state_path_;
     // Runtime fallback does not authorize replacement of a failed startup load.
-    bool spectrum_view_writeback_allowed_ = true;
-    std::optional<SpectrumViewStateCache>
-        startup_spectrum_view_state_;
+    bool spectrum_viewport_state_writeback_allowed_ = true;
+    std::optional<SpectrumViewportState>
+        startup_spectrum_viewport_state_;
     std::optional<std::uint64_t>
         startup_spectrum_view_mutation_revision_;
     LocalUserStatePersistenceLifecycle
-        spectrum_view_state_persistence_;
+        spectrum_viewport_state_persistence_;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     ImFont* spectral_line_label_font_ = nullptr;
     bool immersive_plot_mode_ = false;

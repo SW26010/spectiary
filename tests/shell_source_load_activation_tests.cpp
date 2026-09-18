@@ -159,9 +159,9 @@ struct ShellUiTestAccess {
 
     static void SeedStartupSpectrumViewState(
         ShellUi& shell,
-        SpectrumViewStateCache state)
+        SpectrumViewportState state)
     {
-        shell.startup_spectrum_view_state_ =
+        shell.startup_spectrum_viewport_state_ =
             std::move(state);
         shell.startup_spectrum_view_mutation_revision_ =
             shell.spectrum_view_session_.
@@ -191,20 +191,21 @@ struct ShellUiTestAccess {
                 SetPlotSeriesColor(
                     series,
                     std::move(color)));
+        shell.ObserveSpectrumPersistenceChanges(LocalUserStateSaveScheduler::Clock::now());
     }
 
     static void MarkSpectrumViewStateDirtyAt(
         ShellUi& shell,
         LocalUserStateSaveScheduler::TimePoint now)
     {
-        shell.spectrum_view_state_persistence_.
+        shell.spectrum_viewport_state_persistence_.
             MarkDirtyAt(now);
     }
 
     static LocalUserStatePersistenceStatus SpectrumViewPersistenceStatus(
         const ShellUi& shell)
     {
-        return shell.spectrum_view_state_persistence_.PersistenceStatus();
+        return shell.spectrum_viewport_state_persistence_.PersistenceStatus();
     }
 
     static std::optional<PlotViewLimits>
@@ -218,8 +219,9 @@ struct ShellUiTestAccess {
         ShellUi& shell,
         std::filesystem::path path)
     {
-        shell.legacy_spectrum_view_state_path_ =
-            std::move(path);
+        shell.spectrum_viewport_state_path_ = path;
+        shell.spectrum_plot_preferences_path_ = path.string() + ".preferences";
+        shell.observed_viewport_state_ = LoadSpectrumViewportState(path).state;
         shell.persist_local_state_ = true;
         shell.local_state_flush_result_.reset();
     }
@@ -905,7 +907,7 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *matching,
-        specforge::SpectrumViewStateCache{
+        specforge::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 source_collection_identity,
@@ -936,7 +938,7 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *mutated,
-        specforge::SpectrumViewStateCache{
+        specforge::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 source_collection_identity,
@@ -961,7 +963,7 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *mismatched,
-        specforge::SpectrumViewStateCache{
+        specforge::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 "different-collection",
@@ -1079,21 +1081,21 @@ void TestShellShutdownFlushPersistsLockedViewport()
         color_changed_at);
     shell->RunMaintenance(
         color_changed_at + 250ms);
-    const specforge::SpectrumViewStateCacheLoadResult
+    const specforge::SpectrumPlotPreferencesLoadResult
         maintained =
-            specforge::LoadSpectrumViewStateCache(
-                state_path);
+            specforge::LoadSpectrumPlotPreferences(
+                state_path.string() + ".preferences");
     Require(
         maintained.warning.empty() &&
             maintained.state.plot_colors.raw_spectrum ==
                 custom_raw_color,
-        "curve color edits should debounce into the global spectrum view cache before shutdown");
+        "curve color edits should debounce into the plot preferences before shutdown");
     const specforge::ShellLocalStateFlushResult flushed =
         shell->FlushLocalState();
-    const specforge::SpectrumViewStateCacheLoadResult loaded =
-        specforge::LoadSpectrumViewStateCache(state_path);
+    const specforge::SpectrumViewportStateLoadResult loaded =
+        specforge::LoadSpectrumViewportState(state_path);
     Require(
-        flushed.spectrum_view_saved &&
+        flushed.spectrum_viewport_state_saved &&
             loaded.warning.empty() && loaded.state.locked &&
             loaded.state.source_collection_identity ==
                 source_collection_identity &&
@@ -1101,9 +1103,9 @@ void TestShellShutdownFlushPersistsLockedViewport()
             loaded.state.limits.x_max == expected.x_max &&
             loaded.state.limits.y_min == expected.y_min &&
             loaded.state.limits.y_max == expected.y_max &&
-            loaded.state.plot_colors.raw_spectrum ==
+            specforge::LoadSpectrumPlotPreferences(state_path.string() + ".preferences").state.plot_colors.raw_spectrum ==
                 custom_raw_color,
-        "shutdown flush should persist the locked viewport and global curve colors through the same view-state owner");
+        "shutdown flush should persist the locked viewport and global curve colors through separate owners");
     shell.reset();
 
     std::unique_ptr<specforge::ShellUi> unlocked =
@@ -1115,8 +1117,8 @@ void TestShellShutdownFlushPersistsLockedViewport()
         *unlocked,
         state_path);
     Require(
-        unlocked->FlushLocalState().spectrum_view_saved &&
-            !specforge::LoadSpectrumViewStateCache(
+        unlocked->FlushLocalState().spectrum_viewport_state_saved &&
+            !specforge::LoadSpectrumViewportState(
                  state_path)
                  .state.locked,
         "an unlocked shutdown should clear an older persisted lock");
@@ -1125,6 +1127,7 @@ void TestShellShutdownFlushPersistsLockedViewport()
     std::error_code cleanup_error;
     std::filesystem::remove(source_path, cleanup_error);
     std::filesystem::remove(state_path, cleanup_error);
+    std::filesystem::remove(state_path.string() + ".preferences", cleanup_error);
 }
 
 void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
@@ -3870,7 +3873,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
     result.application_settings.panel_visibility_saved = false;
     result.source_collection.navigation_saved = false;
     result.source_collection.workflow_saved = false;
-    result.spectrum_view_saved = false;
+    result.spectrum_viewport_state_saved = false;
     result.spectral_lines_saved = false;
     const std::string message = result.FailureMessage();
     Require(
@@ -5032,9 +5035,10 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
     inputs.executable_path = CurrentExecutablePath();
     inputs.local_user_state_root_override = root;
     const auto startup = PrepareSpecForgeStartup(std::move(inputs));
-    const auto path = startup.runtime_paths().legacy_spectrum_view_state_path;
+    const auto path = startup.runtime_paths().spectrum_viewport_state_path;
+    std::filesystem::create_directories(path.parent_path());
     const std::array<std::string, 4> documents{
-        "{\"format_kind\":\"specforge.spectrum_view.state\",\"schema_version\":999}",
+        "{\"format_kind\":\"specforge.spectrum_viewport.state\",\"schema_version\":999}",
         "{broken json",
         "[]",
         "temporarily unreadable original",
@@ -5045,7 +5049,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
         } else {
             std::ofstream(path, std::ios::binary) << documents[i];
         }
-        const auto loaded = LoadSpectrumViewStateCache(path);
+        const auto loaded = LoadSpectrumViewportState(path);
         const auto expected_issue = i == 3
             ? VersionedJsonCacheLoadIssueKind::ReadFailed
             : i == 0 ? VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema
@@ -5057,8 +5061,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
             const auto load_status = Access::SpectrumViewPersistenceStatus(shell);
             Require(!load_status.load_warning.empty(),
                 "protected view state must expose the original load warning");
-            Require(Access::SpectrumView(shell).plot_colors == SpectrumPlotColors{} &&
-                    !Access::LockedViewportLimits(shell),
+            Require(!Access::LockedViewportLimits(shell),
                 "failed loads must still allow default colors and an automatic viewport");
             if (i == 3) {
                 Require(loaded.issue_kind == VersionedJsonCacheLoadIssueKind::ReadFailed,
@@ -5079,7 +5082,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
                 Require(std::string((std::istreambuf_iterator<char>(original)), {}) == documents[i],
                     "routine maintenance must preserve the original bytes before shutdown");
             }
-            Require(shell.FlushLocalState().spectrum_view_saved,
+            Require(shell.FlushLocalState().spectrum_viewport_state_saved,
                 "skipping protected view state is not a save failure");
             const auto skipped_status = Access::SpectrumViewPersistenceStatus(shell);
             Require(skipped_status.load_warning == load_status.load_warning &&
@@ -5100,17 +5103,18 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
     }
     {
         ShellUi shell(startup);
-        Require(shell.FlushLocalState().spectrum_view_saved && std::filesystem::exists(path),
-            "missing view state must permit normal first-write creation");
+        Access::RequestSpectrumViewportFit(shell);
+        Require(shell.FlushLocalState().spectrum_viewport_state_saved && std::filesystem::exists(path),
+            "missing viewport state must permit first-write creation after a viewport intent");
     }
     {
         ShellUi shell(startup);
         Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
             PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1.0f}));
-        Require(shell.FlushLocalState().spectrum_view_saved,
+        Require(shell.FlushLocalState().spectrum_viewport_state_saved,
             "supported view state must remain writable after restart");
     }
-    Require(LoadSpectrumViewStateCache(path).state.plot_colors.raw_spectrum.mode() ==
+    Require(LoadSpectrumPlotPreferences(startup.runtime_paths().spectrum_plot_preferences_path).state.plot_colors.raw_spectrum.mode() ==
             PlotSeriesColorMode::ExplicitColor,
         "supported startup load must persist subsequent runtime color changes");
     std::filesystem::remove_all(root);

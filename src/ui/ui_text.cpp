@@ -386,7 +386,8 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Unsaved areas:", "未保存的区域："},
     UiTextEntry{"Application settings", "应用设置"},
     UiTextEntry{"Source session", "源会话"},
-    UiTextEntry{"Spectrum view", "光谱视图"},
+    UiTextEntry{"Spectrum plot preferences", "光谱曲线偏好"},
+    UiTextEntry{"Spectrum viewport state", "光谱视口状态"},
     UiTextEntry{"Sample navigation", "样本导航"},
     UiTextEntry{"Sample labeling", "样本标注"},
     UiTextEntry{"Sample workflow", "样本工作流"},
@@ -1203,10 +1204,10 @@ std::string_view UiText(
         return UiText(
             language,
             UiTextId::SourceSessionArea);
-    case LocalUserStateArea::SpectrumView:
-        return UiText(
-            language,
-            UiTextId::SpectrumViewArea);
+    case LocalUserStateArea::SpectrumPlotPreferences:
+        return UiText(language, UiTextId::SpectrumPlotPreferencesArea);
+    case LocalUserStateArea::SpectrumViewportState:
+        return UiText(language, UiTextId::SpectrumViewportStateArea);
     case LocalUserStateArea::SampleNavigation:
         return UiText(
             language,

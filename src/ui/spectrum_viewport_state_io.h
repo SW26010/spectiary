@@ -14,6 +14,13 @@ struct SpectrumViewportState {
     bool locked = false;
     std::string source_collection_identity;
     PlotViewLimits limits;
+
+    [[nodiscard]] bool operator==(const SpectrumViewportState& other) const {
+        return locked == other.locked &&
+            source_collection_identity == other.source_collection_identity &&
+            limits.x_min == other.limits.x_min && limits.x_max == other.limits.x_max &&
+            limits.y_min == other.limits.y_min && limits.y_max == other.limits.y_max;
+    }
 };
 
 struct SpectrumViewportStateLoadResult {

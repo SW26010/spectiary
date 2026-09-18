@@ -980,8 +980,11 @@ std::string ShellLocalStateFlushResult::FailureMessage(
     if (!source_collection.workflow_saved) {
         append_area(LocalUserStateArea::SampleWorkflow);
     }
-    if (!spectrum_view_saved) {
-        append_area(LocalUserStateArea::SpectrumView);
+    if (!spectrum_plot_preferences_saved) {
+        append_area(LocalUserStateArea::SpectrumPlotPreferences);
+    }
+    if (!spectrum_viewport_state_saved) {
+        append_area(LocalUserStateArea::SpectrumViewportState);
     }
     if (!spectral_lines_saved) {
         append_area(LocalUserStateArea::SpectralLines);
@@ -1020,31 +1023,37 @@ ShellUi::ShellUi(
       application_settings_(
           ApplicationSettingsStorageForRuntimePaths(
               startup.runtime_paths())),
-      legacy_spectrum_view_state_path_(
-          startup.runtime_paths().legacy_spectrum_view_state_path),
-      spectrum_view_state_persistence_(
+      spectrum_plot_preferences_path_(startup.runtime_paths().spectrum_plot_preferences_path),
+      spectrum_viewport_state_path_(
+          startup.runtime_paths().spectrum_viewport_state_path),
+      spectrum_viewport_state_persistence_(
           std::chrono::milliseconds(250),
           std::chrono::seconds(1)),
       touchpad_gestures_(touchpad_gestures),
       sample_workflow_panel_ui_(startup.runtime_paths())
 {
-    SpectrumViewStateCacheLoadResult spectrum_view_state =
-        LoadSpectrumViewStateCache(
-            legacy_spectrum_view_state_path_);
-    spectrum_view_writeback_allowed_ =
+    SpectrumViewportStateLoadResult spectrum_view_state =
+        LoadSpectrumViewportState(
+            spectrum_viewport_state_path_);
+    spectrum_viewport_state_writeback_allowed_ =
         spectrum_view_state.issue_kind ==
         VersionedJsonCacheLoadIssueKind::None;
     if (!spectrum_view_state.warning.empty()) {
-        spectrum_view_state_persistence_.SetLoadWarning(
+        spectrum_viewport_state_persistence_.SetLoadWarning(
             std::move(spectrum_view_state.warning),
             std::move(
                 spectrum_view_state.diagnostic_detail));
     }
+    auto preferences = LoadSpectrumPlotPreferences(spectrum_plot_preferences_path_);
+    spectrum_plot_preferences_writeback_allowed_ =
+        preferences.issue_kind == VersionedJsonCacheLoadIssueKind::None;
+    spectrum_plot_preferences_persistence_.SetLoadWarning(
+        std::move(preferences.warning), std::move(preferences.diagnostic_detail));
     spectrum_view_session_.Submit(
-        SpectrumViewSessionCommand::SetPlotColors(
-            spectrum_view_state.state.plot_colors));
+        SpectrumViewSessionCommand::SetPlotColors(preferences.state.plot_colors));
+    observed_plot_colors_ = preferences.state.plot_colors;
     if (spectrum_view_state.state.locked) {
-        startup_spectrum_view_state_ =
+        startup_spectrum_viewport_state_ =
             std::move(spectrum_view_state.state);
         startup_spectrum_view_mutation_revision_ =
             spectrum_view_session_.
@@ -1060,6 +1069,8 @@ ShellUi::ShellUi(
                 std::move(
                     source_collection_identity));
         });
+    observed_viewport_state_ = CurrentSpectrumViewportState();
+    observed_viewport_revision_ = spectrum_view_session_.ViewportMutationRevision();
     BeginDeferredSourceRestore();
 }
 
@@ -1080,7 +1091,7 @@ ShellUi::ShellUi(
           SettingsPanelEnvironment{}),
       application_settings_(
           ApplicationSettingsStorage{.persistent = false}),
-      spectrum_view_state_persistence_(
+      spectrum_viewport_state_persistence_(
           std::chrono::milliseconds(250),
           std::chrono::seconds(1)),
       persist_local_state_(false)
@@ -1111,12 +1122,17 @@ ShellUi::~ShellUi()
     }
 }
 
-SpectrumViewStateCache
-ShellUi::CurrentSpectrumViewStateCache() const
+SpectrumViewportState
+ShellUi::CurrentSpectrumViewportState() const
 {
-    SpectrumViewStateCache state;
-    state.plot_colors =
-        spectrum_view_session_.View().plot_colors;
+    SpectrumViewportState state;
+    // Until source restoration completes, retain the saved snapshot unless a
+    // live viewport intent has superseded it. Closing early must not erase it.
+    if (startup_spectrum_viewport_state_ &&
+        startup_spectrum_view_mutation_revision_ ==
+            spectrum_view_session_.ViewportMutationRevision()) {
+        return *startup_spectrum_viewport_state_;
+    }
     const std::optional<PlotViewLimits> locked_limits =
         spectrum_view_session_.LockedViewportLimits();
     const std::optional<std::string>
@@ -1132,17 +1148,47 @@ ShellUi::CurrentSpectrumViewStateCache() const
 }
 
 LocalUserStatePersistenceLifecycle::SaveResult
-ShellUi::SaveSpectrumViewState()
+ShellUi::SaveSpectrumViewportState()
 {
     std::string error;
-    const bool saved = SaveSpectrumViewStateCache(
-        legacy_spectrum_view_state_path_,
-        CurrentSpectrumViewStateCache(),
+    const bool saved = specforge::SaveSpectrumViewportState(
+        spectrum_viewport_state_path_,
+        CurrentSpectrumViewportState(),
         &error);
     return {
         .saved = saved,
         .error = std::move(error),
     };
+}
+
+LocalUserStatePersistenceLifecycle::SaveResult
+ShellUi::SaveSpectrumPlotPreferences()
+{
+    std::string error;
+    const bool saved = specforge::SaveSpectrumPlotPreferences(
+        spectrum_plot_preferences_path_,
+        SpectrumPlotPreferences{spectrum_view_session_.View().plot_colors}, &error);
+    return {.saved = saved, .error = std::move(error)};
+}
+
+void ShellUi::ObserveSpectrumPersistenceChanges(
+    LocalUserStateSaveScheduler::TimePoint now)
+{
+    const auto colors = spectrum_view_session_.View().plot_colors;
+    if (colors != observed_plot_colors_) {
+        observed_plot_colors_ = colors;
+        spectrum_plot_preferences_persistence_.MarkDirtyAt(now);
+    }
+    const auto viewport = CurrentSpectrumViewportState();
+    const auto revision = spectrum_view_session_.ViewportMutationRevision();
+    // Identity changes and fitted/restored limits can change the persisted
+    // snapshot without advancing the user-interaction revision.
+    if (revision != observed_viewport_revision_ ||
+        viewport != observed_viewport_state_) {
+        observed_viewport_revision_ = revision;
+        observed_viewport_state_ = viewport;
+        spectrum_viewport_state_persistence_.MarkDirtyAt(now);
+    }
 }
 
 ShellLocalStateFlushResult ShellUi::FlushLocalState()
@@ -1153,19 +1199,25 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
 
     ShellLocalStateFlushResult result;
     if (persist_local_state_) {
+        ObserveSpectrumPersistenceChanges(LocalUserStateSaveScheduler::Clock::now());
         result.application_settings =
             application_settings_.Flush();
         result.source_collection =
             session_.FlushStateCachesWithStatus();
-        if (spectrum_view_writeback_allowed_) {
-            spectrum_view_state_persistence_.MarkDirty();
-            result.spectrum_view_saved =
-                spectrum_view_state_persistence_.Flush(
+        if (spectrum_viewport_state_writeback_allowed_) {
+            result.spectrum_viewport_state_saved =
+                spectrum_viewport_state_persistence_.Flush(
                     [this]() {
-                        return SaveSpectrumViewState();
+                        return SaveSpectrumViewportState();
                     }) !=
                 LocalUserStatePersistenceLifecycle::
                     FlushOutcome::Failed;
+        }
+        if (spectrum_plot_preferences_writeback_allowed_) {
+            result.spectrum_plot_preferences_saved =
+                spectrum_plot_preferences_persistence_.Flush([this]() {
+                    return SaveSpectrumPlotPreferences();
+                }) != LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
         }
         result.spectral_lines_saved =
             spectral_lines_panel_.Flush();
@@ -1200,6 +1252,7 @@ void ShellUi::Render(const ShellStatus& status)
         HandleSampleWorkflowShortcut();
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
+        ObserveSpectrumPersistenceChanges(LocalUserStateSaveScheduler::Clock::now());
         return;
     }
     RenderDockHost(status);
@@ -1285,6 +1338,7 @@ void ShellUi::Render(const ShellStatus& status)
     HandleSampleWorkflowShortcut();
     pending_keyboard_previous_at_.reset();
     pending_keyboard_next_at_.reset();
+    ObserveSpectrumPersistenceChanges(LocalUserStateSaveScheduler::Clock::now());
 }
 
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
@@ -1311,12 +1365,18 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
     HandleSessionAction(
         source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);
-    if (persist_local_state_ && spectrum_view_writeback_allowed_) {
-        (void)spectrum_view_state_persistence_.
+    ObserveSpectrumPersistenceChanges(now);
+    if (persist_local_state_ && spectrum_plot_preferences_writeback_allowed_) {
+        (void)spectrum_plot_preferences_persistence_.RunMaintenance(now, [this]() {
+            return SaveSpectrumPlotPreferences();
+        });
+    }
+    if (persist_local_state_ && spectrum_viewport_state_writeback_allowed_) {
+        (void)spectrum_viewport_state_persistence_.
             RunMaintenance(
                 now,
                 [this]() {
-                    return SaveSpectrumViewState();
+                    return SaveSpectrumViewportState();
                 });
     }
 }
@@ -1334,9 +1394,12 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
         source_activation_.
             NextMaintenanceDeadline());
     consider(spectral_lines_panel_.NextMaintenanceDeadline());
-    if (persist_local_state_ && spectrum_view_writeback_allowed_) {
+    if (persist_local_state_ && spectrum_plot_preferences_writeback_allowed_) {
+        consider(spectrum_plot_preferences_persistence_.NextMaintenanceDeadline());
+    }
+    if (persist_local_state_ && spectrum_viewport_state_writeback_allowed_) {
         consider(
-            spectrum_view_state_persistence_.
+            spectrum_viewport_state_persistence_.
                 NextMaintenanceDeadline());
     }
     return deadline;
@@ -1863,9 +1926,9 @@ void ShellUi::RestoreDeferredSpectrumViewport(
     std::optional<std::string>
         source_collection_identity)
 {
-    std::optional<SpectrumViewStateCache> restored =
+    std::optional<SpectrumViewportState> restored =
         std::exchange(
-            startup_spectrum_view_state_,
+            startup_spectrum_viewport_state_,
             std::nullopt);
     const std::optional<std::uint64_t>
         expected_mutation_revision =
@@ -2264,9 +2327,12 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
         LocalUserStateArea::PanelVisibility,
         ApplicationSetting::PanelVisibility);
     AppendLocalUserStateHealth(
+        health, LocalUserStateArea::SpectrumPlotPreferences,
+        spectrum_plot_preferences_persistence_.PersistenceStatus());
+    AppendLocalUserStateHealth(
         health,
-        LocalUserStateArea::SpectrumView,
-        spectrum_view_state_persistence_.
+        LocalUserStateArea::SpectrumViewportState,
+        spectrum_viewport_state_persistence_.
             PersistenceStatus());
     AppendLocalUserStateHealth(
         health,
@@ -2886,8 +2952,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                         SetPlotSeriesColor(
                             series,
                             selection));
-                spectrum_view_state_persistence_.
-                    MarkDirty();
+
             }
             if (ImGui::IsItemHovered()) {
                 const std::string_view color_tooltip =
@@ -2920,8 +2985,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                             SetPlotSeriesColor(
                                 series,
                                 PlotSeriesColor::Auto()));
-                    spectrum_view_state_persistence_.
-                        MarkDirty();
+
                 }
                 ImGui::EndPopup();
             }
