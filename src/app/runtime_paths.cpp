@@ -144,7 +144,7 @@ void SetLocalUserStatePaths(
         local_user_state_paths::kPanelVisibilityState;
     paths.legacy_spectrum_view_state_path =
         paths.local_user_state_root /
-        local_user_state_paths::kSpectrumViewState;
+        local_user_state_paths::kLegacySpectrumViewState;
     paths.source_session_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kSourceSessionState;

@@ -411,7 +411,8 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectral_lines_panel.cpp
     src/ui/spectrum_plot_preferences_io.cpp
     src/ui/spectrum_viewport_state_io.cpp
-    src/ui/spectrum_view_state_cache_io.cpp
+    src/ui/legacy_spectrum_view_state_io.cpp
+    src/ui/spectrum_persistence_migration.cpp
     src/ui/spectrum_view_session.cpp
     src/ui/theme.cpp
     src/ui/ui_font.cpp

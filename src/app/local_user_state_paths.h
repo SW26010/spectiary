@@ -16,7 +16,7 @@ inline constexpr char kProfileSettings[] = "profile-settings.json";
 inline constexpr char kPanelVisibilityState[] = "panel-visibility.json";
 inline constexpr char kSpectrumPlotPreferences[] = "spectrum-plot-preferences.json";
 inline constexpr char kSpectrumViewportState[] = "spectrum-viewport-state.json";
-inline constexpr char kSpectrumViewState[] = "spectrum-view-state.json";
+inline constexpr char kLegacySpectrumViewState[] = "spectrum-view-state.json";
 inline constexpr char kSourceSessionState[] = "source-session.json";
 inline constexpr char kSampleNavigationState[] =
     "sample-navigation-state.json";

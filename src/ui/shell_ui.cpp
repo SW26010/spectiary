@@ -1,4 +1,5 @@
 #include "ui/shell_ui.h"
+#include "ui/spectrum_persistence_migration.h"
 
 #include "app/runtime_paths.h"
 #include "platform/win32_process_launcher.h"
@@ -1035,6 +1036,15 @@ ShellUi::ShellUi(
     SpectrumViewportStateLoadResult spectrum_view_state =
         LoadSpectrumViewportState(
             spectrum_viewport_state_path_);
+    auto preferences = LoadSpectrumPlotPreferences(spectrum_plot_preferences_path_);
+    const auto migration = MigrateLegacySpectrumViewState(
+        startup.runtime_paths(), preferences, spectrum_view_state);
+    if (migration.preferences_save_pending) {
+        spectrum_plot_preferences_persistence_.MarkDirty();
+    }
+    if (migration.viewport_save_pending) {
+        spectrum_viewport_state_persistence_.MarkDirty();
+    }
     spectrum_viewport_state_writeback_allowed_ =
         spectrum_view_state.issue_kind ==
         VersionedJsonCacheLoadIssueKind::None;
@@ -1044,7 +1054,6 @@ ShellUi::ShellUi(
             std::move(
                 spectrum_view_state.diagnostic_detail));
     }
-    auto preferences = LoadSpectrumPlotPreferences(spectrum_plot_preferences_path_);
     spectrum_plot_preferences_writeback_allowed_ =
         preferences.issue_kind == VersionedJsonCacheLoadIssueKind::None;
     spectrum_plot_preferences_persistence_.SetLoadWarning(

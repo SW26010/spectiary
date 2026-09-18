@@ -6,7 +6,10 @@
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_roster.h"
-#include "ui/spectrum_view_state_cache_io.h"
+#include "ui/spectrum_plot_preferences_io.h"
+#include "ui/spectrum_viewport_state_io.h"
+#include "ui/legacy_spectrum_view_state_io.h"
+#include "ui/spectrum_persistence_migration.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -501,7 +504,7 @@ void TestViewportTransitionPolicyUsesChangeReason()
 void TestLockedViewportStateCacheRoundTripsAndClears()
 {
     const std::filesystem::path path = UniqueTempPath();
-    const specforge::SpectrumViewStateCache locked{
+    const specforge::SpectrumViewportState locked{
         .locked = true,
         .source_collection_identity =
             "viewport-cache-collection",
@@ -511,6 +514,8 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
             .y_min = -0.03125,
             .y_max = 2.0625,
         },
+    };
+    const specforge::SpectrumPlotPreferences preferences{
         .plot_colors = {
             .raw_spectrum =
                 specforge::PlotSeriesColor::ExplicitColor({
@@ -530,15 +535,15 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
     };
     std::string error;
     Require(
-        specforge::SaveSpectrumViewStateCache(
+        specforge::SaveSpectrumViewportState(
             path,
             locked,
             &error),
         error.empty()
             ? "locked viewport cache should save"
             : error);
-    const specforge::SpectrumViewStateCacheLoadResult loaded =
-        specforge::LoadSpectrumViewStateCache(path);
+    const specforge::SpectrumViewportStateLoadResult loaded =
+        specforge::LoadSpectrumViewportState(path);
     Require(
         loaded.warning.empty() && loaded.state.locked &&
             loaded.state.source_collection_identity ==
@@ -550,41 +555,72 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
             loaded.state.limits.y_min ==
                 locked.limits.y_min &&
             loaded.state.limits.y_max ==
-                locked.limits.y_max &&
-            loaded.state.plot_colors ==
-                locked.plot_colors,
+                locked.limits.y_max,
         "spectrum view state should round-trip its viewport and complete Auto/explicit curve colors");
 
-    specforge::SpectrumViewStateCache unlocked_colors;
-    unlocked_colors.plot_colors =
-        locked.plot_colors;
-    Require(
-        specforge::SaveSpectrumViewStateCache(
-            path,
-            unlocked_colors,
-            &error),
-        "unlocked spectrum colors should save independently of viewport state");
-    const specforge::SpectrumViewStateCacheLoadResult
-        loaded_unlocked_colors =
-            specforge::LoadSpectrumViewStateCache(path);
-    Require(
-        loaded_unlocked_colors.warning.empty() &&
-            !loaded_unlocked_colors.state.locked &&
-            loaded_unlocked_colors.state.plot_colors ==
-                unlocked_colors.plot_colors,
-        "curve colors are global view preferences and must not require a locked or source-scoped viewport");
+    const auto preferences_path = path.string() + ".preferences";
+    Require(specforge::SaveSpectrumPlotPreferences(preferences_path, preferences, &error),
+        "preferences save should not require a source or locked viewport");
+    Require(specforge::LoadSpectrumPlotPreferences(preferences_path).state.plot_colors == preferences.plot_colors,
+        "all Auto and explicit RGBA colors should round trip independently");
+    std::filesystem::remove(preferences_path);
 
     Require(
-        specforge::SaveSpectrumViewStateCache(
+        specforge::SaveSpectrumViewportState(
             path,
             {},
             &error),
         "an unlocked shutdown should clear the persisted locked viewport");
     Require(
-        !specforge::LoadSpectrumViewStateCache(path)
+        !specforge::LoadSpectrumViewportState(path)
              .state.locked,
         "the cleared viewport cache should reload in automatic mode");
     std::filesystem::remove(path);
+}
+
+void TestLegacySpectrumMigrationCompletesPartialCutover()
+{
+    using namespace specforge;
+    const auto root = UniqueTempPath();
+    std::filesystem::create_directories(root);
+    RuntimePaths paths;
+    paths.legacy_spectrum_view_state_path = root / "spectrum-view-state.json";
+    paths.spectrum_plot_preferences_path = root / "config" / "spectrum-plot-preferences.json";
+    paths.spectrum_viewport_state_path = root / "state" / "spectrum-viewport-state.json";
+    const std::string legacy = R"({"format_kind":"specforge.spectrum_view.state","schema_version":2,
+        "locked":true,"source_collection_identity":"source-A",
+        "x_min":"1.25","x_max":"8.5","y_min":"-2","y_max":"3",
+        "series_colors":{"spectrum.raw":{"mode":"explicit-color","red":"0.25",
+        "green":"0.5","blue":"0.75","alpha":"1"},
+        "spectrum.smoothing.gaussian":{"mode":"auto"},
+        "spectrum.smoothing.median":{"mode":"auto"}}})";
+    std::ofstream(paths.legacy_spectrum_view_state_path) << legacy;
+    auto preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    auto viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    // A destination becomes unwritable after the initial missing-file probe.
+    std::filesystem::create_directories(paths.spectrum_viewport_state_path);
+    auto migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(!migrated.preferences_save_pending && migrated.viewport_save_pending &&
+            std::filesystem::exists(paths.legacy_spectrum_view_state_path),
+        "partial migration must retain the legacy input and retry only the failed destination");
+    Require(preferences.document_present && viewport.state.locked &&
+            viewport.state.source_collection_identity == "source-A" &&
+            viewport.state.limits.x_min == 1.25,
+        "a failed migration write must retain supported legacy values for runtime and retry");
+    // A user changes the established config before the next startup.
+    preferences.state.plot_colors.raw_spectrum = PlotSeriesColor::Auto();
+    Require(SaveSpectrumPlotPreferences(paths.spectrum_plot_preferences_path, preferences.state),
+        "established preferences should remain editable");
+    std::filesystem::remove(paths.spectrum_viewport_state_path);
+    preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(!migrated.preferences_save_pending && !migrated.viewport_save_pending &&
+            !std::filesystem::exists(paths.legacy_spectrum_view_state_path) &&
+            preferences.state.plot_colors.raw_spectrum.mode() == PlotSeriesColorMode::Auto &&
+            LoadSpectrumViewportState(paths.spectrum_viewport_state_path).state == viewport.state,
+        "restart must fill only the missing viewport and retire legacy after both targets exist");
+    std::filesystem::remove_all(root);
 }
 
 void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
@@ -598,8 +634,8 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             "{\"format_kind\":\"specforge.spectrum_view.state\","
             "\"schema_version\":1,\"locked\":false}\n";
     }
-    const specforge::SpectrumViewStateCacheLoadResult legacy =
-        specforge::LoadSpectrumViewStateCache(path);
+    const specforge::LegacySpectrumViewStateLoadResult legacy =
+        specforge::LoadLegacySpectrumViewState(path);
     Require(
         legacy.warning.empty() &&
             legacy.issue_kind == specforge::VersionedJsonCacheLoadIssueKind::None &&
@@ -612,8 +648,8 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             path,
             std::ios::binary | std::ios::trunc);
         stream <<
-            "{\"format_kind\":\"specforge.spectrum_view.state\","
-            "\"schema_version\":2,\"locked\":false,"
+            "{\"format_kind\":\"specforge.spectrum_plot.preferences\","
+            "\"schema_version\":1,"
             "\"series_colors\":{"
             "\"spectrum.raw\":{\"mode\":\"explicit-color\","
             "\"red\":\"0.1\",\"green\":\"0.2\","
@@ -623,8 +659,8 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             "\"red\":\"0.4\",\"green\":\"0.5\","
             "\"blue\":\"0.6\",\"alpha\":\"0.7\"}}}\n";
     }
-    const specforge::SpectrumViewStateCacheLoadResult damaged =
-        specforge::LoadSpectrumViewStateCache(path);
+    const specforge::SpectrumPlotPreferencesLoadResult damaged =
+        specforge::LoadSpectrumPlotPreferences(path);
     const std::optional<specforge::RgbaColor>& median =
         damaged.state.plot_colors.median_smoothing.
             explicit_color();
@@ -1452,6 +1488,7 @@ int main()
     TestImmersiveContextOverlayDrawsWithoutCapturingPlotInput();
     TestViewportTransitionPolicyUsesChangeReason();
     TestLockedViewportStateCacheRoundTripsAndClears();
+    TestLegacySpectrumMigrationCompletesPartialCutover();
     TestSpectrumColorCacheSupportsLegacyAndDamagedEntries();
     TestSpectrumViewSessionOwnsCustomCurveColors();
     TestSpectrumViewSessionCapturesAndRestoresLockedLimits();

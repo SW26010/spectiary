@@ -1,4 +1,4 @@
-#include "ui/spectrum_view_state_cache_io.h"
+#include "ui/legacy_spectrum_view_state_io.h"
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
@@ -69,66 +69,10 @@ std::optional<double> ParseFiniteDouble(
     return value;
 }
 
-std::optional<std::string> EncodeFiniteDouble(double value)
-{
-    if (!std::isfinite(value)) {
-        return std::nullopt;
-    }
-    std::array<char, 128> buffer{};
-    const std::to_chars_result encoded = std::to_chars(
-        buffer.data(),
-        buffer.data() + buffer.size(),
-        value,
-        std::chars_format::general,
-        std::numeric_limits<double>::max_digits10);
-    if (encoded.ec != std::errc{}) {
-        return std::nullopt;
-    }
-    return std::string(buffer.data(), encoded.ptr);
-}
-
 bool ColorChannelIsUsable(double value)
 {
     return std::isfinite(value) && value >= 0.0 &&
            value <= 1.0;
-}
-
-std::optional<nlohmann::json> EncodePlotSeriesColor(
-    const PlotSeriesColor& selection)
-{
-    if (selection.mode() ==
-        PlotSeriesColorMode::Auto) {
-        return nlohmann::json::object({
-            {"mode", nlohmann::json(kAutoColorMode)},
-        });
-    }
-
-    const RgbaColor& color =
-        *selection.explicit_color();
-    if (!ColorChannelIsUsable(color.red) ||
-        !ColorChannelIsUsable(color.green) ||
-        !ColorChannelIsUsable(color.blue) ||
-        !ColorChannelIsUsable(color.alpha)) {
-        return std::nullopt;
-    }
-    const std::optional<std::string> red =
-        EncodeFiniteDouble(color.red);
-    const std::optional<std::string> green =
-        EncodeFiniteDouble(color.green);
-    const std::optional<std::string> blue =
-        EncodeFiniteDouble(color.blue);
-    const std::optional<std::string> alpha =
-        EncodeFiniteDouble(color.alpha);
-    if (!red || !green || !blue || !alpha) {
-        return std::nullopt;
-    }
-    return nlohmann::json::object({
-        {"mode", nlohmann::json(kExplicitColorMode)},
-        {"red", nlohmann::json(*red)},
-        {"green", nlohmann::json(*green)},
-        {"blue", nlohmann::json(*blue)},
-        {"alpha", nlohmann::json(*alpha)},
-    });
 }
 
 PlotSeriesColor ParsePlotSeriesColor(
@@ -184,50 +128,19 @@ PlotSeriesColor ParsePlotSeriesColor(
     });
 }
 
-std::optional<nlohmann::json> EncodeSpectrumPlotColors(
-    const SpectrumPlotColors& colors)
-{
-    std::optional<nlohmann::json> raw =
-        EncodePlotSeriesColor(colors.raw_spectrum);
-    std::optional<nlohmann::json> gaussian =
-        EncodePlotSeriesColor(colors.gaussian_smoothing);
-    std::optional<nlohmann::json> median =
-        EncodePlotSeriesColor(colors.median_smoothing);
-    if (!raw || !gaussian || !median) {
-        return std::nullopt;
-    }
-
-    nlohmann::json encoded = nlohmann::json::object();
-    encoded.get_ref<nlohmann::json::object_t&>().emplace(
-        std::string(kRawSpectrumPlotSeriesId),
-        std::move(*raw));
-    encoded.get_ref<nlohmann::json::object_t&>().emplace(
-        std::string(kGaussianSmoothingPlotSeriesId),
-        std::move(*gaussian));
-    encoded.get_ref<nlohmann::json::object_t&>().emplace(
-        std::string(kMedianSmoothingPlotSeriesId),
-        std::move(*median));
-    return encoded;
-}
-
 }  // namespace
 
-std::filesystem::path DefaultSpectrumViewStateCachePath(const RuntimePaths& runtime_paths)
-{
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSpectrumViewState, runtime_paths);
-}
-
-SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
+LegacySpectrumViewStateLoadResult LoadLegacySpectrumViewState(
     const std::filesystem::path& path)
 {
-    SpectrumViewStateCacheLoadResult loaded;
+    LegacySpectrumViewStateLoadResult loaded;
     VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(
             path,
             kStateFormatKind,
             {1, kStateSchemaVersion},
             "spectrum view state cache");
+    loaded.document_present = result.document.has_value();
     loaded.issue_kind = result.issue_kind;
     loaded.warning = std::move(result.warning);
     loaded.diagnostic_detail =
@@ -312,78 +225,6 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
         *identity;
     loaded.state.limits = restored_limits;
     return loaded;
-}
-
-bool SaveSpectrumViewStateCache(
-    const std::filesystem::path& path,
-    const SpectrumViewStateCache& state,
-    std::string* error_message)
-{
-    if (path.empty()) {
-        if (error_message != nullptr) {
-            *error_message =
-                "Spectrum view state cache path is empty.";
-        }
-        return false;
-    }
-
-    const std::optional<nlohmann::json> series_colors =
-        EncodeSpectrumPlotColors(state.plot_colors);
-    if (!series_colors) {
-        if (error_message != nullptr) {
-            *error_message =
-                "Spectrum series colors contain invalid RGBA channels.";
-        }
-        return false;
-    }
-
-    if (state.locked &&
-        (state.source_collection_identity.empty() ||
-         !LimitsAreUsable(state.limits))) {
-        if (error_message != nullptr) {
-            *error_message =
-                "Locked spectrum view state is incomplete or invalid.";
-        }
-        return false;
-    }
-
-    nlohmann::json body = nlohmann::json::object({
-        {"locked", nlohmann::json(state.locked)},
-        {std::string(kSeriesColorsMember), *series_colors},
-    });
-    if (state.locked) {
-        const std::optional<std::string> x_min =
-            EncodeFiniteDouble(state.limits.x_min);
-        const std::optional<std::string> x_max =
-            EncodeFiniteDouble(state.limits.x_max);
-        const std::optional<std::string> y_min =
-            EncodeFiniteDouble(state.limits.y_min);
-        const std::optional<std::string> y_max =
-            EncodeFiniteDouble(state.limits.y_max);
-        if (!x_min || !x_max || !y_min || !y_max) {
-            if (error_message != nullptr) {
-                *error_message =
-                    "Spectrum view axis ranges could not be encoded.";
-            }
-            return false;
-        }
-        body.get_ref<nlohmann::json::object_t&>().emplace(
-            "source_collection_identity",
-            nlohmann::json(
-                state.source_collection_identity));
-        body.get_ref<nlohmann::json::object_t&>().emplace("x_min", nlohmann::json(*x_min));
-        body.get_ref<nlohmann::json::object_t&>().emplace("x_max", nlohmann::json(*x_max));
-        body.get_ref<nlohmann::json::object_t&>().emplace("y_min", nlohmann::json(*y_min));
-        body.get_ref<nlohmann::json::object_t&>().emplace("y_max", nlohmann::json(*y_max));
-    }
-
-    return WriteVersionedJsonCacheDocument(
-        path,
-        kStateFormatKind,
-        kStateSchemaVersion,
-        "spectrum view state cache",
-        body,
-        error_message);
 }
 
 }  // namespace specforge

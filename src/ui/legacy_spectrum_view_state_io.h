@@ -10,31 +10,25 @@
 
 namespace specforge {
 
-struct SpectrumViewStateCache {
+// Read-only migration input. Never an active persistence owner.
+struct LegacySpectrumViewState {
     bool locked = false;
     std::string source_collection_identity;
     PlotViewLimits limits;
     SpectrumPlotColors plot_colors;
 };
 
-struct SpectrumViewStateCacheLoadResult {
-    SpectrumViewStateCache state;
+struct LegacySpectrumViewStateLoadResult {
+    LegacySpectrumViewState state;
+    bool document_present = false;
     VersionedJsonCacheLoadIssueKind issue_kind =
         VersionedJsonCacheLoadIssueKind::None;
     std::string warning;
     std::string diagnostic_detail;
 };
 
-[[nodiscard]] std::filesystem::path
-DefaultSpectrumViewStateCachePath(const RuntimePaths& runtime_paths);
-
-[[nodiscard]] SpectrumViewStateCacheLoadResult
-LoadSpectrumViewStateCache(
+[[nodiscard]] LegacySpectrumViewStateLoadResult
+LoadLegacySpectrumViewState(
     const std::filesystem::path& path);
-
-[[nodiscard]] bool SaveSpectrumViewStateCache(
-    const std::filesystem::path& path,
-    const SpectrumViewStateCache& state,
-    std::string* error_message = nullptr);
 
 }  // namespace specforge
