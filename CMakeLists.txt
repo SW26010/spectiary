@@ -715,6 +715,11 @@ specforge_add_portable_only_test(
     specforge_sessions
 )
 specforge_add_test(
+    specforge_runtime_storage_context_tests
+    tests/runtime_storage_context_tests.cpp
+    specforge_sessions
+)
+specforge_add_test(
     specforge_render_wake_scheduler_tests
     tests/render_wake_scheduler_tests.cpp
     specforge_core
@@ -1720,6 +1725,7 @@ set(SPECFORGE_FAST_TESTS
     specforge_sdr_swap_chain_tests
     specforge_win32_application_icon_tests
     specforge_local_user_state_tests
+    specforge_runtime_storage_context_tests
     specforge_portable_runtime_state_tests
     specforge_render_wake_scheduler_tests
     specforge_imgui_layout_persistence_tests

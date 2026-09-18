@@ -76,8 +76,9 @@ PresentationReasonForNavigationRequest(
 
 class SourceCollectionSessionStatePersistence {
 public:
-    explicit SourceCollectionSessionStatePersistence(std::filesystem::path cache_path)
-        : cache_path_(std::move(cache_path)),
+    explicit SourceCollectionSessionStatePersistence(std::filesystem::path cache_path,
+    const RuntimePaths& runtime_paths)
+        : runtime_paths_(runtime_paths), cache_path_(std::move(cache_path)),
           persistence_(kSourceSessionSaveDebounce, kSourceSessionSaveRetry)
     {
     }
@@ -88,7 +89,7 @@ public:
             return {};
         }
         SourceCollectionSessionStateCacheLoadResult result =
-            LoadSourceCollectionSessionStateCache(cache_path_);
+            LoadSourceCollectionSessionStateCache(runtime_paths_, cache_path_);
         persistence_.SetLoadWarning(std::move(result.warning));
         return std::move(result.cache);
     }
@@ -178,7 +179,7 @@ private:
         SourceCollectionSessionStateCache cache;
         cache.sources = sources;
         cache.active_source_index = active_source_index;
-        if (SaveSourceCollectionSessionStateCache(cache_path_, cache)) {
+        if (SaveSourceCollectionSessionStateCache(runtime_paths_, cache_path_, cache)) {
             return {.saved = true};
         }
         return {
@@ -187,6 +188,7 @@ private:
         };
     }
 
+    RuntimePaths runtime_paths_;
     std::filesystem::path cache_path_;
     LocalUserStatePersistenceLifecycle persistence_;
     bool restoring_ = false;
@@ -534,10 +536,10 @@ SourceCollectionSessionIntent SourceCollectionSessionIntent::ApplySampleSorting(
 
 SourceCollectionSession::SourceCollectionSession()
     : SourceCollectionSession(
-          DefaultSourceCollectionSessionStateCachePath(),
-          DefaultSampleNavigationStateCachePath(),
-          DefaultSampleLabelingStateCachePath(),
-          DefaultSampleWorkflowStateCachePath())
+          std::filesystem::path{},
+          std::filesystem::path{},
+          std::filesystem::path{},
+          std::filesystem::path{}, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, RuntimePaths{})
 {
 }
 
@@ -547,14 +549,15 @@ SourceCollectionSession::SourceCollectionSession(
     std::filesystem::path labeling_state_cache_path,
     std::filesystem::path workflow_state_cache_path,
     SampleLabelingStateCacheLoadPolicy
-        labeling_state_cache_load_policy)
+        labeling_state_cache_load_policy,
+    const RuntimePaths& runtime_paths)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
           labeling_state_cache_load_policy,
-          {})
+          {}, runtime_paths)
 {
 }
 
@@ -566,7 +569,8 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
     SampleLabelingController::CanonicalDocumentPublisher
-        canonical_document_publisher)
+        canonical_document_publisher,
+    const RuntimePaths& runtime_paths)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -574,7 +578,7 @@ SourceCollectionSession::SourceCollectionSession(
           std::move(workflow_state_cache_path),
           labeling_state_cache_load_policy,
           std::move(canonical_document_publisher),
-          SampleLabelingController::CanonicalValuesPublisher{})
+          SampleLabelingController::CanonicalValuesPublisher{}, runtime_paths)
 {
 }
 
@@ -588,27 +592,30 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher,
     SampleLabelingController::CanonicalValuesPublisher
-        canonical_values_publisher)
+        canonical_values_publisher,
+    const RuntimePaths& runtime_paths)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
-          [labeling_state_cache_load_policy](
+          [labeling_state_cache_load_policy, runtime_paths](
               const std::filesystem::path& path) {
               return LoadSampleLabelingStateCache(
+                  runtime_paths,
                   path,
                   {},
                   labeling_state_cache_load_policy);
           },
-          [](const std::filesystem::path& path) {
+          [runtime_paths](const std::filesystem::path& path) {
               return LoadSampleWorkflowStateCache(
-                  path);
+                  runtime_paths,
+                  path, {});
           },
           std::move(canonical_document_publisher),
-          std::move(canonical_values_publisher))),
+          std::move(canonical_values_publisher), runtime_paths)),
       source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
-          std::move(source_session_state_cache_path)))
+          std::move(source_session_state_cache_path), runtime_paths))
 {
     workflow_->SetDeferredSampleNavigation(true);
     PrepareDeferredSourceSessionRestore();
@@ -1512,7 +1519,8 @@ SourceCollectionSessionResult SourceCollectionSession::RecordRestoreFailure(
         result.background_retirement.push_back(std::move(update.replaced_folder_listing_generation));
     }
     if (result.action.snapshot_changed) {
-        ApplyWorkflowTransitionOutcome(result,
+        ApplyWorkflowTransitionOutcome(
+            result,
             workflow_->SyncKnownActiveSource(roster_->current_source_key(), roster_->snapshot()));
     }
     MarkSourceSessionCacheDirty();
@@ -1529,7 +1537,8 @@ SourceCollectionSessionResult SourceCollectionSession::RestoreEmptyActiveSource(
     }
     result.action = source_index ? roster_->ActivateSource(*source_index)
                                 : roster_->ClearActiveSourceForRestore();
-    ApplyWorkflowTransitionOutcome(result,
+    ApplyWorkflowTransitionOutcome(
+        result,
         workflow_->SyncKnownActiveSource(roster_->current_source_key(), roster_->snapshot()));
     MarkSourceSessionCacheDirty();
     InvalidateView();

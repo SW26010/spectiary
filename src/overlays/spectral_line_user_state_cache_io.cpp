@@ -998,10 +998,10 @@ std::vector<std::string> SortedSetValues(const std::unordered_set<std::string>& 
 
 }  // namespace
 
-std::filesystem::path DefaultCatalogUserStateCachePath()
+std::filesystem::path DefaultCatalogUserStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kSpectralLineUserState);
+        local_user_state_paths::kSpectralLineUserState, runtime_paths);
 }
 
 std::filesystem::path CatalogUserStateCacheCommitLeasePath(

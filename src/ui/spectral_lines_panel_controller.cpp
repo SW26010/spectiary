@@ -348,7 +348,7 @@ SpectralLinesPanelController::SpectralLinesPanelController(
     std::filesystem::path packaged_catalog_path)
     : SpectralLinesPanelController(
           std::move(packaged_catalog_path),
-          DefaultCatalogUserStateCachePath())
+          std::filesystem::path{})
 {
 }
 

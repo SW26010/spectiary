@@ -28,6 +28,7 @@ struct SampleWorkflowPreparationPaths {
         labeling_state_cache_load_policy =
             SampleLabelingStateCacheLoadPolicy::
                 AllowPersistentOutputs;
+    RuntimePaths runtime_paths;
 };
 
 struct SampleWorkflowPreparationCacheBundle {

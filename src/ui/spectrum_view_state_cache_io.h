@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "plot/spectrum_plot.h"
 
 #include <filesystem>
@@ -21,7 +23,7 @@ struct SpectrumViewStateCacheLoadResult {
 };
 
 [[nodiscard]] std::filesystem::path
-DefaultSpectrumViewStateCachePath();
+DefaultSpectrumViewStateCachePath(const RuntimePaths& runtime_paths);
 
 [[nodiscard]] SpectrumViewStateCacheLoadResult
 LoadSpectrumViewStateCache(

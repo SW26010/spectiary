@@ -1252,7 +1252,7 @@ void TestCoordinatorFlushesWorkflowIndependentlyAndRecovers()
             !recovered_status.workflow.save_message.empty(),
         "a successful workflow retry should clear the load warning and expose recovery");
     const specforge::SampleWorkflowStateCacheLoadResult restored =
-        specforge::LoadSampleWorkflowStateCache(workflow_cache);
+        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{}, workflow_cache);
     Require(
         restored.cache.sources_by_identity.contains(workflow_identity) &&
             restored.cache.sources_by_identity.at(workflow_identity)

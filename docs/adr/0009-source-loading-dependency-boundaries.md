@@ -27,7 +27,7 @@ implementation and the load queue implementation.
 | `workflow_cache_loader` | Remove | Cache reading has one implementation; isolation is represented by explicit cache paths. Tests read real absent or populated caches and verify the batch shares the same immutable cache object. |
 | `file_context_builder` | Remove | Internal orchestration of identity and manifest construction. Tests inspect real prepared payloads, reuse proofs and existing context-reuse reports. |
 | `folder_context_builder` | Remove | Internal orchestration using the real listing. Folder mutation, preferred-member and navigation tests run the production context builder. |
-| `workflow_cache_paths` | Keep configuration | Portable/local state location and load policy are production configuration, not a replacement algorithm. All-empty paths still select process defaults; partially specified paths remain invalid. Tests explicitly select isolated paths. |
+| `workflow_cache_paths` | Keep configuration | Portable/local state location and load policy are production configuration, not a replacement algorithm. As of #103-A, all-empty paths use the supplied startup context only; a detached empty context disables persistence. Partially specified paths remain invalid. Tests explicitly select isolated paths. See ADR 0012. |
 
 The queue's existing test execution options are separate: worker limits exercise
 bounded scheduling, and `before_worker_start` reproduces thread-creation failure.

@@ -867,7 +867,7 @@ void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
         "legacy-mapped-source",
         std::move(legacy_state));
     Require(
-        specforge::SaveSampleWorkflowStateCache(cache_path, legacy_v2_cache),
+        specforge::SaveSampleWorkflowStateCache(specforge::RuntimePaths{}, cache_path, legacy_v2_cache),
         "legacy schema-v2 workflow cache fixture should save");
     {
         std::ifstream cache_stream(cache_path);
@@ -879,7 +879,7 @@ void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
     }
 
     const specforge::SampleWorkflowStateCacheLoadResult load =
-        specforge::LoadSampleWorkflowStateCache(cache_path);
+        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{}, cache_path);
     Require(load.warning.empty(), "valid workflow cache should load without warning");
     const specforge::SampleWorkflowStateCache& loaded = load.cache;
     std::filesystem::remove(cache_path, cleanup_error);

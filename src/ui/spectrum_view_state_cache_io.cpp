@@ -212,10 +212,10 @@ std::optional<nlohmann::json> EncodeSpectrumPlotColors(
 
 }  // namespace
 
-std::filesystem::path DefaultSpectrumViewStateCachePath()
+std::filesystem::path DefaultSpectrumViewStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kSpectrumViewState);
+        local_user_state_paths::kSpectrumViewState, runtime_paths);
 }
 
 SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(

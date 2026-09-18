@@ -33,6 +33,11 @@ See [release artifacts](../release_artifacts.md) for the full build contract.
 
 ## Runtime path seam and #103 handoff
 
+The #103-A foundation is now defined by [ADR 0012](0012-startup-storage-context.md).
+It activates the final root contract while retaining existing business-file
+placement until the later physical cutover. The following records the #106-A
+handoff before that foundation.
+
 `RuntimePathInputs.executable_path` is the absolute actual executable location.
 `package_root` is its parent, independent of the filename. Failed executable
 resolution fails explicitly rather than inventing an EXE in cwd or temp.

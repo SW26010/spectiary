@@ -110,7 +110,7 @@ void TestPortableDefaultStateWriteCreatesDataFile(
 {
     const std::filesystem::path path =
         specforge::DefaultLocalUserStatePath(
-            roots.default_state_path.filename());
+            roots.default_state_path.filename(), roots.runtime_paths);
     Require(
         path == roots.default_state_path,
         "portable default state path should use the selected Data root");
@@ -154,7 +154,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
     const std::filesystem::path package_path =
         roots.runtime_paths.package_root / relative_path;
     const std::string package_display =
-        specforge::UserPathDisplayText(package_path);
+        specforge::UserPathDisplayText(package_path, roots.runtime_paths);
     Require(
         package_display.find(
             PathToUtf8(roots.runtime_paths.package_root)) ==
@@ -169,7 +169,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
         "package-contained user paths should display their file name");
 
     const nlohmann::json package_reference =
-        specforge::PersistedPathReferenceJson(package_path);
+        specforge::PersistedPathReferenceJson(package_path, roots.runtime_paths);
     Require(
         specforge::ReadJsonStringMember(
             package_reference,
@@ -183,11 +183,11 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
 
     Require(
         specforge::UserPathDisplayText(
-            roots.runtime_paths.package_root) == ".",
+            roots.runtime_paths.package_root, roots.runtime_paths) == ".",
         "the package root should display as the current package-relative directory");
     const nlohmann::json package_root_reference =
         specforge::PersistedPathReferenceJson(
-            roots.runtime_paths.package_root);
+            roots.runtime_paths.package_root, roots.runtime_paths);
     Require(
         specforge::ReadJsonStringMember(
             package_root_reference,
@@ -201,7 +201,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
     const std::optional<std::filesystem::path>
         round_tripped_package_root =
             specforge::ReadPersistedPathReference(
-                package_root_reference);
+                package_root_reference, roots.runtime_paths);
     Require(
         round_tripped_package_root.has_value() &&
             *round_tripped_package_root ==
@@ -211,12 +211,12 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
     const std::filesystem::path external_path =
         roots.temporary_root / "external-display" / "source.npy";
     Require(
-        specforge::UserPathDisplayText(external_path) ==
+        specforge::UserPathDisplayText(external_path, roots.runtime_paths) ==
             PathToUtf8(external_path),
         "nonexistent external user paths should keep their absolute display text");
     Require(
         specforge::ReadJsonStringMember(
-            specforge::PersistedPathReferenceJson(external_path),
+            specforge::PersistedPathReferenceJson(external_path, roots.runtime_paths),
             "path_kind").value_or("") == "absolute",
         "nonexistent external paths should persist as absolute");
 
@@ -236,7 +236,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
         relative_path;
     Require(
         specforge::UserPathDisplayText(
-            differently_cased_package_path) ==
+            differently_cased_package_path, roots.runtime_paths) ==
             PathToUtf8(relative_path),
         "package root matching should use case-insensitive Windows path semantics");
 
@@ -247,7 +247,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
             L"-other") /
         "source.npy";
     Require(
-        specforge::UserPathDisplayText(package_root_other) ==
+        specforge::UserPathDisplayText(package_root_other, roots.runtime_paths) ==
             PathToUtf8(package_root_other),
         "a sibling whose name starts with the package root name should remain external");
 
@@ -258,7 +258,7 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath(
         ".." /
         "escaped.npy";
     Require(
-        specforge::UserPathDisplayText(escaping_path) ==
+        specforge::UserPathDisplayText(escaping_path, roots.runtime_paths) ==
             PathToUtf8(escaping_path),
         "a lexical path that escapes the package root should remain external");
 }
@@ -304,7 +304,7 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace("source-identity", std::move(state));
     Require(
-        specforge::SaveSampleLabelingStateCache(cache_path, cache),
+        specforge::SaveSampleLabelingStateCache(roots.runtime_paths, cache_path, cache, nullptr),
         "package-relative labeling cache should save");
 
     const std::string cache_text = ReadTextFile(cache_path);
@@ -319,7 +319,7 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
         "package-relative output path should not store the package root");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(roots.runtime_paths, cache_path, {}, specforge::SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs);
     Require(loaded.warning.empty(), loaded.warning);
     const auto source = loaded.cache.sources.find("source-identity");
     Require(
@@ -363,7 +363,7 @@ void TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
         std::move(invalid_state));
     std::string save_error;
     Require(
-        !specforge::SaveSampleLabelingStateCache(
+        !specforge::SaveSampleLabelingStateCache(roots.runtime_paths,
             save_path,
             invalid_cache,
             &save_error) &&
@@ -388,8 +388,9 @@ void TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
         std::move(valid_state));
     Require(
         specforge::SaveSampleLabelingStateCache(
+            roots.runtime_paths,
             patch_path,
-            valid_cache),
+            valid_cache, nullptr),
         "valid schema-4 cache seed should save");
 
     valid_task.task_id = "quality";
@@ -402,13 +403,14 @@ void TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
     std::string patch_error;
     Require(
         !specforge::CommitSampleLabelingStateCachePatch(
+            roots.runtime_paths,
             patch_path,
             patch,
-            &patch_error) &&
+            &patch_error, std::chrono::milliseconds::zero()) &&
             patch_error.find("UUID v4") != std::string::npos,
         "schema-4 cache Patch should reject a task id the reader cannot restore");
     const specforge::SampleLabelingStateCacheLoadResult restored =
-        specforge::LoadSampleLabelingStateCache(patch_path);
+        specforge::LoadSampleLabelingStateCache(roots.runtime_paths, patch_path, {}, specforge::SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs);
     Require(
         restored.warning.empty() &&
             restored.cache.sources.at("invalid-patch-source")
@@ -445,6 +447,7 @@ void TestSourceSessionStateCacheStoresPackageRelativePaths(
     cache.active_source_index = 0;
     Require(
         specforge::SaveSourceCollectionSessionStateCache(
+            roots.runtime_paths,
             cache_path,
             cache),
         "package-relative source session cache should save");
@@ -459,7 +462,7 @@ void TestSourceSessionStateCacheStoresPackageRelativePaths(
         "package-relative source session cache should not store a Windows absolute path");
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(cache_path)
+        specforge::LoadSourceCollectionSessionStateCache(roots.runtime_paths, cache_path)
             .cache;
     Require(
         loaded.sources.size() == 1,
@@ -475,7 +478,7 @@ void TestSourceSessionStateCacheStoresPackageRelativePaths(
         "package-relative annotation should resolve under package root");
 }
 
-void TestSourceSessionStateCacheRebasesLegacyMovedPortablePath(
+void TestSourceSessionStateCacheDoesNotGuessLegacyMovedPortablePath(
     const PortableTestRoots& roots)
 {
     const std::filesystem::path relative_fixture_root =
@@ -524,14 +527,14 @@ void TestSourceSessionStateCacheRebasesLegacyMovedPortablePath(
     stream.close();
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(cache_path)
+        specforge::LoadSourceCollectionSessionStateCache(roots.runtime_paths, cache_path)
             .cache;
     Require(
         loaded.sources.size() == 1,
         "legacy moved portable source should load");
     Require(
-        loaded.sources[0].path == source_path,
-        "legacy moved portable source should rebase under the current package root");
+        loaded.sources[0].path == old_source_path,
+        "legacy moved portable source must retain its literal path despite matching basenames");
     Require(
         loaded.sources[0].last_spectrum_index == 5,
         "legacy moved portable source should keep the row index");
@@ -576,7 +579,7 @@ void TestSampleWorkflowStateCacheStoresPackageRelativeAnnotationSourceIds(
         "source-identity",
         std::move(state));
     Require(
-        specforge::SaveSampleWorkflowStateCache(cache_path, cache),
+        specforge::SaveSampleWorkflowStateCache(roots.runtime_paths, cache_path, cache),
         "package-relative workflow cache should save");
 
     const std::string cache_text = ReadTextFile(cache_path);
@@ -595,7 +598,7 @@ void TestSampleWorkflowStateCacheStoresPackageRelativeAnnotationSourceIds(
         "package-relative workflow cache should not store the package root");
 
     const specforge::SampleWorkflowStateCache loaded =
-        specforge::LoadSampleWorkflowStateCache(cache_path).cache;
+        specforge::LoadSampleWorkflowStateCache(roots.runtime_paths, cache_path, {}).cache;
     const auto source =
         loaded.sources_by_identity.find("source-identity");
     Require(
@@ -641,7 +644,7 @@ int main()
         TestSampleLabelingStateCacheWriterRejectsNonUuidTaskIds(
             roots);
         TestSourceSessionStateCacheStoresPackageRelativePaths(roots);
-        TestSourceSessionStateCacheRebasesLegacyMovedPortablePath(
+        TestSourceSessionStateCacheDoesNotGuessLegacyMovedPortablePath(
             roots);
         TestSampleWorkflowStateCacheStoresPackageRelativeAnnotationSourceIds(
             roots);

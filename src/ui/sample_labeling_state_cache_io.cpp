@@ -168,7 +168,8 @@ std::string_view OutputFormatText(
 
 bool ParseTaskOutput(
     const nlohmann::json& task_object,
-    SampleLabelingTask& task)
+    SampleLabelingTask& task,
+    const RuntimePaths& runtime_paths)
 {
     const nlohmann::json* output = ObjectMember(task_object, "output");
     if (output == nullptr || output->type() != nlohmann::json::value_t::object) {
@@ -196,7 +197,7 @@ bool ParseTaskOutput(
         return true;
     }
     std::optional<std::filesystem::path> path =
-        ReadPersistedPathReference(*output_path);
+        ReadPersistedPathReference(*output_path, runtime_paths);
     if (!path || path->empty()) {
         return false;
     }
@@ -481,7 +482,8 @@ ParsedTask ParseTask(
     const nlohmann::json& task_object,
     std::size_t sample_count,
     const std::function<void()>& cancellation_checkpoint,
-    bool hydrate_persistent_output)
+    bool hydrate_persistent_output,
+    const RuntimePaths& runtime_paths)
 {
     if (task_object.type() != nlohmann::json::value_t::object) {
         return {};
@@ -554,7 +556,7 @@ ParsedTask ParseTask(
             malformed = true;
         }
     }
-    malformed = !ParseTaskOutput(task_object, task) || malformed;
+    malformed = !ParseTaskOutput(task_object, task, runtime_paths) || malformed;
     if (const nlohmann::json* initial_publication_pending =
             ObjectMember(
                 task_object,
@@ -1198,10 +1200,10 @@ bool ApplyPatch(
 
 }  // namespace
 
-std::filesystem::path DefaultSampleLabelingStateCachePath()
+std::filesystem::path DefaultSampleLabelingStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kSampleLabelingState);
+        local_user_state_paths::kSampleLabelingState, runtime_paths);
 }
 
 std::filesystem::path
@@ -1310,6 +1312,7 @@ SampleLabelingStateCoordinationDirectories(
 }
 
 SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint,
     SampleLabelingStateCacheLoadPolicy policy)
@@ -1458,7 +1461,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
                                 AllowPersistentOutputsWithoutResultHydration &&
                         policy !=
                             SampleLabelingStateCacheLoadPolicy::
-                                    InternalDraftsOnly);
+                                    InternalDraftsOnly, runtime_paths);
                     if (policy ==
                             SampleLabelingStateCacheLoadPolicy::
                                 InternalDraftsOnly &&
@@ -1531,6 +1534,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
 }
 
 bool SaveSampleLabelingStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCache& cache,
     std::string* error_message)
@@ -1672,7 +1676,7 @@ bool SaveSampleLabelingStateCache(
                     stream << "          \"output\": {\n";
                     stream << "            \"path\": ";
                     if (task.persistence.output_path) {
-                        WritePersistedPathReference(stream, *task.persistence.output_path);
+                        WritePersistedPathReference(stream, *task.persistence.output_path, runtime_paths);
                     } else {
                         stream << "null";
                     }
@@ -1770,6 +1774,7 @@ bool SaveSampleLabelingStateCache(
 }
 
 bool CommitSampleLabelingStateCachePatch(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message,
@@ -1846,6 +1851,7 @@ bool CommitSampleLabelingStateCachePatch(
 
     SampleLabelingStateCacheLoadResult latest =
         LoadSampleLabelingStateCache(
+            runtime_paths,
             path,
             {},
             SampleLabelingStateCacheLoadPolicy::
@@ -1866,6 +1872,7 @@ bool CommitSampleLabelingStateCachePatch(
         return false;
     }
     return SaveSampleLabelingStateCache(
+        runtime_paths,
         path,
         latest.cache,
         error_message);

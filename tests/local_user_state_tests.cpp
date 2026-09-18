@@ -135,7 +135,7 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
 
 void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
 {
-    const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json");
+    const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json", specforge::DefaultRuntimePaths());
     const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
     Require(path.filename() == "state.json", "default local state path should keep the requested filename");
     Require(path.parent_path().filename() == "nested", "default local state path should keep relative subdirectories");

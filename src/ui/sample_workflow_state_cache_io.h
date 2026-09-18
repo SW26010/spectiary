@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "domain/sample_filter.h"
 #include "ui/sample_navigation_sequence.h"
 
@@ -36,14 +38,16 @@ struct SampleWorkflowStateCacheLoadResult {
     std::string warning;
 };
 
-[[nodiscard]] std::filesystem::path DefaultSampleWorkflowStateCachePath();
+[[nodiscard]] std::filesystem::path DefaultSampleWorkflowStateCachePath(const RuntimePaths& runtime_paths);
 
 [[nodiscard]] SampleWorkflowStateCacheLoadResult
 LoadSampleWorkflowStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint = {});
 
 [[nodiscard]] bool SaveSampleWorkflowStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleWorkflowStateCache& cache);
 

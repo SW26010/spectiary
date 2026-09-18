@@ -3753,10 +3753,10 @@ void TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(labeling_cache, cache),
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
         "stale recovery fixture should write its damaged cache");
     const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(labeling_cache);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache);
     Require(
         salvaged.issue_kind ==
                 specforge::SampleLabelingStateCacheLoadIssueKind::
@@ -3822,10 +3822,10 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(labeling_cache, cache),
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
         "formal/temp identity conflict fixture should write its damaged cache");
     const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(labeling_cache);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache);
     Require(
         salvaged.issue_kind ==
                 specforge::SampleLabelingStateCacheLoadIssueKind::
@@ -4130,7 +4130,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
     }
 
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache)
             .cache;
     Require(
@@ -4306,7 +4306,7 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
     }
 
     const specforge::SourceCollectionSessionStateCache before_repair =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache)
             .cache;
     Require(
@@ -4331,7 +4331,7 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
         restored.FlushStateCaches(),
         "prepared attachment repair should be durable after the restore batch completes");
     const specforge::SourceCollectionSessionStateCache after_repair =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache)
             .cache;
     Require(
@@ -4486,7 +4486,7 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
             "removing a missing local owner row should abandon its task record and clear both the ghost annotation and its warning without requiring relink");
         const specforge::SampleLabelingStateCacheLoadResult
             abandoned_cache =
-                specforge::LoadSampleLabelingStateCache(
+                specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                     labeling_cache,
                     {},
                     specforge::SampleLabelingStateCacheLoadPolicy::
@@ -4719,7 +4719,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         session.FlushStateCaches(),
         "abandoning the synthetic missing task should persist its workflow cleanup");
     const specforge::SampleWorkflowStateCacheLoadResult workflow =
-        specforge::LoadSampleWorkflowStateCache(
+        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{},
             workflow_cache);
     const auto workflow_source =
         workflow.cache.sources_by_identity.find(
@@ -5038,7 +5038,7 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     source_state.tasks.push_back(std::move(local_task));
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
-    Require(specforge::SaveSampleLabelingStateCache(labeling_cache, cache), "labeling cache fixture should save");
+    Require(specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache), "labeling cache fixture should save");
 
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
     PreparedSession session(
@@ -5241,7 +5241,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         "adoption must not rewrite the standalone ASDF document");
 
     const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -5638,7 +5638,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         "successful relink should retire the missing old-path attachment row");
 
     const specforge::SampleLabelingStateCacheLoadResult relinked_cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -5843,7 +5843,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         identity.id,
         std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             cache),
         "canonical owner cache fixture should save");
@@ -6346,7 +6346,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         identity.id,
         std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             cache),
         "canonical deactivation owner cache should save");
@@ -6523,7 +6523,7 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             cache),
         "inactive canonical owner cache fixture should save");
@@ -6902,11 +6902,11 @@ void TestSourceSessionStateCacheRoundTrip()
     cache.sources = {first_source, specforge::SourceCollectionSavedSource{second_source_path, 0}};
     cache.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, cache),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, cache),
         "source session cache should save");
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
             .cache;
     Require(loaded.sources.size() == 2, "source session cache should restore all sources");
     Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
@@ -6927,7 +6927,7 @@ void TestSourceSessionStateCacheIgnoresCorruptJson()
     WriteTextFile(source_session_cache, "{ invalid json");
 
     const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache);
     Require(loaded.cache.sources.empty(), "corrupt source session cache should be ignored");
     Require(
@@ -6950,7 +6950,7 @@ void TestMissingPersistenceCachesAreHealthyDefaults()
         UniqueTempPath("_missing_workflow.json");
 
     Require(
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache)
             .warning.empty(),
         "missing source-session cache should be a healthy default");
@@ -6960,11 +6960,11 @@ void TestMissingPersistenceCachesAreHealthyDefaults()
             .warning.empty(),
         "missing navigation cache should be a healthy default");
     Require(
-        specforge::LoadSampleLabelingStateCache(labeling_cache)
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache)
             .warning.empty(),
         "missing labeling cache should be a healthy default");
     Require(
-        specforge::LoadSampleWorkflowStateCache(
+        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{},
             workflow_cache)
             .warning.empty(),
         "missing workflow cache should be a healthy default");
@@ -6983,7 +6983,7 @@ void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
         "}\n");
 
     const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             source_session_cache);
     Require(loaded.cache.sources.empty(), "unsupported source session cache schema should be ignored");
     Require(
@@ -7745,7 +7745,7 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
     };
     saved_state.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
         "source session fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -7780,7 +7780,7 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
     }
     saved_state.active_source_index = 34;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
         "source session cap fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -7816,7 +7816,7 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
     };
     saved_state.active_source_index = 0;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
         "deferred source session fixture should save");
 
     specforge::SourceCollectionSession session(
@@ -7859,7 +7859,7 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
             specforge::SourceCollectionIntent::Remove(0)));
     Require(session.FlushStateCaches(), "user mutation after deferred restore should persist");
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
             .cache;
     Require(persisted.sources.size() == 1, "unresolved deferred source intent should remain persisted");
     Require(
@@ -7886,7 +7886,7 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
     };
     saved_state.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
         "superseded restore fixture should save");
 
     specforge::SourceCollectionSession session(
@@ -7917,7 +7917,7 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
     Require(session.FlushStateCaches(), "new explicit source should flush the source-session cache");
 
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
             .cache;
     Require(persisted.sources.size() == 3, "superseding restore must preserve A and B while adding D");
     const auto find_source = [&persisted](const std::filesystem::path& path) {
@@ -7957,7 +7957,7 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
     };
     saved.active_source_index = 0;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_cache, saved),
+        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_cache, saved),
         "unavailable source fixture should save");
 
     specforge::SourceCollectionSession session(
@@ -7979,7 +7979,7 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
         "closing during deferred restore must flush an explicit Forget immediately");
 
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_cache)
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_cache)
             .cache;
     Require(persisted.sources.size() == 1, "forgotten unavailable source must not return on restart");
     Require(persisted.sources.front().path == unavailable_b, "unrelated unresolved source B must remain persisted");
@@ -10919,7 +10919,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
         "the first successful retry should expose recovered health");
 
     const specforge::SourceCollectionSessionStateCache restored_state =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
             .cache;
     Require(restored_state.sources.size() == 1, "retry flush should write the source session cache");
     Require(restored_state.sources[0].path == source_path, "retry flush should persist the source path");
@@ -11268,7 +11268,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
     }
 
     specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(fixture.labeling_cache);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, fixture.labeling_cache);
     auto source = cache.cache.sources.find(fixture.context.identity.id);
     Require(
         source != cache.cache.sources.end(),
@@ -11301,7 +11301,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
     draft->persistence.output_format =
         specforge::SampleLabelingOutputArtifactFormat::None;
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             fixture.labeling_cache,
             cache.cache),
         "navigation refresh fixture should restore the draft-only projection");
@@ -11540,7 +11540,7 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
             "_deleted_labeling_handoff",
             false);
     specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             fixture.labeling_cache);
     auto source = cache.cache.sources.find(
         fixture.context.identity.id);
@@ -11549,7 +11549,7 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         "stale deletion fixture should load its source");
     source->second.active_task_id.reset();
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             fixture.labeling_cache,
             cache.cache),
         "stale deletion fixture should leave the task inactive");
@@ -11623,7 +11623,7 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
             "_retry_labeling_handoff",
             false);
     specforge::SampleLabelingStateCacheLoadResult pending_cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             fixture.labeling_cache);
     auto source = pending_cache.cache.sources.find(
         fixture.context.identity.id);
@@ -11638,7 +11638,7 @@ void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
         specforge::SampleLabelSaveStateKind::Pending;
     source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             fixture.labeling_cache,
             pending_cache.cache),
         "retry projection fixture should persist its pending task");

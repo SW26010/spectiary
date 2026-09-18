@@ -241,7 +241,7 @@ SampleNavigationRequest SampleNavigationRequest::RestoreLabelUndoPosition(std::s
 }
 
 SampleNavigationController::SampleNavigationController()
-    : SampleNavigationController(DefaultSampleNavigationStateCachePath())
+    : SampleNavigationController(std::filesystem::path{})
 {
 }
 

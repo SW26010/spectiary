@@ -16,10 +16,10 @@ constexpr int kStateSchemaVersion = 1;
 
 }  // namespace
 
-std::filesystem::path DefaultPanelVisibilityStateCachePath()
+std::filesystem::path DefaultPanelVisibilityStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kPanelVisibilityState);
+        local_user_state_paths::kPanelVisibilityState, runtime_paths);
 }
 
 PanelVisibilityStateCacheLoadResult

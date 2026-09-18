@@ -112,13 +112,14 @@ bool HasState(const SampleWorkflowSourceState& state)
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
 
-void WritePersistedWorkflowSourceId(std::ostream& stream, std::string_view source_id)
+void WritePersistedWorkflowSourceId(std::ostream& stream, std::string_view source_id,
+    const RuntimePaths& runtime_paths)
 {
     if (std::optional<std::filesystem::path> annotation_path = AnnotationPathFromSourceId(source_id)) {
         stream << "{ \"source_kind\": ";
         WriteJsonString(stream, kSourceKindAnnotationPath);
         stream << ", \"path\": ";
-        WritePersistedPathReference(stream, *annotation_path);
+        WritePersistedPathReference(stream, *annotation_path, runtime_paths);
         stream << " }";
         return;
     }
@@ -126,7 +127,8 @@ void WritePersistedWorkflowSourceId(std::ostream& stream, std::string_view sourc
     WriteJsonString(stream, source_id);
 }
 
-std::optional<std::string> ReadPersistedWorkflowSourceId(const nlohmann::json& value)
+std::optional<std::string> ReadPersistedWorkflowSourceId(const nlohmann::json& value,
+    const RuntimePaths& runtime_paths)
 {
     if (value.type() == nlohmann::json::value_t::string) {
         return value.get_ref<const std::string&>().empty() ? std::nullopt : std::optional<std::string>{value.get_ref<const std::string&>()};
@@ -141,7 +143,7 @@ std::optional<std::string> ReadPersistedWorkflowSourceId(const nlohmann::json& v
         return std::nullopt;
     }
 
-    std::optional<std::filesystem::path> annotation_path = ReadPersistedPathReference(*path);
+    std::optional<std::filesystem::path> annotation_path = ReadPersistedPathReference(*path, runtime_paths);
     if (!annotation_path || annotation_path->empty()) {
         return std::nullopt;
     }
@@ -152,7 +154,8 @@ void WriteSourceIdArrayMember(
     std::ostream& stream,
     const char* name,
     const std::vector<std::string>& values,
-    bool& wrote_member)
+    bool& wrote_member,
+    const RuntimePaths& runtime_paths)
 {
     if (values.empty()) {
         return;
@@ -165,7 +168,7 @@ void WriteSourceIdArrayMember(
         if (index > 0) {
             stream << ", ";
         }
-        WritePersistedWorkflowSourceId(stream, values[index]);
+        WritePersistedWorkflowSourceId(stream, values[index], runtime_paths);
     }
     stream << "]";
     wrote_member = true;
@@ -174,7 +177,8 @@ void WriteSourceIdArrayMember(
 void WriteFilterConditions(
     std::ostream& stream,
     const std::vector<SampleFilterCondition>& conditions,
-    bool& wrote_member)
+    bool& wrote_member,
+    const RuntimePaths& runtime_paths)
 {
     if (conditions.empty()) {
         return;
@@ -199,7 +203,7 @@ void WriteFilterConditions(
         }
         stream << "\n";
         stream << "        { \"source_id\": ";
-        WritePersistedWorkflowSourceId(stream, condition.source_id);
+        WritePersistedWorkflowSourceId(stream, condition.source_id, runtime_paths);
         stream << ", \"allowed_values\": [";
         for (std::size_t value_index = 0; value_index < values.size(); ++value_index) {
             if (value_index > 0) {
@@ -213,7 +217,8 @@ void WriteFilterConditions(
     wrote_member = true;
 }
 
-void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state, bool& wrote_member)
+void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state, bool& wrote_member,
+    const RuntimePaths& runtime_paths)
 {
     if ((!state.selected_sample_sort_source_id || state.selected_sample_sort_source_id->empty()) &&
         state.selected_sample_sort_direction == SampleNavigationSortDirection::Ascending) {
@@ -226,7 +231,7 @@ void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state
     WriteJsonString(stream, SortDirectionName(state.selected_sample_sort_direction));
     if (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) {
         stream << ", \"source_id\": ";
-        WritePersistedWorkflowSourceId(stream, *state.selected_sample_sort_source_id);
+        WritePersistedWorkflowSourceId(stream, *state.selected_sample_sort_source_id, runtime_paths);
     }
     stream << " }";
     wrote_member = true;
@@ -235,7 +240,8 @@ void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state
 void WriteAnnotationDisplayNames(
     std::ostream& stream,
     std::vector<SampleAnnotationDisplayNameOverride> display_names,
-    bool& wrote_member)
+    bool& wrote_member,
+    const RuntimePaths& runtime_paths)
 {
     display_names.erase(
         std::remove_if(
@@ -266,7 +272,7 @@ void WriteAnnotationDisplayNames(
         }
         stream << "\n";
         stream << "        { \"source_id\": ";
-        WritePersistedWorkflowSourceId(stream, display_name.source_id);
+        WritePersistedWorkflowSourceId(stream, display_name.source_id, runtime_paths);
         stream << ", \"display_name\": ";
         WriteJsonString(stream, display_name.display_name);
         stream << " }";
@@ -275,7 +281,8 @@ void WriteAnnotationDisplayNames(
     wrote_member = true;
 }
 
-std::vector<SampleFilterCondition> ParseFilterConditions(const nlohmann::json& source_object)
+std::vector<SampleFilterCondition> ParseFilterConditions(const nlohmann::json& source_object,
+    const RuntimePaths& runtime_paths)
 {
     std::vector<SampleFilterCondition> conditions;
     const nlohmann::json* filters = JsonObjectMember(source_object, "filters");
@@ -289,7 +296,7 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const nlohmann::json& s
         }
         const nlohmann::json* source_id_value = JsonObjectMember(condition_object, "source_id");
         std::optional<std::string> source_id =
-            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value, runtime_paths);
         if (!source_id || source_id->empty()) {
             continue;
         }
@@ -314,7 +321,8 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const nlohmann::json& s
     return conditions;
 }
 
-std::vector<std::string> ParseSourceIdArrayMember(const nlohmann::json& source_object, const char* name)
+std::vector<std::string> ParseSourceIdArrayMember(const nlohmann::json& source_object, const char* name,
+    const RuntimePaths& runtime_paths)
 {
     std::vector<std::string> values;
     const nlohmann::json* array = JsonObjectMember(source_object, name);
@@ -322,14 +330,15 @@ std::vector<std::string> ParseSourceIdArrayMember(const nlohmann::json& source_o
         return values;
     }
     for (const nlohmann::json& value : (*array)) {
-        if (std::optional<std::string> source_id = ReadPersistedWorkflowSourceId(value)) {
+        if (std::optional<std::string> source_id = ReadPersistedWorkflowSourceId(value, runtime_paths)) {
             values.push_back(std::move(*source_id));
         }
     }
     return UniqueStrings(std::move(values));
 }
 
-std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(const nlohmann::json& source_object)
+std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(const nlohmann::json& source_object,
+    const RuntimePaths& runtime_paths)
 {
     std::vector<SampleAnnotationDisplayNameOverride> display_names;
     const nlohmann::json* array = JsonObjectMember(source_object, "annotation_display_names");
@@ -344,7 +353,7 @@ std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(con
         }
         const nlohmann::json* source_id_value = JsonObjectMember(value, "source_id");
         std::optional<std::string> source_id =
-            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value, runtime_paths);
         std::optional<std::string> display_name = ReadJsonStringMember(value, "display_name");
         if (!source_id || source_id->empty() || !display_name || display_name->empty() ||
             !seen.emplace(*source_id).second) {
@@ -356,7 +365,8 @@ std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(con
     return display_names;
 }
 
-void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceState& state)
+void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceState& state,
+    const RuntimePaths& runtime_paths)
 {
     const nlohmann::json* sorting = JsonObjectMember(source_object, "sorting");
     if (sorting == nullptr || sorting->type() != nlohmann::json::value_t::object) {
@@ -364,7 +374,7 @@ void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceSta
     }
     const nlohmann::json* source_id_value = JsonObjectMember(*sorting, "source_id");
     if (std::optional<std::string> source_id =
-            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value, runtime_paths);
         source_id && !source_id->empty()) {
         state.selected_sample_sort_source_id = std::move(*source_id);
     }
@@ -375,13 +385,14 @@ void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceSta
 
 }  // namespace
 
-std::filesystem::path DefaultSampleWorkflowStateCachePath()
+std::filesystem::path DefaultSampleWorkflowStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kSampleWorkflowState);
+        local_user_state_paths::kSampleWorkflowState, runtime_paths);
 }
 
 SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint)
 {
@@ -415,13 +426,13 @@ SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(
         }
 
         SampleWorkflowSourceState state;
-        state.filter_conditions = ParseFilterConditions(source_object);
+        state.filter_conditions = ParseFilterConditions(source_object, runtime_paths);
         state.selected_filter_source_ids =
-            ParseSourceIdArrayMember(source_object, "selected_filter_source_ids");
+            ParseSourceIdArrayMember(source_object, "selected_filter_source_ids", runtime_paths);
         state.selected_sample_sort_source_ids =
-            ParseSourceIdArrayMember(source_object, "selected_sample_sort_source_ids");
-        state.annotation_display_names = ParseAnnotationDisplayNames(source_object);
-        ParseSortState(source_object, state);
+            ParseSourceIdArrayMember(source_object, "selected_sample_sort_source_ids", runtime_paths);
+        state.annotation_display_names = ParseAnnotationDisplayNames(source_object, runtime_paths);
+        ParseSortState(source_object, state, runtime_paths);
         if (HasState(state)) {
             load.cache.sources_by_identity.emplace(
                 NormalizePersistedSourceCollectionIdentity(std::move(*identity)),
@@ -435,6 +446,7 @@ SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(
 }
 
 bool SaveSampleWorkflowStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleWorkflowStateCache& cache)
 {
@@ -469,19 +481,19 @@ bool SaveSampleWorkflowStateCache(
                 stream << "      \"identity\": ";
                 WriteJsonString(stream, identity);
                 bool wrote_member = true;
-                WriteFilterConditions(stream, state.filter_conditions, wrote_member);
+                WriteFilterConditions(stream, state.filter_conditions, wrote_member, runtime_paths);
                 WriteSourceIdArrayMember(
                     stream,
                     "selected_filter_source_ids",
                     state.selected_filter_source_ids,
-                    wrote_member);
+                    wrote_member, runtime_paths);
                 WriteSourceIdArrayMember(
                     stream,
                     "selected_sample_sort_source_ids",
                     state.selected_sample_sort_source_ids,
-                    wrote_member);
-                WriteSortState(stream, state, wrote_member);
-                WriteAnnotationDisplayNames(stream, state.annotation_display_names, wrote_member);
+                    wrote_member, runtime_paths);
+                WriteSortState(stream, state, wrote_member, runtime_paths);
+                WriteAnnotationDisplayNames(stream, state.annotation_display_names, wrote_member, runtime_paths);
                 stream << "\n";
                 stream << "    }";
                 stream << (index + 1 == keys.size() ? "\n" : ",\n");

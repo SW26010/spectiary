@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "app/local_user_state.h"
 #include "domain/sample_label_export.h"
 #include "domain/spectrum_snapshot.h"
@@ -284,6 +286,7 @@ struct SourceCollectionSessionResult {
 
 class SourceCollectionSession {
 public:
+    // Detached construction never resolves process storage implicitly.
     SourceCollectionSession();
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
@@ -293,7 +296,8 @@ public:
         SampleLabelingStateCacheLoadPolicy
             labeling_state_cache_load_policy =
                 SampleLabelingStateCacheLoadPolicy::
-                    AllowPersistentOutputs);
+                    AllowPersistentOutputs,
+        const RuntimePaths& runtime_paths = {});
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -302,7 +306,8 @@ public:
         SampleLabelingStateCacheLoadPolicy
             labeling_state_cache_load_policy,
         SampleLabelingController::CanonicalDocumentPublisher
-            canonical_document_publisher);
+            canonical_document_publisher,
+        const RuntimePaths& runtime_paths = {});
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -313,7 +318,8 @@ public:
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher,
         SampleLabelingController::CanonicalValuesPublisher
-            canonical_values_publisher);
+            canonical_values_publisher,
+        const RuntimePaths& runtime_paths = {});
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;

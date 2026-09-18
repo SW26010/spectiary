@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "overlays/spectral_line_user_state.h"
 #include "platform/atomic_file.h"
 
@@ -26,7 +28,7 @@ struct CatalogUserStateCacheLoadResult {
     std::string diagnostic_detail;
 };
 
-[[nodiscard]] std::filesystem::path DefaultCatalogUserStateCachePath();
+[[nodiscard]] std::filesystem::path DefaultCatalogUserStateCachePath(const RuntimePaths& runtime_paths);
 // The lease is held only while a task reloads, reconciles, validates, and
 // atomically replaces this cache.  It is separate from the cache file so the
 // normal atomic writer remains usable by migration and unit-test callers.

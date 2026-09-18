@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "app/local_user_state.h"
 #include "profile/profile_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
@@ -198,6 +200,7 @@ struct ApplicationSettingsStorage {
     std::filesystem::path default_profile_output_directory;
     std::optional<std::filesystem::path> profile_output_environment_override;
     bool persistent = true;
+    RuntimePaths runtime_paths;
 };
 
 struct ApplicationSettingsFlushResult {

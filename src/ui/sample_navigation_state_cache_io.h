@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -17,7 +19,7 @@ struct SampleNavigationStateCacheLoadResult {
     std::string warning;
 };
 
-[[nodiscard]] std::filesystem::path DefaultSampleNavigationStateCachePath();
+[[nodiscard]] std::filesystem::path DefaultSampleNavigationStateCachePath(const RuntimePaths& runtime_paths);
 
 [[nodiscard]] SampleNavigationStateCacheLoadResult
 LoadSampleNavigationStateCache(const std::filesystem::path& path);

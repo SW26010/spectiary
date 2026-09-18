@@ -544,6 +544,7 @@ ApplicationSettingsStorageForRuntimePaths(
             paths.profile_log_directory,
         .profile_output_environment_override =
             ProfileOutputDirectoryEnvironmentOverride(),
+        .runtime_paths = paths,
     };
 }
 
@@ -613,7 +614,7 @@ ApplicationSettings::ApplicationSettings(
         std::move(external_source_settings.warning));
 
     ProfileSettingsLoadResult profile_settings =
-        LoadProfileSettings(storage_.profile_settings_path);
+        LoadProfileSettings(storage_.runtime_paths, storage_.profile_settings_path);
     profile_output_directory_ = ResolveProfileOutputDirectory(
         profile_settings.settings,
         storage_.default_profile_output_directory,
@@ -1344,6 +1345,7 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
         }
         std::string error;
         if (SaveProfileSettings(
+                storage_.runtime_paths,
                 storage_.profile_settings_path,
                 *pending_profile_settings_,
                 &error)) {

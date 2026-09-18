@@ -406,38 +406,32 @@ void MergeSampleWorkflowTransitionOutcome(
 }
 
 SampleWorkflowCoordinator::SampleWorkflowCoordinator()
-    : workflow_state_cache_path_(DefaultSampleWorkflowStateCachePath()),
-      workflow_state_cache_loader_([](const std::filesystem::path& path) {
-          return LoadSampleWorkflowStateCache(path);
-      }),
-      workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
+    : SampleWorkflowCoordinator(std::filesystem::path{},
+          std::filesystem::path{}, std::filesystem::path{},
+          RuntimePaths{})
 {
 }
 
 SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path)
-    : navigation_(std::move(navigation_state_cache_path)),
-      labeling_(std::move(labeling_state_cache_path)),
-      workflow_state_cache_loader_([](const std::filesystem::path& path) {
-          return LoadSampleWorkflowStateCache(path);
-      }),
-      workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
+    : SampleWorkflowCoordinator(std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path), std::filesystem::path{}, RuntimePaths{})
 {
 }
-
 SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path,
-    std::filesystem::path workflow_state_cache_path)
+    std::filesystem::path workflow_state_cache_path,
+    const RuntimePaths& runtime_paths)
     : SampleWorkflowCoordinator(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
-          [](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(path); },
-          [](const std::filesystem::path& path) {
-              return LoadSampleWorkflowStateCache(path);
-          })
+          [runtime_paths](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(runtime_paths, path, {}, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs); },
+          [runtime_paths](const std::filesystem::path& path) {
+              return LoadSampleWorkflowStateCache(runtime_paths, path, {});
+          }, runtime_paths)
 {
 }
 
@@ -446,14 +440,15 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path labeling_state_cache_path,
     std::filesystem::path workflow_state_cache_path,
     SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
-    WorkflowStateCacheLoader workflow_state_cache_loader)
+    WorkflowStateCacheLoader workflow_state_cache_loader,
+    const RuntimePaths& runtime_paths)
     : SampleWorkflowCoordinator(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
           std::move(labeling_state_cache_loader),
           std::move(workflow_state_cache_loader),
-          SampleLabelingController::CanonicalDocumentPublisher{})
+          SampleLabelingController::CanonicalDocumentPublisher{}, runtime_paths)
 {
 }
 
@@ -464,7 +459,8 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
     WorkflowStateCacheLoader workflow_state_cache_loader,
     SampleLabelingController::CanonicalDocumentPublisher
-        canonical_document_publisher)
+        canonical_document_publisher,
+    const RuntimePaths& runtime_paths)
     : SampleWorkflowCoordinator(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
@@ -472,7 +468,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           std::move(labeling_state_cache_loader),
           std::move(workflow_state_cache_loader),
           std::move(canonical_document_publisher),
-          SampleLabelingController::CanonicalValuesPublisher{})
+          SampleLabelingController::CanonicalValuesPublisher{}, runtime_paths)
 {
 }
 
@@ -485,7 +481,8 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher,
     SampleLabelingController::CanonicalValuesPublisher
-        canonical_values_publisher)
+        canonical_values_publisher,
+    const RuntimePaths& runtime_paths)
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(
           std::move(labeling_state_cache_path),
@@ -493,7 +490,8 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           canonical_document_publisher
               ? std::move(canonical_document_publisher)
               : DefaultCanonicalDocumentPublisher(),
-          std::move(canonical_values_publisher)),
+          std::move(canonical_values_publisher), runtime_paths),
+      runtime_paths_(runtime_paths),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
       workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
@@ -3021,7 +3019,7 @@ SampleWorkflowCoordinator::SaveWorkflowStateCache()
     for (const std::string& identity : workflow_state_tombstones_) {
         merged.sources_by_identity.erase(identity);
     }
-    if (SaveSampleWorkflowStateCache(workflow_state_cache_path_, merged)) {
+    if (SaveSampleWorkflowStateCache(runtime_paths_, workflow_state_cache_path_, merged)) {
         return {.saved = true};
     }
     return {

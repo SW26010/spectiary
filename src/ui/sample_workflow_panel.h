@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "domain/sample_filter.h"
 #include "domain/sample_label_export.h"
 #include "domain/spectrum_snapshot.h"
@@ -68,6 +70,7 @@ using SampleLabelingOutputPathChooser =
 
 class SampleWorkflowPanelUi {
 public:
+    explicit SampleWorkflowPanelUi(const RuntimePaths& paths = {}) : runtime_paths_(paths) {}
     [[nodiscard]] static const char* LabelingWindowName();
     [[nodiscard]] static const char* FiltersWindowName();
     [[nodiscard]] static const char* SortingWindowName();
@@ -108,6 +111,7 @@ public:
         bool* open);
 
 private:
+    RuntimePaths runtime_paths_;
     friend struct SampleWorkflowPanelUiTestAccess;
     friend struct ShellUiTestAccess;
     friend class ShellUi;

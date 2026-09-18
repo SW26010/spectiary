@@ -563,20 +563,22 @@ std::unordered_set<std::string> TaskIdsMatchingSnapshot(
 }  // namespace
 
 SampleLabelingController::SampleLabelingController()
-    : SampleLabelingController(DefaultSampleLabelingStateCachePath())
+    : SampleLabelingController(std::filesystem::path{}, RuntimePaths{})
 {
 }
 
-SampleLabelingController::SampleLabelingController(std::filesystem::path state_cache_path)
+SampleLabelingController::SampleLabelingController(std::filesystem::path state_cache_path,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
-          [](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(path); })
+          [runtime_paths](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(runtime_paths, path, {}, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs); }, runtime_paths)
 {
 }
 
 SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
-    StateCacheLoader state_cache_loader)
+    StateCacheLoader state_cache_loader,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
@@ -587,14 +589,15 @@ SampleLabelingController::SampleLabelingController(
                   snapshot,
                   document,
                   SampleLabelingCompatibilityView(source));
-          })
+          }, runtime_paths)
 {
 }
 
 SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
-    CanonicalDocumentPublisher canonical_document_publisher)
+    CanonicalDocumentPublisher canonical_document_publisher,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
@@ -606,7 +609,7 @@ SampleLabelingController::SampleLabelingController(
                   path,
                   document,
                   SampleLabelingCompatibilityView(source));
-          })
+          }, runtime_paths)
 {
 }
 
@@ -614,7 +617,8 @@ SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
     CanonicalDocumentPublisher canonical_document_publisher,
-    CanonicalValuesPublisher canonical_values_publisher)
+    CanonicalValuesPublisher canonical_values_publisher,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
@@ -647,7 +651,7 @@ SampleLabelingController::SampleLabelingController(
                   SampleLabelingCompatibilityView(source));
           },
           []() { return GenerateUuidV4(); },
-          []() { return CurrentCanonicalTimestamp(); })
+          []() { return CurrentCanonicalTimestamp(); }, runtime_paths)
 {
 }
 
@@ -655,14 +659,15 @@ SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
     CanonicalDocumentPublisher canonical_document_publisher,
-    CanonicalCreationPublisher canonical_creation_publisher)
+    CanonicalCreationPublisher canonical_creation_publisher,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
           std::move(canonical_document_publisher),
           std::move(canonical_creation_publisher),
           []() { return GenerateUuidV4(); },
-          []() { return CurrentCanonicalTimestamp(); })
+          []() { return CurrentCanonicalTimestamp(); }, runtime_paths)
 {
 }
 
@@ -672,7 +677,8 @@ SampleLabelingController::SampleLabelingController(
     CanonicalDocumentPublisher canonical_document_publisher,
     CanonicalCreationPublisher canonical_creation_publisher,
     TaskIdGenerator task_id_generator,
-    TaskClock task_clock)
+    TaskClock task_clock,
+    const RuntimePaths& runtime_paths)
     : SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
@@ -685,7 +691,7 @@ SampleLabelingController::SampleLabelingController(
           },
           std::move(canonical_creation_publisher),
           std::move(task_id_generator),
-          std::move(task_clock))
+          std::move(task_clock), runtime_paths)
 {
 }
 
@@ -696,8 +702,10 @@ SampleLabelingController::SampleLabelingController(
     CanonicalValuesPublisher canonical_values_publisher,
     CanonicalCreationPublisher canonical_creation_publisher,
     TaskIdGenerator task_id_generator,
-    TaskClock task_clock)
-    : state_cache_path_(std::move(state_cache_path)),
+    TaskClock task_clock,
+    const RuntimePaths& runtime_paths)
+    : runtime_paths_(runtime_paths),
+      state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
       canonical_document_publisher_(
           std::move(canonical_document_publisher)),
@@ -1999,6 +2007,7 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
     if (!state_cache_path_.empty()) {
         const SampleLabelingStateCacheLoadResult latest =
             LoadSampleLabelingStateCache(
+                runtime_paths_,
                 state_cache_path_,
                 {},
                 SampleLabelingStateCacheLoadPolicy::
@@ -2317,6 +2326,7 @@ SampleLabelingController::DeleteTask(
         if (!state_cache_path_.empty()) {
             const SampleLabelingStateCacheLoadResult latest =
                 LoadSampleLabelingStateCache(
+                    runtime_paths_,
                     state_cache_path_,
                     {},
                     SampleLabelingStateCacheLoadPolicy::
@@ -2394,6 +2404,7 @@ SampleLabelingController::DeleteTask(
     if (!state_cache_path_.empty()) {
         SampleLabelingStateCacheLoadResult latest =
             LoadSampleLabelingStateCache(
+                runtime_paths_,
                 state_cache_path_,
                 {},
                 SampleLabelingStateCacheLoadPolicy::
@@ -3250,6 +3261,7 @@ SampleLabelingController::ExportActiveLabels(
     if (!state_cache_path_.empty()) {
         const SampleLabelingStateCacheLoadResult latest =
             LoadSampleLabelingStateCache(
+                runtime_paths_,
                 state_cache_path_,
                 {},
                 SampleLabelingStateCacheLoadPolicy::
@@ -3862,6 +3874,7 @@ bool SampleLabelingController::CommitTaskRecoveryCheckpoint(
             task.task_id);
     }
     const bool saved = CommitSampleLabelingStateCachePatch(
+        runtime_paths_,
         state_cache_path_,
         checkpoint,
         error_message,
@@ -4589,6 +4602,7 @@ SampleLabelingController::PrepareTaskActivation(
 
     SampleLabelingStateCacheLoadResult structural =
         LoadSampleLabelingStateCache(
+            runtime_paths_,
             state_cache_path_,
             {},
             SampleLabelingStateCacheLoadPolicy::
@@ -4937,6 +4951,7 @@ SampleLabelingController::PrepareTaskCreation(
          ++attempt) {
         SampleLabelingStateCacheLoadResult latest =
             LoadSampleLabelingStateCache(
+                runtime_paths_,
                 state_cache_path_,
                 {},
                 SampleLabelingStateCacheLoadPolicy::
@@ -5047,6 +5062,7 @@ SampleLabelingController::PrepareTaskCreation(
 
         SampleLabelingStateCacheLoadResult verified =
             LoadSampleLabelingStateCache(
+                runtime_paths_,
                 state_cache_path_,
                 {},
                 SampleLabelingStateCacheLoadPolicy::
@@ -5989,6 +6005,7 @@ SampleLabelingController::LatestCacheHasOutputConflict(
     }
     const SampleLabelingStateCacheLoadResult latest =
         LoadSampleLabelingStateCache(
+            runtime_paths_,
             state_cache_path_,
             {},
             SampleLabelingStateCacheLoadPolicy::
@@ -6076,6 +6093,7 @@ bool SampleLabelingController::TrySaveStateCache(
     std::string save_error;
     const bool saved =
         CommitSampleLabelingStateCachePatch(
+            runtime_paths_,
             state_cache_path_,
             patch,
             &save_error,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "domain/spectrum_snapshot.h"
 #include "app/local_user_state.h"
 #include "ui/sample_labeling_controller.h"
@@ -83,6 +85,7 @@ class SampleWorkflowCoordinator {
 public:
     using WorkflowStateCacheLoader =
         std::function<SampleWorkflowStateCacheLoadResult(const std::filesystem::path&)>;
+    // Detached construction never resolves process storage implicitly.
     SampleWorkflowCoordinator();
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
@@ -90,13 +93,15 @@ public:
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
-        std::filesystem::path workflow_state_cache_path);
+        std::filesystem::path workflow_state_cache_path,
+        const RuntimePaths& runtime_paths = {});
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
         std::filesystem::path workflow_state_cache_path,
         SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
-        WorkflowStateCacheLoader workflow_state_cache_loader);
+        WorkflowStateCacheLoader workflow_state_cache_loader,
+        const RuntimePaths& runtime_paths = {});
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
@@ -104,7 +109,8 @@ public:
         SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
         WorkflowStateCacheLoader workflow_state_cache_loader,
         SampleLabelingController::CanonicalDocumentPublisher
-            canonical_document_publisher);
+            canonical_document_publisher,
+        const RuntimePaths& runtime_paths = {});
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
@@ -114,7 +120,8 @@ public:
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher,
         SampleLabelingController::CanonicalValuesPublisher
-            canonical_values_publisher);
+            canonical_values_publisher,
+        const RuntimePaths& runtime_paths = {});
 
     [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
         SourceCollectionIntent intent,
@@ -374,6 +381,7 @@ private:
     SampleWorkflowSourcePolicy workflow_sources_;
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
+    RuntimePaths runtime_paths_;
     std::filesystem::path workflow_state_cache_path_;
     std::shared_ptr<const SampleWorkflowStateCache> workflow_state_cache_snapshot_;
     SampleWorkflowStateCache workflow_state_cache_;

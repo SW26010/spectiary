@@ -865,7 +865,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
             const specforge::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}};
             saved.sources = failure_first ? std::vector{bad, good} : std::vector{good, bad};
             saved.active_source_index = active_fails == failure_first ? 0 : 1;
-            Require(specforge::SaveSourceCollectionSessionStateCache(saved_path, saved),
+            Require(specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path, saved),
                 "startup fixture should save");
 
             // Restart from the saved result as well: an unavailable active row
@@ -903,7 +903,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                         : (view.current_sample_snapshot && view.current_sample_snapshot->source.path == good_path),
                     "an unavailable active source must leave plot and sample workflow empty");
                 Require(session.FlushStateCaches(), "startup state should flush");
-                const auto persisted = specforge::LoadSourceCollectionSessionStateCache(saved_path).cache;
+                const auto persisted = specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path).cache;
                 Require(persisted.sources.size() == 2 && persisted.active_source_index &&
                         persisted.sources[*persisted.active_source_index].path == (active_fails ? bad_path : good_path),
                     "shutdown must persist the same active source identity");
@@ -931,7 +931,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                             activation.status().failures.empty(),
                         "removing the failed row must forget its unresolved restore intent");
                     Require(session.FlushStateCaches(), "removal should flush");
-                    const auto removed = specforge::LoadSourceCollectionSessionStateCache(saved_path).cache;
+                    const auto removed = specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path).cache;
                     Require(removed.sources.size() == 1 && removed.sources.front().path == good_path,
                         "removed failures must not return at the next startup");
                 }

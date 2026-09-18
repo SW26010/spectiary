@@ -8,6 +8,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <stdexcept>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -48,7 +49,10 @@ std::filesystem::path NormalizedAbsolutePath(const std::filesystem::path& path)
 {
     std::error_code error;
     const std::filesystem::path absolute_path = path.is_absolute() ? path : std::filesystem::absolute(path, error);
-    return (error ? path : absolute_path).lexically_normal();
+    if (error || !absolute_path.is_absolute()) {
+        throw std::invalid_argument("Could not resolve an absolute user path.");
+    }
+    return absolute_path.lexically_normal();
 }
 
 bool WindowsPathComponentEquals(
@@ -76,7 +80,7 @@ bool IsDotDot(const std::filesystem::path& path)
 
 bool IsSafePackageRelativePath(const std::filesystem::path& path)
 {
-    if (path.empty() || path.is_absolute()) {
+    if (path.empty() || path.has_root_name() || path.has_root_directory()) {
         return false;
     }
     for (const std::filesystem::path& part : path) {
@@ -87,11 +91,14 @@ bool IsSafePackageRelativePath(const std::filesystem::path& path)
     return true;
 }
 
-bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesystem::path& relative_path)
+bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesystem::path& relative_path,
+    const RuntimePaths& runtime_paths)
 {
-    const RuntimePaths runtime_paths = DefaultRuntimePaths();
-    if (runtime_paths.storage_profile != StorageProfile::Portable || runtime_paths.package_root.empty()) {
+    if (runtime_paths.storage_profile != StorageProfile::Portable) {
         return false;
+    }
+    if (!runtime_paths.package_root.is_absolute()) {
+        throw std::invalid_argument("Portable locators require a resolved package root.");
     }
 
     const std::filesystem::path package_root = NormalizedAbsolutePath(runtime_paths.package_root);
@@ -119,69 +126,36 @@ bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesyst
     return true;
 }
 
-std::optional<std::filesystem::path> TryRebaseLegacyPackagePath(const std::filesystem::path& path)
-{
-    const RuntimePaths runtime_paths = DefaultRuntimePaths();
-    if (runtime_paths.storage_profile != StorageProfile::Portable || runtime_paths.package_root.empty()) {
-        return std::nullopt;
-    }
-
-    std::error_code error;
-    if (std::filesystem::exists(path, error) && !error) {
-        return path;
-    }
-
-    const std::filesystem::path package_name = runtime_paths.package_root.filename();
-    if (package_name.empty()) {
-        return std::nullopt;
-    }
-
-    std::filesystem::path suffix;
-    bool found_package_root_name = false;
-    for (const std::filesystem::path& part : path) {
-        if (found_package_root_name) {
-            suffix /= part;
-            continue;
-        }
-        if (part == package_name) {
-            found_package_root_name = true;
-        }
-    }
-
-    if (!found_package_root_name || suffix.empty()) {
-        return std::nullopt;
-    }
-
-    const std::filesystem::path rebased = runtime_paths.package_root / suffix;
-    if (std::filesystem::exists(rebased, error) && !error) {
-        return rebased;
-    }
-    return std::nullopt;
-}
-
 }  // namespace
 
-std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path)
+std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path,
+    const RuntimePaths& runtime_paths)
 {
-    return DefaultRuntimePaths().local_user_state_root / std::move(relative_path);
+    if (runtime_paths.local_user_state_root.empty()) return {};
+    if (!IsSafePackageRelativePath(relative_path)) throw std::invalid_argument("Invalid local-state relative path.");
+    return runtime_paths.local_user_state_root / std::move(relative_path);
 }
 
-std::string UserPathDisplayText(const std::filesystem::path& path)
+std::string UserPathDisplayText(const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths)
 {
+    if (path.empty()) {
+        return {};
+    }
     std::filesystem::path relative_path;
-    if (TryMakePackageRelativePath(path, relative_path)) {
+    if (TryMakePackageRelativePath(path, relative_path, runtime_paths)) {
         return LocalUserStatePathToUtf8(relative_path);
     }
     return LocalUserStatePathToUtf8(path);
 }
 
-std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value)
+std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value,
+    const RuntimePaths& runtime_paths)
+try
 {
     if (value.type() == nlohmann::json::value_t::string) {
         std::filesystem::path legacy_path = PathFromUtf8(value.get_ref<const std::string&>());
-        if (std::optional<std::filesystem::path> rebased = TryRebaseLegacyPackagePath(legacy_path)) {
-            return rebased;
-        }
+        if (!legacy_path.is_absolute() || value.get_ref<const std::string&>().find('\0') != std::string::npos) return std::nullopt;
         return legacy_path;
     }
 
@@ -191,32 +165,42 @@ std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::
 
     const std::optional<std::string> path_kind = ReadJsonStringMember(value, "path_kind");
     const std::optional<std::string> path_text = ReadJsonStringMember(value, "path");
-    if (!path_kind || !path_text || path_text->empty()) {
+    if (!path_kind || !path_text || path_text->empty() || path_text->find('\0') != std::string::npos) {
         return std::nullopt;
     }
 
     if (*path_kind == kPathKindPackageRelative) {
         const std::filesystem::path relative_path = PathFromUtf8(*path_text);
-        if (!IsSafePackageRelativePath(relative_path)) {
+        if (runtime_paths.storage_profile != StorageProfile::Portable ||
+            !runtime_paths.package_root.is_absolute() || !IsSafePackageRelativePath(relative_path)) {
             return std::nullopt;
         }
         if (relative_path == ".") {
-            return DefaultRuntimePaths().package_root;
+            return runtime_paths.package_root;
         }
-        return DefaultRuntimePaths().package_root / relative_path;
+        return runtime_paths.package_root / relative_path;
     }
     if (*path_kind == kPathKindAbsolute) {
-        return PathFromUtf8(*path_text);
+        const auto path = PathFromUtf8(*path_text);
+        return path.is_absolute() ? std::optional(path) : std::nullopt;
     }
 
     return std::nullopt;
 }
+catch (const std::system_error&)
+{
+    return std::nullopt;
+}
 
 nlohmann::json PersistedPathReferenceJson(
-    const std::filesystem::path& path)
+    const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths)
 {
+    if (path.empty() || path.native().find(L'\0') != std::wstring::npos) {
+        throw std::invalid_argument("Cannot persist an empty or NUL-containing path.");
+    }
     std::filesystem::path relative_path;
-    if (TryMakePackageRelativePath(path, relative_path)) {
+    if (TryMakePackageRelativePath(path, relative_path, runtime_paths)) {
         return nlohmann::json::object({
             {"path_kind",
              nlohmann::json(kPathKindPackageRelative)},
@@ -229,31 +213,61 @@ nlohmann::json PersistedPathReferenceJson(
         {"path_kind", nlohmann::json(kPathKindAbsolute)},
         {"path",
          nlohmann::json(
-             LocalUserStatePathToUtf8(path))},
+             LocalUserStatePathToUtf8(NormalizedAbsolutePath(path)))},
     });
 }
 
-void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path)
+void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths)
 {
-    std::filesystem::path relative_path;
-    if (TryMakePackageRelativePath(path, relative_path)) {
-        stream << "{ \"path_kind\": ";
-        WriteJsonString(stream, kPathKindPackageRelative);
-        stream << ", \"path\": ";
-        WriteJsonString(
-            stream,
-            LocalUserStatePathToUtf8(relative_path));
-        stream << " }";
-        return;
-    }
-
+    const auto reference = PersistedPathReferenceJson(path, runtime_paths);
     stream << "{ \"path_kind\": ";
-    WriteJsonString(stream, kPathKindAbsolute);
+    WriteJsonString(stream, reference.at("path_kind").get_ref<const std::string&>());
     stream << ", \"path\": ";
-    WriteJsonString(
-        stream,
-        LocalUserStatePathToUtf8(path));
+    WriteJsonString(stream, reference.at("path").get_ref<const std::string&>());
     stream << " }";
+}
+
+UserFilePathStatus CheckUserFilePath(
+    const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths)
+{
+    if (!path.is_absolute() || !runtime_paths.application_data_root.is_absolute() ||
+        path.native().find(L'\0') != std::wstring::npos) {
+        return UserFilePathStatus::Invalid;
+    }
+    // Reject Win32 aliases (ADS, trailing dots/spaces, device paths) rather
+    // than letting the OS reinterpret a namespace after validation.
+    if (path.native().starts_with(L"\\\\?\\") || path.native().starts_with(L"\\\\.\\")) {
+        return UserFilePathStatus::Invalid;
+    }
+    for (const auto& part : path.relative_path()) {
+        const auto& text = part.native();
+        if (part != "." && part != ".." && !text.empty() &&
+            (text.back() == L'.' || text.back() == L' ' || text.find(L':') != std::wstring::npos)) {
+            return UserFilePathStatus::Invalid;
+        }
+    }
+    const auto contained = [](const auto& candidate, const auto& root) {
+        auto current = candidate.begin();
+        for (auto part = root.begin(); part != root.end(); ++part, ++current) {
+            if (current == candidate.end() || !WindowsPathComponentEquals(*current, *part)) return false;
+        }
+        return true;
+    };
+    std::error_code error;
+    const auto physical_path = std::filesystem::weakly_canonical(path, error);
+    if (error) return UserFilePathStatus::Invalid;
+    for (const auto* name : {"config", "state", "logs", "unsaved"}) {
+        const auto root = runtime_paths.application_data_root / name;
+        if (contained(path.lexically_normal(), root.lexically_normal())) {
+            return UserFilePathStatus::ReservedNamespace;
+        }
+        const auto physical_root = std::filesystem::weakly_canonical(root, error);
+        if (error) return UserFilePathStatus::Invalid;
+        if (contained(physical_path, physical_root)) return UserFilePathStatus::ReservedNamespace;
+    }
+    return UserFilePathStatus::Allowed;
 }
 
 void LocalUserStateSaveStatus::Clear()

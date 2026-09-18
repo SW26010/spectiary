@@ -324,13 +324,13 @@ int WriteLabelingSeedFixture(
     cache.sources.emplace(
         context.identity.id,
         std::move(source));
-    if (!specforge::SaveSampleLabelingStateCache(
+    if (!specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             *seed_path,
             cache)) {
         return 5;
     }
     const auto loaded =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             *seed_path);
     return loaded.warning.empty() &&
                    loaded.cache.sources.size() == 1U
@@ -514,7 +514,7 @@ int VerifyLabelingStateFixture(
                 LoadSourceCollectionContext(
                     *snapshot);
     const auto loaded =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             *cache_path);
     if (!loaded.warning.empty()) {
         return 4;
@@ -646,12 +646,12 @@ int wmain(int argc, wchar_t** argv)
         "seed-source",
         std::move(persistent_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             persistent_seed_cache,
             persistent_cache),
         "persistent-output seed fixture should use the production serializer");
     const auto restricted_seed =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             persistent_seed_cache,
             {},
             specforge::

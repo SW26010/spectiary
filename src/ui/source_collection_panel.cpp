@@ -166,11 +166,6 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
-std::string NarrowPath(const std::filesystem::path& path)
-{
-    return UserPathDisplayText(path);
-}
-
 std::string NormalizedDiagnosticPath(
     const std::filesystem::path& path)
 {
@@ -338,7 +333,7 @@ void RenderSourceCollectionDiagnostic(
     const SourceCollectionManifestDiagnostic& diagnostic,
     UiLanguage language)
 {
-    std::string filename = NarrowPath(
+    std::string filename = PathToUtf8(
         diagnostic.path.filename());
     if (filename.empty()) {
         filename = UiText(
@@ -1029,7 +1024,8 @@ void SourceCollectionPanelUi::RenderFiles(
             const auto show_failure_tooltip = [&]() {
                 if (unavailable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     const SourceCollectionLoadFailure failure{entry.path, *entry.load_error};
-                    const auto message = FormatSourceCollectionLoadFailures(language,
+                    const auto message = FormatSourceCollectionLoadFailures(
+                        language,
                         std::span(&failure, 1));
                     ImGui::SetTooltip("%s", message.c_str());
                 }
@@ -1051,7 +1047,7 @@ void SourceCollectionPanelUi::RenderFiles(
             const bool source_hovered = ImGui::IsItemHovered();
             OpenSourceContextPopupForHoveredCell("source_context");
             if (source_hovered) {
-                const std::string path = NarrowPath(entry.path);
+                const std::string path = UserPathDisplayText(entry.path, runtime_paths_);
                 ImGui::SetTooltip("%s", path.c_str());
             }
             show_failure_tooltip();
@@ -1412,7 +1408,7 @@ bool SourceCollectionPanelUi::RenderAnnotationImportDiagnostic(
         return false;
     }
 
-    std::string filename = NarrowPath(
+    std::string filename = PathToUtf8(
         diagnostic.path.filename());
     if (filename.empty()) {
         filename = UiText(
@@ -1730,7 +1726,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
                     annotation_display_name_buffer_.size(),
                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
                 if (ImGui::IsItemHovered()) {
-                    const std::string path = NarrowPath(annotation.path);
+                    const std::string path = UserPathDisplayText(annotation.path, runtime_paths_);
                     ImGui::SetTooltip("%s", path.c_str());
                 }
                 if (submitted || ImGui::IsItemDeactivatedAfterEdit()) {
@@ -1746,7 +1742,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
                     annotation.name,
                     ImGui::GetColorU32(ImGuiCol_Text));
                 if (ImGui::IsItemHovered()) {
-                    const std::string path = NarrowPath(annotation.path);
+                    const std::string path = UserPathDisplayText(annotation.path, runtime_paths_);
                     ImGui::SetTooltip("%s", path.c_str());
                 }
                 if (edit_requested && annotation.can_rename_annotation && !annotation_path_text.empty()) {

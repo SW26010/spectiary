@@ -16,13 +16,14 @@ constexpr int kSettingsSchemaVersion = 1;
 
 }  // namespace
 
-std::filesystem::path DefaultProfileSettingsPath()
+std::filesystem::path DefaultProfileSettingsPath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kProfileSettings);
+        local_user_state_paths::kProfileSettings, runtime_paths);
 }
 
 ProfileSettingsLoadResult LoadProfileSettings(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path)
 {
     ProfileSettingsLoadResult loaded;
@@ -41,7 +42,7 @@ ProfileSettingsLoadResult LoadProfileSettings(
         JsonObjectMember(result.document->root, "output_directory");
     if (output_directory != nullptr && output_directory->type() != nlohmann::json::value_t::null) {
         std::optional<std::filesystem::path> parsed =
-            ReadPersistedPathReference(*output_directory);
+            ReadPersistedPathReference(*output_directory, runtime_paths);
         if (!parsed) {
             loaded.warning =
                 "Performance profile settings member "
@@ -55,6 +56,7 @@ ProfileSettingsLoadResult LoadProfileSettings(
 }
 
 bool SaveProfileSettings(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const ProfileSettings& settings,
     std::string* error_message)
@@ -62,7 +64,7 @@ bool SaveProfileSettings(
     const nlohmann::json output_directory =
         settings.output_directory
         ? PersistedPathReferenceJson(
-              *settings.output_directory)
+              *settings.output_directory, runtime_paths)
         : nlohmann::json();
     return WriteVersionedJsonCacheDocument(
         path,

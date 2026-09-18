@@ -131,11 +131,12 @@ SourceCollectionLoadDependencies DefaultAdapters(
     adapters.source_open_probe =
         ProbeSourceOpenRequest;
     if (AllWorkflowCachePathsEmpty(workflow_cache_paths)) {
-        workflow_cache_paths = {
-            DefaultSampleLabelingStateCachePath(),
-            DefaultSampleWorkflowStateCachePath(),
-            DefaultSampleNavigationStateCachePath(),
-        };
+        workflow_cache_paths.labeling_state_cache_path =
+            workflow_cache_paths.runtime_paths.sample_labeling_state_path;
+        workflow_cache_paths.workflow_state_cache_path =
+            workflow_cache_paths.runtime_paths.sample_workflow_state_path;
+        workflow_cache_paths.navigation_state_cache_path =
+            workflow_cache_paths.runtime_paths.sample_navigation_state_path;
     }
     adapters.workflow_cache_paths =
         std::move(workflow_cache_paths);

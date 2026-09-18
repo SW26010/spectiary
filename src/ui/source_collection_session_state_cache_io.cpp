@@ -17,14 +17,14 @@ constexpr std::size_t kMaxRestoredSources = 32;
 
 }  // namespace
 
-std::filesystem::path DefaultSourceCollectionSessionStateCachePath()
+std::filesystem::path DefaultSourceCollectionSessionStateCachePath(const RuntimePaths& runtime_paths)
 {
     return DefaultLocalUserStatePath(
-        local_user_state_paths::kSourceSessionState);
+        local_user_state_paths::kSourceSessionState, runtime_paths);
 }
 
 SourceCollectionSessionStateCacheLoadResult
-LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
+LoadSourceCollectionSessionStateCache(const RuntimePaths& runtime_paths, const std::filesystem::path& path)
 {
     SourceCollectionSessionStateCacheLoadResult load;
     VersionedJsonCacheLoadResult result = LoadVersionedJsonCacheFile(
@@ -54,7 +54,7 @@ LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
             continue;
         }
 
-        std::optional<std::filesystem::path> path_reference = ReadPersistedPathReference(*path_value);
+        std::optional<std::filesystem::path> path_reference = ReadPersistedPathReference(*path_value, runtime_paths);
         if (!path_reference || path_reference->empty()) {
             continue;
         }
@@ -66,7 +66,7 @@ LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
         if (annotation_paths != nullptr && annotation_paths->type() == nlohmann::json::value_t::array) {
             for (const nlohmann::json& annotation_path_value : (*annotation_paths)) {
                 std::optional<std::filesystem::path> annotation_path =
-                    ReadPersistedPathReference(annotation_path_value);
+                    ReadPersistedPathReference(annotation_path_value, runtime_paths);
                 if (!annotation_path || annotation_path->empty()) {
                     continue;
                 }
@@ -79,6 +79,7 @@ LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
 }
 
 bool SaveSourceCollectionSessionStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SourceCollectionSessionStateCache& cache)
 {
@@ -106,7 +107,7 @@ bool SaveSourceCollectionSessionStateCache(
             }
             for (std::size_t index = 0; index < cache.sources.size(); ++index) {
                 stream << "    { \"path\": ";
-                WritePersistedPathReference(stream, cache.sources[index].path);
+                WritePersistedPathReference(stream, cache.sources[index].path, runtime_paths);
                 stream << ", \"last_index\": " << cache.sources[index].last_spectrum_index;
                 if (!cache.sources[index].annotation_paths.empty()) {
                     stream << ", \"annotation_paths\": [";
@@ -116,7 +117,7 @@ bool SaveSourceCollectionSessionStateCache(
                         if (path_index > 0) {
                             stream << ", ";
                         }
-                        WritePersistedPathReference(stream, cache.sources[index].annotation_paths[path_index]);
+                        WritePersistedPathReference(stream, cache.sources[index].annotation_paths[path_index], runtime_paths);
                     }
                     stream << "]";
                 }

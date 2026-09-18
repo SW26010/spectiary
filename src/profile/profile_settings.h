@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -31,10 +33,12 @@ struct ProfileOutputDirectoryResolution {
         const ProfileOutputDirectoryResolution&) const = default;
 };
 
-[[nodiscard]] std::filesystem::path DefaultProfileSettingsPath();
+[[nodiscard]] std::filesystem::path DefaultProfileSettingsPath(const RuntimePaths& runtime_paths);
 [[nodiscard]] ProfileSettingsLoadResult LoadProfileSettings(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path);
 [[nodiscard]] bool SaveProfileSettings(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const ProfileSettings& settings,
     std::string* error_message = nullptr);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/ui_text.h"
@@ -29,6 +31,7 @@ using SourceCollectionPathLauncher = std::function<std::optional<std::string>(
 
 class SourceCollectionPanelUi {
 public:
+    explicit SourceCollectionPanelUi(const RuntimePaths& paths = {}) : runtime_paths_(paths) {}
     [[nodiscard]] static const char* FilesWindowName();
     [[nodiscard]] static const char* NavigationWindowName();
     [[nodiscard]] static const char* AnnotationsWindowName();
@@ -71,6 +74,7 @@ public:
         const SourceCollectionSessionView& view);
 
 private:
+    RuntimePaths runtime_paths_;
     friend struct ShellUiTestAccess;
     friend struct SourceCollectionPanelUiTestAccess;
 

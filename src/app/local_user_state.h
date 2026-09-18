@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nlohmann/json_fwd.hpp>
+#include "app/runtime_paths.h"
 
 #include <chrono>
 #include <filesystem>
@@ -75,14 +76,26 @@ void AppendLocalUserStateHealth(
     LocalUserStateArea area,
     const LocalUserStatePersistenceStatus& status);
 
-[[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
+[[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path,
+    const RuntimePaths& runtime_paths);
 [[nodiscard]] std::string LocalUserStatePathToUtf8(
     const std::filesystem::path& path);
-[[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
-[[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value);
+[[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths);
+[[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const nlohmann::json& value,
+    const RuntimePaths& runtime_paths);
 [[nodiscard]] nlohmann::json PersistedPathReferenceJson(
-    const std::filesystem::path& path);
-void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path);
+    const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths);
+void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths);
+
+enum class UserFilePathStatus { Allowed, ReservedNamespace, Invalid };
+// For ordinary source/document open/save admission. Does not create or move files.
+// Invalid/unresolvable paths fail closed; callers must accept only Allowed.
+[[nodiscard]] UserFilePathStatus CheckUserFilePath(
+    const std::filesystem::path& path,
+    const RuntimePaths& runtime_paths);
 
 class LocalUserStateSaveStatus {
 public:

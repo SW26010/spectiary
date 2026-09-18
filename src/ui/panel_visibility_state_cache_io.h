@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "app/panel_visibility_state.h"
 
 #include <filesystem>
@@ -12,7 +14,7 @@ struct PanelVisibilityStateCacheLoadResult {
     std::string warning;
 };
 
-[[nodiscard]] std::filesystem::path DefaultPanelVisibilityStateCachePath();
+[[nodiscard]] std::filesystem::path DefaultPanelVisibilityStateCachePath(const RuntimePaths& runtime_paths);
 
 [[nodiscard]] PanelVisibilityStateCacheLoadResult
 LoadPanelVisibilityStateCache(

@@ -190,7 +190,7 @@ void TestTaskLifecycleUsesInjectedUuidAndSemanticClock()
     specforge::SampleLabelingController controller(
         {},
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -580,7 +580,7 @@ void TestSampleLabelingStateCacheRoundTrip()
     state.active_task_id = kTaskId;
     state.tasks.push_back(std::move(task));
     cache.sources.emplace("source-identity", std::move(state));
-    Require(specforge::SaveSampleLabelingStateCache(cache_path, cache), "sample-labeling cache should save");
+    Require(specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path, cache), "sample-labeling cache should save");
 
     const std::string cache_text = ReadTextFile(cache_path);
     const std::size_t email_position =
@@ -598,7 +598,7 @@ void TestSampleLabelingStateCacheRoundTrip()
         "schema 4 should persist output ownership and only present author email fields");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(loaded.warning.empty(), loaded.warning);
     const auto source = loaded.cache.sources.find("source-identity");
     Require(source != loaded.cache.sources.end(), "sample-labeling cache should restore source state");
@@ -650,7 +650,7 @@ void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
             "}\n");
 
         const specforge::SampleLabelingStateCacheLoadResult unsupported =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path,
                 {},
                 specforge::SampleLabelingStateCacheLoadPolicy::
@@ -687,7 +687,7 @@ void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
     current_source.tasks.push_back(std::move(canonical_task));
     current.sources.emplace("legacy-source", std::move(current_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             current),
         "current output formats should save as schema 4");
@@ -702,7 +702,7 @@ void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
         "schema 4 should persist formal output path and format together");
 
     const specforge::SampleLabelingStateCacheLoadResult round_tripped =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -814,7 +814,7 @@ void TestSampleLabelingStateCacheReportsCorruptJson()
     WriteTextFile(cache_path, "{ invalid json");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(!loaded.warning.empty(), "corrupt sample-labeling cache should report a warning");
     Require(loaded.cache.sources.empty(), "corrupt sample-labeling cache should be ignored");
 }
@@ -832,7 +832,7 @@ void TestSampleLabelingStateCacheReportsUnsupportedSchema()
         "}\n");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(!loaded.warning.empty(), "unsupported sample-labeling cache schema should report a warning");
     Require(loaded.cache.sources.empty(), "unsupported sample-labeling cache schema should be ignored");
 }
@@ -868,7 +868,7 @@ void TestSampleLabelingStateCacheRejectsNonportablePromotionOriginName()
         "nonportable-origin-source",
         std::move(state));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "portable cache-origin fixture should save");
@@ -888,7 +888,7 @@ void TestSampleLabelingStateCacheRejectsNonportablePromotionOriginName()
     WriteTextFile(cache_path, cache_text);
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto source = loaded.cache.sources.find(
         "nonportable-origin-source");
     Require(
@@ -922,7 +922,7 @@ void TestSampleLabelingStateCacheRejectsInvalidAuthorEmail()
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace("invalid-email-source", std::move(state));
     Require(
-        specforge::SaveSampleLabelingStateCache(cache_path, cache),
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path, cache),
         "valid cache-author-email fixture should save");
 
     const std::string valid_text = ReadTextFile(cache_path);
@@ -936,7 +936,7 @@ void TestSampleLabelingStateCacheRejectsInvalidAuthorEmail()
                                          std::string_view message) {
         WriteTextFile(cache_path, cache_text);
         const specforge::SampleLabelingStateCacheLoadResult loaded =
-            specforge::LoadSampleLabelingStateCache(cache_path);
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
         const auto source = loaded.cache.sources.find(
             "invalid-email-source");
         Require(
@@ -1179,7 +1179,7 @@ void SaveCanonicalOwnerCache(
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "canonical owner cache fixture should save");
@@ -1249,7 +1249,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "canonical owner cache fixture should save");
@@ -1264,7 +1264,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         "canonical owner cache should retain only its sparse pending values");
     const specforge::SampleLabelingStateCacheLoadResult
         structural =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask* structural_task =
         FindTask(
@@ -1299,7 +1299,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         specforge::SampleLabelingController controller(
             cache_path,
             [](const std::filesystem::path& path) {
-                return specforge::LoadSampleLabelingStateCache(
+                return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                     path);
             },
             [&canonical_document_publication_calls](
@@ -1434,7 +1434,7 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
 
     const specforge::SampleLabelingStateCacheLoadResult
         clean_cache =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask* clean_cached_task =
         FindTask(
@@ -1608,7 +1608,7 @@ void TestPendingCanonicalRelinkActivationRetainsBothOwnerLeases()
     commit_lock.lease.Reset();
     (void)RunMaintenanceUntilIdle(controller);
     const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -1796,7 +1796,7 @@ void TestMissingOwnerDeletionRevalidatesLatestDurablePath()
         "delete revalidation fixture should make the local projection missing");
 
     specforge::SampleLabelingStateCacheLoadResult latest =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -1817,7 +1817,7 @@ void TestMissingOwnerDeletionRevalidatesLatestDurablePath()
         "delete revalidation fixture should reload its durable task");
     latest_task->persistence.output_path = replacement_path;
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             latest.cache),
         "delete revalidation fixture should publish the replacement durable owner");
@@ -1827,7 +1827,7 @@ void TestMissingOwnerDeletionRevalidatesLatestDurablePath()
             "canonical-source",
             task_id);
     const specforge::SampleLabelingStateCacheLoadResult verified =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -1880,7 +1880,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 path);
         },
         [&canonical_document_publication_calls](
@@ -1965,7 +1965,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
                     CanonicalOwnerSourceDescriptor()));
     const specforge::SampleLabelingStateCacheLoadResult
         pending_cache =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask* pending_task =
         FindTask(
@@ -2011,7 +2011,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
             RunMaintenanceUntilIdle(controller);
     const specforge::SampleLabelingStateCacheLoadResult
         inactive_cache =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask*
         inactive_pending_task = FindTask(
@@ -2045,7 +2045,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
                     CanonicalOwnerSourceDescriptor()));
     const specforge::SampleLabelingStateCacheLoadResult
         clean_cache =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask* clean_task =
         FindTask(
@@ -2120,7 +2120,7 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 path);
         },
         [&document_publication_calls](
@@ -2266,7 +2266,7 @@ void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
                 CanonicalOwnerSourceDescriptor()));
     const specforge::SampleLabelingStateCacheLoadResult
         clean_cache =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path);
     const specforge::SampleLabelingTask* clean_task =
         FindTask(
@@ -2345,7 +2345,7 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [&document_publication_calls](
             const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
@@ -2454,7 +2454,7 @@ void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
         retried_projection =
             controller.ActiveCanonicalAsdfAnnotationProjection();
     const specforge::SampleLabelingStateCacheLoadResult clean_cache =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* clean_task =
         FindTask(
             clean_cache.cache,
@@ -2525,7 +2525,7 @@ void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "canonical deactivation cache fixture should save");
@@ -2689,7 +2689,7 @@ void TestCanonicalRevalidationRetainsLeaseForPendingRecoveryPatch()
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "pending revalidation cache fixture should save");
@@ -2787,7 +2787,7 @@ void TestCanonicalAsdfTaskOwnerFailsClosed()
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "malformed canonical owner cache fixture should save");
@@ -2877,7 +2877,7 @@ void TestCanonicalAsdfTaskOwnerRejectsUndefinedPendingCode()
         "canonical-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "undefined pending cache fixture should save");
@@ -3697,7 +3697,7 @@ void TestLabelValuesNpyExportRejectsManagedAndLeasedOwners()
         "managed-source",
         std::move(managed_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "managed-owner fixture should persist its local owner");
@@ -4411,7 +4411,7 @@ void TestCreateFromAnnotationRegeneratesUuidWhenIdentityLeaseIsUnavailable()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -4475,7 +4475,7 @@ void TestCreateFromAnnotationRegeneratesUuidWithoutHydratingCollidingOwner()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -4514,7 +4514,7 @@ void TestCreateFromAnnotationRegeneratesUuidWithoutHydratingCollidingOwner()
         "shared-source",
         std::move(latest_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             latest_cache),
         "promotion owner-collision fixture should publish the newer structural cache generation");
@@ -4557,7 +4557,7 @@ void TestImportedDraftRetainsValuesWhileRecoveryCheckpointBlocked()
     lock.lease.Reset();
     Require(controller.FlushStateCache() && !std::filesystem::exists(import_path),
             "retry should save only the local recovery cache, never create an import artifact");
-    const auto restored = specforge::LoadSampleLabelingStateCache(cache_path);
+    const auto restored = specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto* task = FindTask(restored.cache, "shared-source", ActiveTask(controller)->task_id);
     Require(task && !task->persistence.output_path && task->values.Complete() == std::vector<int>({5, -1, -1}),
             "recovered import values should match the accepted draft");
@@ -4707,7 +4707,7 @@ void TestControllerAtomicallyStartsOrResumesTemporaryTask()
         cache_path,
         [](const std::filesystem::path& path) {
             return specforge::
-                LoadSampleLabelingStateCache(path);
+                LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         }, {}, FaultingValuesPublisher(fail_output_save));
     ActivateCanonicalTestSource(controller, "source-identity", 3);
     Require(
@@ -5132,7 +5132,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
         "shared-source",
         std::move(repaired_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             repaired_cache),
         "repair fixture should replace the corrupt cache");
@@ -5146,7 +5146,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
         ReadTextFile(cache_path) == repaired_cache_bytes,
         "a rejected pending create must preserve the repaired cache bytes");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -5167,7 +5167,7 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
         deleted.accepted && deleted.state_saved,
         "deleting a stale expected-absent draft should cancel only its local pending create");
     const specforge::SampleLabelingStateCacheLoadResult after_delete =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     task = FindTask(
         after_delete.cache,
         "shared-source",
@@ -5197,7 +5197,7 @@ void TestFailedExternalOutputPersistsPendingOverlay()
         specforge::SampleLabelingController controller(
             cache_path,
             [](const std::filesystem::path& path) {
-                return specforge::LoadSampleLabelingStateCache(path);
+                return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
             }, {}, FaultingValuesPublisher(fail_output_save));
         ActivateCanonicalTestSource(controller, "source-identity", 3);
         specforge::SampleLabelSet labels;
@@ -5271,7 +5271,7 @@ void TestFailedExternalOutputRetriesAfterBackoff()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         }, {}, FaultingValuesPublisher(fail_output_save));
     ActivateCanonicalTestSource(controller, "source-identity", 3);
     specforge::SampleLabelSet labels;
@@ -5449,7 +5449,7 @@ void TestInteractiveOutputLabelWritesDoNotWaitForCacheCommitLock()
             specforge::kUnlabeledSampleLabelCode,
         "maintenance should publish the newest label after the cache checkpoint commits");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -5480,7 +5480,7 @@ void TestSuccessfulOutputCannotRetainOlderPendingOverlay()
         specforge::SampleLabelingController controller(
             cache_path,
             [](const std::filesystem::path& path) {
-                return specforge::LoadSampleLabelingStateCache(
+                return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                     path);
             }, {}, [&](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
                         const specforge::SampleLabelingDocument& document) {
@@ -5626,7 +5626,7 @@ void TestDifferentFormalTargetsMergeAcrossInstances()
         ReadTestCanonicalAsdfValues(second_output)[1] == 7,
         "second instance output should remain intact");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(loaded.warning.empty(), loaded.warning);
     Require(
         FindTask(
@@ -5678,7 +5678,7 @@ void TestDifferentTemporaryTasksMergeAcrossInstances()
     Require(second.FlushStateCache(), "second draft should merge");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* first_task =
         FindTask(
             loaded.cache,
@@ -5748,7 +5748,7 @@ void TestStaleNewTaskDoesNotActivateLatestFormalTask()
         "stale New labeling task must create a distinct canonical UUID rather than reactivate the formal task");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -5818,7 +5818,7 @@ void TestStaleExplicitCreateDoesNotActivateFormalizedDraft()
         "explicit CreateTask should create a fresh UUID instead of activating the refreshed formal task");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -5900,12 +5900,12 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
         "damaged-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "duplicate-id fixture should write the structurally damaged cache");
     const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -5936,7 +5936,7 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 path);
         });
     controller.ActivateSource("damaged-source", 3);
@@ -6174,7 +6174,7 @@ void TestTemporaryDraftRecoveryDeletionKeepsLeaseUntilTombstoneCommits()
         deleting.FlushStateCache(),
         "temporary deletion tombstone should commit after the lock is released");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         FindTask(
             loaded.cache,
@@ -6243,7 +6243,7 @@ void TestTemporaryDraftRecoveryCancelsPendingCreateBeforeFlush()
         controller.FlushStateCache(),
         "pending-create deletion should flush after the cache lock is released");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         FindTask(
             loaded.cache,
@@ -6347,7 +6347,7 @@ void TestTemporaryDraftRecoveryUsesPendingCreateBeforeFlush()
         controller.FlushStateCache(),
         "pending-create recovery should flush after the cache lock is released");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -6448,7 +6448,7 @@ void TestTemporaryDraftRecoveryMissingTargetDoesNotTombstoneRecreatedTask()
         stale.FlushStateCache(),
         "ordinary source metadata refresh should flush any pending projection work");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -6536,7 +6536,7 @@ void TestTemporaryDraftRecoveryRetainsDeferredPendingEdit()
         editor.FlushStateCache(),
         "pending temporary edit should flush after the cache lock is released");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -6695,7 +6695,7 @@ void TestTemporaryDraftDeleteIgnoresUnrelatedFailedActiveFormalTask()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         }, {}, FaultingValuesPublisher(fail));
     ActivateCanonicalTestSource(controller, "shared-source", 3);
     Require(
@@ -6799,7 +6799,7 @@ void TestLeaseConflictTemporaryReopenPreservesPendingEdit()
         "temporary recovery edit should remain editable and persist after reopen");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto source = loaded.cache.sources.find("shared-source");
     const specforge::SampleLabelingTask* recovered =
         FindTask(
@@ -7034,13 +7034,13 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             lease_cache),
         "output alias fixture should save both historical task records");
     const auto structural_loader = [](
                                        const std::filesystem::path& path) {
-        return specforge::LoadSampleLabelingStateCache(
+        return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7134,13 +7134,13 @@ void TestExistingHardLinksShareFileObjectIdentity()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             conflict_cache),
         "file-object identity fixture should save historical aliases");
     const auto structural_loader = [](
                                        const std::filesystem::path& path) {
-        return specforge::LoadSampleLabelingStateCache(
+        return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7270,14 +7270,14 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "artifact-set fixture should save historical overlapping records");
 
     const auto structural_loader = [](
                                        const std::filesystem::path& path) {
-        return specforge::LoadSampleLabelingStateCache(
+        return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7361,7 +7361,7 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
         "offline-source",
         offline_source);
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "offline-history fixture should persist its historical task");
@@ -7373,7 +7373,7 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
             .source_name = "Local source"};
     std::string error;
     Require(
-        specforge::CommitSampleLabelingStateCachePatch(
+        specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             unrelated,
             &error),
@@ -7381,7 +7381,7 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
             ? "an offline historical output must not block an unrelated cache patch"
             : error);
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7416,7 +7416,7 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
         ReadTextFile(cache_path);
     error.clear();
     Require(
-        specforge::CommitSampleLabelingStateCachePatch(
+        specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             unsafe,
             &error),
@@ -7427,7 +7427,7 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
         ReadTextFile(cache_path) != before_unsafe,
         "a newly introduced offline output should be persisted by its path identity");
     const specforge::SampleLabelingStateCacheLoadResult after_unsafe =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7479,14 +7479,14 @@ void TestOfflineOutputLeaseFallsBackToStablePathIdentity()
     source.tasks.push_back(std::move(task));
     cache.sources.emplace("offline-source", std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "offline output lease fixture should persist its cache record");
 
     const auto structural_loader = [](
                                        const std::filesystem::path& path) {
-        return specforge::LoadSampleLabelingStateCache(
+        return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -7555,7 +7555,7 @@ void TestSynchronousFlushWaitsForShortCommitLockContention()
         flushed,
         "synchronous flush should wait through brief commit-lock contention");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const specforge::SampleLabelingTask* task =
         FindTask(
             loaded.cache,
@@ -7758,7 +7758,7 @@ void TestSameSourceReopenRemovesMissingTaskProjection()
     tombstone.sources["shared-source"].active_task_id.reset();
     std::string error;
     Require(
-        specforge::CommitSampleLabelingStateCachePatch(
+        specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             tombstone,
             &error),
@@ -7946,7 +7946,7 @@ void TestTemporaryFormalizationRequiresRecoveryCheckpoint()
         specforge::SampleLabelingController controller(
             cache_path,
             [](const std::filesystem::path& path) {
-                return specforge::LoadSampleLabelingStateCache(path);
+                return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
             });
         ActivateCanonicalTestSource(
             controller,
@@ -8440,7 +8440,7 @@ void TestPreparedReopenAdoptsUnprotectedTasksAndDeletions()
             "another controller should publish newer canonical metadata");
     }
     specforge::SampleLabelingStateCacheLoadResult modified =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto modified_source = modified.cache.sources.find(
         identity.id);
     Require(
@@ -8471,7 +8471,7 @@ void TestPreparedReopenAdoptsUnprotectedTasksAndDeletions()
             "another controller should publish the task deletion");
     }
     specforge::SampleLabelingStateCacheLoadResult deleted =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto deleted_source = deleted.cache.sources.find(
         identity.id);
     Require(
@@ -8528,7 +8528,7 @@ void TestPreparedReopenMergesOnlyProtectedLocalTasks()
             controller.RememberActivePosition(1).changed,
         "protected reopen fixture should hold a lease and pending upsert for one task");
     specforge::SampleLabelingStateCacheLoadResult prepared =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     auto prepared_source = prepared.cache.sources.find(identity.id);
     Require(
         prepared_source != prepared.cache.sources.end() &&
@@ -8785,7 +8785,7 @@ void TestFailedDeletionRetryClearsPersistedSelection()
         deleting.FlushStateCache(),
         "tombstone retry should also clear the persisted selection and converge");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto source = loaded.cache.sources.find("shared-source");
     Require(
             source != loaded.cache.sources.end() &&
@@ -8829,7 +8829,7 @@ void TestOutputRetryRespectsTaskLease()
     specforge::SampleLabelingController retrying(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         }, {}, FaultingValuesPublisher(fail_output_save, &persist_call_count));
     ActivateCanonicalTestSource(retrying, "shared-source", 3);
     Require(
@@ -8883,7 +8883,7 @@ void TestCachePatchFailsClosedOnUntrustedLatestFile()
                 .sample_count = 3};
         std::string error;
         Require(
-            !specforge::CommitSampleLabelingStateCachePatch(
+            !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
                 cache_path,
                 patch,
                 &error),
@@ -8924,7 +8924,7 @@ void TestSchemaOneMultipleDraftsRemainPatchable()
 
     const std::string original = ReadTextFile(cache_path);
     specforge::SampleLabelingStateCacheLoadResult legacy =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         !legacy.warning.empty() &&
             legacy.cache.sources.empty(),
@@ -8935,7 +8935,7 @@ void TestSchemaOneMultipleDraftsRemainPatchable()
             .sample_count = 3};
     std::string error;
     Require(
-        !specforge::CommitSampleLabelingStateCachePatch(
+        !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             patch,
             &error),
@@ -9153,7 +9153,7 @@ void TestRecoveryViewClassifiesCurrentAndRecoverableDraft()
         "projection-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             cache),
         "recovery projection fixture should be persisted");
@@ -9211,7 +9211,7 @@ void TestRecoveryViewClassifiesConflictingDrafts()
         "conflicting-source",
         std::move(source));
     Require(
-        specforge::SaveSampleLabelingStateCache(cache_path, cache),
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path, cache),
         "conflicting recovery fixture should persist schema-4 drafts");
 
     specforge::SampleLabelingController controller(cache_path);
@@ -9269,7 +9269,7 @@ void TestRecoveryViewRetainsUntrustedPreparedSnapshotTrust()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             specforge::SampleLabelingStateCache{}),
         "prepared recovery fixture should start from a healthy cache");
@@ -9355,7 +9355,7 @@ void TestRecoveryViewTrustedPreparedSnapshotClearsStalenessDespiteWarning()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             specforge::SampleLabelingStateCache{}),
         "prepared warning fixture should start from a healthy cache");
@@ -9593,7 +9593,7 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
             std::move(source));
     }
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             legacy),
         "duplicate-output fixture should write a schema-4 cache");
@@ -9605,7 +9605,7 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
             .source_name = "New source"};
     std::string error;
     Require(
-        specforge::CommitSampleLabelingStateCachePatch(
+        specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             unrelated,
             &error),
@@ -9613,7 +9613,7 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
             ? "historical duplicate outputs should not block an unrelated patch"
             : error);
     const specforge::SampleLabelingStateCacheLoadResult preserved =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         preserved.cache.sources.size() == 3 &&
             FindTask(
@@ -9644,7 +9644,7 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
         ReadTextFile(cache_path);
     error.clear();
     Require(
-        !specforge::CommitSampleLabelingStateCachePatch(
+        !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             conflicting,
             &error) &&
@@ -9677,7 +9677,7 @@ void TestStructurallyDamagedCacheFailsClosedAfterSalvage()
     for (const std::string& document : damaged_documents) {
         WriteTextFile(cache_path, document);
         const specforge::SampleLabelingStateCacheLoadResult salvaged =
-            specforge::LoadSampleLabelingStateCache(cache_path);
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
         Require(
             salvaged.issue_kind !=
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
@@ -9691,7 +9691,7 @@ void TestStructurallyDamagedCacheFailsClosedAfterSalvage()
                 .sample_count = 3};
         std::string error;
         Require(
-            !specforge::CommitSampleLabelingStateCachePatch(
+            !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
                 cache_path,
                 patch,
                 &error),
@@ -9741,7 +9741,7 @@ void TestMalformedTaskFieldsFailClosedAfterSalvage()
     for (const std::string& document : damaged_documents) {
         WriteTextFile(cache_path, document);
         const specforge::SampleLabelingStateCacheLoadResult salvaged =
-            specforge::LoadSampleLabelingStateCache(cache_path);
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
         Require(
             salvaged.issue_kind !=
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
@@ -9755,7 +9755,7 @@ void TestMalformedTaskFieldsFailClosedAfterSalvage()
                 .sample_count = 3};
         std::string error;
         Require(
-            !specforge::CommitSampleLabelingStateCachePatch(
+            !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
                 cache_path,
                 patch,
                 &error),
@@ -9789,7 +9789,7 @@ void TestMalformedSourceFieldsFailClosedAfterSalvage()
         "}\n";
     WriteTextFile(cache_path, document);
     const specforge::SampleLabelingStateCacheLoadResult salvaged =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         salvaged.issue_kind !=
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
@@ -9803,7 +9803,7 @@ void TestMalformedSourceFieldsFailClosedAfterSalvage()
             .sample_count = 3};
     std::string error;
     Require(
-        !specforge::CommitSampleLabelingStateCachePatch(
+        !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             patch,
             &error),
@@ -9832,7 +9832,7 @@ void TestMissingRequiredTaskFieldsFailClosed()
         "}\n";
     WriteTextFile(cache_path, document);
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         loaded.issue_kind !=
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
@@ -9844,7 +9844,7 @@ void TestMissingRequiredTaskFieldsFailClosed()
         specforge::SampleLabelingSourceMetadataPatch{.sample_count = 3};
     std::string error;
     Require(
-        !specforge::CommitSampleLabelingStateCachePatch(
+        !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             patch,
             &error),
@@ -9872,7 +9872,7 @@ void TestMissingSourceTasksFieldFailsClosed()
         "}\n";
     WriteTextFile(cache_path, document);
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         loaded.issue_kind !=
                 specforge::SampleLabelingStateCacheLoadIssueKind::None &&
@@ -9884,7 +9884,7 @@ void TestMissingSourceTasksFieldFailsClosed()
         specforge::SampleLabelingSourceMetadataPatch{.sample_count = 3};
     std::string error;
     Require(
-        !specforge::CommitSampleLabelingStateCachePatch(
+        !specforge::CommitSampleLabelingStateCachePatch(specforge::RuntimePaths{},
             cache_path,
             patch,
             &error),
@@ -10186,7 +10186,7 @@ void TestTemporarySlotLeaseSerializesDifferentTaskIds()
             unavailable_count == 1,
         "same-source draft creation must be serialized before different task ids can diverge");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         loaded.issue_kind ==
                 specforge::SampleLabelingStateCacheLoadIssueKind::
@@ -10231,7 +10231,7 @@ void TestActiveTemporaryDraftCanRecoverAnotherDraftWithSharedSlot()
             "shared-source",
             std::move(source));
         Require(
-            specforge::SaveSampleLabelingStateCache(
+            specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
                 cache_path,
                 cache),
             "shared temporary-slot fixture should save two drafts");
@@ -10398,7 +10398,7 @@ void TestActiveTemporaryDraftCanRecoverAnotherDraftWithSharedSlot()
             deleting.FlushStateCache(),
             "the pending draft tombstone should commit after the cache lock is released");
         const specforge::SampleLabelingStateCacheLoadResult loaded =
-            specforge::LoadSampleLabelingStateCache(cache_path);
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
         Require(
             FindTask(
                 loaded.cache,
@@ -10463,7 +10463,7 @@ void TestTaskDeletionMergesWithAnotherInstanceUpsert()
         "explicit deletion tombstone should commit");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     Require(
         FindTask(
             loaded.cache,
@@ -10520,7 +10520,7 @@ void TestOrdinaryTaskSavePreservesLatestExplicitSelection()
         "ordinary task setting save should commit its task upsert");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
-        specforge::LoadSampleLabelingStateCache(cache_path);
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path);
     const auto source = loaded.cache.sources.find("shared-source");
     Require(
             source != loaded.cache.sources.end() &&
@@ -10716,7 +10716,7 @@ void TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -10819,7 +10819,7 @@ void TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure()
     specforge::SampleLabelingController descriptorless(
         descriptorless_cache,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         });
     descriptorless.ActivateSource(
         "descriptorless-source",
@@ -10852,7 +10852,7 @@ void TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -10983,7 +10983,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
     source.sample_count = 3;
     source.active_task_id = legacy.task_id;
     source.tasks.push_back(legacy);
-    Require(specforge::SaveSampleLabelingStateCache(cache_path, cache),
+    Require(specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, cache_path, cache),
             "historical pending edits should be persisted before recovery");
     {
         const auto unavailable = directory / "unavailable.npy";
@@ -11002,7 +11002,7 @@ void TestRecoveredLegacyPendingEditsMigrateWithoutLegacyPublication()
         specforge::SampleLabelingController restored(
             cache_path,
             [](const std::filesystem::path& path) {
-                return specforge::LoadSampleLabelingStateCache(path);
+                return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
             });
         ActivateCanonicalTestSource(restored, source_id, 3);
         const auto* recovered = ActiveTask(restored);
@@ -11115,7 +11115,7 @@ void SeedLegacyRecoveryFixture(
     auto& source = cache.sources[source_id];
     source.sample_count = task.values.SampleCount();
     source.tasks.push_back(std::move(task));
-    Require(specforge::SaveSampleLabelingStateCache(path, cache),
+    Require(specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, path, cache),
             "legacy recovery fixture should persist the historical owner and accepted overlay");
 }
 
@@ -11198,7 +11198,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -11222,7 +11222,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
             ++canonical_creation_calls;
             const specforge::SampleLabelingStateCacheLoadResult
                 checkpoint =
-                    specforge::LoadSampleLabelingStateCache(
+                    specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                         cache_path,
                         {},
                         specforge::
@@ -11331,7 +11331,7 @@ void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifact
         "migrated ASDF should use the current canonical source roster and preserve legacy task semantics");
 
     const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -11418,7 +11418,7 @@ void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -11517,7 +11517,7 @@ void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
         "failed migration must leave both old legacy artifacts and the target path unchanged");
 
     const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::
@@ -11672,7 +11672,7 @@ void TestLegacyOwnerMigrationOwnerSwitchCheckpointFailureKeepsLegacyOwnerAndCanR
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
-            return specforge::LoadSampleLabelingStateCache(path);
+            return specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, path);
         },
         [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
            const specforge::SampleLabelingDocument& document,
@@ -11758,7 +11758,7 @@ void TestLegacyOwnerMigrationOwnerSwitchCheckpointFailureKeepsLegacyOwnerAndCanR
                 .succeeded(),
         "owner-switch checkpoint failure should leave old artifacts unchanged and the published ASDF complete but unowned");
     const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             cache_path,
             {},
             specforge::SampleLabelingStateCacheLoadPolicy::

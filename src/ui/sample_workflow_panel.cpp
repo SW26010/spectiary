@@ -868,7 +868,7 @@ std::string_view SortDirectionTooltip(
 SampleSortSourceRowAction RenderSampleSortSourceRow(
     const SourceCollectionSampleSortSourceView& source_view,
     SampleNavigationSortDirection direction,
-    UiLanguage language)
+    UiLanguage language, const RuntimePaths& runtime_paths_)
 {
     SampleSortSourceRowAction action;
     const std::string display_name =
@@ -909,7 +909,7 @@ SampleSortSourceRowAction RenderSampleSortSourceRow(
     if (ImGui::IsItemHovered()) {
         const std::string tooltip = source_view.annotation_path.empty()
             ? display_name
-            : UserPathDisplayText(source_view.annotation_path);
+            : UserPathDisplayText(source_view.annotation_path, runtime_paths_);
         ImGui::SetTooltip("%s", tooltip.c_str());
     }
     const ImRect label_rect(label_min, ImVec2(label_min.x + label_width, label_min.y + frame_height));
@@ -2681,7 +2681,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     RenderDisabledText(save_state_reminder);
     render_labeling_state_diagnostics();
     if (labeling_view.output_path) {
-        const std::string path = UserPathDisplayText(*labeling_view.output_path);
+        const std::string path = UserPathDisplayText(*labeling_view.output_path, runtime_paths_);
         ImGui::TextDisabled("%s", path.c_str());
     }
 
@@ -3587,7 +3587,7 @@ void SampleWorkflowPanelUi::RenderFilters(
                 source_to_add = source_view.id;
             }
             if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
-                const std::string path = UserPathDisplayText(source_view.annotation_path);
+                const std::string path = UserPathDisplayText(source_view.annotation_path, runtime_paths_);
                 ImGui::SetTooltip("%s", path.c_str());
             }
             ImGui::PopID();
@@ -3674,7 +3674,7 @@ void SampleWorkflowPanelUi::RenderFilters(
         const ImVec2 source_item_max = ImGui::GetItemRectMax();
         const bool source_row_hovered = ImGui::IsItemHovered();
         if (source_row_hovered && !source_view.annotation_path.empty()) {
-            const std::string path = UserPathDisplayText(source_view.annotation_path);
+            const std::string path = UserPathDisplayText(source_view.annotation_path, runtime_paths_);
             ImGui::SetTooltip("%s", path.c_str());
         }
         bool removed_source = false;
@@ -3847,7 +3847,7 @@ void SampleWorkflowPanelUi::RenderSorting(
                 source_to_add = source_view.id;
             }
             if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
-                const std::string path = UserPathDisplayText(source_view.annotation_path);
+                const std::string path = UserPathDisplayText(source_view.annotation_path, runtime_paths_);
                 ImGui::SetTooltip("%s", path.c_str());
             }
             ImGui::PopID();
@@ -3885,7 +3885,7 @@ void SampleWorkflowPanelUi::RenderSorting(
         RenderSampleSortSourceRow(
             source_order_view,
             source_order_direction,
-            language);
+            language, runtime_paths_);
     if (source_order_action.toggle_direction) {
         if (sorting_view->active && sorting_view->active_source_id == source_order_view.id) {
             PanelSessionInteraction::Update update =
@@ -3944,7 +3944,7 @@ void SampleWorkflowPanelUi::RenderSorting(
             RenderSampleSortSourceRow(
                 source_view,
                 source_view.direction,
-                language);
+                language, runtime_paths_);
         if (row_action.remove) {
             PanelSessionInteraction::Update update =
                 interaction.Submit(

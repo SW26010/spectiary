@@ -905,7 +905,7 @@ SourceCollectionSession SourceCollectionSessionForRuntimePaths(
         paths.sample_navigation_state_path,
         paths.sample_labeling_state_path,
         paths.sample_workflow_state_path,
-        labeling_state_cache_load_policy);
+        labeling_state_cache_load_policy, paths);
 }
 
 SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
@@ -922,6 +922,7 @@ SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
             paths.sample_navigation_state_path,
         .labeling_state_cache_load_policy =
             labeling_state_cache_load_policy,
+        .runtime_paths = paths,
     });
 }
 
@@ -1013,6 +1014,7 @@ ShellUi::ShellUi(
               .public_spectral_line_catalog_path,
           startup.runtime_paths()
               .spectral_line_user_state_path),
+      source_collection_panel_ui_(startup.runtime_paths()),
       settings_panel_ui_(
           SettingsPanelEnvironmentForStartup(startup)),
       application_settings_(
@@ -1023,7 +1025,8 @@ ShellUi::ShellUi(
       spectrum_view_state_persistence_(
           std::chrono::milliseconds(250),
           std::chrono::seconds(1)),
-      touchpad_gestures_(touchpad_gestures)
+      touchpad_gestures_(touchpad_gestures),
+      sample_workflow_panel_ui_(startup.runtime_paths())
 {
     SpectrumViewStateCacheLoadResult spectrum_view_state =
         LoadSpectrumViewStateCache(

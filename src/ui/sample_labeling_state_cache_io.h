@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "domain/sample_annotation_io.h"
 
 #include <chrono>
@@ -71,7 +73,7 @@ enum class SampleLabelingStateCacheLoadPolicy {
     InternalDraftsOnly,
 };
 
-[[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath();
+[[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath(const RuntimePaths& runtime_paths);
 
 [[nodiscard]] std::filesystem::path
 SampleLabelingStateCoordinationDirectory(
@@ -85,6 +87,7 @@ SampleLabelingStateCoordinationDirectories(
     const std::filesystem::path& state_cache_path);
 
 [[nodiscard]] SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint = {},
     SampleLabelingStateCacheLoadPolicy policy =
@@ -92,11 +95,13 @@ SampleLabelingStateCoordinationDirectories(
             AllowPersistentOutputs);
 
 [[nodiscard]] bool SaveSampleLabelingStateCache(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCache& cache,
     std::string* error_message = nullptr);
 
 [[nodiscard]] bool CommitSampleLabelingStateCachePatch(
+    const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message = nullptr,

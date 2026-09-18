@@ -2966,7 +2966,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     }
 
     const specforge::SourceCollectionSessionStateCache saved_cache =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     Require(
@@ -3126,7 +3126,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         Access::Session(*shell).FlushStateCaches(),
         "restored source-session cache should flush successfully");
     const specforge::SourceCollectionSessionStateCache flushed_cache =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     Require(
@@ -4899,7 +4899,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
         session.FlushStateCaches(),
         "deferred external FITS failure should preserve source session state");
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(
+        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     const auto persisted_source = std::find_if(
@@ -5790,7 +5790,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     }
 
     specforge::SampleLabelingStateCacheLoadResult pending =
-        specforge::LoadSampleLabelingStateCache(
+        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache);
     auto pending_source = pending.cache.sources.find(
         context.identity.id);
@@ -5806,7 +5806,7 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
         specforge::SampleLabelSaveStateKind::Pending;
     pending_source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
-        specforge::SaveSampleLabelingStateCache(
+        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
             labeling_cache,
             pending.cache),
         "maintenance topology fixture should persist a pending retry");

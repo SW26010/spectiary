@@ -317,7 +317,7 @@ bool ValidateLabelingStateSeed(
     }
     const specforge::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 seed.path(),
                 {},
                 specforge::
@@ -423,7 +423,7 @@ bool MaterializeLabelingStateSeed(
     }
     const specforge::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadSampleLabelingStateCache(
+            specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
                 destination,
                 {},
                 specforge::

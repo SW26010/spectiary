@@ -63,12 +63,14 @@ SampleWorkflowPreparationCacheBundle LoadSampleWorkflowPreparationCacheBundle(
     SampleWorkflowPreparationCacheBundle bundle;
     bundle.labeling =
         LoadSampleLabelingStateCache(
+            paths.runtime_paths,
             paths.labeling_state_cache_path,
             cancellation_checkpoint,
             paths.labeling_state_cache_load_policy);
     Checkpoint(cancellation_checkpoint);
     SampleWorkflowStateCacheLoadResult workflow =
         LoadSampleWorkflowStateCache(
+            paths.runtime_paths,
             paths.workflow_state_cache_path,
             cancellation_checkpoint);
     bundle.workflow = std::move(workflow.cache);

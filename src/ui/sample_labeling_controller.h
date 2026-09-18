@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/runtime_paths.h"
+
 #include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling_asdf_store.h"
@@ -140,32 +142,39 @@ public:
         std::function<std::optional<std::string>()>;
     using TaskClock = std::function<CanonicalTimestamp()>;
 
+    // Detached construction never resolves process storage implicitly.
     SampleLabelingController();
-    explicit SampleLabelingController(std::filesystem::path state_cache_path);
-    SampleLabelingController(
-        std::filesystem::path state_cache_path,
-        StateCacheLoader state_cache_loader);
+    explicit SampleLabelingController(std::filesystem::path state_cache_path,
+        const RuntimePaths& runtime_paths = {});
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        CanonicalDocumentPublisher canonical_document_publisher);
+        const RuntimePaths& runtime_paths = {});
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         CanonicalDocumentPublisher canonical_document_publisher,
-        CanonicalValuesPublisher canonical_values_publisher);
+        const RuntimePaths& runtime_paths = {});
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         CanonicalDocumentPublisher canonical_document_publisher,
-        CanonicalCreationPublisher canonical_creation_publisher);
+        CanonicalValuesPublisher canonical_values_publisher,
+        const RuntimePaths& runtime_paths = {});
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalCreationPublisher canonical_creation_publisher,
+        const RuntimePaths& runtime_paths = {});
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         CanonicalDocumentPublisher canonical_document_publisher,
         CanonicalCreationPublisher canonical_creation_publisher,
         TaskIdGenerator task_id_generator,
-        TaskClock task_clock);
+        TaskClock task_clock,
+        const RuntimePaths& runtime_paths = {});
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
@@ -173,7 +182,8 @@ public:
         CanonicalValuesPublisher canonical_values_publisher,
         CanonicalCreationPublisher canonical_creation_publisher,
         TaskIdGenerator task_id_generator,
-        TaskClock task_clock);
+        TaskClock task_clock,
+        const RuntimePaths& runtime_paths = {});
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -601,6 +611,7 @@ private:
 
     std::unordered_map<std::string, SourceState> sources_;
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> state_cache_snapshot_;
+    RuntimePaths runtime_paths_;
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
     CanonicalDocumentPublisher canonical_document_publisher_;
