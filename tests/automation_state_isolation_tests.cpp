@@ -9,6 +9,7 @@
 #include "ui/shell_ui.h"
 
 #include <Windows.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -43,6 +44,15 @@ struct ShellUiTestAccess {
 }  // namespace specforge
 
 namespace {
+specforge::RuntimePaths FixtureRuntimePaths(const std::filesystem::path& state)
+{
+    specforge::RuntimePaths paths;
+    if (state.filename() == "sample-labeling-state.json" && state.parent_path().filename() == "state") {
+        paths.sample_labeling_state_path = state;
+        paths.sample_labeling_drafts_path = state.parent_path().parent_path() / "unsaved" / "sample-labeling-drafts.json";
+    }
+    return paths;
+}
 
 constexpr char kLabelingTaskId[] =
     "77777777-7777-4777-8777-777777777777";
@@ -383,34 +393,30 @@ int WriteLabelingSeedFixture(
         }
     }
 
-    specforge::SampleLabelingSourceState source;
-    source.sample_count =
-        context.identity.spectrum_count;
-    source.source_name =
-        context.identity.source_name;
-    source.source_fingerprint =
-        context.identity.source_fingerprint;
-    source.context_fingerprint =
-        context.identity.context_fingerprint;
-    source.tasks.push_back(std::move(task));
-    source.active_task_id = kLabelingTaskId;
-
-    specforge::SampleLabelingStateCache cache;
-    cache.sources.emplace(
-        context.identity.id,
-        std::move(source));
-    if (!specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
-            *seed_path,
-            cache)) {
-        return 5;
-    }
-    const auto loaded =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
-            *seed_path);
-    return loaded.warning.empty() &&
-                   loaded.cache.sources.size() == 1U
-               ? 0
-               : 6;
+    // The launcher accepts one pinned historical schema-4 import fixture.
+    // Production writes always use the separate state/checkpoint owners.
+    nlohmann::json labels = nlohmann::json::array();
+    for (const auto& label : task.label_set.labels)
+        labels.push_back({{"code", label.code}, {"name", label.name},
+            {"shortcut", std::string(1, label.shortcut)}});
+    const auto path_utf8 = output_path ? output_path->u8string() : std::u8string{};
+    nlohmann::json record{{"task_id", task.task_id}, {"task_name", task.task_name},
+        {"labels", labels}, {"values", task.values.Complete()}, {"auto_advance", true},
+        {"canonical_metadata", {{"created_at", "2026-01-01T00:00:00.000Z"},
+            {"modified_at", "2026-01-01T00:00:00.000Z"}, {"origin", {{"kind", "manual"}}}}},
+        {"output", {{"path", output_path ? nlohmann::json{{"path_kind", "absolute"}, {"path", std::string(path_utf8.begin(), path_utf8.end())}} : nlohmann::json(nullptr)}, {"format", output_path ? "canonical_asdf" : "none"}}}};
+    nlohmann::json fixture{{"format_kind", "specforge.sample_labeling_tasks.cache"},
+        {"schema_version", 4}, {"sources", nlohmann::json::array({{
+            {"identity", context.identity.id}, {"sample_count", context.identity.spectrum_count},
+            {"source_name", context.identity.source_name}, {"source_fingerprint", context.identity.source_fingerprint},
+            {"context_fingerprint", context.identity.context_fingerprint},
+            {"active_task_id", task.task_id}, {"tasks", nlohmann::json::array({record})}}})}};
+    std::ofstream fixture_output(*seed_path, std::ios::binary | std::ios::trunc);
+    fixture_output << fixture.dump(2);
+    fixture_output.close();
+    if (!fixture_output) return 5;
+    if (output_path) return 0; // Negative seed tests deliberately contain an output locator.
+    return specforge::LoadLegacySampleLabelingDraftSeed(*seed_path).warning.empty() ? 0 : 6;
 }
 
 int ExerciseLabelingDeleteFixture(
@@ -444,7 +450,7 @@ int ExerciseLabelingDeleteFixture(
     }
     const specforge::SourceCollectionContext context =
         specforge::LoadSourceCollectionContext(*snapshot);
-    specforge::SampleLabelingController controller(*cache_path);
+    specforge::SampleLabelingController controller(*cache_path, FixtureRuntimePaths(*cache_path));
     controller.ActivateSource(context.identity);
     const std::string selected_task_id =
         task_id
@@ -589,7 +595,7 @@ int VerifyLabelingStateFixture(
                 LoadSourceCollectionContext(
                     *snapshot);
     const auto loaded =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+        specforge::LoadSampleLabelingStateCache(FixtureRuntimePaths(*cache_path),
             *cache_path);
     if (!loaded.warning.empty()) {
         return 4;

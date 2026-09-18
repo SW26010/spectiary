@@ -1735,7 +1735,7 @@ try {
 
     & $resolvedStateFixture `
         --verify-labeling-state (
-            Join-Path $stateRoot 'sample-labeling-tasks.json') `
+            Join-Path $stateRoot 'state\sample-labeling-state.json') `
         --source $sourceRoot `
         --spectrum-index 1 `
         --expected-code 5
@@ -3678,11 +3678,11 @@ try {
             -Status 'failed'
     $canceledPersisted =
         Get-Content -Raw -LiteralPath (
-            Join-Path $canceledBusinessRoot 'sample-labeling-tasks.json') |
+            Join-Path $canceledBusinessRoot 'unsaved\sample-labeling-drafts.json') |
             ConvertFrom-Json
     $canceledQualityTask = @(
         $canceledPersisted.sources |
-            ForEach-Object { $_.tasks } |
+            ForEach-Object { $_.draft } |
             Where-Object {
                 [string]$_.task_id -eq $labelingTaskId
             }
@@ -3753,17 +3753,19 @@ try {
             -Messages $sameActivationMessages `
             -RequestId 'request-9' `
             -Status 'completed'
-    $sameActivationPersisted =
-        Get-Content -Raw -LiteralPath (
-            Join-Path $sameActivationRoot 'sample-labeling-tasks.json') |
-            ConvertFrom-Json
-    $sameActivationQualityTask = @(
-        $sameActivationPersisted.sources |
-            ForEach-Object { $_.tasks } |
-            Where-Object {
-                [string]$_.task_id -eq $labelingTaskId
-            }
-    )[0]
+    # No accepted mutation need not create the new owners during read-only import.
+    $sameCheckpoint = Join-Path $sameActivationRoot 'unsaved\sample-labeling-drafts.json'
+    if (Test-Path -LiteralPath $sameCheckpoint) {
+        $sameActivationPersisted = Get-Content -Raw -LiteralPath $sameCheckpoint | ConvertFrom-Json
+        $sameActivationQualityTask = @($sameActivationPersisted.sources | ForEach-Object { $_.draft } |
+            Where-Object { [string]$_.task_id -eq $labelingTaskId })[0]
+    } else {
+        Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sameActivationRoot 'state\sample-labeling-state.json'))) `
+            -Message 'An imported draft must not lose its checkpoint after owner cutover.'
+        $sameActivationPersisted = Get-Content -Raw -LiteralPath (Join-Path $sameActivationRoot 'sample-labeling-tasks.json') | ConvertFrom-Json
+        $sameActivationQualityTask = @($sameActivationPersisted.sources | ForEach-Object { $_.tasks } |
+            Where-Object { [string]$_.task_id -eq $labelingTaskId })[0]
+    }
     $sameGotoTerminalIndex =
         [array]::IndexOf(
             $sameActivationMessages,
@@ -3882,7 +3884,7 @@ try {
             $waitingQuitTerminal)
     $labelThenQuitPersisted =
         Get-Content -Raw -LiteralPath (
-            Join-Path $labelThenQuitRoot 'sample-labeling-tasks.json') |
+            Join-Path $labelThenQuitRoot 'unsaved\sample-labeling-drafts.json') |
             ConvertFrom-Json
     Assert-True `
         -Condition (
@@ -3890,7 +3892,7 @@ try {
             $claimedLabelIndex -lt $waitingQuitIndex -and
             [int]$claimedLabelTerminal.result.assignment.new_code -eq
                 5 -and
-            [int]$labelThenQuitPersisted.sources[0].tasks[0].values[0] -eq
+            [int]$labelThenQuitPersisted.sources[0].draft.values[0] -eq
                 5) `
         -Message 'A label write that occurs must report completed before the later app.quit terminal and persist the same fact.'
 
@@ -3954,11 +3956,11 @@ try {
             $replacementQuitTerminal)
     $labelThenReplacePersisted =
         Get-Content -Raw -LiteralPath (
-            Join-Path $labelThenReplaceRoot 'sample-labeling-tasks.json') |
+            Join-Path $labelThenReplaceRoot 'unsaved\sample-labeling-drafts.json') |
             ConvertFrom-Json
     $labelThenReplaceQualityTask = @(
         $labelThenReplacePersisted.sources |
-            ForEach-Object { $_.tasks } |
+            ForEach-Object { $_.draft } |
             Where-Object {
                 [string]$_.task_id -eq $labelingTaskId
             }

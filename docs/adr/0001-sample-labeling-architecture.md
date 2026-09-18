@@ -6,8 +6,9 @@ New formal labeling owners use the canonical SpecForge sample-labeling schema
 `2.0.0` in one ASDF document. Legacy NPY results and adjacent portable
 metadata sidecars are read-only compatibility inputs. Importing NPY or CSV
 creates an output-free draft; explicit Save As establishes an ASDF owner
-without rewriting the import files. Supported legacy recovery records retain
-accepted pending edits for explicit ASDF migration, with no legacy autosave.
+without rewriting the import files. Legacy registrations reopen their unchanged
+NPY/sidecar inputs for explicit ASDF migration, with no legacy autosave or
+persisted pending overlay.
 See [recovery compatibility](../agents/legacy-labeling-recovery-audit.md).
 Sample labeling task records, workflow settings, autosave
 state, output paths, and recovery remain local user state rather than canonical
@@ -17,9 +18,9 @@ dtype, shape, ASDF blocks, or file-write capabilities.
 
 The runtime task groups local navigation preferences in `SampleLabelingSessionState`,
 output ownership/write tracking in `SampleLabelingPersistenceState`, and derived
-counts in `SampleLabelingStatistics`. The cache codec explicitly maps these local
-groups to the existing schema; neither the ASDF document nor cache wire layout
-changes because of this C++ decomposition.
+counts in `SampleLabelingStatistics`. Separate labeling-specific wire structures
+encode ordinary registration/session state and pre-canonical draft content.
+Formal content belongs only to ASDF; dirty/retry state stays in memory.
 
 `SampleLabelingController` is the single mutable owner of active tasks, drafts,
 output-save state, retry scheduling, and the labeling state cache. Callers
@@ -124,7 +125,9 @@ The rewrite reuses only the encoded roster block and recomputes the metadata and
 container layout.
 
 SpecForge labeling schema `1.0.0` and labeling cache schemas 1 through 3 have no
-migration path; current local state uses cache schema 4. Unsupported state is
+migration path. Current ordinary state and draft checkpoint codecs each use
+their own schema 1 envelope; the old monolithic schema 4 is a bounded migration
+input. Unsupported state is
 ignored/fails closed according to its owner rather than being guessed into
 canonical identity or provenance.
 
@@ -147,10 +150,11 @@ overlay row is unknown, including when an explicit pending value is `-1`.
 Sparse state cannot yield a content view. Deactivation drops complete values
 into the sparse representation; canonical projection restores complete content
 from the ASDF base before applying pending edits. This is an implementation
-boundary and changes neither schema 2.0 nor cache schema 4.
+boundary does not change canonical schema 2.0. Sparse edits are no longer
+serialized for formal tasks. See the [persistence field audit](../labeling_persistence_ownership.md).
 
-Source-session, navigation, labeling, and workflow state remain four
-independently validated, independently written versioned JSON caches. Their
+Source-session, navigation, labeling ordinary state, labeling draft checkpoints,
+and workflow state are independently validated JSON owners. Their
 codecs continue to own schema support and field validation; the session only
 aggregates owner-reported health.
 

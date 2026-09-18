@@ -2817,7 +2817,7 @@ try {
         -ExecutablePath $resolvedExecutable `
         -Arguments @(
             '--verify-labeling-state',
-            (Join-Path $stateRootB 'sample-labeling-tasks.json'),
+            (Join-Path $stateRootB 'state\sample-labeling-state.json'),
             '--source',
             $resolvedFixtureDirectory,
             '--spectrum-index',
@@ -2922,7 +2922,7 @@ finally {
         try {
             foreach ($source in @(
                     $seedPath,
-                    (Join-Path $stateRootB 'sample-labeling-tasks.json'),
+                    (Join-Path $stateRootB 'state\sample-labeling-state.json'),
                     $capturePath)) {
                 if (Test-Path -LiteralPath $source -PathType Leaf) {
                     $destination = Join-Path `

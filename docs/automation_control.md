@@ -44,7 +44,7 @@ command or a profile importer. The launcher requires an existing regular file
 outside both ordinary and automation state roots and pins that read-only file
 identity while the production labeling-cache reader validates and materializes
 it. Automation seeds are deliberately narrower than ordinary user caches: in
-state-cache schema 3, every task must be an internal draft with `output.path`
+the bounded historical state-cache schema 4, every task must be an internal draft with `output.path`
 set to `null` and `output.format` set to `"none"`. Any formal output owner is
 rejected before the production reader hydrates or accesses it, and the GUI's
 background production load applies the same policy.
@@ -59,13 +59,16 @@ leases. This is an explicit startup opt-in, not a client protocol command; the
 normal launcher and all automation startups without the option retain the
 `InternalDraftsOnly` seed policy above.
 The runner also requires each formal label terminal to report both output-save
-success flags, reloads the final NPY and metadata through the production reader,
+success flags, reloads the final canonical ASDF through the production reader,
 and bounds pipe I/O and owned-process cleanup so a stalled GUI cannot leave its
 fixture behind.
 
 The launcher creates the new root relative to a verified directory handle,
 copies each seed handle-to-handle with create-new/no-follow semantics, and
-validates the materialized `sample-labeling-tasks.json` with the same reader.
+validates the materialized `sample-labeling-tasks.json` with the same bounded
+legacy reader. On a subsequent state write, the GUI imports it into ordinary
+`state/sample-labeling-state.json` and `unsaved/sample-labeling-drafts.json`;
+the seed is never an ongoing write destination.
 A launcher-owned identity lock prevents the root from being renamed or replaced
 through the complete GUI child lifetime while permitting normal sibling cache
 renames; it is removed after that child exits. This entire sequence finishes

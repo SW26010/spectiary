@@ -45,8 +45,8 @@ reference/compatibility constraint, not a second content owner.
 | `initial_publication_pending` | Delete the protocol and field, rather than relocating it. |
 
 `pending_count`, label usage counts, labeled count, retry deadlines, open snapshots,
-and leases are already derived/runtime state and remain so. A future explicit
-`display_name_hint` may improve unopened lists, but cannot supply canonical
+and leases are already derived/runtime state and remain so. The explicit
+`display_name_hint` supports unopened lists, but cannot supply canonical
 metadata, reconstruct missing documents, or override document contents.
 
 ## Coordination and partial writes
@@ -85,8 +85,10 @@ old local state must never cause a canonical file to be modified or removed.
 ## User-visible lifecycle
 
 Checkpoint publication never reports document-save success. Drafts stay unsaved
-until explicit canonical publication. Normal close or replacement deliberately
-handles accepted unsaved work with Save / Discard / Cancel where applicable.
-Pausing a task or changing source may retain the live working object. Windows
+until explicit canonical publication. Ordinary close retains paused drafts and
+flushes their checkpoints; a known checkpoint failure blocks close so the user
+can retry, explicitly save, delete/discard the draft, or cancel closing. Pending
+formal writes also block normal close. Pausing a task or changing source retains
+the live working object and dirty-task leases. Windows
 session end must not veto shutdown solely because a pre-canonical draft exists;
 already-maintained checkpoints are best-effort recovery, not a zero-loss promise.

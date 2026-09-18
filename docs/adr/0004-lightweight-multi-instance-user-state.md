@@ -102,18 +102,27 @@ refresh may converge the physical lease set. This is deliberate best-effort
 alias protection rather than a guarantee of immediate post-replacement alias
 exclusion.
 
-Temporary-to-formal conversion first commits a write-ahead task checkpoint that
-contains the selected `.asdf` output path, its canonical owner format, an
-`initial_publication_pending` phase, and the pending recovery overlay. No ASDF
-write begins until that checkpoint succeeds. The controller then publishes one
-full canonical document, reopens and validates that generation, refreshes the
-one-file lease, and only then adopts the formal owner. If publication or reopen
-fails, a compensating checkpoint restores the existing temporary-draft behavior.
-If compensation cannot commit, the formal pending checkpoint and lease are
-retained and maintenance is explicitly scheduled; once the checkpoint is
-durable and can be re-read, it is reconciled into a true output-free temporary
-draft. Restart performs the same reconciliation rather than treating the path as
-an established owner or an unowned orphan.
+Labeling persistence has two application-managed owners: ordinary registration
+and session preferences in `state/sample-labeling-state.json`, and complete
+pre-canonical checkpoints in `unsaved/sample-labeling-drafts.json`. Both use
+atomic replacement under the existing labeling commit lock. There is no
+cross-file transaction. See the [field audit and lifecycle contract](../labeling_persistence_ownership.md).
+
+Temporary-to-formal conversion publishes a complete ASDF from the current
+in-memory draft, reopens and validates it, and only then adopts the canonical
+owner. Registration follows publication, then checkpoint cleanup is best-effort.
+Failed publication keeps the current draft in memory; no write-ahead phase or
+compensating transaction is persisted. A crash after publication may leave a
+complete ASDF plus a stale checkpoint. Matching canonical registration
+supersedes that checkpoint without rewriting the ASDF.
+
+Formal edits attempt atomic ASDF saves directly. Failed edits and metadata,
+retry deadlines and error presentation remain in memory only. Dirty tasks keep
+their existing task/output leases across source switches until their edits are
+saved or the process ends. Local-state contention does not gate canonical
+publication. Abnormal termination can lose edits since the last successful
+canonical write. Normal close prevents silent loss of known pending canonical
+edits; OS session end is not vetoed merely to protect draft checkpoints.
 
 The complete artifact-set lease prevents different stale task IDs or result
 extensions from creating parallel editors for one logical draft or output;
@@ -125,10 +134,11 @@ create operation. A create patch also carries an expected-absent precondition,
 so a draft retained after an untrusted-cache failure cannot later replace a
 same-ID task introduced while the cache was repaired.
 
-Legacy caches that already contain multiple temporary drafts for one source
-remain losslessly readable and patchable. Defining a UI recovery flow for
-selecting among those historical drafts is deferred; this change does not
-silently delete or merge them.
+Schema-4 monoliths are bounded migration inputs only while neither new owner
+exists. Ambiguous multiple-draft slots cannot be written into the new checkpoint
+schema; they fail closed rather than being silently merged. Formal pending/WAL
+payloads are not carried forward as a second content owner. Migration/reset never
+rewrites or removes user-owned canonical files.
 
 The labeling lease coordinates writers only. It does not invalidate annotation
 snapshots already loaded by another instance when that labeling output changes.

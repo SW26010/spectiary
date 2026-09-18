@@ -67,7 +67,8 @@ Expected terminal state and evidence:
 - `state.get` reports `spectrum.index = 1`, current sample label code `5`, a
   successful capture, and an idle Shell.
 - After `app.quit`, the production state reader reloads code `5` from the
-  isolated `sample-labeling-tasks.json`; the seed file's hash is unchanged.
+  isolated `state/sample-labeling-state.json` and
+  `unsaved/sample-labeling-drafts.json`; the seed file's hash is unchanged.
 
 ## Ownership and cleanup
 

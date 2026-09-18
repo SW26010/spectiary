@@ -197,8 +197,9 @@ state.
 _Avoid_: Sample labeling task record, sample labeling draft, label array payload
 
 **Sample labeling draft**:
-The in-progress sample label result of a temporary sample labeling task, saved
-for recovery before the user selects the intended labeling output.
+The in-progress sample label result of a temporary sample labeling task. Its
+running in-memory object is authoritative; an internal best-effort checkpoint
+may support resuming it before explicit canonical Save As.
 _Avoid_: Final label output, label set, source data
 
 **Spectral-line marker**:

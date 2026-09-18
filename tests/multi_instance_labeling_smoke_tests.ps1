@@ -940,6 +940,7 @@ function Remove-AliasLockDirectoriesWithinDeadline {
         [Parameter(Mandatory = $true)]
         [string]$AliasRoot,
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [string[]]$Directories,
         [Parameter(Mandatory = $true)]
         [DateTime]$DeadlineUtc
@@ -1473,6 +1474,7 @@ try {
     Write-Utf8File `
         -Path $cachePath `
         -Contents ($cacheDocument | ConvertTo-Json -Depth 20)
+    $cachePath = Join-Path $sharedStateRoot 'state\sample-labeling-state.json'
     $script:CurrentStep = 'record exact labeling coordination directories'
     Invoke-StateFixture -Arguments @(
         '--write-labeling-coordination-directories', $cachePath,

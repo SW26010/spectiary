@@ -607,40 +607,21 @@ metadata, roster, and values is atomically written and reopened successfully.
 The task retains the formal name established when the draft was created or
 promoted; the chosen filename does not rename it. Successful publication then
 permits a fresh temporary task for the same source collection. The selected
-owner and pending overlay are checkpointed before publication; a failed first
-publication restores the output-free draft immediately or through
-maintenance/restart recovery if the compensating checkpoint is temporarily
-unavailable. Locally created tasks may define and expand their own category
-sets.
+canonical file is built from current memory, without a pre-publication WAL.
+Only successful publication and validation establish the canonical owner.
+Ordinary registration follows, then checkpoint cleanup is best-effort. Cleanup
+failure does not turn canonical save success into failure. A crash can leave a
+complete canonical file and a stale draft; observable matching registration
+supersedes the checkpoint. No compensating transaction is needed.
 
-An active `legacy_npy_with_sidecar` owner exposes a separate explicit
-`Migrate to ASDF...` action. This is not standalone-ASDF adoption and does not
-rewrite the legacy result in place. The selected destination must be an `.asdf`
-path, and migration proceeds as one owner-transfer transaction:
-
-1. retain the active task-identity lease and both legacy artifact leases;
-2. acquire the destination ASDF one-file lease;
-3. synchronously checkpoint the legacy owner plus any sparse pending overlay;
-4. build the canonical document from the current task identity, task name,
-   label definitions, newest values, and the active source's canonical
-   descriptor/roster;
-5. atomically write and reopen the destination ASDF generation;
-6. synchronously checkpoint the task with `canonical_asdf` ownership;
-7. install the opened canonical snapshot and destination lease, then release
-   the old NPY and sidecar leases.
-
-The original `.npy` and `.sf-labels.json` bytes are never modified by this
-operation. If destination lease acquisition, write-ahead checkpoint, ASDF
-publication/reopen, or the durable owner switch fails, the old legacy owner
-remains the trusted durable base and its sparse recovery overlay remains in the
-local cache. A newly written ASDF whose owner-switch checkpoint fails is left as
-an unowned Save-As artifact; it does not silently replace the legacy owner. The
-user may retry the same explicit migration after the checkpoint failure is
-resolved; the retry revalidates and republishes the destination before adopting
-it. Path conflicts, write-ahead checkpoint failures, publication/reopen
-failures, and owner-switch checkpoint failures are reported as stable semantic
-error kinds mapped by the desktop UI to the selected language. Low-level I/O
-details remain diagnostic data and are not displayed as untranslated UI text.
+An active `legacy_npy_with_sidecar` owner exposes explicit `Migrate to ASDF...`.
+The controller retains task and legacy artifact leases, acquires the destination
+lease, publishes and reopens the ASDF, then changes ordinary registration and
+adopts the destination lease. The legacy NPY and sidecar are never modified.
+Failure before registration leaves the legacy owner available; an extra complete
+ASDF may remain unregistered. No migration WAL or formal pending overlay is
+persisted. Path conflicts, publication/reopen failures, and registration failures
+remain distinct user-facing errors with low-level details confined to diagnostics.
 
 The first implementation should not allow two local sample labeling task records
 for the same source collection to point at the same output path. If the user
@@ -814,33 +795,25 @@ every time. Relink does not reinterpret remembered labeling positions by sample
 name, source path, or content matching. A remembered labeling position remains
 the same sample index inside the relinked source collection.
 
-Local task records should be persisted in a versioned JSON cache under the
-user's local SpecForge application data directory, consistent with catalog user
-state persistence. Writes should be debounced, flushed on normal shutdown, and
-retried after non-blocking save failures.
+Labeling has two versioned JSON owners under the application data root:
+`state/sample-labeling-state.json` contains registration, explicit output
+path/format, selection and session preferences; `unsaved/sample-labeling-drafts.json`
+contains complete output-free draft content and source compatibility facts.
+Both use independent schema-1 envelopes and atomic replacement under the existing
+shared commit lock. The [field audit](labeling_persistence_ownership.md) defines
+all field ownership and partial-write behavior.
 
-Each `SampleLabelingTask` persists its formal output ownership as an explicit
-path-and-format pair. State-cache schema 4 writes this as `output.path` plus
-`output.format`; temporary drafts use `none`, `Save to...` tasks and existing
-canonical document owners use `canonical_asdf`, and existing or explicitly
-adopted legacy-format owners use `legacy_npy_with_sidecar`. Explicit promotion
-of an existing NPY annotation is one such adoption. Schema 4 also stores the
-canonical task metadata (`created_at`, `modified_at`, `origin`, optional
-`description`, and `authors`). Schema 4 author records preserve required `name`
-plus optional `identifier` and `email`; absent optional fields remain absent.
-Cache schemas 1 through 3 are unsupported and
-ignored rather than migrated because they cannot supply both a strict UUID v4
-identity and trustworthy canonical creation metadata. Formal records do not
-duplicate the full values array in this cache; they retain only sparse pending
-values plus local session/recovery state. The write-ahead
-`initial_publication_pending` phase is
-durable only until canonical creation is adopted or reconciled back to a true
-temporary draft. Legacy-to-ASDF migration does not use that temporary-only
-phase: its pre-publication checkpoint continues to name the legacy owner, and a
-second synchronous checkpoint changes the owner only after ASDF publication and
-reopen succeed. Output leases, conflict detection, and recovery projection
-checks use the task's stored format rather than guessing from its filename
-extension.
+Ordinary state has no canonical metadata, label definitions, values or pending
+payload. Its optional `display_name_hint` is for unopened lists only; opening
+ASDF replaces that hint with canonical content. Formal values, names, semantics,
+and provenance belong solely to ASDF. Runtime failed edits and retry state are
+not restored across process termination.
+
+Only when neither new owner exists is the old schema-4 monolith read as a bounded
+migration input. Schemas 1–3 remain unsupported. Compatible output-free drafts
+can become checkpoints; formal pending metadata/value payloads are discarded.
+No cutover operation deletes or rewrites a user-owned canonical document.
+Output leases and path conflict checks continue to use explicit owner format.
 
 The schema reader accepts syntactically valid future `origin.kind` tokens so an
 existing document can be opened and preserved forward-compatibly. A current
@@ -1083,7 +1056,7 @@ only values and `modified_at` and reuse only the encoded roster block.
 
 SpecForge labeling schema `1.0.0` documents are unsupported and are not
 migrated to `2.0.0`. Likewise, labeling state-cache schemas 1 through 3 are
-ignored rather than migrated; current local task records use cache schema 4.
+ignored rather than migrated; current state and checkpoint owners use independent schema-1 envelopes.
 These version boundaries are unrelated to the ASDF file-format `1.0.0` header.
 
 Schema 2.0 intentionally has no task-copy/parent lineage, persisted edit
@@ -1096,10 +1069,9 @@ Format-specific details belong behind annotation I/O. Canonical sample-labeling
 documents use SpecForge schema `2.0.0`, serialized with ASDF file format `1.0.0`
 and ASDF Standard `1.5.0`; this ASDF adapter is the writer for newly formalized
 tasks and the source-aware annotation/task-hydration adapter. New canonical
-owners require an `.asdf` path before their write-ahead checkpoint is committed.
-NPY remains a read adapter and the persistence writer
-for existing or explicitly adopted legacy-format owners, including tasks created
-by promoting an existing NPY annotation. That legacy owner's lease identity
+owners require a user-selected `.asdf` path before direct canonical publication.
+NPY remains a read adapter for legacy-format owners and annotation promotion.
+New promotions create output-free drafts. That legacy owner's lease identity
 always protects both the selected result path and the adjacent
 `<stem>.sf-labels.json`. NPY is also available through a separate one-shot value
 export operation; that operation is not an output owner and does not acquire a
@@ -1185,13 +1157,12 @@ output lease, then opens the document store against the controller's owned
 canonical source descriptor: base identity, source kind, source name,
 fingerprint, sample count, and canonical sample names. The opened document is
 authoritative for task id/name, labels, and base values. Local auto-advance,
-remembered position, and sparse pending overlays are applied afterward. The
+remembered position, and this process's leased runtime dirty edits are applied afterward. The
 controller keeps the resulting `SampleLabelingAsdfOpenSnapshot` as the active
 durable generation only in memory; it is never serialized into the state cache.
 Malformed documents, source/roster mismatches, and task-id mismatches fail the
 activation without falling back to legacy NPY hydration. Assigning or clearing
-values first commits the newest sparse overlay to the local cache, then builds a
-complete replacement from the opened snapshot plus the authoritative task
+values builds a complete replacement directly from the opened snapshot plus the authoritative task
 values and canonical metadata. The resulting values-plus-`modified_at`
 publication uses the values fast path; it preserves the supported unknown
 mappings and the encoded roster block while replacing the values generation.
@@ -1205,7 +1176,7 @@ A successful foreground publication or maintenance retry synchronizes the
 attached annotation generation before the active snapshot can be released and
 invalidates filter/sort projections that may have consumed the older generation.
 Canonical retries run only while their source is active with its matching
-descriptor; switching sources parks the durable overlay and that source's next
+descriptor; switching sources retains the runtime dirty edits and that source's next
 activation re-arms publication. Task renames and label add/edit/remove
 operations, including shortcuts and used-code rewrites, take the full-document
 path, so known metadata, values, and forward-compatible unknown metadata remain
