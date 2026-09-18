@@ -228,6 +228,7 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
             kStateFormatKind,
             {1, kStateSchemaVersion},
             "spectrum view state cache");
+    loaded.issue_kind = result.issue_kind;
     loaded.warning = std::move(result.warning);
     loaded.diagnostic_detail =
         std::move(result.diagnostic_detail);

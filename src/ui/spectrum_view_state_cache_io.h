@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/runtime_paths.h"
+#include "app/local_user_state_json.h"
 
 #include "plot/spectrum_plot.h"
 
@@ -18,6 +19,8 @@ struct SpectrumViewStateCache {
 
 struct SpectrumViewStateCacheLoadResult {
     SpectrumViewStateCache state;
+    VersionedJsonCacheLoadIssueKind issue_kind =
+        VersionedJsonCacheLoadIssueKind::None;
     std::string warning;
     std::string diagnostic_detail;
 };
