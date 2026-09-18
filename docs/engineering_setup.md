@@ -300,8 +300,9 @@ HEAD 脚本先解析并冻结完整 `HEAD` object ID，再用 `git archive` 将�
 开发 shell 或已批准的非沙箱 agent 运行中执行；它们不复用 Ninja debug wrapper 的日志、
 timeout 和 preflight 形态。
 
-Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
-`dist\head\SpecForge-portable`。各自的 ZIP 和 `.sha256` 位于对应输出目录，HEAD
+Working-tree 默认输出位于 `dist\Spectiary-portable`，包名来自 identity 契约中的
+`artifact_basename`；HEAD 入口目前仍默认输出到 `dist\head\SpecForge-portable`。
+各自的 ZIP 和 `.sha256` 位于对应的 `dist\` 或 `dist\head\` 目录，HEAD
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
