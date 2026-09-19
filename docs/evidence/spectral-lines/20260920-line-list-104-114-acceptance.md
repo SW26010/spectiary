@@ -1,8 +1,17 @@
 # Line list #104 / #114 acceptance — 2026-09-20
 
-Implemented locally on `master`, following `.scratch/104and114plan.md` and the
-user's subsequent clarification of marker-array semantics. No push, issue
-closure, or workflow-trigger change was performed.
+Implemented on `master`, following `.scratch/104and114plan.md` and the user's
+subsequent clarification of marker-array semantics. The original implementation
+session made local commits without pushing or closing issues; those commits have
+since been published to GitHub.
+
+On 2026-09-20, a read-only GitHub API check confirmed remote `master` at
+[`36b09ef`](https://github.com/SW26010/spectiary/commit/36b09effb7aeb3f09ec6998409b5b2742f728b5c).
+For that exact SHA, workflow runs, check runs, and commit statuses each had a
+count of zero. The combined status API reported `pending` with zero statuses;
+this is not evidence of a running or passing CI job. The results below are local
+validation evidence, not GitHub CI results. This is a dated snapshot, not a claim
+about future remote heads. No workflow triggers were changed.
 
 ## Delivered scope
 
@@ -66,3 +75,18 @@ paths were rerun with the required access and passed.
 
 Local detailed test output is retained under `.scratch/104114-*.log`; build logs
 are under `logs/build/`. These transient logs are not committed.
+
+## Follow-up cleanup — 2026-09-20
+
+The controller vocabulary now uses `SpectralLineStateIntent`,
+`SpectralLineStateResult`, and `SpectralLinePanelView`, with `line_list_*` and
+`has_base_grouping_view` fields. Callers and localization helpers were renamed
+without adding abstractions or changing behavior. Historical serialized IDs,
+schema 6 fields, and stable UI localization keys remain compatible.
+
+Persistence load diagnostics now use an explicit enum switch instead of relying
+on equal enum ordinals. The Debug application and affected tests built
+successfully through the MSVC wrapper. Controller, shell source-load activation,
+and UI text tests passed 3/3; `git diff --check` passed. The earlier full-preset
+and Release results above were not rerun for this cleanup. Local follow-up test
+output is `.scratch/104114-cleanup-tests.log`.
