@@ -11892,6 +11892,119 @@ void TestSplitOwnerWritesNotAttemptedBeforePreconditions()
         "commit reload failures must retain both owner causes while leaving both replacements unattempted");
 }
 
+void TestNewDraftRetriesAfterPartialOwnerSave()
+{
+    for (const auto [block_state, block_draft] :
+        {std::pair{true, false}, std::pair{false, true}, std::pair{true, true}}) {
+        const auto directory = FreshTestDirectory(
+            "spectiary_new_draft_partial_owner_retry_" +
+            std::to_string(block_state) + std::to_string(block_draft));
+        const auto state_path = directory / "sample-labeling-state.json";
+        const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+        Require(spectiary::SaveSampleLabelingStateCache({}, state_path, {}),
+            "new draft partial-save fixture should establish both empty owners");
+        std::string task_id;
+        {
+            spectiary::SampleLabelingController controller(state_path);
+            ActivateCanonicalTestSource(controller, "source", 3);
+            Require(controller.FlushStateCache(), "flush source metadata before blocking new draft creation");
+            const auto state_before = ReadTextFile(state_path);
+            const auto draft_before = ReadTextFile(draft_path);
+            HANDLE held_state = INVALID_HANDLE_VALUE;
+            HANDLE held_draft = INVALID_HANDLE_VALUE;
+            if (block_state) held_state = CreateFileW(state_path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (block_draft) held_draft = CreateFileW(draft_path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            const bool opened = (!block_state || held_state != INVALID_HANDLE_VALUE) &&
+                (!block_draft || held_draft != INVALID_HANDLE_VALUE);
+            if (!opened) {
+                if (held_state != INVALID_HANDLE_VALUE) CloseHandle(held_state);
+                if (held_draft != INVALID_HANDLE_VALUE) CloseHandle(held_draft);
+                Require(false, "new draft fixture should deny selected owner replacements");
+            }
+            const auto created = controller.CreateTask("Retrying draft");
+            const bool created_locally = created.accepted && !created.state_saved && ActiveTask(controller);
+            if (created_locally) task_id = ActiveTask(controller)->task_id;
+            const bool state_unchanged = ReadTextFile(state_path) == state_before;
+            const bool draft_unchanged = ReadTextFile(draft_path) == draft_before;
+            const bool edited = controller.UpsertActiveLabel({5, "Review", 'r'}).changed &&
+                controller.AssignLabel(1, 5).write.changed;
+            const bool saved_while_blocked = controller.FlushStateCache();
+            const auto failed_status = controller.PersistenceStatus();
+            if (held_state != INVALID_HANDLE_VALUE) CloseHandle(held_state);
+            if (held_draft != INVALID_HANDLE_VALUE) CloseHandle(held_draft);
+            Require(created_locally && edited && !saved_while_blocked &&
+                    state_unchanged == block_state && draft_unchanged == block_draft,
+                "new draft creation must retain accepted edits and publish every independently writable owner");
+            Require(failed_status.retrying &&
+                    (!block_state || failed_status.save_diagnostic_detail.find("Ordinary state:") != std::string::npos) &&
+                    (!block_draft || failed_status.save_diagnostic_detail.find("Draft checkpoint:") != std::string::npos),
+                "controller save diagnostics must retain each owner failure during draft creation retry");
+            Require(controller.state_save_pending() && controller.FlushStateCache() &&
+                    !controller.state_save_pending() && !controller.state_save_failed(),
+                "new draft retry must not mistake its own partial publication for a conflicting create");
+            Require(controller.PrepareForInteractiveClose(),
+                "a new draft should close normally after its partial owner save converges");
+        }
+        spectiary::SampleLabelingController restarted(state_path);
+        ActivateCanonicalTestSource(restarted, "source", 3);
+        Require(restarted.StartOrResumeTemporaryTask().accepted && ActiveTask(restarted) &&
+                ActiveTask(restarted)->task_id == task_id && ActiveTask(restarted)->values.Complete()[1] == 5,
+            "restart after partial new-draft save must recover its latest accepted label");
+    }
+}
+
+void TestNewCanonicalTaskRetriesAfterCheckpointFailure()
+{
+    const auto directory = FreshTestDirectory("spectiary_new_canonical_partial_owner_retry");
+    const auto state_path = directory / "sample-labeling-state.json";
+    const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+    const auto output_path = directory / "saved.asdf";
+    Require(spectiary::SaveSampleLabelingStateCache({}, state_path, {}),
+        "new canonical partial-save fixture should establish both empty owners");
+    std::string task_id;
+    {
+        spectiary::SampleLabelingController controller(state_path);
+        ActivateCanonicalTestSource(controller, "source", 3);
+        Require(controller.FlushStateCache(), "flush source metadata before blocking the first checkpoint");
+        const auto draft_before = ReadTextFile(draft_path);
+        HANDLE held = CreateFileW(draft_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Require(held != INVALID_HANDLE_VALUE, "block the new task's first checkpoint and later cleanup");
+        const auto created = controller.CreateTask("Canonical without checkpoint");
+        const bool created_locally = created.accepted && !created.state_saved && ActiveTask(controller);
+        if (created_locally) task_id = ActiveTask(controller)->task_id;
+        const bool edited = controller.UpsertActiveLabel({5, "Review", 'r'}).changed &&
+            controller.AssignLabel(1, 5).write.changed;
+        const auto saved = controller.SaveActiveTemporaryTaskToOutput(output_path);
+        const auto registered = spectiary::LoadSampleLabelingStateCache({}, state_path, {},
+            spectiary::SampleLabelingStateCacheLoadPolicy::OrdinaryRegistrationsOnly);
+        const auto* formal = FindTask(registered.cache, "source", task_id);
+        const bool registration_published = formal && formal->persistence.output_path == output_path;
+        const bool checkpoint_unchanged = ReadTextFile(draft_path) == draft_before;
+        CloseHandle(held);
+        Require(created_locally && edited && saved.output_saved && !saved.state_saved &&
+                registration_published && checkpoint_unchanged &&
+                ReadCanonicalTestValues(output_path) == std::vector<std::int32_t>({-1, 5, -1}),
+            "canonical publication and registration must succeed before the new task's first checkpoint can be written");
+        Require(controller.state_save_pending() && controller.FlushStateCache() &&
+                !controller.state_save_pending() && !controller.state_save_failed(),
+            "canonical registration retry must not reject its own partially persisted creation");
+        Require(controller.PrepareForInteractiveClose() &&
+                nlohmann::json::parse(ReadTextFile(draft_path))["sources"].empty(),
+            "successful canonical registration retry must finish cleanup and permit normal close");
+    }
+    spectiary::SampleLabelingController restarted(state_path);
+    ActivateCanonicalTestSource(restarted, "source", 3);
+    Require(ActiveTask(restarted) || restarted.ActivateTask(task_id).accepted,
+        "restart should activate the canonical task published before its first checkpoint");
+    const auto* task = ActiveTask(restarted);
+    Require(task && task->task_id == task_id && task->persistence.output_path == output_path &&
+            task->Content() && task->Content()->values[1] == 5 && TemporaryTask(restarted) == nullptr,
+        "restart must restore the canonical content without resurrecting an uncheckpointed draft");
+}
+
 void TestSplitDraftCheckpointCleanupAndCloseForProfile(spectiary::StorageProfile profile)
 {
     const auto base = FreshTestDirectory(profile == spectiary::StorageProfile::Portable
@@ -12027,6 +12140,8 @@ int main(int argc, char* argv[])
         run("TestSplitOwnerLoadDiagnostics", TestSplitOwnerLoadDiagnostics);
         run("TestSplitOwnerWriteOutcomes", TestSplitOwnerWriteOutcomes);
         run("TestSplitOwnerWritesNotAttemptedBeforePreconditions", TestSplitOwnerWritesNotAttemptedBeforePreconditions);
+        run("TestNewDraftRetriesAfterPartialOwnerSave", TestNewDraftRetriesAfterPartialOwnerSave);
+        run("TestNewCanonicalTaskRetriesAfterCheckpointFailure", TestNewCanonicalTaskRetriesAfterCheckpointFailure);
         run("TestSplitDraftCheckpointCleanupAndClose", TestSplitDraftCheckpointCleanupAndClose);
         if (argc == 2 && std::string_view(argv[1]) == "--legacy-retirement") {
             TestNpyPromotionCreatesDraftWithoutModifyingImport();

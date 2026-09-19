@@ -95,6 +95,16 @@ struct SampleLabelingStateCacheSaveResult {
                 SampleLabelingPersistenceCompletion::Succeeded;
     }
 
+    // A successful owner save makes this upsert visible to the next commit
+    // reload, so its creation precondition has been consumed even on partial
+    // success. The caller must still retain the patch and its leases for retry.
+    [[nodiscard]] bool TaskIdentityPersisted(const SampleLabelingTask& task) const
+    {
+        return task.persistence.output_path
+            ? RegistrationSucceeded()
+            : draft_checkpoint.completion == SampleLabelingPersistenceCompletion::Succeeded;
+    }
+
     explicit operator bool() const { return Succeeded(); }
 };
 

@@ -5978,6 +5978,14 @@ bool SampleLabelingController::TrySaveStateCache(
             wait_for_commit_lock
                 ? kSynchronousCommitLockWait
                 : std::chrono::milliseconds::zero());
+    for (auto& [identity, source_patch] : pending_cache_patch_.sources) {
+        (void)identity;
+        for (const auto& task : source_patch.task_upserts) {
+            if (result.TaskIdentityPersisted(task)) {
+                source_patch.task_ids_expected_absent.erase(task.task_id);
+            }
+        }
+    }
     if (result.Succeeded()) {
         normalize_saved_states(sources_);
         pending_cache_patch_ = {};

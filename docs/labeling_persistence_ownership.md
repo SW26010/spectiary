@@ -78,6 +78,11 @@ pending patch and retry scheduler retain the incomplete work. Load causes reach 
 existing persistence-health diagnostics without turning routine checkpoint success
 into a canonical document-save notification.
 
+After a partial save, a new task's expected-absent precondition is consumed only
+when its identity becomes visible to the next commit reload: checkpoint success
+for a draft, or ordinary registration success for a formal task. Its pending
+upsert and leases remain held until the combined save succeeds.
+
 ## Publication and failures
 
 Save As constructs the full canonical document from current memory, acquires its
