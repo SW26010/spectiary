@@ -27,9 +27,11 @@ All collections may be empty. Optional text may be empty and is preserved
 distinctly from omission. Timestamps are opaque metadata strings in v1; writers
 should use ISO 8601, but the codec does not invent dates or normalize them.
 Hexadecimal color digits accept either case and round-trip unchanged. RGBA8
-conversion from application floating-point colors clamps each finite component
-to [0,1] and rounds `component * 255` to the nearest integer; decoding divides
-each unsigned byte by 255. Auto has no persisted color entry.
+conversion from application floating-point colors requires every component to
+be finite and within [0,1]; nonfinite or out-of-range values are rejected.
+Valid components are quantized by rounding `component * 255` to the nearest
+integer (halfway values round up); decoding divides each unsigned byte by 255.
+Auto has no persisted color entry.
 
 Marker, grouping-view, and color-scheme IDs are unique within their own kind.
 Group IDs are unique across every view in the document. Group references must
