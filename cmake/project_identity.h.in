@@ -3,6 +3,12 @@
 namespace specforge::project_identity {
 // Permanent lineage token, not a runtime Git revision or a display name.
 inline constexpr char kApplicationId[] = "@PROJECT_founding_identity@";
+// Machine namespaces are rooted in the complete immutable lineage token.
+inline constexpr wchar_t kAutomationPipePrefix[] = L"\\\\.\\pipe\\@PROJECT_founding_identity@.automation.v1.";
+inline constexpr wchar_t kAutomationRootLock[] = L".@PROJECT_founding_identity@.automation-root.v1.lock";
+inline constexpr char kAsdfPreservationDomain[] = "@PROJECT_founding_identity@.sample-labeling.asdf-preservation-identity-v2";
+inline constexpr char kAsdfValuesRewriteDomain[] = "@PROJECT_founding_identity@.sample-labeling.asdf-values-rewrite-identity-v1";
+inline constexpr char kLabelingEditLeaseDomain[] = "@PROJECT_founding_identity@.sample-labeling.edit-lease.v1\n";
 inline constexpr char kProductDisplayName[] = "@PROJECT_product_display_name@";
 // Final destination contract; physical adoption is owned by #103.
 inline constexpr char kLocalAppDataLeaf[] = "@PROJECT_local_app_data_leaf@";

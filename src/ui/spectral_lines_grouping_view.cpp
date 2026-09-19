@@ -19,8 +19,8 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kMarkerReferenceDragPayload = "SpecForgeMarkerReference";
-constexpr const char* kUserGroupDragPayload = "SpecForgeUserGroup";
+constexpr const char* kMarkerReferenceDragPayload = "MarkerReference";
+constexpr const char* kUserGroupDragPayload = "UserGroup";
 
 struct MarkerReferenceDragPayload {
     std::string view_id;
@@ -478,7 +478,7 @@ void SpectralLinesGroupingViewUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::AddGroup,
-                "SpecForgeAddSpectralLineGroup");
+                "AddSpectralLineGroup");
         if (ImGui::Button(add_group_label.c_str())) {
             (void)panel.Submit(CatalogUserStateIntent::AddUserGroup(view.id));
         }
@@ -642,7 +642,7 @@ void SpectralLinesGroupingViewUi::Render(
                 StableUiLabel(
                     language,
                     UiTextId::Rename,
-                    "SpecForgeRenameSpectralLineGroup");
+                    "RenameSpectralLineGroup");
             if (ImGui::Selectable(rename_label.c_str())) {
                 renaming_group_view_id_ = view.id;
                 renaming_group_id_ = group.id;
@@ -659,7 +659,7 @@ void SpectralLinesGroupingViewUi::Render(
                 StableUiLabel(
                     language,
                     UiTextId::Delete,
-                    "SpecForgeDeleteSpectralLineGroup");
+                    "DeleteSpectralLineGroup");
             if (ImGui::Selectable(delete_label.c_str())) {
                 group_deleted = panel.Submit(CatalogUserStateIntent::DeleteUserGroup(view.id, group.id)).changed;
                 group_context_view_id_.reset();
@@ -893,7 +893,7 @@ void SpectralLinesGroupingViewUi::Render(
                         StableUiLabel(
                             language,
                             UiTextId::ResetColorToAuto,
-                            "SpecForgeResetSpectralLineColorToAuto");
+                            "ResetSpectralLineColorToAuto");
                     if (ImGui::Selectable(
                             reset_color_label.c_str())) {
                         (void)panel.Submit(
@@ -908,7 +908,7 @@ void SpectralLinesGroupingViewUi::Render(
                             StableUiLabel(
                                 language,
                                 UiTextId::CopyToGroup,
-                                "SpecForgeCopySpectralLineMarkerToGroup");
+                                "CopySpectralLineMarkerToGroup");
                         if (ImGui::BeginMenu(
                                 copy_to_group_label.c_str())) {
                             bool has_target = false;
@@ -994,7 +994,7 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
         StableUiLabel(
             language,
             UiTextId::RenameGroup,
-            "SpecForgeRenameUserGroupPopup");
+            "RenameUserGroupPopup");
     if (renaming_group_popup_requested_) {
         ImGui::OpenPopup(rename_group_popup.c_str());
         renaming_group_popup_requested_ = false;
@@ -1011,7 +1011,7 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
             StableUiLabel(
                 language,
                 UiTextId::Name,
-                "SpecForgeSpectralLineGroupName");
+                "SpectralLineGroupName");
         const bool submitted = ImGui::InputText(
             name_label.c_str(),
             &renaming_group_name_,
@@ -1051,7 +1051,7 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
             StableUiLabel(
                 language,
                 UiTextId::Rename,
-                "SpecForgeConfirmRenameSpectralLineGroup");
+                "ConfirmRenameSpectralLineGroup");
         if (ImGui::Button(rename_label.c_str()) ||
             (submitted && valid_name)) {
             finish_rename();
@@ -1064,7 +1064,7 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelRenameSpectralLineGroup");
+                "CancelRenameSpectralLineGroup");
         if (ImGui::Button(cancel_label.c_str())) {
             renaming_group_view_id_.reset();
             renaming_group_id_.reset();

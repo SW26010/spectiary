@@ -32,21 +32,21 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
-constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
-constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
-constexpr const char* kCurveDisplayWindow = "Curve Display###SpecForgeSmoothingV1";
+constexpr const char* kDockHostWindow = "Main Dock Host###DockHostV2";
+constexpr const char* kMainPlotWindow = "Spectrum###SpectrumV2";
+constexpr const char* kInfoTagsWindow = "Info###InfoTagsV2";
+constexpr const char* kCurveDisplayWindow = "Curve Display###SmoothingV1";
 constexpr std::array<const char*, kApplicationPanelCount>
     kApplicationPanelWindowIds{
-        "###SpecForgeFilesV2",
-        "###SpecForgeNavigationV1",
-        "###SpecForgeAnnotationsV1",
-        "###SpecForgeLabelingV1",
-        "###SpecForgeFiltersV1",
-        "###SpecForgeSampleSortingV1",
-        "###SpecForgeSmoothingV1",
-        "###SpecForgeInfoTagsV2",
-        "###SpecForgeSpectralLinesV2",
+        "###FilesV2",
+        "###NavigationV1",
+        "###AnnotationsV1",
+        "###LabelingV1",
+        "###FiltersV1",
+        "###SampleSortingV1",
+        "###SmoothingV1",
+        "###InfoTagsV2",
+        "###SpectralLinesV2",
     };
 
 enum class ImmersivePlotAxisImplementation {
@@ -2419,7 +2419,7 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
 
     RenderMainMenuBar(status);
 
-    const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
+    const ImGuiID dockspace_id = ImGui::GetID("DockSpaceSampleNavigationV1");
     const ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
 
     if (std::exchange(restore_default_layout_requested_, false)) {
@@ -2464,7 +2464,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         StableUiLabel(
             language,
             UiTextId::Spectrum,
-            "SpecForgeSpectrumImmersiveV1");
+            "SpectrumImmersiveV1");
     const bool plot_visible = ImGui::Begin(
         immersive_plot_window.c_str(),
         nullptr,
@@ -2575,12 +2575,12 @@ void ShellUi::RenderMainMenuBar(
     const std::string file_menu = StableUiLabel(
         language,
         UiTextId::FileMenu,
-        "SpecForgeFileMenu");
+        "FileMenu");
     if (ImGui::BeginMenu(file_menu.c_str())) {
         const std::string open_file = StableUiLabel(
             language,
             UiTextId::OpenFile,
-            "SpecForgeOpenFile");
+            "OpenFile");
         if (ImGui::MenuItem(open_file.c_str())) {
             if (choose_source_file) {
                 OpenSourceFromFilePicker(
@@ -2592,7 +2592,7 @@ void ShellUi::RenderMainMenuBar(
         const std::string open_folder = StableUiLabel(
             language,
             UiTextId::OpenFolder,
-            "SpecForgeOpenFolder");
+            "OpenFolder");
         if (ImGui::MenuItem(open_folder.c_str())) {
             OpenSourceFromFolderPicker();
         }
@@ -2604,7 +2604,7 @@ void ShellUi::RenderMainMenuBar(
             StableUiLabel(
                 language,
                 UiTextId::OpenFileAsAnnotation,
-                "SpecForgeOpenFileAsAnnotation");
+                "OpenFileAsAnnotation");
         if (ImGui::MenuItem(
                 open_annotation.c_str())) {
             OpenAnnotationFromFilePicker();
@@ -2618,7 +2618,7 @@ void ShellUi::RenderMainMenuBar(
     const std::string view_menu = StableUiLabel(
         language,
         UiTextId::ViewMenu,
-        "SpecForgeViewMenu");
+        "ViewMenu");
     if (ImGui::BeginMenu(view_menu.c_str())) {
         const PanelVisibilityState panel_visibility =
             settings.panel_visibility;
@@ -2626,7 +2626,7 @@ void ShellUi::RenderMainMenuBar(
             StableUiLabel(
                 language,
                 UiTextId::ImmersivePlotMode,
-                "SpecForgeImmersivePlotMode");
+                "ImmersivePlotMode");
         if (ImGui::MenuItem(
                 immersive_plot_label.c_str(),
                 "F11",
@@ -2638,7 +2638,7 @@ void ShellUi::RenderMainMenuBar(
             StableUiLabel(
                 language,
                 UiTextId::RestoreDefaultLayout,
-                "SpecForgeRestoreDefaultLayout");
+                "RestoreDefaultLayout");
         if (ImGui::MenuItem(
                 restore_default_layout.c_str())) {
             restore_default_layout_requested_ = true;
@@ -2668,55 +2668,55 @@ void ShellUi::RenderMainMenuBar(
         render_panel_toggle(
             language,
             UiTextId::Files,
-            "SpecForgeViewFiles",
+            "ViewFiles",
             ApplicationPanel::Files,
             panel_visibility.files);
         render_panel_toggle(
             language,
             UiTextId::Navigation,
-            "SpecForgeViewNavigation",
+            "ViewNavigation",
             ApplicationPanel::Navigation,
             panel_visibility.navigation);
         render_panel_toggle(
             language,
             UiTextId::Annotations,
-            "SpecForgeViewAnnotations",
+            "ViewAnnotations",
             ApplicationPanel::Annotations,
             panel_visibility.annotations);
         render_panel_toggle(
             language,
             UiTextId::Labeling,
-            "SpecForgeViewLabeling",
+            "ViewLabeling",
             ApplicationPanel::Labeling,
             panel_visibility.labeling);
         render_panel_toggle(
             language,
             UiTextId::SampleFilters,
-            "SpecForgeViewSampleFilters",
+            "ViewSampleFilters",
             ApplicationPanel::Filters,
             panel_visibility.filters);
         render_panel_toggle(
             language,
             UiTextId::SampleSorting,
-            "SpecForgeViewSampleSorting",
+            "ViewSampleSorting",
             ApplicationPanel::Sorting,
             panel_visibility.sorting);
         render_panel_toggle(
             language,
             UiTextId::CurveDisplay,
-            "SpecForgeViewSmoothing",
+            "ViewSmoothing",
             ApplicationPanel::Smoothing,
             panel_visibility.smoothing);
         render_panel_toggle(
             language,
             UiTextId::Information,
-            "SpecForgeViewInformation",
+            "ViewInformation",
             ApplicationPanel::Information,
             panel_visibility.information);
         render_panel_toggle(
             language,
             UiTextId::SpectralLines,
-            "SpecForgeViewSpectralLines",
+            "ViewSpectralLines",
             ApplicationPanel::SpectralLines,
             panel_visibility.spectral_lines);
         ImGui::EndMenu();
@@ -2725,7 +2725,7 @@ void ShellUi::RenderMainMenuBar(
     const std::string settings_label = StableUiLabel(
         language,
         UiTextId::Settings,
-        "SpecForgeOpenSettings");
+        "OpenSettings");
     if (ImGui::MenuItem(settings_label.c_str())) {
         settings_panel_ui_.Open();
     }
@@ -2885,7 +2885,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     const std::string smoothing_window = StableUiLabel(
         language,
         UiTextId::CurveDisplay,
-        "SpecForgeSmoothingV1");
+        "SmoothingV1");
     if (!ImGui::Begin(
             smoothing_window.c_str(),
             &panel_open)) {
@@ -3033,10 +3033,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     if (render_curve_leading_controls(
             show_raw_curve,
             UiTextId::RawSpectrum,
-            "SpecForgeShowRawCurve",
+            "ShowRawCurve",
             SpectrumPlotSeries::RawSpectrum,
-            "SpecForgeRawSpectrumColor",
-            "SpecForgeRawSpectrumColorReset")) {
+            "RawSpectrumColor",
+            "RawSpectrumColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowRawCurve(show_raw_curve));
     }
@@ -3045,7 +3045,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     const std::string show_points_label = StableUiLabel(
         language,
         UiTextId::DataPoints,
-        "SpecForgeShowSpectrumPoints");
+        "ShowSpectrumPoints");
     if (ImGui::Checkbox(show_points_label.c_str(), &show_points)) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowPoints(show_points));
@@ -3055,10 +3055,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     if (render_curve_leading_controls(
             show_gaussian_smoothed,
             UiTextId::GaussianSmoothing,
-            "SpecForgeShowGaussianSmoothedCurve",
+            "ShowGaussianSmoothedCurve",
             SpectrumPlotSeries::GaussianSmoothing,
-            "SpecForgeGaussianSmoothingColor",
-            "SpecForgeGaussianSmoothingColorReset")) {
+            "GaussianSmoothingColor",
+            "GaussianSmoothingColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowGaussianSmoothed(
                 show_gaussian_smoothed));
@@ -3070,7 +3070,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     const std::string sigma_label = StableUiLabel(
         language,
         UiTextId::GaussianSigma,
-        "SpecForgeGaussianSigma");
+        "GaussianSigma");
     if (ImGui::DragFloat(
             sigma_label.c_str(),
             &sigma,
@@ -3096,10 +3096,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     if (render_curve_leading_controls(
             show_median_smoothed,
             UiTextId::MedianSmoothing,
-            "SpecForgeShowMedianSmoothedCurve",
+            "ShowMedianSmoothedCurve",
             SpectrumPlotSeries::MedianSmoothing,
-            "SpecForgeMedianSmoothingColor",
-            "SpecForgeMedianSmoothingColorReset")) {
+            "MedianSmoothingColor",
+            "MedianSmoothingColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowMedianSmoothed(
                 show_median_smoothed));
@@ -3112,7 +3112,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     const std::string kernel_size_label = StableUiLabel(
         language,
         UiTextId::MedianKernelSize,
-        "SpecForgeMedianKernelSize");
+        "MedianKernelSize");
     const ImGuiID kernel_size_id =
         ImGui::GetCurrentWindow()->GetID(kernel_size_label.c_str());
     const bool kernel_text_input_active_before =
@@ -3181,7 +3181,7 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
         StableUiLabel(
             language,
             UiTextId::Information,
-            "SpecForgeInfoTagsV2");
+            "InfoTagsV2");
     if (!ImGui::Begin(
             information_window.c_str(),
             &panel_open)) {
@@ -3351,7 +3351,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     const std::string spectrum_window = StableUiLabel(
         language,
         UiTextId::Spectrum,
-        "SpecForgeSpectrumV2");
+        "SpectrumV2");
     if (!ImGui::Begin(spectrum_window.c_str())) {
         ImGui::End();
         return;

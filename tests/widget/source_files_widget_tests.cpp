@@ -115,7 +115,7 @@ void TestFilesPanelAddFileForwardsCsvToInAppOpener()
     specforge::test::WidgetHarness ui{render_frame,
         specforge::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
-    ui.Click("SpecForgeFilesAddFile");
+    ui.Click("FilesAddFile");
     Require(
         choose_file_count == 1 &&
             choose_folder_count == 0 &&
@@ -209,7 +209,7 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
     ui.Click("type", ImGuiMouseButton_Right);
     Require(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId |
         ImGuiPopupFlags_AnyPopupLevel), "source row should open its context menu");
-    ui.Click("SpecForgeOpenSourceInNewInstance");
+    ui.Click("OpenSourceInNewInstance");
     Require(
         launch_count == 1 && launched_path == source_path,
         "activating the source context menu should launch the selected filesystem path");
@@ -347,7 +347,7 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
     ui.Frames();
     ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
     ui.Frames(2);
-    const auto action = ui.Find("SpecForgeOpenSourceInNewInstance");
+    const auto action = ui.Find("OpenSourceInNewInstance");
     Require(action.disabled, "ineligible source action must be disabled");
     const auto center = action.bounds.GetCenter();
     ImGui::GetIO().AddMousePosEvent(center.x, center.y);

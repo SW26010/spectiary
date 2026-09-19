@@ -608,7 +608,7 @@ void TestViewportOwnershipLayoutFixtureContract()
         "viewport ownership layout fixture should remain a well-formed ImGui snapshot");
 
     constexpr std::string_view window_section =
-        "[Window][SpecForgeSpectralLinesV2]";
+        "[Window][SpectralLinesV2]";
     const std::size_t section_start =
         snapshot.find(window_section);
     Require(
@@ -637,7 +637,7 @@ void TestViewportOwnershipLayoutFixtureContract()
         snapshot.find("[Docking][Data]") !=
                 std::string::npos &&
             snapshot.find(
-                "DockSpace             ID=0xFBB4891A") !=
+                "DockSpace             ID=0xEEC57B96") !=
                 std::string::npos,
         "viewport ownership fixture should retain a loaded dockspace so startup does not reseed the default layout");
 }

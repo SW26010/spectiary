@@ -22,9 +22,9 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
-constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
-constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
+constexpr const char* kFilesWindow = "Files###FilesV2";
+constexpr const char* kNavigationWindow = "Navigation###NavigationV1";
+constexpr const char* kAnnotationsWindow = "Annotations###AnnotationsV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 constexpr const char* kSampleNavigationSourceInput =
     "##SampleNavigationSample";
@@ -928,7 +928,7 @@ void SourceCollectionPanelUi::RenderFiles(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Files,
-        "SpecForgeFilesV2");
+        "FilesV2");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -955,7 +955,7 @@ void SourceCollectionPanelUi::RenderFiles(
     const std::string add_file_label = StableUiLabel(
         language,
         UiTextId::AddFile,
-        "SpecForgeFilesAddFile");
+        "FilesAddFile");
     if (ImGui::Button(add_file_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_source_file()) {
             open_source(*path);
@@ -965,7 +965,7 @@ void SourceCollectionPanelUi::RenderFiles(
     const std::string add_folder_label = StableUiLabel(
         language,
         UiTextId::AddFolder,
-        "SpecForgeFilesAddFolder");
+        "FilesAddFolder");
     if (ImGui::Button(add_folder_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_source_folder()) {
             open_source(*path);
@@ -996,22 +996,22 @@ void SourceCollectionPanelUi::RenderFiles(
             UiText(language, UiTextId::SourceColumn).data(),
             ImGuiTableColumnFlags_WidthFixed,
             200.0f,
-            ImGui::GetID("SpecForgeFilesSourceColumn"));
+            ImGui::GetID("FilesSourceColumn"));
         ImGui::TableSetupColumn(
             UiText(language, UiTextId::TypeColumn).data(),
             ImGuiTableColumnFlags_WidthFixed,
             72.0f,
-            ImGui::GetID("SpecForgeFilesTypeColumn"));
+            ImGui::GetID("FilesTypeColumn"));
         ImGui::TableSetupColumn(
             UiText(language, UiTextId::StateColumn).data(),
             ImGuiTableColumnFlags_WidthFixed,
             128.0f,
-            ImGui::GetID("SpecForgeFilesStateColumn"));
+            ImGui::GetID("FilesStateColumn"));
         ImGui::TableSetupColumn(
             "",
             ImGuiTableColumnFlags_WidthFixed,
             32.0f,
-            ImGui::GetID("SpecForgeFilesActionsColumn"));
+            ImGui::GetID("FilesActionsColumn"));
         ImGui::TableHeadersRow();
 
         std::optional<std::size_t> source_to_remove;
@@ -1090,7 +1090,7 @@ void SourceCollectionPanelUi::RenderFiles(
                 const std::string reopen_label = StableUiLabel(
                     language,
                     UiTextId::OpenSourceInNewInstance,
-                    "SpecForgeOpenSourceInNewInstance");
+                    "OpenSourceInNewInstance");
                 const bool reopen_requested =
                     ImGui::MenuItem(reopen_label.c_str());
                 if (reopen_requested) {
@@ -1152,7 +1152,7 @@ void SourceCollectionPanelUi::RenderNavigation(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Navigation,
-        "SpecForgeNavigationV1");
+        "NavigationV1");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -1357,7 +1357,7 @@ void SourceCollectionPanelUi::RenderSampleNameSearch(
             StableUiLabel(
                 language,
                 UiTextId::SampleNameMatches,
-                "SpecForgeSampleNameMatchesV1");
+                "SampleNameMatchesV1");
         if (ImGui::Begin(
                 matches_window.c_str(),
                 nullptr,
@@ -1443,7 +1443,7 @@ bool SourceCollectionPanelUi::RenderAnnotationImportDiagnostic(
     const std::string dismiss_label = StableUiLabel(
         language,
         UiTextId::Dismiss,
-        "SpecForgeAnnotationImportDiagnosticDismiss");
+        "AnnotationImportDiagnosticDismiss");
     const float dismiss_width =
         ImGui::CalcTextSize(
             dismiss_label.c_str(),
@@ -1558,7 +1558,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Annotations,
-        "SpecForgeAnnotationsV1");
+        "AnnotationsV1");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -1578,7 +1578,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
     const std::string add_file_label = StableUiLabel(
         language,
         UiTextId::AddFile,
-        "SpecForgeAnnotationsAddFile");
+        "AnnotationsAddFile");
     if (ImGui::Button(add_file_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_annotation_file()) {
             PrepareAnnotationImportAttempt(
@@ -1650,7 +1650,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
         StableUiLabel(
             language,
             UiTextId::DeleteLabelingTaskQuestion,
-            "SpecForgeRemoveMissingLocalLabelingTask");
+            "RemoveMissingLocalLabelingTask");
 
     if (navigation.current_annotations.empty()) {
         pending_missing_local_annotation_removal_.reset();
@@ -1679,25 +1679,25 @@ void SourceCollectionPanelUi::RenderAnnotations(
             ImGuiTableColumnFlags_WidthFixed,
             220.0f,
             ImGui::GetID(
-                "SpecForgeAnnotationsDisplayNameColumn"));
+                "AnnotationsDisplayNameColumn"));
         ImGui::TableSetupColumn(
             UiText(language, UiTextId::TypeColumn).data(),
             ImGuiTableColumnFlags_WidthFixed,
             72.0f,
             ImGui::GetID(
-                "SpecForgeAnnotationsTypeColumn"));
+                "AnnotationsTypeColumn"));
         ImGui::TableSetupColumn(
             UiText(language, UiTextId::ValueColumn).data(),
             ImGuiTableColumnFlags_WidthFixed,
             160.0f,
             ImGui::GetID(
-                "SpecForgeAnnotationsValueColumn"));
+                "AnnotationsValueColumn"));
         ImGui::TableSetupColumn(
             "",
             ImGuiTableColumnFlags_WidthFixed,
             32.0f,
             ImGui::GetID(
-                "SpecForgeAnnotationsActionsColumn"));
+                "AnnotationsActionsColumn"));
         ImGui::TableHeadersRow();
 
         std::optional<std::filesystem::path> annotation_to_remove;
@@ -1871,7 +1871,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
             const std::string confirm_label = StableUiLabel(
                 language,
                 UiTextId::DeleteTask,
-                "SpecForgeConfirmRemoveMissingLocalLabelingTask");
+                "ConfirmRemoveMissingLocalLabelingTask");
             const bool confirmed = ImGui::Button(
                 confirm_label.c_str());
 
@@ -1879,7 +1879,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
             const std::string cancel_label = StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelRemoveMissingLocalLabelingTask");
+                "CancelRemoveMissingLocalLabelingTask");
             const bool canceled = ImGui::Button(
                 cancel_label.c_str());
 

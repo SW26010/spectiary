@@ -37,11 +37,11 @@ void TestInputCheckbox()
 {
     SettingsFixture f;
     const bool initial = f.settings.View().live_numeric_navigation;
-    f.ui.Click("SpecForgeSettingsInput");
-    f.ui.Click("SpecForgeLiveNumericNavigation");
+    f.ui.Click("SettingsInput");
+    f.ui.Click("LiveNumericNavigation");
     Require(f.settings.View().live_numeric_navigation != initial,
             "Input checkbox must update ApplicationSettings");
-    f.ui.Click("SpecForgeLiveNumericNavigation");
+    f.ui.Click("LiveNumericNavigation");
     Require(f.settings.View().live_numeric_navigation == initial,
             "Second checkbox click must restore the original setting");
     Require(f.intents == 2, "Checkbox interactions must emit exactly one intent each");
@@ -50,29 +50,29 @@ void TestInputCheckbox()
 void TestGeneralAndLanguageControls()
 {
     SettingsFixture f;
-    f.ui.Click("SpecForgeSettingsGeneral");
-    f.ui.Click("SpecForgeOpenExternalSourceAsFolder");
+    f.ui.Click("SettingsGeneral");
+    f.ui.Click("OpenExternalSourceAsFolder");
     Require(f.settings.View().open_external_source_as_folder && f.intents == 1,
         "External source checkbox must update the owner exactly once");
-    const auto placeholder = f.ui.Find("SpecForgeIncludeExternalSubfolders");
+    const auto placeholder = f.ui.Find("IncludeExternalSubfolders");
     Require(placeholder.disabled, "Deferred subfolder control must stay disabled");
     try {
-        f.ui.Click("SpecForgeIncludeExternalSubfolders");
+        f.ui.Click("IncludeExternalSubfolders");
         throw std::runtime_error("Disabled placeholder accepted input");
     } catch (const std::runtime_error& error) {
-        Require(std::string(error.what()) == "Disabled widget: SpecForgeIncludeExternalSubfolders",
+        Require(std::string(error.what()) == "Disabled widget: IncludeExternalSubfolders",
             "Disabled placeholder must reject widget input");
     }
     Require(f.intents == 1, "Disabled placeholder must not emit an intent");
-    f.ui.Click("SpecForgeSettingsLanguage");
-    f.ui.Click("SpecForgeApplicationLanguage");
-    f.ui.Click("SpecForgeUiLanguageSimplifiedChinese");
+    f.ui.Click("SettingsLanguage");
+    f.ui.Click("ApplicationLanguage");
+    f.ui.Click("UiLanguageSimplifiedChinese");
     Require(f.settings.View().language == UiLanguage::SimplifiedChinese && f.intents == 2,
         "Language selector must update the owner exactly once");
-    f.ui.Click("SpecForgeSettingsAppearance");
+    f.ui.Click("SettingsAppearance");
     (void)f.settings.Apply(ApplicationSettingsIntent::SetUiScale(125), {});
     f.ui.Frames(2);
-    f.ui.Click("SpecForgeUiScaleReset");
+    f.ui.Click("UiScaleReset");
     Require(f.settings.View().ui_scale_percentage == 100 && f.intents == 3,
         "Localized scale Reset must preserve its identity and submit once");
 }
@@ -80,8 +80,8 @@ void TestGeneralAndLanguageControls()
 void TestThemeCombo()
 {
     SettingsFixture f;
-    f.ui.Click("SpecForgeSettingsAppearance");
-    f.ui.Click("SpecForgeAppearanceTheme");
+    f.ui.Click("SettingsAppearance");
+    f.ui.Click("AppearanceTheme");
     f.ui.Click("Light");
     Require(f.settings.View().theme_selection == ThemeSelection::Explicit(BuiltInLightThemeId()),
             "Rendered theme popup must select the light theme");
@@ -91,10 +91,10 @@ void TestThemeCombo()
 void TestScaleKeyboardCommitAndReset()
 {
     SettingsFixture f;
-    f.ui.Click("SpecForgeSettingsAppearance");
+    f.ui.Click("SettingsAppearance");
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
     f.ui.Frames();
-    f.ui.Click("SpecForgeUiScale");
+    f.ui.Click("UiScale");
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
     f.ui.Frames();
     f.ui.Text("125");
@@ -102,7 +102,7 @@ void TestScaleKeyboardCommitAndReset()
             "Scale draft must not apply before the edit finishes");
     f.ui.Key(ImGuiKey_Enter);
     f.ui.Until([&] { return f.settings.View().ui_scale_percentage == 125; }, "scale keyboard commit");
-    f.ui.Click("SpecForgeUiScaleReset");
+    f.ui.Click("UiScaleReset");
     Require(f.settings.View().ui_scale_percentage == 100, "Scale Reset must restore 100 percent");
     Require(f.intents == 2, "Scale commit and Reset must each emit one intent");
 }
@@ -113,11 +113,11 @@ void TestRecordingDisablesDirectoryReset()
     Require(f.settings.Apply(ApplicationSettingsIntent::SetProfileOutputDirectory("widget-custom-logs"), {}).applied(),
             "Custom profile directory fixture must apply");
     f.status.profile_open = true;
-    f.ui.Click("SpecForgeSettingsDiagnostics");
-    Require(f.ui.Find("SpecForgeRestoreProfileOutputDefault").disabled,
+    f.ui.Click("SettingsDiagnostics");
+    Require(f.ui.Find("RestoreProfileOutputDefault").disabled,
             "Directory reset must be disabled while recording");
     // Inject a real click even on the disabled control to prove it cannot emit an intent.
-    const auto point = f.ui.Find("SpecForgeRestoreProfileOutputDefault").bounds.GetCenter();
+    const auto point = f.ui.Find("RestoreProfileOutputDefault").bounds.GetCenter();
     ImGui::GetIO().AddMousePosEvent(point.x, point.y);
     f.ui.Frames();
     ImGui::GetIO().AddMouseButtonEvent(0, true);
@@ -129,7 +129,7 @@ void TestRecordingDisablesDirectoryReset()
             "Recording must preserve the output directory");
     f.status.profile_open = false;
     f.ui.Frames(2);
-    f.ui.Click("SpecForgeRestoreProfileOutputDefault");
+    f.ui.Click("RestoreProfileOutputDefault");
     Require(f.settings.View().profile_output_directory == "widget-default-logs",
             "Reset after recording must restore the production owner's default directory");
     Require(f.intents == 1, "Enabled reset must emit one intent");
@@ -162,13 +162,13 @@ void TestClippedWidgetBounds()
 void TestLayoutRecoveryControlAndSettingsPlacement()
 {
     SettingsFixture f;
-    f.ui.Click("SpecForgeSettingsDataAndRecovery");
-    f.ui.Click("SpecForgeResetWindowLayout");
+    f.ui.Click("SettingsDataAndRecovery");
+    f.ui.Click("ResetWindowLayout");
     Require(f.panel.TakeRestoreDefaultLayoutRequest(),
         "Layout recovery button must emit a request");
     Require(!f.panel.TakeRestoreDefaultLayoutRequest() && f.intents == 0,
         "Recovery is one-shot and must not emit unrelated settings intents");
-    ImGuiWindow* window = ImGui::FindWindowByName("###SpecForgeSettingsV1");
+    ImGuiWindow* window = ImGui::FindWindowByName("###SettingsV1");
     Require(window != nullptr, "Settings window should exist");
     ImGui::SetWindowPos(window, ImVec2(30000, -20000));
     ImGui::SetWindowSize(window, ImVec2(4000, 3000));

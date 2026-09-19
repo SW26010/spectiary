@@ -27,9 +27,9 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kLabelingWindow = "Labeling###SpecForgeLabelingV1";
-constexpr const char* kFiltersWindow = "Sample Filters###SpecForgeFiltersV1";
-constexpr const char* kSortingWindow = "Sample Sorting###SpecForgeSampleSortingV1";
+constexpr const char* kLabelingWindow = "Labeling###LabelingV1";
+constexpr const char* kFiltersWindow = "Sample Filters###FiltersV1";
+constexpr const char* kSortingWindow = "Sample Sorting###SampleSortingV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 
 enum class ActionIcon {
@@ -1404,7 +1404,7 @@ void SampleWorkflowPanelUi::RenderTaskNameEditor(
     const std::string copy_task_id_label = StableUiLabel(
         language,
         UiTextId::CopyLabelingTaskId,
-        "SpecForgeCopyLabelingTaskId");
+        "CopyLabelingTaskId");
     if (ImGui::Button(copy_task_id_label.c_str())) {
         ImGui::SetClipboardText(labeling_view.task_id.c_str());
     }
@@ -1570,27 +1570,27 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Labeling,
-        "SpecForgeLabelingV1");
+        "LabelingV1");
     const std::string annotation_to_labeling_popup =
         StableUiLabel(
             language,
             UiTextId::UseAnnotationAsLabelingTask,
-            "SpecForgeAnnotationToLabelingPopup");
+            "AnnotationToLabelingPopup");
     const std::string delete_labeling_task_popup =
         StableUiLabel(
             language,
             UiTextId::DeleteLabelingTaskQuestion,
-            "SpecForgeDeleteLabelingTaskPopup");
+            "DeleteLabelingTaskPopup");
     const std::string delete_sample_label_popup =
         StableUiLabel(
             language,
             UiTextId::DeleteLabelQuestion,
-            "SpecForgeDeleteSampleLabelPopup");
+            "DeleteSampleLabelPopup");
     const std::string change_sample_label_code_popup =
         StableUiLabel(
             language,
             UiTextId::ChangeUsedLabelCodeQuestion,
-            "SpecForgeChangeSampleLabelCodePopup");
+            "ChangeSampleLabelCodePopup");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         if (task_name_edit_focused_ ||
             task_name_finalize_pending_) {
@@ -1791,7 +1791,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             const std::string recover_label = StableUiLabel(
                 language,
                 UiTextId::RecoverTemporaryDraft,
-                "SpecForgeRecoverTemporaryDraft");
+                "RecoverTemporaryDraft");
             if (recover_disabled) {
                 ImGui::BeginDisabled();
             }
@@ -1829,7 +1829,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 retained
                     ? UiTextId::TemporaryDraftKept
                     : UiTextId::KeepTemporaryDraft,
-                "SpecForgeKeepTemporaryDraft");
+                "KeepTemporaryDraft");
             if (retained) {
                 ImGui::BeginDisabled();
             }
@@ -1845,7 +1845,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             const std::string delete_draft_label = StableUiLabel(
                 language,
                 UiTextId::DeleteTemporaryDraft,
-                "SpecForgeDeleteTemporaryDraft");
+                "DeleteTemporaryDraft");
             if (duplicate_task_id) {
                 ImGui::BeginDisabled();
             }
@@ -2081,7 +2081,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::DeleteTask,
-                "SpecForgeConfirmDeleteLabelingTask");
+                "ConfirmDeleteLabelingTask");
         if (ImGui::Button(
                 delete_task_label.c_str())) {
             const bool deleting_recovery_draft =
@@ -2155,7 +2155,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelDeleteLabelingTask");
+                "CancelDeleteLabelingTask");
         if (ImGui::Button(
                 cancel_delete_task_label.c_str())) {
             clear_pending_delete();
@@ -2211,12 +2211,12 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::string pause_label = StableUiLabel(
         language,
         UiTextId::Pause,
-        "SpecForgePauseLabelingTask");
+        "PauseLabelingTask");
     const std::string delete_task_control_label =
         StableUiLabel(
             language,
             UiTextId::Delete,
-            "SpecForgeDeleteLabelingTask");
+            "DeleteLabelingTask");
     // Task header: selector, ownership controls, editable name, and ID are
     // source/task-level UI and stay available when filtering yields no sample.
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -2296,7 +2296,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                           : UiTextId::ResumeLabelingDraft));
             const UnformattedSelectableRowResult temporary_action =
                 RenderUnformattedSelectableRow(
-                "###SpecForgeTemporaryLabelingTaskAction",
+                "###TemporaryLabelingTaskAction",
                 temporary_action_text,
                 ownership_text,
                 temporary_selected,
@@ -2350,7 +2350,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::PushID(PathToUtf8(annotation.path).c_str());
             const UnformattedSelectableRowResult annotation_row =
                 RenderUnformattedSelectableRow(
-                    "###SpecForgeLabelingTaskAnnotation",
+                    "###LabelingTaskAnnotation",
                     annotation.name,
                     std::nullopt,
                     selected,
@@ -2531,7 +2531,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::UseAnnotation,
-                "SpecForgeConfirmUseAnnotation");
+                "ConfirmUseAnnotation");
         if (ImGui::Button(
                 use_annotation_label.c_str())) {
             (void)submit(
@@ -2552,7 +2552,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelUseAnnotation");
+                "CancelUseAnnotation");
         if (ImGui::Button(
                 cancel_annotation_label.c_str())) {
             pending_annotation_activation_path_.clear();
@@ -2647,7 +2647,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::Resume,
-                "SpecForgeResumeRememberedLabelingRow");
+                "ResumeRememberedLabelingRow");
         if (ImGui::Button(
                 resume_label.c_str())) {
             (void)submit(
@@ -2691,7 +2691,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         StableUiLabel(
             language,
             UiTextId::AutoAdvance,
-            "SpecForgeLabelingAutoAdvance");
+            "LabelingAutoAdvance");
     if (ImGui::Checkbox(
             auto_advance_label.c_str(),
             &auto_advance)) {
@@ -2709,7 +2709,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         StableUiLabel(
             language,
             UiTextId::SkipLabeled,
-            "SpecForgeLabelingSkipLabeled");
+            "LabelingSkipLabeled");
     if (ImGui::Checkbox(
             skip_labeled_label.c_str(),
             &skip_labeled_on_advance)) {
@@ -2733,8 +2733,8 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 *canonical_output_action,
                 *canonical_output_action ==
                         UiTextId::MigrateToAsdf
-                    ? "SpecForgeMigrateLabelingTaskToAsdf"
-                    : "SpecForgeSaveLabelingTaskTo");
+                    ? "MigrateLabelingTaskToAsdf"
+                    : "SaveLabelingTaskTo");
         if (ImGui::Button(
                 save_to_label.c_str())) {
             const std::string suggested_filename =
@@ -2756,7 +2756,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         const std::string export_label = StableUiLabel(
             language,
             UiTextId::ExportLabels,
-            "SpecForgeExportLabels");
+            "ExportLabels");
         if (ImGui::Button(export_label.c_str())) {
             if (std::optional<std::filesystem::path> path =
                     choose_export_path(
@@ -2787,13 +2787,13 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::GetFrameHeight() +
             ImGui::GetStyle().FramePadding.x * 2.0f);
         if (ImGui::BeginCombo(
-                "##SpecForgeLabelExportFormat",
+                "##LabelExportFormat",
                 export_format_text)) {
             const bool npy_selected =
                 labeling_export_format_ ==
                 SampleLabelExportFormat::Npy;
             if (ImGui::Selectable(
-                    "NPY##SpecForgeLabelExportFormatNpy",
+                    "NPY##LabelExportFormatNpy",
                     npy_selected)) {
                 labeling_export_format_ =
                     SampleLabelExportFormat::Npy;
@@ -2805,7 +2805,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 labeling_export_format_ ==
                 SampleLabelExportFormat::Csv;
             if (ImGui::Selectable(
-                    "CSV##SpecForgeLabelExportFormatCsv",
+                    "CSV##LabelExportFormatCsv",
                     csv_selected)) {
                 labeling_export_format_ =
                     SampleLabelExportFormat::Csv;
@@ -2883,7 +2883,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGuiTableColumnFlags_WidthStretch,
             1.0f,
             ImGui::GetID(
-                "SpecForgeSampleLabelNameColumn"));
+                "SampleLabelNameColumn"));
         ImGui::TableSetupColumn(
             UiText(
                 language,
@@ -2892,7 +2892,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGuiTableColumnFlags_WidthFixed,
             52.0f,
             ImGui::GetID(
-                "SpecForgeSampleLabelCodeColumn"));
+                "SampleLabelCodeColumn"));
         ImGui::TableSetupColumn(
             UiText(
                 language,
@@ -2901,19 +2901,19 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGuiTableColumnFlags_WidthFixed,
             132.0f,
             ImGui::GetID(
-                "SpecForgeSampleLabelShortcutColumn"));
+                "SampleLabelShortcutColumn"));
         ImGui::TableSetupColumn(
             "##Edit",
             ImGuiTableColumnFlags_WidthFixed,
             32.0f,
             ImGui::GetID(
-                "SpecForgeSampleLabelEditColumn"));
+                "SampleLabelEditColumn"));
         ImGui::TableSetupColumn(
             "##Delete",
             ImGuiTableColumnFlags_WidthFixed,
             32.0f,
             ImGui::GetID(
-                "SpecForgeSampleLabelDeleteColumn"));
+                "SampleLabelDeleteColumn"));
         ImGui::TableHeadersRow();
 
         for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
@@ -3363,7 +3363,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::ChangeCode,
-                "SpecForgeConfirmChangeSampleLabelCode");
+                "ConfirmChangeSampleLabelCode");
         if (ImGui::Button(
                 change_code_label.c_str()) &&
             pending_label_code_change_original_code_) {
@@ -3387,7 +3387,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelChangeSampleLabelCode");
+                "CancelChangeSampleLabelCode");
         if (ImGui::Button(
                 cancel_change_code_label.c_str())) {
             pending_label_code_change_original_code_.reset();
@@ -3432,7 +3432,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::DeleteLabel,
-                "SpecForgeConfirmDeleteSampleLabel");
+                "ConfirmDeleteSampleLabel");
         if (ImGui::Button(
                 delete_label.c_str()) &&
             pending_delete_label_code_) {
@@ -3447,7 +3447,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelDeleteSampleLabel");
+                "CancelDeleteSampleLabel");
         if (ImGui::Button(
                 cancel_delete_label.c_str())) {
             pending_delete_label_code_.reset();
@@ -3488,7 +3488,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         StableUiLabel(
             language,
             UiTextId::Clear,
-            "SpecForgeClearCurrentSampleLabel");
+            "ClearCurrentSampleLabel");
     if (ImGui::Button(
             clear_current_label.c_str())) {
         label_code_to_assign.reset();
@@ -3534,12 +3534,12 @@ void SampleWorkflowPanelUi::RenderFilters(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::SampleFilters,
-        "SpecForgeFiltersV1");
+        "FiltersV1");
     const std::string add_sample_filter_source_popup =
         StableUiLabel(
             language,
             UiTextId::AddSampleFilterSource,
-            "SpecForgeAddSampleFilterSourcePopup");
+            "AddSampleFilterSourcePopup");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -3616,7 +3616,7 @@ void SampleWorkflowPanelUi::RenderFilters(
         StableUiLabel(
             language,
             UiTextId::ResetSampleFilters,
-            "SpecForgeResetSampleFilters");
+            "ResetSampleFilters");
     if (ImGui::Button(
             reset_filters_label.c_str())) {
         PanelSessionInteraction::Update update =
@@ -3769,12 +3769,12 @@ void SampleWorkflowPanelUi::RenderSorting(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::SampleSorting,
-        "SpecForgeSampleSortingV1");
+        "SampleSortingV1");
     const std::string add_sample_sort_source_popup =
         StableUiLabel(
             language,
             UiTextId::AddSampleSortSource,
-            "SpecForgeAddSampleSortSourcePopup");
+            "AddSampleSortSourcePopup");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -3816,7 +3816,7 @@ void SampleWorkflowPanelUi::RenderSorting(
         StableUiLabel(
             language,
             UiTextId::ResetSorting,
-            "SpecForgeResetSampleSorting");
+            "ResetSampleSorting");
     if (ImGui::Checkbox(
             reset_sorting_label.c_str(),
             &reset_sorting_checked) &&

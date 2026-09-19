@@ -271,13 +271,13 @@ struct LegalDocumentUiFixture {
 constexpr LegalDocumentUiFixture kLegalDocumentUiFixtures[] = {
     {
         specforge::LegalDocument::ThirdPartyNotices,
-        "Third-Party Notices###SpecForgeOpenThirdPartyNotices",
-        "##SpecForgeThirdPartyNoticesContent",
+        "Third-Party Notices###OpenThirdPartyNotices",
+        "##ThirdPartyNoticesContent",
     },
     {
         specforge::LegalDocument::DataSources,
-        "Data Sources###SpecForgeOpenDataSources",
-        "##SpecForgeDataSourcesContent",
+        "Data Sources###OpenDataSources",
+        "##DataSourcesContent",
     },
 };
 
@@ -319,7 +319,7 @@ LegalRenderObservation RenderLegalFrame(
 
     LegalRenderObservation observation;
     ImGuiWindow* settings_window = ImGui::FindWindowByName(
-        "Settings###SpecForgeSettingsV1");
+        "Settings###SettingsV1");
     if (settings_window != nullptr) {
         const ImGuiID navigation_child_id =
             settings_window->GetID("##SettingsNavigation");
@@ -343,7 +343,7 @@ LegalRenderObservation RenderLegalFrame(
                 observation.entry_hovered =
                     GImGui->HoveredId == observation.entry_id;
                 observation.copy_id = window->GetID(
-                    "Copy Document###SpecForgeCopyLegalDocument");
+                    "Copy Document###CopyLegalDocument");
                 observation.copy_hovered =
                     GImGui->HoveredId == observation.copy_id;
                 break;
@@ -1359,7 +1359,7 @@ void TestLanguageRenderKeepsStableImGuiIds()
         MakeSettingsView(specforge::UiLanguage::English));
     ImGuiWindow* english_window =
         ImGui::FindWindowByName(
-            "Settings###SpecForgeSettingsV1");
+            "Settings###SettingsV1");
     Require(
         english_window != nullptr,
         "English render should create the settings window");
@@ -1372,7 +1372,7 @@ void TestLanguageRenderKeepsStableImGuiIds()
             specforge::UiLanguage::SimplifiedChinese));
     ImGuiWindow* chinese_window =
         ImGui::FindWindowByName(
-            "设置###SpecForgeSettingsV1");
+            "设置###SettingsV1");
     Require(
         chinese_window != nullptr &&
             chinese_window->ID == english_window_id,
@@ -1381,9 +1381,9 @@ void TestLanguageRenderKeepsStableImGuiIds()
 
     Require(
         ImHashStr(
-            "Language###SpecForgeSettingsLanguage") ==
+            "Language###SettingsLanguage") ==
             ImHashStr(
-                "语言###SpecForgeSettingsLanguage"),
+                "语言###SettingsLanguage"),
         "localized Language labels should retain one ImGui ID");
     const std::string appearance_english =
         specforge::SettingsPanelUiTestAccess::SectionLabel(
@@ -1395,9 +1395,9 @@ void TestLanguageRenderKeepsStableImGuiIds()
             specforge::UiLanguage::SimplifiedChinese);
     Require(
         appearance_english ==
-                "Appearance###SpecForgeSettingsAppearance" &&
+                "Appearance###SettingsAppearance" &&
             appearance_chinese ==
-                "外观###SpecForgeSettingsAppearance",
+                "外观###SettingsAppearance",
         "Appearance navigation should use the production stable suffix");
     Require(
         ImHashStr(appearance_english.c_str()) ==
@@ -1462,9 +1462,9 @@ void TestLanguageRenderKeepsStableImGuiIds()
                 specforge::UiLanguage::SimplifiedChinese);
     Require(
         theme_english ==
-                "Theme###SpecForgeAppearanceTheme" &&
+                "Theme###AppearanceTheme" &&
             theme_chinese ==
-                "主题###SpecForgeAppearanceTheme",
+                "主题###AppearanceTheme",
         "theme controls should use the production stable suffix");
     Require(
         ImHashStr(theme_english.c_str()) ==
@@ -1482,10 +1482,10 @@ void TestLanguageRenderKeepsStableImGuiIds()
     Require(
         accent_english ==
                 "Accent color###"
-                "SpecForgeAppearanceAccentColor" &&
+                "AppearanceAccentColor" &&
             accent_chinese ==
                 "强调色###"
-                "SpecForgeAppearanceAccentColor",
+                "AppearanceAccentColor",
         "accent color controls should use the production stable suffix");
     Require(
         ImHashStr(accent_english.c_str()) ==
@@ -1493,41 +1493,41 @@ void TestLanguageRenderKeepsStableImGuiIds()
         "localized accent color controls should retain one ImGui ID");
     Require(
         ImHashStr(
-            "UI scale###SpecForgeUiScale") ==
+            "UI scale###UiScale") ==
             ImHashStr(
-                "界面缩放###SpecForgeUiScale"),
+                "界面缩放###UiScale"),
         "localized UI scale controls should retain one ImGui ID");
     Require(
         ImHashStr(
-            "Reset###SpecForgeUiScaleReset") ==
+            "Reset###UiScaleReset") ==
             ImHashStr(
-                "重置###SpecForgeUiScaleReset"),
+                "重置###UiScaleReset"),
         "localized reset actions should retain one ImGui ID");
     Require(
         ImHashStr(
             "Application language###"
-            "SpecForgeApplicationLanguage") ==
+            "ApplicationLanguage") ==
             ImHashStr(
                 "应用语言###"
-                "SpecForgeApplicationLanguage"),
+                "ApplicationLanguage"),
         "localized language selectors should retain one ImGui ID");
     Require(
         ImHashStr(
-            "English###SpecForgeUiLanguageEnglish") ==
+            "English###UiLanguageEnglish") ==
             ImHashStr(
-                "英语###SpecForgeUiLanguageEnglish"),
+                "英语###UiLanguageEnglish"),
         "localized language options should retain one ImGui ID");
     Require(
         ImHashStr(
-            "Third-Party Notices###SpecForgeOpenThirdPartyNotices") ==
+            "Third-Party Notices###OpenThirdPartyNotices") ==
             ImHashStr(
-                "第三方声明###SpecForgeOpenThirdPartyNotices"),
+                "第三方声明###OpenThirdPartyNotices"),
         "localized third-party notice disclosure headers should retain one ImGui ID");
     Require(
         ImHashStr(
-            "Data Sources###SpecForgeOpenDataSources") ==
+            "Data Sources###OpenDataSources") ==
             ImHashStr(
-                "数据来源###SpecForgeOpenDataSources"),
+                "数据来源###OpenDataSources"),
         "localized data-source disclosure headers should retain one ImGui ID");
 }
 
@@ -1557,7 +1557,7 @@ void TestRenderSmoke()
         panel.Render(MakeSettingsView());
         Require(
             ImGui::FindWindowByName(
-                "Settings###SpecForgeSettingsV1") != nullptr,
+                "Settings###SettingsV1") != nullptr,
             "rendering an open settings panel should create its window");
         Require(
             panel.open(),
@@ -1603,7 +1603,7 @@ void TestSettingsViewportStableAcrossOpeningFrames()
     ImGuiID settings_viewport = 0;
     for (int i = 0; i < 3; ++i) {
         frame();
-        const auto* window = ImGui::FindWindowByName("###SpecForgeSettingsV1");
+        const auto* window = ImGui::FindWindowByName("###SettingsV1");
         Require(window && window->ViewportId != ImGui::GetMainViewport()->ID,
             "Settings must own its detached viewport from its opening frame");
         if (i == 0) settings_viewport = window->ViewportId;
@@ -1612,14 +1612,14 @@ void TestSettingsViewportStableAcrossOpeningFrames()
     }
     panel.Open();
     frame();
-    Require(ImGui::FindWindowByName("###SpecForgeSettingsV1")->ViewportId == settings_viewport,
+    Require(ImGui::FindWindowByName("###SettingsV1")->ViewportId == settings_viewport,
         "Focusing an open Settings panel must retain its detached viewport");
     panel.CloseForLayoutRecovery();
     frame();
     frame();
     panel.Open();
     frame();
-    Require(ImGui::FindWindowByName("###SpecForgeSettingsV1")->ViewportId == settings_viewport,
+    Require(ImGui::FindWindowByName("###SettingsV1")->ViewportId == settings_viewport,
         "Reopening Settings after recovery must immediately use its detached viewport");
     ImGui::DestroyPlatformWindows();
 }
@@ -1640,7 +1640,7 @@ void TestSettingsWindowMinimumSizeTracksUiScale()
     ImGui::NewFrame();
     panel.Render(settings);
     ImGuiWindow* window = ImGui::FindWindowByName(
-        "Settings###SpecForgeSettingsV1");
+        "Settings###SettingsV1");
     Require(
         window != nullptr &&
             window->Size.x >= 1290.0f &&
@@ -1665,7 +1665,7 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
     ImGui::NewFrame();
     panel.Render(settings);
     ImGuiWindow* window = ImGui::FindWindowByName(
-        "Settings###SpecForgeSettingsV1");
+        "Settings###SettingsV1");
     Require(
         window != nullptr &&
             window->Size.x >= 1290.0f &&
@@ -1724,7 +1724,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
     ImGui::NewFrame();
     panel.Render(MakeSettingsView());
     ImGuiWindow* window = ImGui::FindWindowByName(
-        "Settings###SpecForgeSettingsV1");
+        "Settings###SettingsV1");
     Require(
         window != nullptr,
         "detached resize fixture should create the Settings window");
@@ -1746,7 +1746,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
         panel,
         detached_viewport.ID);
     ImGui::SetWindowSize(
-        "Settings###SpecForgeSettingsV1",
+        "Settings###SettingsV1",
         detached_viewport.Size,
         ImGuiCond_Always);
     panel.Render(MakeSettingsView());
@@ -1760,7 +1760,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
         panel,
         detached_viewport.ID);
     ImGui::SetWindowSize(
-        "Settings###SpecForgeSettingsV1",
+        "Settings###SettingsV1",
         enlarged_size,
         ImGuiCond_Always);
     panel.Render(MakeSettingsView());

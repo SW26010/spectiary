@@ -641,7 +641,7 @@ function Start-GuiInstance {
 
     $instanceId = New-RandomHex -ByteCount 16
     $nonce = New-RandomHex -ByteCount 32
-    $pipeName = 'SpecForge.Automation.' + $instanceId
+    $pipeName = '0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation.v1.' + $instanceId
     $pipePath = '\\.\pipe\' + $pipeName
     $arguments = @(
         '--automation-pipe', (Quote-WindowsArgument -Value $pipePath),

@@ -3130,7 +3130,7 @@ try {
             -Condition (
                 -not (Test-Path -LiteralPath (
                     Join-Path $windowContractRoot (
-                        '.specforge-automation-root.lock')))) `
+                        '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-root.v1.lock')))) `
             -Message 'The launcher must release and remove its state-root identity lock after the owned GUI exits.'
     }
     finally {

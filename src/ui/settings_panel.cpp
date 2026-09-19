@@ -214,7 +214,7 @@ LegalDisclosureRenderResult RenderEmbeddedLegalDisclosure(
     const std::string copy_label = StableUiLabel(
         language,
         UiTextId::CopyDocument,
-        "SpecForgeCopyLegalDocument");
+        "CopyLegalDocument");
     ImGui::BeginDisabled(content.empty());
     if (ImGui::Button(copy_label.c_str())) {
         ImGui::SetClipboardText(std::string(content).c_str());
@@ -230,7 +230,7 @@ std::string SettingsWindowLabel(UiLanguage language)
     return StableUiLabel(
         language,
         UiTextId::Settings,
-        "SpecForgeSettingsV1");
+        "SettingsV1");
 }
 
 std::string AppearanceThemeItems(UiLanguage language)
@@ -656,42 +656,42 @@ std::string SettingsPanelUi::SectionLabel(
         return StableUiLabel(
             language,
             UiTextId::General,
-            "SpecForgeSettingsGeneral");
+            "SettingsGeneral");
     case SettingsSection::Appearance:
         return StableUiLabel(
             language,
             UiTextId::Appearance,
-            "SpecForgeSettingsAppearance");
+            "SettingsAppearance");
     case SettingsSection::Language:
         return StableUiLabel(
             language,
             UiTextId::Language,
-            "SpecForgeSettingsLanguage");
+            "SettingsLanguage");
     case SettingsSection::Input:
         return StableUiLabel(
             language,
             UiTextId::Input,
-            "SpecForgeSettingsInput");
+            "SettingsInput");
     case SettingsSection::DataAndRecovery:
         return StableUiLabel(
             language,
             UiTextId::DataAndRecovery,
-            "SpecForgeSettingsDataAndRecovery");
+            "SettingsDataAndRecovery");
     case SettingsSection::Diagnostics:
         return StableUiLabel(
             language,
             UiTextId::Diagnostics,
-            "SpecForgeSettingsDiagnostics");
+            "SettingsDiagnostics");
     case SettingsSection::About:
         return StableUiLabel(
             language,
             UiTextId::About,
-            "SpecForgeSettingsAbout");
+            "SettingsAbout");
     }
     return StableUiLabel(
         language,
         UiTextId::Settings,
-        "SpecForgeSettingsFallback");
+        "SettingsFallback");
 }
 
 std::string SettingsPanelUi::AppearanceThemeLabel(
@@ -700,7 +700,7 @@ std::string SettingsPanelUi::AppearanceThemeLabel(
     return StableUiLabel(
         language,
         UiTextId::Theme,
-        "SpecForgeAppearanceTheme");
+        "AppearanceTheme");
 }
 
 std::string SettingsPanelUi::AppearanceAccentColorLabel(
@@ -709,7 +709,7 @@ std::string SettingsPanelUi::AppearanceAccentColorLabel(
     return StableUiLabel(
         language,
         UiTextId::AccentColor,
-        "SpecForgeAppearanceAccentColor");
+        "AppearanceAccentColor");
 }
 
 float SettingsPanelUi::VisibleLabelWidth(std::string_view label)
@@ -1095,7 +1095,7 @@ void SettingsPanelUi::RenderGeneral(
     const std::string restore_label = StableUiLabel(
         language,
         UiTextId::RestorePreviousSession,
-        "SpecForgeRestorePreviousSession");
+        "RestorePreviousSession");
     ImGui::BeginDisabled();
     ImGui::Checkbox(
         restore_label.c_str(),
@@ -1123,7 +1123,7 @@ void SettingsPanelUi::RenderGeneral(
         StableUiLabel(
             language,
             UiTextId::OpenExternalSourceAsFolder,
-            "SpecForgeOpenExternalSourceAsFolder");
+            "OpenExternalSourceAsFolder");
     if (ImGui::Checkbox(
             open_external_source_label.c_str(),
             &open_external_source_as_folder)) {
@@ -1146,7 +1146,7 @@ void SettingsPanelUi::RenderGeneral(
         StableUiLabel(
             language,
             UiTextId::IncludeExternalSubfolders,
-            "SpecForgeIncludeExternalSubfolders");
+            "IncludeExternalSubfolders");
     ImGui::BeginDisabled();
     ImGui::Checkbox(
         include_external_subfolders_label.c_str(),
@@ -1267,7 +1267,7 @@ void SettingsPanelUi::RenderAppearance(
     const std::string ui_scale_label = StableUiLabel(
         language,
         UiTextId::UiScale,
-        "SpecForgeUiScale");
+        "UiScale");
     const bool ui_scale_changed = ImGui::SliderInt(
         ui_scale_label.c_str(),
         &ui_scale,
@@ -1292,7 +1292,7 @@ void SettingsPanelUi::RenderAppearance(
     const std::string reset_label = StableUiLabel(
         language,
         UiTextId::Reset,
-        "SpecForgeUiScaleReset");
+        "UiScaleReset");
     if (ImGui::Button(reset_label.c_str())) {
         ui_scale_draft_percentage_.reset();
         SetUiScalePercentage(kDefaultUiScalePercentage);
@@ -1367,7 +1367,7 @@ void SettingsPanelUi::RenderLanguage(
     const std::string selector_label = StableUiLabel(
         language,
         UiTextId::ApplicationLanguage,
-        "SpecForgeApplicationLanguage");
+        "ApplicationLanguage");
     const char* preview =
         UiText(language, LanguageNameTextId(language)).data();
     if (ImGui::BeginCombo(selector_label.c_str(), preview)) {
@@ -1381,8 +1381,8 @@ void SettingsPanelUi::RenderLanguage(
                 language,
                 LanguageNameTextId(candidate),
                 candidate == UiLanguage::English
-                    ? "SpecForgeUiLanguageEnglish"
-                    : "SpecForgeUiLanguageSimplifiedChinese");
+                    ? "UiLanguageEnglish"
+                    : "UiLanguageSimplifiedChinese");
             if (ImGui::Selectable(
                     option_label.c_str(),
                     selected) &&
@@ -1452,7 +1452,7 @@ void SettingsPanelUi::RenderInput(
         StableUiLabel(
             language,
             UiTextId::LiveNumericNavigation,
-            "SpecForgeLiveNumericNavigation");
+            "LiveNumericNavigation");
     if (ImGui::Checkbox(
             live_numeric_navigation_label.c_str(),
             &live_numeric_navigation)) {
@@ -1506,19 +1506,19 @@ void SettingsPanelUi::RenderInput(
     const std::string mouse_zoom_label = StableUiLabel(
         language,
         UiTextId::MouseZoomSensitivity,
-        "SpecForgeMouseZoomSensitivity");
+        "MouseZoomSensitivity");
     const std::string touchpad_zoom_label = StableUiLabel(
         language,
         UiTextId::TouchpadZoomSensitivity,
-        "SpecForgeTouchpadZoomSensitivity");
+        "TouchpadZoomSensitivity");
     const std::string reverse_zoom_label = StableUiLabel(
         language,
         UiTextId::ReverseZoomDirection,
-        "SpecForgeReverseZoomDirection");
+        "ReverseZoomDirection");
     const std::string shortcuts_label = StableUiLabel(
         language,
         UiTextId::ViewKeyboardShortcuts,
-        "SpecForgeViewKeyboardShortcuts");
+        "ViewKeyboardShortcuts");
     ImGui::BeginDisabled();
     ImGui::SliderFloat(
         mouse_zoom_label.c_str(),
@@ -1586,7 +1586,7 @@ void SettingsPanelUi::RenderDataAndRecovery(
     const std::string open_data_label = StableUiLabel(
         language,
         UiTextId::OpenDataFolder,
-        "SpecForgeOpenDataFolder");
+        "OpenDataFolder");
     if (ImGui::Button(open_data_label.c_str())) {
         OpenDirectory(
             environment_.data_directory,
@@ -1599,7 +1599,7 @@ void SettingsPanelUi::RenderDataAndRecovery(
     const std::string copy_data_path_label = StableUiLabel(
         language,
         UiTextId::CopyPath,
-        "SpecForgeCopyDataPath");
+        "CopyDataPath");
     if (ImGui::Button(copy_data_path_label.c_str())) {
         CopyPath(
             environment_.data_directory,
@@ -1612,17 +1612,17 @@ void SettingsPanelUi::RenderDataAndRecovery(
         StableUiLabel(
             language,
             UiTextId::ConfigurationPortability,
-            "SpecForgeConfigurationPortability");
+            "ConfigurationPortability");
     ImGui::SeparatorText(
         configuration_portability.c_str());
     const std::string import_label = StableUiLabel(
         language,
         UiTextId::ImportSettings,
-        "SpecForgeImportSettings");
+        "ImportSettings");
     const std::string export_label = StableUiLabel(
         language,
         UiTextId::ExportSettings,
-        "SpecForgeExportSettings");
+        "ExportSettings");
     ImGui::BeginDisabled();
     ImGui::Button(import_label.c_str());
     ImGui::SameLine();
@@ -1644,23 +1644,23 @@ void SettingsPanelUi::RenderDataAndRecovery(
     const std::string recovery_heading = StableUiLabel(
         language,
         UiTextId::RecoveryAndReset,
-        "SpecForgeRecoveryAndReset");
+        "RecoveryAndReset");
     ImGui::SeparatorText(recovery_heading.c_str());
     const std::string reset_layout_label =
         StableUiLabel(
             language,
             UiTextId::RestoreDefaultLayout,
-            "SpecForgeResetWindowLayout");
+            "ResetWindowLayout");
     const std::string reset_settings_label =
         StableUiLabel(
             language,
             UiTextId::ResetApplicationSettings,
-            "SpecForgeResetApplicationSettings");
+            "ResetApplicationSettings");
     const std::string erase_state_label =
         StableUiLabel(
             language,
             UiTextId::EraseAllApplicationState,
-            "SpecForgeEraseAllApplicationState");
+            "EraseAllApplicationState");
     if (ImGui::Button(reset_layout_label.c_str())) {
         restore_default_layout_requested_ = true;
     }
@@ -1740,7 +1740,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             recording_action_id,
-            "SpecForgeProfileRecordingToggle");
+            "ProfileRecordingToggle");
     if (ImGui::Button(
             recording_action_label.c_str())) {
         profile_recording_toggle_requested_ = true;
@@ -1787,7 +1787,7 @@ void SettingsPanelUi::RenderDiagnostics(
             StableUiLabel(
                 language,
                 UiTextId::ExperimentalFrameCapture,
-                "SpecForgeExperimentalFrameCapture");
+                "ExperimentalFrameCapture");
         ImGui::SeparatorText(capture_heading.c_str());
         ImGui::PushTextWrapPos();
         const std::string_view capture_description =
@@ -1812,7 +1812,7 @@ void SettingsPanelUi::RenderDiagnostics(
             StableUiLabel(
                 language,
                 UiTextId::CaptureNextMainFrame,
-                "SpecForgeCaptureNextMainFrame");
+                "CaptureNextMainFrame");
         if (ImGui::Button(capture_button.c_str())) {
             frame_capture_requested_ = true;
         }
@@ -1872,7 +1872,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             UiTextId::ProfileOutputDirectory,
-            "SpecForgeProfileOutputDirectory");
+            "ProfileOutputDirectory");
     ImGui::SeparatorText(
         profile_output_heading.c_str());
     const std::string output_path =
@@ -1944,7 +1944,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             UiTextId::ChooseFolder,
-            "SpecForgeChooseProfileOutputFolder");
+            "ChooseProfileOutputFolder");
     if (ImGui::Button(choose_folder_label.c_str())) {
         profile_output_directory_selection_requested_ = true;
     }
@@ -1964,7 +1964,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             UiTextId::RestoreDefault,
-            "SpecForgeRestoreProfileOutputDefault");
+            "RestoreProfileOutputDefault");
     if (ImGui::Button(
             restore_default_label.c_str())) {
         ResetProfileOutputDirectory();
@@ -1978,7 +1978,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             UiTextId::OpenOutputFolder,
-            "SpecForgeOpenProfileOutputFolder");
+            "OpenProfileOutputFolder");
     if (ImGui::Button(open_output_label.c_str())) {
         OpenDirectory(
             settings.profile_output_directory,
@@ -1992,7 +1992,7 @@ void SettingsPanelUi::RenderDiagnostics(
         StableUiLabel(
             language,
             UiTextId::CopyPath,
-            "SpecForgeCopyProfileOutputPath");
+            "CopyProfileOutputPath");
     if (ImGui::Button(
             copy_profile_path_label.c_str())) {
         CopyPath(
@@ -2117,7 +2117,7 @@ void SettingsPanelUi::RenderAbout(
         const std::string build_details = StableUiLabel(
             language,
             UiTextId::BuildDetails,
-            "SpecForgeBuildDetails");
+            "BuildDetails");
         ImGui::SeparatorText(build_details.c_str());
         const BuildMetadata& metadata =
             *environment_.build_metadata.metadata;
@@ -2146,7 +2146,7 @@ void SettingsPanelUi::RenderAbout(
     const std::string artifact_identity_heading = StableUiLabel(
         language,
         UiTextId::ArtifactIdentity,
-        "SpecForgeArtifactIdentity");
+        "ArtifactIdentity");
     ImGui::SeparatorText(artifact_identity_heading.c_str());
     if (presentation.show_completed_at_utc &&
         !artifact_identity.completed_at_utc.empty()) {
@@ -2165,7 +2165,7 @@ void SettingsPanelUi::RenderAbout(
         StableUiLabel(
             language,
             UiTextId::ThirdPartyComponents,
-            "SpecForgeThirdPartyComponents");
+            "ThirdPartyComponents");
     ImGui::SeparatorText(
         third_party_heading.c_str());
     if (presentation.show_third_party_versions) {
@@ -2275,7 +2275,7 @@ void SettingsPanelUi::RenderAbout(
         StableUiLabel(
             language,
             UiTextId::LegalDocuments,
-            "SpecForgeLegalDocuments");
+            "LegalDocuments");
     ImGui::SeparatorText(
         legal_documents_heading.c_str());
     ImGui::PushTextWrapPos();
@@ -2292,16 +2292,16 @@ void SettingsPanelUi::RenderAbout(
         RenderEmbeddedLegalDisclosure(
             LegalDocument::ThirdPartyNotices,
             UiTextId::ThirdPartyNotices,
-            "SpecForgeOpenThirdPartyNotices",
-            "##SpecForgeThirdPartyNoticesContent",
+            "OpenThirdPartyNotices",
+            "##ThirdPartyNoticesContent",
             language,
             expanded_legal_document_);
     const LegalDisclosureRenderResult data_sources =
         RenderEmbeddedLegalDisclosure(
             LegalDocument::DataSources,
             UiTextId::DataSources,
-            "SpecForgeOpenDataSources",
-            "##SpecForgeDataSourcesContent",
+            "OpenDataSources",
+            "##DataSourcesContent",
             language,
             expanded_legal_document_);
 
@@ -2331,7 +2331,7 @@ void SettingsPanelUi::RenderAbout(
         StableUiLabel(
             language,
             UiTextId::Diagnostics,
-            "SpecForgeAboutDiagnostics");
+            "AboutDiagnostics");
     ImGui::SeparatorText(
         diagnostics_heading.c_str());
     const std::string log_path =
@@ -2350,7 +2350,7 @@ void SettingsPanelUi::RenderAbout(
         StableUiLabel(
             language,
             UiTextId::OpenLogFolder,
-            "SpecForgeOpenLogFolder");
+            "OpenLogFolder");
     if (ImGui::Button(open_log_label.c_str())) {
         OpenDirectory(
             settings.profile_output_directory,
@@ -2364,7 +2364,7 @@ void SettingsPanelUi::RenderAbout(
         StableUiLabel(
             language,
             UiTextId::CopyDiagnosticInformation,
-            "SpecForgeCopyDiagnosticInformation");
+            "CopyDiagnosticInformation");
     if (ImGui::Button(
             copy_diagnostics_label.c_str())) {
         CopyDiagnosticInformation(

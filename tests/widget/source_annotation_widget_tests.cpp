@@ -209,7 +209,7 @@ void TestMissingLocalAnnotationRemovalRequiresConfirmation()
                 std::string::npos,
         "the first remove click should show an explicit warning without abandoning the task");
 
-    fixture.ui.Click("SpecForgeConfirmRemoveMissingLocalLabelingTask");
+    fixture.ui.Click("ConfirmRemoveMissingLocalLabelingTask");
     Require(
         fixture.submit_count == 1,
         "confirming the warning should submit the missing local task removal exactly once");
@@ -259,7 +259,7 @@ void TestAnnotationImportFailureDismissalTracksExactDetail()
             "initial-labels.csv",
             "First roster mismatch detail."));
     (void)fixture.RenderFrame();
-    fixture.ui.Click("SpecForgeAnnotationImportDiagnosticDismiss");
+    fixture.ui.Click("AnnotationImportDiagnosticDismiss");
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     const AnnotationPanelFrameObservation dismissed =
         fixture.RenderFrame();
@@ -299,7 +299,7 @@ void TestReimportSameAnnotationClearsDismissalForNewFailure()
     fixture.view.navigation.annotation_diagnostics.push_back(
         diagnostic);
     (void)fixture.RenderFrame();
-    fixture.ui.Click("SpecForgeAnnotationImportDiagnosticDismiss");
+    fixture.ui.Click("AnnotationImportDiagnosticDismiss");
     Require(
         fixture.RenderFrame().logged_text.find(
             "Roster mismatch on retry.") ==
@@ -312,7 +312,7 @@ void TestReimportSameAnnotationClearsDismissalForNewFailure()
         fixture.view.navigation.annotation_diagnostics.push_back(
             diagnostic);
     };
-    fixture.ui.Click("SpecForgeAnnotationsAddFile");
+    fixture.ui.Click("AnnotationsAddFile");
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     const AnnotationPanelFrameObservation retried =
         fixture.RenderFrame();
@@ -324,10 +324,10 @@ void TestReimportSameAnnotationClearsDismissalForNewFailure()
                 "Roster mismatch on retry.") == 1,
         "same normalized path retry should submit once and reveal one latest failure card");
 
-    fixture.ui.Click("SpecForgeAnnotationImportDiagnosticDismiss");
+    fixture.ui.Click("AnnotationImportDiagnosticDismiss");
     fixture.submit_loaded = true;
     fixture.after_submit = {};
-    fixture.ui.Click("SpecForgeAnnotationsAddFile");
+    fixture.ui.Click("AnnotationsAddFile");
     const AnnotationPanelFrameObservation successful =
         fixture.RenderFrame();
     Require(
@@ -347,7 +347,7 @@ void TestAnnotationDismissalsResetAcrossSourceSwitch()
     fixture.view.navigation.annotation_diagnostics = {
         source_a_failure};
     (void)fixture.RenderFrame();
-    fixture.ui.Click("SpecForgeAnnotationImportDiagnosticDismiss");
+    fixture.ui.Click("AnnotationImportDiagnosticDismiss");
 
     fixture.view.labeling.source_identity = "source-b";
     fixture.snapshot->source.path = "source-b.npy";
@@ -385,7 +385,7 @@ void TestHiddenAnnotationPanelObservesIntermediateSourceSwitch()
     fixture.view.navigation.annotation_diagnostics = {
         source_a_failure};
     (void)fixture.RenderFrame();
-    fixture.ui.Click("SpecForgeAnnotationImportDiagnosticDismiss");
+    fixture.ui.Click("AnnotationImportDiagnosticDismiss");
     Require(
         fixture.RenderFrame().logged_text.find(
             "Source A hidden-panel failure.") ==

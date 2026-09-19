@@ -65,7 +65,7 @@ bool Win32Window::Create(HINSTANCE instance, const wchar_t* title, int width, in
 {
     instance_ = instance;
     message_handler_ = std::move(handler);
-    class_name_ = L"SpecForgeMainWindow";
+    class_name_ = L"MainWindowV1";
     const Win32ApplicationIcons icons =
         LoadWin32ApplicationIcons(instance_);
     if (!icons) {

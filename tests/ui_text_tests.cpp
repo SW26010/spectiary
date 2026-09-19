@@ -403,16 +403,16 @@ void TestShellAndSettingsMappingsAreExact()
     const std::string english = StableUiLabel(
         UiLanguage::English,
         UiTextId::OpenFile,
-        "SpecForgeOpenFile");
+        "OpenFile");
     const std::string chinese = StableUiLabel(
         UiLanguage::SimplifiedChinese,
         UiTextId::OpenFile,
-        "SpecForgeOpenFile");
+        "OpenFile");
     Require(
         english ==
-                "Open File...###SpecForgeOpenFile" &&
+                "Open File...###OpenFile" &&
             chinese ==
-                "打开文件…###SpecForgeOpenFile",
+                "打开文件…###OpenFile",
         "localized actions should retain their stable ID suffix");
 }
 
@@ -703,8 +703,8 @@ void TestSourceInspectionMappingsAreExact()
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::RawSpectrum,
-            "SpecForgeShowRawCurve") ==
-            "原始曲线###SpecForgeShowRawCurve",
+            "ShowRawCurve") ==
+            "原始曲线###ShowRawCurve",
         "localized smoothing controls should retain stable IDs");
     Require(
         StableUiLabel(
@@ -1033,15 +1033,15 @@ void TestSampleWorkflowMappingsAreExact()
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::UseAnnotationAsLabelingTask,
-            "SpecForgeAnnotationToLabelingPopup") ==
-            "将标注用作标注任务？###SpecForgeAnnotationToLabelingPopup",
+            "AnnotationToLabelingPopup") ==
+            "将标注用作标注任务？###AnnotationToLabelingPopup",
         "localized sample-workflow popups should retain stable IDs");
     Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::ResetSorting,
-            "SpecForgeResetSampleSorting") ==
-            "重置排序###SpecForgeResetSampleSorting",
+            "ResetSampleSorting") ==
+            "重置排序###ResetSampleSorting",
         "localized sample-sorting controls should retain stable IDs");
 }
 
@@ -1257,15 +1257,15 @@ void TestSpectralLineMappingsAreExact()
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::Search,
-            "SpecForgeSpectralLineSearch") ==
-            "搜索###SpecForgeSpectralLineSearch",
+            "SpectralLineSearch") ==
+            "搜索###SpectralLineSearch",
         "localized spectral-line controls should retain stable IDs");
     Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::RenameGroup,
-            "SpecForgeRenameUserGroupPopup") ==
-            "重命名分组###SpecForgeRenameUserGroupPopup",
+            "RenameUserGroupPopup") ==
+            "重命名分组###RenameUserGroupPopup",
         "localized spectral-line popups should retain stable IDs");
 }
 

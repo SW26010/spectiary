@@ -1,3 +1,4 @@
+#include "app/project_identity.h"
 #include "ui/sample_labeling_controller.h"
 
 #include "app/local_user_state.h"
@@ -406,7 +407,7 @@ std::vector<std::filesystem::path> TaskEditLeasePaths(
         return paths;
     }
     StableSha256 digest;
-    digest.Append("specforge.sample-labeling.edit-lease.v1\n");
+    digest.Append(project_identity::kLabelingEditLeaseDomain);
     digest.Append(lease_key);
     const std::string file_name =
         digest.FinishHex() + ".lock";

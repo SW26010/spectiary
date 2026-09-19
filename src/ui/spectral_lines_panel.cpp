@@ -16,7 +16,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kSpectralLinesWindow =
-    "Spectral Lines###SpecForgeSpectralLinesV2";
+    "Spectral Lines###SpectralLinesV2";
 
 bool HasNonWhitespace(std::string_view text)
 {
@@ -120,7 +120,7 @@ void SpectralLinesPanelUi::Render(
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::SpectralLines,
-        "SpecForgeSpectralLinesV2");
+        "SpectralLinesV2");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
@@ -162,7 +162,7 @@ void SpectralLinesPanelUi::Render(
         StableUiLabel(
             language,
             UiTextId::Catalog,
-            "SpecForgeSpectralLineCatalog");
+            "SpectralLineCatalog");
     if (ImGui::BeginCombo(
             catalog_label.c_str(),
             selected_catalog.c_str())) {
@@ -184,7 +184,7 @@ void SpectralLinesPanelUi::Render(
         StableUiLabel(
             language,
             UiTextId::Labels,
-            "SpecForgeSpectralLineLabels");
+            "SpectralLineLabels");
     if (ImGui::Checkbox(
             labels_label.c_str(),
             &marker_labels_visible)) {
@@ -250,7 +250,7 @@ void SpectralLinesPanelUi::Render(
         StableUiLabel(
             language,
             UiTextId::Search,
-            "SpecForgeSpectralLineSearch");
+            "SpectralLineSearch");
     if (ImGui::InputTextWithHint(
             search_label.c_str(),
             UiText(
@@ -301,7 +301,7 @@ void SpectralLinesPanelUi::Render(
                             grouping_view.editable
                                 ? UiTextId::Duplicate
                                 : UiTextId::DuplicateAsUserView,
-                            "SpecForgeDuplicateSpectralLineGroupingView");
+                            "DuplicateSpectralLineGroupingView");
                     if (ImGui::Selectable(
                             duplicate_label.c_str())) {
                         pending_duplicate = grouping_view;
@@ -310,7 +310,7 @@ void SpectralLinesPanelUi::Render(
                         StableUiLabel(
                             language,
                             UiTextId::Rename,
-                            "SpecForgeRenameSpectralLineGroupingView");
+                            "RenameSpectralLineGroupingView");
                     if (grouping_view.editable &&
                         ImGui::Selectable(rename_label.c_str())) {
                         pending_rename = grouping_view;
@@ -319,7 +319,7 @@ void SpectralLinesPanelUi::Render(
                         StableUiLabel(
                             language,
                             UiTextId::Delete,
-                            "SpecForgeDeleteSpectralLineGroupingView");
+                            "DeleteSpectralLineGroupingView");
                     if (grouping_view.editable &&
                         ImGui::Selectable(delete_label.c_str())) {
                         pending_delete = grouping_view;
@@ -369,7 +369,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::RenameGroupingView,
-                "SpecForgeRenameGroupingViewPopup");
+                "RenameGroupingViewPopup");
         ImGui::OpenPopup(rename_popup.c_str());
     }
     if (pending_delete) {
@@ -383,7 +383,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::DeleteGroupingView,
-                "SpecForgeDeleteGroupingViewPopup");
+                "DeleteGroupingViewPopup");
         ImGui::OpenPopup(delete_popup.c_str());
     }
     grouping_view_ui_.RenderPendingPopups(
@@ -394,7 +394,7 @@ void SpectralLinesPanelUi::Render(
         StableUiLabel(
             language,
             UiTextId::RenameGroupingView,
-            "SpecForgeRenameGroupingViewPopup");
+            "RenameGroupingViewPopup");
     if (ImGui::BeginPopupModal(
             rename_popup.c_str(),
             nullptr,
@@ -406,7 +406,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::Name,
-                "SpecForgeSpectralLineGroupingViewName");
+                "SpectralLineGroupingViewName");
         const bool submitted = ImGui::InputText(
             name_label.c_str(),
             &renaming_grouping_view_name_,
@@ -444,7 +444,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::Rename,
-                "SpecForgeConfirmRenameSpectralLineGroupingView");
+                "ConfirmRenameSpectralLineGroupingView");
         if (ImGui::Button(rename_label.c_str()) ||
             (submitted && valid_name)) {
             finish_rename();
@@ -457,7 +457,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelRenameSpectralLineGroupingView");
+                "CancelRenameSpectralLineGroupingView");
         if (ImGui::Button(cancel_rename_label.c_str())) {
             renaming_grouping_view_id_.reset();
             renaming_grouping_view_name_.clear();
@@ -472,7 +472,7 @@ void SpectralLinesPanelUi::Render(
         StableUiLabel(
             language,
             UiTextId::DeleteGroupingView,
-            "SpecForgeDeleteGroupingViewPopup");
+            "DeleteGroupingViewPopup");
     if (ImGui::BeginPopupModal(
             delete_popup.c_str(),
             nullptr,
@@ -495,7 +495,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::Delete,
-                "SpecForgeConfirmDeleteSpectralLineGroupingView");
+                "ConfirmDeleteSpectralLineGroupingView");
         if (ImGui::Button(delete_label.c_str())) {
             if (deleting_grouping_view_id_) {
                 (void)panel.Submit(
@@ -510,7 +510,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::Cancel,
-                "SpecForgeCancelDeleteSpectralLineGroupingView");
+                "CancelDeleteSpectralLineGroupingView");
         if (ImGui::Button(cancel_delete_label.c_str())) {
             deleting_grouping_view_id_.reset();
             deleting_grouping_view_name_.clear();
@@ -532,7 +532,7 @@ void SpectralLinesPanelUi::Render(
             StableUiLabel(
                 language,
                 UiTextId::NewGroupingView,
-                "SpecForgeNewSpectralLineGroupingView");
+                "NewSpectralLineGroupingView");
         if (ImGui::Button(
                 new_grouping_view_label.c_str())) {
             create_new_view();

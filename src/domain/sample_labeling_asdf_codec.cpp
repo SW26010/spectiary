@@ -1,3 +1,4 @@
+#include "app/project_identity.h"
 #include "domain/sample_labeling_asdf_codec.h"
 
 #include "domain/stable_sha256.h"
@@ -98,7 +99,7 @@ void AppendIdentityDigestField(StableSha256& digest,
 {
     StableSha256 digest;
     AppendIdentityDigestField(
-        digest, "specforge.sample_labeling.asdf-preservation-identity-v2");
+        digest, project_identity::kAsdfPreservationDomain);
     AppendIdentityDigestField(digest, document.format_kind);
     AppendIdentityDigestField(digest, document.schema_version);
     AppendIdentityDigestField(digest, document.source.base_identity);
@@ -142,7 +143,7 @@ void AppendIdentityDigestField(StableSha256& digest,
 {
     StableSha256 digest;
     AppendIdentityDigestField(
-        digest, "specforge.sample_labeling.asdf-values-rewrite-identity-v1");
+        digest, project_identity::kAsdfValuesRewriteDomain);
     AppendIdentityDigestField(
         digest, PreservationIdentityDigest(document));
     AppendIdentityDigestField(

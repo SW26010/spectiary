@@ -241,8 +241,8 @@ namespace {
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> OutputWidgetBounds()
 {
-    const auto save = WidgetBounds("SpecForgeSaveLabelingTaskTo");
-    return save ? save : WidgetBounds("SpecForgeMigrateLabelingTaskToAsdf");
+    const auto save = WidgetBounds("SaveLabelingTaskTo");
+    return save ? save : WidgetBounds("MigrateLabelingTaskToAsdf");
 }
 #endif
 
@@ -803,9 +803,9 @@ void SelectLabelExportFormatThroughUi(
             ++unexpected_actions;
     };
     auto& ui = specforge::test::WidgetHarness::Current();
-    ui.Click("##SpecForgeLabelExportFormat", render);
+    ui.Click("##LabelExportFormat", render);
     ui.Click(format == specforge::SampleLabelExportFormat::Csv
-        ? "CSV##SpecForgeLabelExportFormatCsv" : "NPY##SpecForgeLabelExportFormatNpy", render);
+        ? "CSV##LabelExportFormatCsv" : "NPY##LabelExportFormatNpy", render);
     Require(unexpected_actions == 0 &&
         specforge::SampleWorkflowPanelUiTestAccess::LabelingExportFormat(panel) == format,
         "choosing an export format must update the preference without exporting");
@@ -1035,7 +1035,7 @@ RecoveryFrameObservation RenderRecoveryFrame(
         if (ImGuiWindow* popup_window =
                 GImGui->OpenPopupStack.back().Window) {
             observation.popup_confirm_id = popup_window->GetID(
-                "SpecForgeConfirmDeleteLabelingTask");
+                "ConfirmDeleteLabelingTask");
         }
     }
     if (ImGuiWindow* window = ImGui::FindWindowByName(
@@ -1133,7 +1133,7 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
         if (ImGuiWindow* popup_window = GImGui->OpenPopupStack.back().Window) {
             observation.popup_content_start = popup_window->DC.CursorStartPos;
             observation.temporary_action_hovered =
-                GImGui->HoveredId == popup_window->GetID("SpecForgeTemporaryLabelingTaskAction");
+                GImGui->HoveredId == popup_window->GetID("TemporaryLabelingTaskAction");
         }
     }
     ImGui::EndFrame();
@@ -1363,10 +1363,10 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, active_view);
     const auto export_rect =
-        WidgetBounds("SpecForgeExportLabels");
+        WidgetBounds("ExportLabels");
     Require(
         export_rect.has_value() &&
-            WidgetBounds("##SpecForgeLabelExportFormat") &&
+            WidgetBounds("##LabelExportFormat") &&
             specforge::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
                 specforge::SampleLabelExportFormat::Npy,
@@ -1406,7 +1406,7 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, inactive_view);
     Require(
-        !WidgetBounds("SpecForgeExportLabels"),
+        !WidgetBounds("ExportLabels"),
         "Export Labels should be hidden when no editable task is active");
 
     specforge::SourceCollectionSessionView structural_view =
@@ -1418,7 +1418,7 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     const LabelingExportFrameObservation structural =
         RenderLabelingExportFrame(panel, structural_view);
     Require(
-        !WidgetBounds("SpecForgeExportLabels") &&
+        !WidgetBounds("ExportLabels") &&
             structural.export_path_request_count == 0 &&
             !structural.submitted_workflow_kind,
         "Export Labels should be hidden for a structural canonical task without authoritative values");
@@ -1477,7 +1477,7 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, folder_view);
     const auto export_rect =
-        WidgetBounds("SpecForgeExportLabels");
+        WidgetBounds("ExportLabels");
     Require(
         export_rect &&
             specforge::SampleWorkflowPanelUiTestAccess::
@@ -1622,7 +1622,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
         }
 
         const auto export_rect =
-            WidgetBounds("SpecForgeExportLabels");
+            WidgetBounds("ExportLabels");
         Require(
             export_rect.has_value(),
             "each export matrix case should expose the export action");
@@ -1908,7 +1908,7 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
         activated_view,
         false);
     const auto temporary_action_rect =
-        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
+        WidgetBounds("TemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "integration fixture should expose a deterministic temporary task action rectangle");
@@ -2015,7 +2015,7 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
             activated_view,
             false);
         const auto temporary_action_rect =
-            WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
+            WidgetBounds("TemporaryLabelingTaskAction");
         Require(
             temporary_action_rect.has_value(),
             "single-draft resume fixture should expose a deterministic generic action rectangle");
@@ -2123,17 +2123,17 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             RecoveryWidgetBounds(
                 recovery_view,
                 0,
-                "SpecForgeRecoverTemporaryDraft");
+                "RecoverTemporaryDraft");
         const auto keep_rect =
             RecoveryWidgetBounds(
                 recovery_view,
                 0,
-                "SpecForgeKeepTemporaryDraft");
+                "KeepTemporaryDraft");
         const auto delete_rect =
             RecoveryWidgetBounds(
                 recovery_view,
                 0,
-                "SpecForgeDeleteTemporaryDraft");
+                "DeleteTemporaryDraft");
         Require(
             recover_rect.has_value() && keep_rect.has_value() && delete_rect.has_value(),
             "the recovery list should expose deterministic Recover, Keep, and Delete rectangles");
@@ -2187,7 +2187,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             RecoveryWidgetBounds(
                 recovery_view,
                 0,
-                "SpecForgeKeepTemporaryDraft");
+                "KeepTemporaryDraft");
         Require(
             keep_rect.has_value(),
             "the recovery list should expose a deterministic Keep rectangle");
@@ -2342,7 +2342,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             RecoveryWidgetBounds(
                 recovery_view,
                 0,
-                "SpecForgeDeleteTemporaryDraft");
+                "DeleteTemporaryDraft");
         Require(
             delete_rect.has_value(),
             "the recovery list should expose a deterministic Delete rectangle");
@@ -2385,7 +2385,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             specforge::UiLanguage::English,
             compact_window_size);
         const auto confirm_rect =
-            WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
+            WidgetBounds("ConfirmDeleteLabelingTask");
         Require(
             confirm_rect.has_value(),
             "Delete draft fixture should expose a deterministic confirmation rectangle");
@@ -2471,7 +2471,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         RecoveryWidgetBounds(
             duplicate_view,
             1,
-            "SpecForgeKeepTemporaryDraft");
+            "KeepTemporaryDraft");
     Require(
         second_keep_rect.has_value(),
         "duplicate recovery rows should expose a deterministic second Keep rectangle");
@@ -2541,7 +2541,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         RecoveryWidgetBounds(
             duplicate_view,
             0,
-            "SpecForgeKeepTemporaryDraft");
+            "KeepTemporaryDraft");
     Require(
         first_keep_rect.has_value(),
         "the first duplicate recovery row should expose a deterministic Keep rectangle");
@@ -2682,9 +2682,9 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
     };
 
     assert_ambiguous_action_is_blocked(
-        "SpecForgeRecoverTemporaryDraft");
+        "RecoverTemporaryDraft");
     assert_ambiguous_action_is_blocked(
-        "SpecForgeDeleteTemporaryDraft");
+        "DeleteTemporaryDraft");
 }
 #endif
 
@@ -2770,7 +2770,7 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
         "multiple-draft fixture should open the task selector");
 
     const auto temporary_action_rect =
-        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
+        WidgetBounds("TemporaryLabelingTaskAction");
     const bool generic_resume_hovered = temporary_action_rect.has_value();
     Require(
         !generic_resume_hovered && observation.submission_count == 0,
@@ -2838,10 +2838,10 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
     };
 
     assert_row_action_disabled(
-        "SpecForgeRecoverTemporaryDraft",
+        "RecoverTemporaryDraft",
         "a formal/temp duplicate ID should disable recovery");
     assert_row_action_disabled(
-        "SpecForgeDeleteTemporaryDraft",
+        "DeleteTemporaryDraft",
         "a formal/temp duplicate ID should disable deletion");
 
     ScopedImGuiContext context;
@@ -2905,7 +2905,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         specforge::UiLanguage::English,
         window_size);
     const auto temporary_action_rect =
-        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
+        WidgetBounds("TemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "a formal/temp duplicate ID should expose the disabled Resume rectangle");
@@ -2968,7 +2968,7 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
         RecoveryWidgetBounds(
             view,
             0,
-            "SpecForgeDeleteTemporaryDraft");
+            "DeleteTemporaryDraft");
     Require(
         delete_rect.has_value(),
         "multiple-draft fixture should expose a deterministic selected draft Delete rectangle");
@@ -3064,9 +3064,9 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
             const auto selector_rect =
                 WidgetBounds("##labeling_task_selector");
             const auto pause_rect =
-                WidgetBounds("SpecForgePauseLabelingTask");
+                WidgetBounds("PauseLabelingTask");
             const auto delete_rect =
-                WidgetBounds("SpecForgeDeleteLabelingTask");
+                WidgetBounds("DeleteLabelingTask");
             Require(selector_rect.has_value(), "layout: selector must be observed");
             Require(pause_rect.has_value(), "layout: Pause must be observed");
             Require(delete_rect.has_value(), "layout: Delete must be observed");
@@ -3081,7 +3081,7 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
                     (*delete_rect)[2] <= 20.0f + window_size.x,
                 "selector row controls should remain inside the labeling window");
             if (expect_recovery_action) {
-                const auto recovery = RecoveryWidgetBounds(view, 0, "SpecForgeRecoverTemporaryDraft");
+                const auto recovery = RecoveryWidgetBounds(view, 0, "RecoverTemporaryDraft");
                 Require(recovery && (*recovery)[1] > (*delete_rect)[3],
                     "recovery actions must remain below the complete selector row");
             }
@@ -3119,7 +3119,7 @@ void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
 
     (void)render_active_frame(true);
     const auto delete_rect =
-        WidgetBounds("SpecForgeDeleteLabelingTask");
+        WidgetBounds("DeleteLabelingTask");
     Require(
         delete_rect.has_value(),
         "active delete integration fixture should expose a deterministic delete rectangle");
@@ -3166,7 +3166,7 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
 
     (void)render_active_frame();
     const auto delete_rect =
-        WidgetBounds("SpecForgeDeleteLabelingTask");
+        WidgetBounds("DeleteLabelingTask");
     Require(
         delete_rect.has_value(),
         "cross-frame delete fixture should expose a deterministic delete rectangle");
@@ -3188,7 +3188,7 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
     latest_view.labeling.source_identity = "source/new";
     latest_view.labeling.task_id = "task-new";
     const auto confirm_rect =
-        WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
+        WidgetBounds("ConfirmDeleteLabelingTask");
     Require(
         confirm_rect.has_value(),
         "cross-frame delete fixture should expose a deterministic confirmation rectangle");
@@ -3255,7 +3255,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             RecoveryWidgetBounds(
                 view,
                 0,
-                "SpecForgeDeleteTemporaryDraft");
+                "DeleteTemporaryDraft");
         Require(
             delete_rect.has_value(),
             "editing-state fixture should expose a deterministic recovery Delete rectangle");
@@ -3296,7 +3296,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             true);
 
         const auto confirm_rect =
-            WidgetBounds("SpecForgeConfirmDeleteLabelingTask");
+            WidgetBounds("ConfirmDeleteLabelingTask");
         Require(
             confirm_rect.has_value(),
             "editing-state fixture should expose a deterministic recovery confirmation rectangle");
@@ -3401,9 +3401,9 @@ void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
         specforge::UiLanguage::SimplifiedChinese,
         default_labeling_dock_size);
     const std::array<std::string_view, 3> action_ids = {
-        "SpecForgeRecoverTemporaryDraft",
-        "SpecForgeKeepTemporaryDraft",
-        "SpecForgeDeleteTemporaryDraft",
+        "RecoverTemporaryDraft",
+        "KeepTemporaryDraft",
+        "DeleteTemporaryDraft",
     };
     Require(
         rendered.cursor_max_y < default_labeling_dock_size.y,
@@ -3444,7 +3444,7 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
         formal.submission_count == 0 &&
             WidgetBounds("##labeling_task_name")
                 .has_value() &&
-            WidgetBounds("SpecForgeCopyLabelingTaskId")
+            WidgetBounds("CopyLabelingTaskId")
                 .has_value(),
         "a formal task should always render the name editor and task ID copy control");
     Require(
@@ -3708,7 +3708,7 @@ void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
         "editing before blur must not emit a rename");
 
     const auto copy_rect =
-        WidgetBounds("SpecForgeCopyLabelingTaskId");
+        WidgetBounds("CopyLabelingTaskId");
     Require(
         copy_rect.has_value(),
         "the full task ID should have a copy button beside it");
@@ -3792,7 +3792,7 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
     const LabelingTaskNameFrameObservation typed =
         RenderLabelingTaskNameFrame(panel, view);
     const auto copy_rect =
-        WidgetBounds("SpecForgeCopyLabelingTaskId");
+        WidgetBounds("CopyLabelingTaskId");
     Require(
         typed.submission_count == 0 &&
             copy_rect.has_value(),
@@ -3840,7 +3840,7 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
     Require(
         WidgetBounds("##labeling_task_name")
                 .has_value() &&
-            WidgetBounds("SpecForgeCopyLabelingTaskId")
+            WidgetBounds("CopyLabelingTaskId")
                 .has_value() &&
             specforge::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) ==
@@ -3920,9 +3920,9 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
             false,
             narrow_size);
     const auto copy_rect =
-        WidgetBounds("SpecForgeCopyLabelingTaskId");
+        WidgetBounds("CopyLabelingTaskId");
     const auto copy_widget =
-        specforge::test::WidgetHarness::Current().Observe("SpecForgeCopyLabelingTaskId");
+        specforge::test::WidgetHarness::Current().Observe("CopyLabelingTaskId");
     Require(
         copy_rect.has_value() && copy_widget.has_value() &&
             copy_widget->raw_bounds.Min.x >= window_x &&
@@ -4006,7 +4006,7 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         RecoveryWidgetBounds(
             frame_view,
             0,
-            "SpecForgeRecoverTemporaryDraft");
+            "RecoverTemporaryDraft");
     Require(
         recovery_rect.has_value(),
         "the recovery switch should expose its deterministic action rectangle");
@@ -4355,7 +4355,7 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
         false,
         conflict_message);
     const auto temporary_action_rect =
-        WidgetBounds("SpecForgeTemporaryLabelingTaskAction");
+        WidgetBounds("TemporaryLabelingTaskAction");
     Require(
         temporary_action_rect.has_value(),
         "message integration fixture should expose a deterministic labeling action rectangle");

@@ -528,7 +528,7 @@ public:
 };
 
 constexpr const char* kFileMenuTestHost =
-    "File menu test host###SpecForgeFileMenuTestHost";
+    "File menu test host###FileMenuTestHost";
 
 void RenderShellFileMenuFrame(
     specforge::ShellUi& shell,
@@ -4196,8 +4196,8 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
             RenderShellFileMenuFrame(*shell, choose_source_file);
         }, specforge::test::WidgetHarness::FrameMode::ExistingContext};
         ui.Frames(2);
-        ui.Click("SpecForgeFileMenu");
-        ui.Click("SpecForgeOpenFile");
+        ui.Click("FileMenu");
+        ui.Click("OpenFile");
     }
     Require(
         file_picker_called,
@@ -6717,8 +6717,8 @@ void TestRestoreDefaultLayout()
         SampleWorkflowPanelUi::LabelingWindowName(),
         SampleWorkflowPanelUi::FiltersWindowName(),
         SampleWorkflowPanelUi::SortingWindowName(),
-        "Info###SpecForgeInfoTagsV2", "Curve Display###SpecForgeSmoothingV1",
-        "Spectrum###SpecForgeSpectrumV2", SpectralLinesPanelUi::WindowName()};
+        "Info###InfoTagsV2", "Curve Display###SmoothingV1",
+        "Spectrum###SpectrumV2", SpectralLinesPanelUi::WindowName()};
     const ApplicationPanel panels[] = {
         ApplicationPanel::Files, ApplicationPanel::Navigation,
         ApplicationPanel::Annotations, ApplicationPanel::Labeling,
@@ -6755,8 +6755,8 @@ void TestRestoreDefaultLayout()
         }
         ImGui::GetIO().DisplaySize = ImVec2(1000, 700);
         ui.Frames(2);
-        ui.Click("SpecForgeViewMenu");
-        ui.Click("SpecForgeRestoreDefaultLayout");
+        ui.Click("ViewMenu");
+        ui.Click("RestoreDefaultLayout");
         ui.Frames(3);
         const auto after = Access::Settings(*shell);
         for (std::size_t i = 0; i < kApplicationPanelCount; ++i) {
@@ -6787,8 +6787,8 @@ void TestRestoreDefaultLayout()
         ImGui::SetWindowPos(windows[0], ImVec2(30000, -20000));
         Access::SettingsPanel(*shell).Open();
         ui.Frames(2);
-        ui.Click("SpecForgeSettingsDataAndRecovery");
-        ui.Click("SpecForgeResetWindowLayout");
+        ui.Click("SettingsDataAndRecovery");
+        ui.Click("ResetWindowLayout");
         ui.Frames(3);
         const auto* files = ImGui::FindWindowByName(windows[0]);
         Require(files && files->DockId != 0 && files->Pos.x < 1000 &&

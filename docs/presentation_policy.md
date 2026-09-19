@@ -337,7 +337,7 @@ Present flags、DRR boost 或自定义 duration。
   光标。885 条探针中，主 secondary viewport 有 866 条且始终保持 `(884, 32)`、
   `1273 x 857`；47 帧同时检测到 ImGui/Win32 左键按下并由该 viewport HWND 持有 capture，
   两者仅 1 帧不一致。`NoInputs` 只短暂出现 36 帧，不是永久残留；28 帧已建立
-  `MovingWindow=Spectrum###SpecForgeSpectrumV2`，ActiveID/capture 也能随释放清除，但 ImGui
+  `MovingWindow=Spectrum###SpectrumV2`，ActiveID/capture 也能随释放清除，但 ImGui
   viewport 的位置和尺寸仍完全不变。因此可排除 secondary 消息未送达、永久 `NoInputs`、
   capture 建立失败以及渲染循环死亡；剩余边界是 ImGui 鼠标坐标/目标几何未变化，或几何在
   同帧 platform update 前后被覆盖。实际布局文件 `Data/specforge-imgui-v2.ini` 也确认当前

@@ -635,13 +635,13 @@ function Wait-ForOwnershipWindows {
             $windows |
                 Where-Object {
                     $_.ClassName -ceq
-                        'SpecForgeMainWindow'
+                        'MainWindowV1'
                 })
         $secondary = @(
             $windows |
                 Where-Object {
                     $_.ClassName -cne
-                        'SpecForgeMainWindow'
+                        'MainWindowV1'
                 })
         if ($main.Count -eq 1 -and
             $secondary.Count -eq

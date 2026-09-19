@@ -1,3 +1,4 @@
+#include "app/project_identity.h"
 #include "automation/automation_startup.h"
 
 #include "app/runtime_paths.h"
@@ -37,7 +38,7 @@ constexpr std::wstring_view
         L"--automation-allow-persistent-labeling-outputs";
 constexpr std::wstring_view
     kAutomationRootIdentityLockName =
-        L".specforge-automation-root.lock";
+        project_identity::kAutomationRootLock;
 constexpr std::array<std::wstring_view, 4>
     kIncompatibleAutomationEnvironmentVariables = {
         L"SPECFORGE_PROFILE",
@@ -623,7 +624,7 @@ std::wstring AutomationPipeNameForInstance(
 {
     const std::wstring wide_instance =
         Utf8ToWide(instance_id);
-    return L"\\\\.\\pipe\\SpecForge.Automation." +
+    return project_identity::kAutomationPipePrefix +
            wide_instance;
 }
 

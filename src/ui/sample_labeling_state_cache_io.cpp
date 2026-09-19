@@ -1,3 +1,4 @@
+#include "app/project_identity.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/sample_labeling_persistence_owners.h"
 
@@ -1273,7 +1274,7 @@ SampleLabelingStateCoordinationDirectories(
     std::error_code temp_error;
     const std::filesystem::path coordination_root =
         std::filesystem::temp_directory_path(temp_error) /
-        "SpecForge" /
+        project_identity::kApplicationId /
         "sample-labeling-cache-locks";
     if (!temp_error) {
         std::vector<std::filesystem::path> aliases;
