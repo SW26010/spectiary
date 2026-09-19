@@ -293,6 +293,8 @@ add_library(spectiary_core STATIC
     src/domain/utf8.cpp
     src/domain/uuid_v4.cpp
     src/overlays/spectral_line_catalog.cpp
+    src/overlays/spectral_line_list.cpp
+    src/overlays/spectral_line_list_json.cpp
     src/overlays/catalog_user_state_reconciliation.cpp
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
@@ -1665,6 +1667,13 @@ spectiary_add_test(
     tests/spectral_line_catalog_tests.cpp
     spectiary_core
 )
+spectiary_add_test(
+    spectiary_spectral_line_list_tests
+    tests/spectral_line_list_tests.cpp
+    spectiary_core
+)
+target_compile_definitions(spectiary_spectral_line_list_tests
+    PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(
     spectiary_spectral_line_catalog_tests
     PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -1806,6 +1815,7 @@ set(SPECTIARY_FAST_TESTS
     spectiary_native_window_title_architecture_tests
     spectiary_spectrum_view_session_tests
     spectiary_spectral_line_catalog_tests
+    spectiary_spectral_line_list_tests
     spectiary_spectral_line_user_state_tests
     spectiary_ctest_tier_contract_tests
 )

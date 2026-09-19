@@ -1,0 +1,636 @@
+{
+  "format_kind": "spectiary.spectral_line_list",
+  "schema_version": 1,
+  "id": "public-spectral-lines.v1",
+  "name": "Public spectral lines",
+  "coordinate": {
+    "unit": "angstrom",
+    "medium": "vacuum",
+    "laboratory_rest": true
+  },
+  "markers": [
+    {
+      "id": "c_ii_3920",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 3920.077,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_3922",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 3921.792,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ca_ii_k",
+      "name": "Ca II K",
+      "kind": "line",
+      "coordinate": 3934.777,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ca_ii_h",
+      "name": "Ca II H",
+      "kind": "line",
+      "coordinate": 3969.591,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_4076_multiplet",
+      "name": "C II 4076 multiplet",
+      "kind": "band",
+      "start": 4075.631,
+      "end": 4075.991,
+      "note": "Atomic Line List vacuum components 4075.631, 4075.694, and 4075.991 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "sr_ii_4078",
+      "name": "Sr II",
+      "kind": "line",
+      "coordinate": 4078.9,
+      "note": "Approximate visual marker; not for wavelength calibration."
+    },
+    {
+      "id": "h_delta",
+      "name": "Hδ",
+      "kind": "line",
+      "coordinate": 4102.892,
+      "note": "Atomic Line List weighted vacuum marker, rounded to 0.001 A."
+    },
+    {
+      "id": "cn_4216",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 4216.0,
+      "note": "Approximate molecular feature marker."
+    },
+    {
+      "id": "ca_i_4228",
+      "name": "Ca I",
+      "kind": "line",
+      "coordinate": 4227.918,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_4268_multiplet",
+      "name": "C II 4268 multiplet",
+      "kind": "band",
+      "start": 4268.202,
+      "end": 4268.462,
+      "note": "Atomic Line List vacuum components 4268.202, 4268.384, and 4268.462 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "c_i_4270",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 4270.221,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ch_g_band",
+      "name": "CH G band",
+      "kind": "band",
+      "start": 4300.0,
+      "end": 4314.0,
+      "note": "Approximate molecular band marker, not a zoom window."
+    },
+    {
+      "id": "h_gamma",
+      "name": "Hγ",
+      "kind": "line",
+      "coordinate": 4341.684,
+      "note": "Atomic Line List weighted vacuum marker, rounded to 0.001 A."
+    },
+    {
+      "id": "ch_p_branch",
+      "name": "CH P branch",
+      "kind": "band",
+      "start": 4341.69,
+      "end": 4342.0,
+      "note": "Approximate CH P-branch marker near H gamma."
+    },
+    {
+      "id": "c_i_4373",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 4372.596,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_4374_multiplet",
+      "name": "C II 4374 multiplet",
+      "kind": "band",
+      "start": 4373.604,
+      "end": 4373.743,
+      "note": "Atomic Line List vacuum components 4373.604, 4373.730, and 4373.743 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "c2_4383",
+      "name": "C₂",
+      "kind": "line",
+      "coordinate": 4382.5,
+      "note": "Approximate C2 molecular marker."
+    },
+    {
+      "id": "c_ii_4411",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 4411.229,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ba_ii_4555",
+      "name": "Ba II",
+      "kind": "line",
+      "coordinate": 4555.301,
+      "note": "Observed 4554.024 A air wavelength converted to vacuum and rounded."
+    },
+    {
+      "id": "c_ii_4620_multiplet",
+      "name": "C II 4620 multiplet",
+      "kind": "band",
+      "start": 4619.853,
+      "end": 4620.543,
+      "note": "Atomic Line List vacuum components 4619.853 and 4620.543 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "c2_4737",
+      "name": "C₂",
+      "kind": "line",
+      "coordinate": 4737.1,
+      "note": "Approximate C2 Swan-band marker."
+    },
+    {
+      "id": "c13_c12_4744_4754",
+      "name": "¹³C¹²C",
+      "kind": "band",
+      "start": 4744.0,
+      "end": 4754.0,
+      "note": "Approximate isotopic molecular band marker."
+    },
+    {
+      "id": "c_i_4771",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 4771.361,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "h_beta",
+      "name": "Hβ",
+      "kind": "line",
+      "coordinate": 4862.683,
+      "note": "Atomic Line List weighted vacuum marker, rounded to 0.001 A."
+    },
+    {
+      "id": "c_i_4933",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 4933.426,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_i_5054",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 5053.575,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_5147",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 5146.598,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_5153",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 5152.52,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c2_5165",
+      "name": "C₂",
+      "kind": "line",
+      "coordinate": 5165.2,
+      "note": "Approximate C2 Swan-band marker."
+    },
+    {
+      "id": "mg_i_b_5169",
+      "name": "Mg I b",
+      "kind": "line",
+      "coordinate": 5168.761,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "mg_i_b_5174",
+      "name": "Mg I b",
+      "kind": "line",
+      "coordinate": 5174.125,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "mg_i_b_5185",
+      "name": "Mg I b",
+      "kind": "line",
+      "coordinate": 5185.048,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_i_5382",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 5381.833,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c2_5635",
+      "name": "C₂",
+      "kind": "line",
+      "coordinate": 5635.5,
+      "note": "Approximate C2 Swan-band marker."
+    },
+    {
+      "id": "c_ii_5891",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 5891.408,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A; blended with Na I D2 at low resolution."
+    },
+    {
+      "id": "na_i_d2",
+      "name": "Na I D₂",
+      "kind": "line",
+      "coordinate": 5891.583,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_5893",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 5893.231,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "na_i_d1",
+      "name": "Na I D₁",
+      "kind": "line",
+      "coordinate": 5897.558,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_i_6015_multiplet",
+      "name": "C I 6015 multiplet",
+      "kind": "band",
+      "start": 6014.831,
+      "end": 6014.878,
+      "note": "Atomic Line List vacuum components 6014.831 and 6014.878 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "c13_c12_6100",
+      "name": "¹³C¹²C",
+      "kind": "line",
+      "coordinate": 6100.0,
+      "note": "Approximate isotopic molecular marker."
+    },
+    {
+      "id": "c_ii_6153_multiplet",
+      "name": "C II 6153 multiplet",
+      "kind": "band",
+      "start": 6152.968,
+      "end": 6153.237,
+      "note": "Atomic Line List vacuum components 6152.968 and 6153.237 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "c13_c12_6168",
+      "name": "¹³C¹²C",
+      "kind": "line",
+      "coordinate": 6168.0,
+      "note": "Approximate isotopic molecular marker."
+    },
+    {
+      "id": "feature_6192",
+      "name": "6192 feature",
+      "kind": "line",
+      "coordinate": 6192.0,
+      "note": "Approximate isotope-region feature marker."
+    },
+    {
+      "id": "c12_cn_6206",
+      "name": "¹²CN",
+      "kind": "line",
+      "coordinate": 6206.0,
+      "note": "Approximate molecular marker."
+    },
+    {
+      "id": "c13_cn_6260",
+      "name": "¹³CN",
+      "kind": "line",
+      "coordinate": 6260.0,
+      "note": "Approximate molecular marker."
+    },
+    {
+      "id": "c_ii_6464_multiplet",
+      "name": "C II 6464 multiplet",
+      "kind": "band",
+      "start": 6463.736,
+      "end": 6463.915,
+      "note": "Atomic Line List vacuum components 6463.736 and 6463.915 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "ba_ii_6499",
+      "name": "Ba II",
+      "kind": "line",
+      "coordinate": 6498.686,
+      "note": "Observed 6496.891 A air wavelength converted to vacuum and rounded."
+    },
+    {
+      "id": "cn_6500",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 6500.0,
+      "note": "Approximate molecular marker."
+    },
+    {
+      "id": "h_alpha",
+      "name": "Hα",
+      "kind": "line",
+      "coordinate": 6564.608,
+      "note": "Atomic Line List weighted vacuum marker, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_6580",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 6579.869,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "c_ii_6585",
+      "name": "C II",
+      "kind": "line",
+      "coordinate": 6584.7,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "li_i_6708",
+      "name": "Li I 6708 multiplet",
+      "kind": "band",
+      "start": 6709.613,
+      "end": 6709.764,
+      "note": "Atomic Line List vacuum transitions 6709.613 and 6709.764 A combined as an unresolved resonance doublet; not for wavelength calibration."
+    },
+    {
+      "id": "cn_6928",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 6927.6,
+      "note": "Approximate red CN marker."
+    },
+    {
+      "id": "cn_6945",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 6945.4,
+      "note": "Approximate red CN marker."
+    },
+    {
+      "id": "c_i_7117_multiplet",
+      "name": "C I 7117 multiplet",
+      "kind": "band",
+      "start": 7117.134,
+      "end": 7117.144,
+      "note": "Atomic Line List vacuum components 7117.134 and 7117.144 A combined as one low-resolution multiplet marker; not for wavelength calibration."
+    },
+    {
+      "id": "k_i_7667",
+      "name": "K I",
+      "kind": "line",
+      "coordinate": 7667.021,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A; near strong telluric O2 absorption."
+    },
+    {
+      "id": "k_i_7701",
+      "name": "K I",
+      "kind": "line",
+      "coordinate": 7701.093,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "cn_7853",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 7852.9,
+      "note": "Approximate red CN marker."
+    },
+    {
+      "id": "cn_7899",
+      "name": "CN",
+      "kind": "line",
+      "coordinate": 7898.6,
+      "note": "Approximate red CN marker."
+    },
+    {
+      "id": "c_i_8337",
+      "name": "C I",
+      "kind": "line",
+      "coordinate": 8337.44,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ca_ii_8500",
+      "name": "Ca II",
+      "kind": "line",
+      "coordinate": 8500.358,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ca_ii_8544",
+      "name": "Ca II",
+      "kind": "line",
+      "coordinate": 8544.438,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "ca_ii_8665",
+      "name": "Ca II",
+      "kind": "line",
+      "coordinate": 8664.52,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    },
+    {
+      "id": "mg_i_8809",
+      "name": "Mg I",
+      "kind": "line",
+      "coordinate": 8809.175,
+      "note": "Atomic Line List vacuum wavelength, rounded to 0.001 A."
+    }
+  ],
+  "grouping_views": [
+    {
+      "id": "__catalog_grouping_view__",
+      "name": "Catalog grouping view",
+      "groups": [
+        {
+          "id": "catalog_ba_ii",
+          "name": "Ba II",
+          "marker_ids": [
+            "ba_ii_4555",
+            "ba_ii_6499"
+          ]
+        },
+        {
+          "id": "catalog_balmer",
+          "name": "Balmer",
+          "marker_ids": [
+            "h_delta",
+            "h_gamma",
+            "h_beta",
+            "h_alpha"
+          ]
+        },
+        {
+          "id": "catalog_c_i",
+          "name": "C I",
+          "marker_ids": [
+            "c_i_4270",
+            "c_i_4373",
+            "c_i_4771",
+            "c_i_4933",
+            "c_i_5054",
+            "c_i_5382",
+            "c_i_6015_multiplet",
+            "c_i_7117_multiplet",
+            "c_i_8337"
+          ]
+        },
+        {
+          "id": "catalog_c_ii",
+          "name": "C II",
+          "marker_ids": [
+            "c_ii_3920",
+            "c_ii_3922",
+            "c_ii_4076_multiplet",
+            "c_ii_4268_multiplet",
+            "c_ii_4374_multiplet",
+            "c_ii_4411",
+            "c_ii_4620_multiplet",
+            "c_ii_5147",
+            "c_ii_5153",
+            "c_ii_5891",
+            "c_ii_5893",
+            "c_ii_6153_multiplet",
+            "c_ii_6464_multiplet",
+            "c_ii_6580",
+            "c_ii_6585"
+          ]
+        },
+        {
+          "id": "catalog_c2",
+          "name": "C2",
+          "marker_ids": [
+            "c2_4383",
+            "c2_4737",
+            "c2_5165",
+            "c2_5635"
+          ]
+        },
+        {
+          "id": "catalog_ca_i",
+          "name": "Ca I",
+          "marker_ids": [
+            "ca_i_4228"
+          ]
+        },
+        {
+          "id": "catalog_ca_ii",
+          "name": "Ca II",
+          "marker_ids": [
+            "ca_ii_k",
+            "ca_ii_h",
+            "ca_ii_8500",
+            "ca_ii_8544",
+            "ca_ii_8665"
+          ]
+        },
+        {
+          "id": "catalog_ch",
+          "name": "CH",
+          "marker_ids": [
+            "ch_g_band",
+            "ch_p_branch"
+          ]
+        },
+        {
+          "id": "catalog_cn",
+          "name": "CN",
+          "marker_ids": [
+            "cn_4216",
+            "c12_cn_6206",
+            "c13_cn_6260",
+            "cn_6500",
+            "cn_6928",
+            "cn_6945",
+            "cn_7853",
+            "cn_7899"
+          ]
+        },
+        {
+          "id": "catalog_isotope",
+          "name": "Isotope",
+          "marker_ids": [
+            "c13_c12_4744_4754",
+            "c13_c12_6100",
+            "c13_c12_6168",
+            "feature_6192"
+          ]
+        },
+        {
+          "id": "catalog_k_i",
+          "name": "K I",
+          "marker_ids": [
+            "k_i_7667",
+            "k_i_7701"
+          ]
+        },
+        {
+          "id": "catalog_li_i",
+          "name": "Li I",
+          "marker_ids": [
+            "li_i_6708"
+          ]
+        },
+        {
+          "id": "catalog_mg_i",
+          "name": "Mg I",
+          "marker_ids": [
+            "mg_i_b_5169",
+            "mg_i_b_5174",
+            "mg_i_b_5185",
+            "mg_i_8809"
+          ]
+        },
+        {
+          "id": "catalog_na_i",
+          "name": "Na I",
+          "marker_ids": [
+            "na_i_d2",
+            "na_i_d1"
+          ]
+        },
+        {
+          "id": "catalog_sr_ii",
+          "name": "Sr II",
+          "marker_ids": [
+            "sr_ii_4078"
+          ]
+        }
+      ]
+    }
+  ],
+  "color_schemes": []
+}
