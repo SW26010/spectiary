@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 5,
   "cmakeMinimumRequired": {
     "major": 3,
     "minor": 24,
@@ -169,7 +169,8 @@
         "outputOnFailure": true
       },
       "execution": {
-        "noTestsAction": "error"
+        "noTestsAction": "error",
+        "timeout": 120
       }
     },
     {
@@ -189,7 +190,8 @@
         "outputOnFailure": true
       },
       "execution": {
-        "noTestsAction": "error"
+        "noTestsAction": "error",
+        "timeout": 120
       }
     }
   ]

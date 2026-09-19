@@ -1,4 +1,5 @@
 #include "legacy_annotation_fixture_io.h"
+#include "helpers/temporary_directory.h"
 #include "domain/spectrum_loader.h"
 #include "cancellation_stage_probe.h"
 #include "domain/npy_array_io.h"
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -32,6 +34,9 @@
 #include <zlib.h>
 
 namespace {
+
+// main owns this directory for the complete test run, including failure unwinding.
+std::filesystem::path test_root;
 
 using spectiary::SpectrumAxisQuantity;
 using spectiary::SpectrumDiagnosticCode;
@@ -1153,8 +1158,8 @@ std::optional<std::string> EnvironmentVariable(std::string_view name)
 
 void TestLoadsSelectedNpyRow()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_row_X.npy";
-    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "spectiary_loader_row_name.npy";
+    const std::filesystem::path path = test_root / "spectiary_loader_row_X.npy";
+    const std::filesystem::path name_path = test_root / "spectiary_loader_row_name.npy";
     WriteNpy(
         path,
         "<f8",
@@ -1196,7 +1201,7 @@ void TestAssignsNpyAxisLabels()
 {
     constexpr std::size_t kWavelengthGridColumns = 3909;
     const std::filesystem::path directory =
-        std::filesystem::temp_directory_path() /
+        test_root /
         ("spectiary_loader_axis_labels_" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Require(std::filesystem::create_directory(directory), "could not create NPY axis-label fixture directory");
@@ -1247,9 +1252,9 @@ void TestAssignsNpyAxisLabels()
 
 void TestLoadsNpySampleAnnotationContext()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_annotation_context.npy";
-    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "spectiary_annotation_context_name.npy";
-    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "spectiary_annotation_context_y.npy";
+    const std::filesystem::path path = test_root / "spectiary_annotation_context.npy";
+    const std::filesystem::path name_path = test_root / "spectiary_annotation_context_name.npy";
+    const std::filesystem::path annotation_path = test_root / "spectiary_annotation_context_y.npy";
     WriteNpy(path, "<f8", {2, 3}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
     WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"alpha", "beta"}, 5));
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({7, -1}));
@@ -1284,9 +1289,9 @@ void TestLoadsNpySampleAnnotationContext()
 
 void TestLoadsReadOnlyAnnotationDtypes()
 {
-    const std::filesystem::path float_path = std::filesystem::temp_directory_path() / "spectiary_annotation_float_X.npy";
+    const std::filesystem::path float_path = test_root / "spectiary_annotation_float_X.npy";
     const std::filesystem::path float_annotation_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_float_y.npy";
+        test_root / "spectiary_annotation_float_y.npy";
     WriteNpy(float_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(float_annotation_path, "<f4", {2}, BytesFor<float>({1.25F, -2.5F}));
 
@@ -1302,9 +1307,9 @@ void TestLoadsReadOnlyAnnotationDtypes()
             float_context.annotations[0].values[1]) == "-2.5",
         "float annotation should display raw value");
 
-    const std::filesystem::path string_path = std::filesystem::temp_directory_path() / "spectiary_annotation_string_X.npy";
+    const std::filesystem::path string_path = test_root / "spectiary_annotation_string_X.npy";
     const std::filesystem::path string_annotation_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_string_y.npy";
+        test_root / "spectiary_annotation_string_y.npy";
     WriteNpy(string_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(string_annotation_path, "<U4", {2}, UnicodeNpyBytesFor({"good", "bad"}, 4));
 
@@ -1327,11 +1332,11 @@ void TestLoadsReadOnlyAnnotationDtypes()
 void TestAnnotationAdapterPreservesWideNumericSemantics()
 {
     const std::filesystem::path signed_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_i8.npy";
+        test_root / "spectiary_annotation_adapter_i8.npy";
     const std::filesystem::path unsigned_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_u8.npy";
+        test_root / "spectiary_annotation_adapter_u8.npy";
     const std::filesystem::path floating_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_f8.npy";
+        test_root / "spectiary_annotation_adapter_f8.npy";
 
     WriteNpy(
         signed_path,
@@ -1410,11 +1415,11 @@ void TestPreservesNonCanonicalNpySampleNamesForNavigation()
                                      std::initializer_list<std::string_view>
                                          names) {
         const std::filesystem::path path =
-            std::filesystem::temp_directory_path() /
+            test_root /
             ("spectiary_invalid_names_" + std::string(suffix) +
              ".npy");
         const std::filesystem::path name_path =
-            std::filesystem::temp_directory_path() /
+            test_root /
             ("spectiary_invalid_names_" + std::string(suffix) +
              "_name.npy");
         WriteNpy(
@@ -1522,13 +1527,13 @@ void WriteAnnotationAsdf(
 void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
 {
     const std::filesystem::path explicit_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_annotation_adapter_explicit.asdf";
     const std::filesystem::path source_index_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_annotation_adapter_source_index.asdf";
     const std::filesystem::path npy_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_annotation_adapter_legacy.npy";
 
     const spectiary::SampleLabelingDocument explicit_document =
@@ -1733,7 +1738,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
 void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_cancelable_annotation.asdf";
     spectiary::SampleLabelingDocument document =
         MakeAnnotationAsdfDocument();
@@ -1786,9 +1791,9 @@ void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
 void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
 {
     const std::filesystem::path shape_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_bad_shape.npy";
+        test_root / "spectiary_annotation_adapter_bad_shape.npy";
     const std::filesystem::path dtype_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_bad_dtype.npy";
+        test_root / "spectiary_annotation_adapter_bad_dtype.npy";
     WriteNpy(shape_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     WriteNpy(dtype_path, "<f8", {2}, BytesFor<double>({1.0, 2.0}));
 
@@ -1816,8 +1821,8 @@ void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
 
 void TestRejectsMismatchedSampleAnnotationLength()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_annotation_mismatch_X.npy";
-    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "spectiary_annotation_mismatch_y.npy";
+    const std::filesystem::path path = test_root / "spectiary_annotation_mismatch_X.npy";
+    const std::filesystem::path annotation_path = test_root / "spectiary_annotation_mismatch_y.npy";
     WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(annotation_path, "<i4", {1}, BytesFor<std::int32_t>({1}));
 
@@ -1841,7 +1846,7 @@ void TestRejectsMismatchedSampleAnnotationLength()
 
 void TestRejectsAuxiliaryNpyArrays()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_label.npy";
+    const std::filesystem::path path = test_root / "spectiary_loader_label.npy";
     WriteNpy(path, "<f8", {1, 2}, BytesFor<double>({1.0, 2.0}));
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -1853,7 +1858,7 @@ void TestRejectsAuxiliaryNpyArrays()
 
 void TestClassifiesUnsupportedDtype()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_flux.npy";
+    const std::filesystem::path path = test_root / "spectiary_loader_flux.npy";
     WriteNpy(path, "<i4", {1, 3}, BytesFor<std::int32_t>({1, 2, 3}));
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -1864,7 +1869,7 @@ void TestClassifiesUnsupportedDtype()
 
 void TestClassifiesEmptyShape()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_empty_flux.npy";
+    const std::filesystem::path path = test_root / "spectiary_loader_empty_flux.npy";
     WriteNpy(path, "<f8", {0, 3}, {});
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -1873,7 +1878,7 @@ void TestClassifiesEmptyShape()
 
 void TestLoadsCsvSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_wavelength_flux.csv";
+    const std::filesystem::path path = test_root / "spectiary_loader_wavelength_flux.csv";
     {
         std::ofstream stream(path);
         Require(stream.good(), "could not open CSV test fixture for writing");
@@ -1900,7 +1905,7 @@ void TestLoadsCsvSpectrum()
 
 void TestLoadsFitsScalarTableSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_sdss_table.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_sdss_table.fits";
     WriteFitsScalarTable(path);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -1949,7 +1954,7 @@ void TestLoadsFitsScalarTableSpectrum()
 
 void TestLoadsFitsVectorTableSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_lamost_vector.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_lamost_vector.fits";
     WriteFitsVectorTable(path);
 
     const SpectrumSnapshotHandle first = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2014,7 +2019,7 @@ void TestLoadsFitsVectorTableSpectrum()
 
 void TestBlocksInvalidFitsRedshiftForRestFrameInput()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_invalid_redshift.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_invalid_redshift.fits";
     WriteFitsInvalidRedshiftTable(path);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2035,7 +2040,7 @@ void TestBlocksInvalidFitsRedshiftForRestFrameInput()
 
 void TestLoadsLimitedFitsImageSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_limited_image.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_limited_image.fits";
     WriteFitsImage(path, true);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2057,7 +2062,7 @@ void TestLoadsLimitedFitsImageSpectrum()
 
 void TestRejectsFitsImageWcsFallback()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_wcs_image.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_wcs_image.fits";
     WriteFitsImage(path, false);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2070,7 +2075,7 @@ void TestRejectsFitsImageWcsFallback()
 void TestPrefersRecognizedFitsTableOverImageHdu()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_table_before_image_fallback.fits";
+        test_root / "spectiary_loader_table_before_image_fallback.fits";
     WriteFitsImageThenScalarTable(path);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2086,7 +2091,7 @@ void TestPrefersRecognizedFitsTableOverImageHdu()
 void TestUndefinedOptionalFitsKeywordsAreAbsent()
 {
     const std::filesystem::path table_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_undefined_optional_table.fits";
     WriteFitsTableWithUndefinedOptionalKeywords(table_path);
 
@@ -2104,7 +2109,7 @@ void TestUndefinedOptionalFitsKeywordsAreAbsent()
         "undefined optional table keywords should not publish metadata");
 
     const std::filesystem::path image_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_undefined_optional_image.fits";
     WriteFitsImageWithUndefinedCoefficients(image_path);
 
@@ -2140,7 +2145,7 @@ void TestRejectsTruncatedUnselectedFitsData()
     };
 
     const std::filesystem::path table_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_truncated_unselected_table_row.fits";
     WriteFitsVectorTableWithTruncatedLaterRow(table_path);
     require_invalid_shape(
@@ -2148,7 +2153,7 @@ void TestRejectsTruncatedUnselectedFitsData()
         "FITS table truncated after the selected vector row");
 
     const std::filesystem::path image_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_truncated_unselected_image_tail.fits";
     WriteFitsImageWithTruncatedUnselectedTail(image_path);
     require_invalid_shape(
@@ -2163,7 +2168,7 @@ void TestRejectsTruncatedUnselectedFitsData()
 
 void TestRejectsMalformedFitsTableWidth()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_bad_table_width.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_bad_table_width.fits";
     WriteMalformedFitsTableWidth(path);
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2176,7 +2181,7 @@ void TestRejectsMalformedFitsTableWidth()
 void TestMalformedFitsInputsReturnErrorSnapshots()
 {
     const std::filesystem::path truncated_header =
-        std::filesystem::temp_directory_path() / "spectiary_loader_truncated_header.fits";
+        test_root / "spectiary_loader_truncated_header.fits";
     WriteTruncatedFitsHeader(truncated_header);
     const SpectrumSnapshotHandle truncated_header_snapshot =
         spectiary::LoadSpectrumSnapshotFromPath(
@@ -2191,7 +2196,7 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "truncated FITS headers should map to invalid shape");
 
     const std::filesystem::path missing_image_data =
-        std::filesystem::temp_directory_path() / "spectiary_loader_missing_image_data.fits";
+        test_root / "spectiary_loader_missing_image_data.fits";
     WriteFitsHeaderWithMissingImageData(missing_image_data);
     const SpectrumSnapshotHandle missing_image_data_snapshot =
         spectiary::LoadSpectrumSnapshotFromPathCancelable(
@@ -2207,7 +2212,7 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "truncated FITS image data should map to invalid shape");
 
     const std::filesystem::path declared_data_mismatch =
-        std::filesystem::temp_directory_path() / "spectiary_loader_declared_data_mismatch.fits";
+        test_root / "spectiary_loader_declared_data_mismatch.fits";
     WriteFitsTableWithDeclaredDataMismatch(declared_data_mismatch);
     const SpectrumSnapshotHandle declared_data_mismatch_snapshot =
         spectiary::LoadSpectrumSnapshotFromPath(
@@ -2222,7 +2227,7 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "FITS declared data mismatches should map to invalid shape");
 
     const std::filesystem::path unsupported_columns =
-        std::filesystem::temp_directory_path() / "spectiary_loader_unsupported_columns.fits";
+        test_root / "spectiary_loader_unsupported_columns.fits";
     WriteFitsTableWithUnsupportedColumnLayout(unsupported_columns);
     const SpectrumSnapshotHandle unsupported_columns_snapshot =
         spectiary::LoadSpectrumSnapshotFromPathCancelable(
@@ -2253,7 +2258,7 @@ void TestRejectsUnsupportedFitsStructures()
 
     for (const UnsupportedColumnCase& test_case : cases) {
         const std::filesystem::path path =
-            std::filesystem::temp_directory_path() /
+            test_root /
             ("spectiary_loader_unsupported_" +
              std::string(test_case.name) + ".fits");
         WriteFitsTableWithUnsupportedColumnType(
@@ -2277,7 +2282,7 @@ void TestRejectsUnsupportedFitsStructures()
     }
 
     const std::filesystem::path ascii_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_unsupported_ascii_table.fits";
     WriteAsciiFitsTable(ascii_path);
     const SpectrumSnapshotHandle ascii_snapshot =
@@ -2295,8 +2300,8 @@ void TestRejectsUnsupportedFitsStructures()
 
 void TestLoadsGzippedFitsSpectrum()
 {
-    const std::filesystem::path fits_path = std::filesystem::temp_directory_path() / "spectiary_loader_gzip_source.fits";
-    const std::filesystem::path gzip_path = std::filesystem::temp_directory_path() / "spectiary_loader_gzip_source.fits.gz";
+    const std::filesystem::path fits_path = test_root / "spectiary_loader_gzip_source.fits";
+    const std::filesystem::path gzip_path = test_root / "spectiary_loader_gzip_source.fits.gz";
     WriteFitsScalarTable(fits_path);
     WriteBytes(gzip_path, GzipBytes(ReadBytes(fits_path)));
 
@@ -2310,10 +2315,10 @@ void TestLoadsGzippedFitsSpectrum()
 void TestLoadsConcatenatedGzipMembers()
 {
     const std::filesystem::path fits_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_concatenated_gzip_source.fits";
     const std::filesystem::path gzip_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_concatenated_gzip_source.fits.gz";
     WriteFitsScalarTable(fits_path);
     const std::vector<unsigned char> fits_bytes = ReadBytes(fits_path);
@@ -2351,7 +2356,7 @@ void TestLoadsConcatenatedGzipMembers()
 void TestRejectsDataAfterValidGzipMember()
 {
     const std::filesystem::path fits_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_gzip_trailing_source.fits";
     WriteFitsScalarTable(fits_path);
     const std::vector<unsigned char> valid_member =
@@ -2381,7 +2386,7 @@ void TestRejectsDataAfterValidGzipMember()
         "broken-member fixture should include a gzip trailer");
     broken_member.resize(broken_member.size() - 4U);
     const std::filesystem::path broken_member_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_broken_trailing_member.fits.gz";
     require_open_failed(
         broken_member_path,
@@ -2389,7 +2394,7 @@ void TestRejectsDataAfterValidGzipMember()
         "valid FITS gzip followed by a broken member");
 
     const std::filesystem::path garbage_path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_trailing_gzip_garbage.fits.gz";
     require_open_failed(
         garbage_path,
@@ -2407,7 +2412,7 @@ void TestRejectsDataAfterValidGzipMember()
 void TestLoadsFitsFromNonAsciiPath()
 {
     const std::filesystem::path directory =
-        std::filesystem::temp_directory_path() / std::filesystem::path(L"spectiary_loader_\u5149\u8c31\u8def\u5f84");
+        test_root / std::filesystem::path(L"spectiary_loader_\u5149\u8c31\u8def\u5f84");
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     Require(!error, "could not create non-ASCII FITS fixture directory");
@@ -2544,7 +2549,7 @@ void WriteLargeFitsMaskedVectorTable(
 void TestCancelableCsvLoadStopsInsideParsingAndSorting()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable.csv";
+        test_root / "spectiary_loader_cancelable.csv";
     {
         std::ofstream stream(path);
         Require(stream.good(), "could not create cancelable CSV fixture");
@@ -2570,7 +2575,7 @@ void TestNpyTypedValueConversionPollsCancellation()
 {
     constexpr std::size_t kColumnCount = 262'144;
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_cancel_npy_conversion.npy";
+        test_root / "spectiary_loader_cancel_npy_conversion.npy";
     WriteNpy(path, "<f4", {1, kColumnCount}, BytesFor(std::vector<float>(kColumnCount, 1.0F)));
 
     std::size_t cancellation_checks = 0;
@@ -2595,7 +2600,7 @@ void TestNpyTypedValueConversionPollsCancellation()
 
 void TestFolderSortingPollsCancellation()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() /
+    const std::filesystem::path path = test_root /
         ("spectiary_loader_cancel_folder_sort_" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::error_code error;
@@ -2638,7 +2643,7 @@ void TestFolderSortingPollsCancellation()
 void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable_annotation.npy";
+        test_root / "spectiary_loader_cancelable_annotation.npy";
     constexpr std::size_t kValueCount = 600'000;
     WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
 
@@ -2674,7 +2679,7 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
 void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable_annotation_metadata.npy";
+        test_root / "spectiary_loader_cancelable_annotation_metadata.npy";
     constexpr std::size_t kValueCount = 600'000;
     WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
 
@@ -2738,7 +2743,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
 void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
 {
     const std::filesystem::path annotation_path =
-        std::filesystem::temp_directory_path() / "spectiary_annotation_ingestion_warning.npy";
+        test_root / "spectiary_annotation_ingestion_warning.npy";
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     {
         std::ofstream metadata(
@@ -2775,7 +2780,7 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
 void TestCancelableFitsLoadStopsDuringLoglamTransform()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_cancel_loglam_transform.fits";
     WriteLargeFitsLoglamVectorTable(path, 50'000);
 
@@ -2805,7 +2810,7 @@ void TestCancelableFitsLoadStopsDuringLoglamTransform()
 void TestCancelableFitsLoadStopsDuringMaskFiltering()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
+        test_root /
         "spectiary_loader_cancel_mask_filter.fits";
     WriteLargeFitsMaskedVectorTable(path, 50'000);
 
@@ -2837,7 +2842,7 @@ void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
 {
     constexpr std::size_t kTrailingHduCount = 96U;
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "spectiary_loader_cancel_many_hdu_metadata.fits";
+        test_root / "spectiary_loader_cancel_many_hdu_metadata.fits";
     WriteFitsScalarTableWithTrailingEmptyHdus(path, kTrailingHduCount);
 
     const std::filesystem::path loader_source =
@@ -2865,7 +2870,7 @@ void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
 
 void TestRejectsCorruptGzippedFits()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_corrupt.fits.gz";
+    const std::filesystem::path path = test_root / "spectiary_loader_corrupt.fits.gz";
     WriteBytes(path, {'n', 'o', 't', '-', 'g', 'z', 'i', 'p'});
 
     const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
@@ -2877,7 +2882,7 @@ void TestRejectsCorruptGzippedFits()
 
 void TestRejectsOversizedInflatedGzippedFits()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_inflated_too_large.fits.gz";
+    const std::filesystem::path path = test_root / "spectiary_loader_inflated_too_large.fits.gz";
     constexpr std::size_t kPayloadSize = 64ULL * 1024ULL * 1024ULL + 1ULL;
     WriteBytes(path, GzipFitsImageWithPayload(kPayloadSize));
 
@@ -2890,7 +2895,7 @@ void TestRejectsOversizedInflatedGzippedFits()
 
 void TestRejectsOversizedFitsBeforeRead()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_large_catalog.fits";
+    const std::filesystem::path path = test_root / "spectiary_loader_large_catalog.fits";
     {
         std::ofstream stream(path, std::ios::binary);
         Require(stream.good(), "could not open oversized FITS fixture");
@@ -2910,7 +2915,7 @@ void TestRejectsOversizedFitsBeforeRead()
 
 void TestLoadsFolderCollectionWithWarnings()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_folder_source";
+    const std::filesystem::path path = test_root / "spectiary_loader_folder_source";
     std::error_code error;
     std::filesystem::remove_all(path, error);
     Require(std::filesystem::create_directory(path), "could not create folder source test fixture");
@@ -3046,7 +3051,7 @@ void TestLoadsFolderCollectionWithWarnings()
 
 void TestEmptyFolderUsesDomainSnapshot()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_empty_folder_source";
+    const std::filesystem::path path = test_root / "spectiary_loader_empty_folder_source";
     std::error_code error;
     std::filesystem::remove_all(path, error);
     Require(std::filesystem::create_directory(path), "could not create empty folder source test fixture");
@@ -3123,52 +3128,59 @@ void TestOptionalSampleDirectory()
 
 int main()
 {
-    TestReadsNpyV1V2V3Headers();
-    TestRejectsOversizedNpyV2V3Headers();
-    TestRejectsNpyHeaderLongerThanRemainingInput();
-    TestNpyTypedValueConversionPollsCancellation();
-    TestFolderSortingPollsCancellation();
-    TestLoadsSelectedNpyRow();
-    TestAssignsNpyAxisLabels();
-    TestLoadsNpySampleAnnotationContext();
-    TestPreservesNonCanonicalNpySampleNamesForNavigation();
-    TestLoadsReadOnlyAnnotationDtypes();
-    TestAnnotationAdapterPreservesWideNumericSemantics();
-    TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource();
-    TestCancelableAsdfAnnotationLoadStopsInsideCodecRead();
-    TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch();
-    TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates();
-    TestRejectsMismatchedSampleAnnotationLength();
-    TestRejectsAuxiliaryNpyArrays();
-    TestClassifiesUnsupportedDtype();
-    TestClassifiesEmptyShape();
-    TestLoadsCsvSpectrum();
-    TestCancelableCsvLoadStopsInsideParsingAndSorting();
-    TestCancelableAnnotationLoadStopsInsidePayloadConversion();
-    TestCancelableAnnotationLoadStopsInsideMetadataPairing();
-    TestLoadsFitsScalarTableSpectrum();
-    TestLoadsFitsVectorTableSpectrum();
-    TestBlocksInvalidFitsRedshiftForRestFrameInput();
-    TestLoadsLimitedFitsImageSpectrum();
-    TestRejectsFitsImageWcsFallback();
-    TestPrefersRecognizedFitsTableOverImageHdu();
-    TestUndefinedOptionalFitsKeywordsAreAbsent();
-    TestRejectsTruncatedUnselectedFitsData();
-    TestRejectsMalformedFitsTableWidth();
-    TestMalformedFitsInputsReturnErrorSnapshots();
-    TestRejectsUnsupportedFitsStructures();
-    TestLoadsGzippedFitsSpectrum();
-    TestLoadsConcatenatedGzipMembers();
-    TestRejectsDataAfterValidGzipMember();
-    TestLoadsFitsFromNonAsciiPath();
-    TestCancelableFitsLoadStopsDuringLoglamTransform();
-    TestCancelableFitsLoadStopsDuringMaskFiltering();
-    TestFitsHeaderMetadataScanPollsAcrossManyHdus();
-    TestRejectsCorruptGzippedFits();
-    TestRejectsOversizedInflatedGzippedFits();
-    TestRejectsOversizedFitsBeforeRead();
-    TestLoadsFolderCollectionWithWarnings();
-    TestEmptyFolderUsesDomainSnapshot();
-    TestOptionalSampleDirectory();
-    return 0;
+    try {
+        const spectiary::test_support::TemporaryDirectory temporary;
+        test_root = temporary.path();
+        TestReadsNpyV1V2V3Headers();
+        TestRejectsOversizedNpyV2V3Headers();
+        TestRejectsNpyHeaderLongerThanRemainingInput();
+        TestNpyTypedValueConversionPollsCancellation();
+        TestFolderSortingPollsCancellation();
+        TestLoadsSelectedNpyRow();
+        TestAssignsNpyAxisLabels();
+        TestLoadsNpySampleAnnotationContext();
+        TestPreservesNonCanonicalNpySampleNamesForNavigation();
+        TestLoadsReadOnlyAnnotationDtypes();
+        TestAnnotationAdapterPreservesWideNumericSemantics();
+        TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource();
+        TestCancelableAsdfAnnotationLoadStopsInsideCodecRead();
+        TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch();
+        TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates();
+        TestRejectsMismatchedSampleAnnotationLength();
+        TestRejectsAuxiliaryNpyArrays();
+        TestClassifiesUnsupportedDtype();
+        TestClassifiesEmptyShape();
+        TestLoadsCsvSpectrum();
+        TestCancelableCsvLoadStopsInsideParsingAndSorting();
+        TestCancelableAnnotationLoadStopsInsidePayloadConversion();
+        TestCancelableAnnotationLoadStopsInsideMetadataPairing();
+        TestLoadsFitsScalarTableSpectrum();
+        TestLoadsFitsVectorTableSpectrum();
+        TestBlocksInvalidFitsRedshiftForRestFrameInput();
+        TestLoadsLimitedFitsImageSpectrum();
+        TestRejectsFitsImageWcsFallback();
+        TestPrefersRecognizedFitsTableOverImageHdu();
+        TestUndefinedOptionalFitsKeywordsAreAbsent();
+        TestRejectsTruncatedUnselectedFitsData();
+        TestRejectsMalformedFitsTableWidth();
+        TestMalformedFitsInputsReturnErrorSnapshots();
+        TestRejectsUnsupportedFitsStructures();
+        TestLoadsGzippedFitsSpectrum();
+        TestLoadsConcatenatedGzipMembers();
+        TestRejectsDataAfterValidGzipMember();
+        TestLoadsFitsFromNonAsciiPath();
+        TestCancelableFitsLoadStopsDuringLoglamTransform();
+        TestCancelableFitsLoadStopsDuringMaskFiltering();
+        TestFitsHeaderMetadataScanPollsAcrossManyHdus();
+        TestRejectsCorruptGzippedFits();
+        TestRejectsOversizedInflatedGzippedFits();
+        TestRejectsOversizedFitsBeforeRead();
+        TestLoadsFolderCollectionWithWarnings();
+        TestEmptyFolderUsesDomainSnapshot();
+        TestOptionalSampleDirectory();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "FAILED: " << error.what() << '\n';
+        return 1;
+    }
 }

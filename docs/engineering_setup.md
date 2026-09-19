@@ -184,6 +184,9 @@ ctest --preset fast
 ctest --preset extended
 ```
 
+两个 preset 为未单独声明超时的测试提供 120 秒默认上限；测试自己的 CTest
+`TIMEOUT` 属性仍优先。这是卡住时的退出边界，不是整套测试的耗时预算。
+
 2026-09-02 合并后的代表性 GitHub-hosted Windows/MSVC/Ninja 验证在
 [repository verification run 33573199441](https://github.com/SW26010/SpecForge/actions/runs/33573199441/job/100071400948)
 中通过同一正式入口运行了 `ctest --preset fast`：74/74 项测试通过，
@@ -376,6 +379,10 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 
 ## 仓库卫生
 
+文本换行由 `.gitattributes` 固定为 LF，编辑器的缩进与文件末尾换行由
+`.editorconfig` 约定。Markdown 保留有意义的行末空格；ASDF fixture 和图标
+保持原始字节，尤其不得重新编码或格式化带 manifest 校验和的 ASDF 文件。
+
 以下内容不进入提交：
 
 - `build/`
@@ -390,6 +397,11 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 - `.scratch/` 中的旧 demo 和实验。
 
 如果后续需要测试数据，只提交小型、明确授权的 fixture，并放在专门的 fixture 路径中。
+
+本地构建备份和实验材料集中保留在已忽略的 `.scratch/`，采样日志保留在
+`logs/`。这些目录不属于 Git 提交范围，也不因一次卫生整理而自动删除。
+归档或清理前应先确认相关任务不再需要该份构建，且报告引用的原始采样、
+EXE/PDB 和哈希仍有可追溯副本；不要用 `git clean -xfd` 批量清除证据。
 
 ## 后续实现检查
 

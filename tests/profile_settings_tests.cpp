@@ -1,4 +1,5 @@
 #include "profile/profile_settings.h"
+#include "helpers/temporary_directory.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -20,26 +21,7 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-class TemporaryDirectory {
-public:
-    TemporaryDirectory()
-    {
-        path_ = std::filesystem::temp_directory_path() /
-                ("spectiary-profile-settings-tests-" + std::to_string(std::rand()));
-        std::filesystem::create_directories(path_);
-    }
-
-    ~TemporaryDirectory()
-    {
-        std::error_code ignored;
-        std::filesystem::remove_all(path_, ignored);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
+using spectiary::test_support::TemporaryDirectory;
 
 std::string ReadFile(const std::filesystem::path& path)
 {

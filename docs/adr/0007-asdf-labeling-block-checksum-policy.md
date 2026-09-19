@@ -121,6 +121,10 @@ abort or uncaught exception was observed.
 Use the repository's required Windows build wrapper, then install the pinned
 oracle dependencies into an isolated target directory:
 
+The commands below use the current Spectiary target and executable names after
+the [project rename](../project_rename.md); the decision and recorded evidence
+above retain their historical names.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   scripts\build-ninja-msvc-debug.ps1 `
@@ -129,7 +133,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   scripts\build-ninja-msvc-debug.ps1 `
-  -Target specforge_sample_labeling_asdf_codec_tests `
+  -Target spectiary_sample_labeling_asdf_codec_tests `
   -TimeoutSec 300
 
 python -m pip install `
@@ -138,7 +142,7 @@ python -m pip install `
 
 $env:PYTHONPATH = (Resolve-Path build\asdf-labeling-checksum-policy\python)
 python tools\asdf_labeling_hardening\checksum_oracle.py `
-  --native build\ninja-msvc-debug\specforge_sample_labeling_asdf_codec_tests.exe `
+  --native build\ninja-msvc-debug\spectiary_sample_labeling_asdf_codec_tests.exe `
   --output build\asdf-labeling-checksum-policy\checksum-matrix.json `
   --work-dir build\asdf-labeling-checksum-policy\files
 ```

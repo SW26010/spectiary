@@ -1,4 +1,5 @@
 #include "helpers/source_load_test_support.h"
+#include "helpers/temporary_directory.h"
 #include "legacy_annotation_fixture_io.h"
 #include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
@@ -20,6 +21,7 @@
 #include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +42,9 @@
 #include <vector>
 
 namespace {
+
+// main owns this directory until all sessions and their workers have stopped.
+std::filesystem::path test_root;
 
 void Require(bool condition, std::string_view message)
 {
@@ -91,10 +96,11 @@ struct SourceFixture {
 
 std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
-    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::filesystem::path path = std::filesystem::temp_directory_path();
-    path /= "spectiary_source_collection_session_";
-    path += std::to_string(now);
+    static std::atomic_uint64_t next_id = 0;
+    // The run directory already identifies the suite's fixtures. Keep filenames
+    // short enough for derived persistence paths when TEMP is nested deeply.
+    std::filesystem::path path = test_root / "fixture_";
+    path += std::to_string(next_id.fetch_add(1));
     path += std::string(suffix);
     return path;
 }
@@ -11223,12 +11229,19 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             "navigation refresh fixture should expose the formal task");
         fixture.formal_task_id = seed.View().active_task->task_id;
         Require(
-            seed.AssignLabel(0, 1).write.changed &&
-                seed.SaveActiveTemporaryTaskToOutput(
-                       fixture.formal_output_path)
-                    .output_saved &&
-                seed.DeactivateActiveTask().state_saved,
-            "navigation refresh fixture should persist the active formal task");
+            seed.AssignLabel(0, 1).write.changed,
+            "navigation refresh fixture should assign the formal task label");
+        const auto saved = seed.SaveActiveTemporaryTaskToOutput(
+            fixture.formal_output_path);
+        Require(
+            saved.output_saved,
+            "navigation refresh fixture should save the formal task: " +
+                saved.diagnostic);
+        const auto deactivated = seed.DeactivateActiveTask();
+        Require(
+            deactivated.state_saved,
+            "navigation refresh fixture should persist formal task deactivation: " +
+                deactivated.diagnostic);
 
         Require(
             seed.StartOrResumeTemporaryTask().accepted,
@@ -11841,6 +11854,8 @@ void RunAllTests()
 int main()
 {
     try {
+        const spectiary::test_support::TemporaryDirectory temporary;
+        test_root = temporary.path();
         TestCanonicalSaveRejectsReservedStorage();
         RunAllTests();
     } catch (const std::exception& error) {

@@ -1,3 +1,7 @@
+* text=auto eol=lf
+
+*.ico binary -eol
+
 # ASDF fixtures include intentionally text-shaped malformed inputs whose
 # manifest checksums require byte-for-byte checkout stability.
-tests/fixtures/asdf_labeling/*.asdf binary
+tests/fixtures/asdf_labeling/*.asdf binary -eol

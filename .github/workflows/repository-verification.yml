@@ -107,15 +107,15 @@ jobs:
           $env:TMP = $ctestTemp
           $env:SPECTIARY_ASDF_MUTATION_ARTIFACT_DIRECTORY =
             Join-Path $ctestDirectory 'asdf-mutation-failure'
-          $fastOutput = @(& ctest --preset fast 2>&1)
+          & ctest --preset fast 2>&1 |
+            Tee-Object -FilePath (Join-Path $ctestDirectory 'fast.log')
           $fastExitCode = $LASTEXITCODE
-          $fastOutput | Tee-Object -FilePath (Join-Path $ctestDirectory 'fast.log')
           if ($fastExitCode -ne 0) {
             throw "Debug fast CTest preset failed with exit code $fastExitCode."
           }
-          $extendedOutput = @(& ctest --preset extended 2>&1)
+          & ctest --preset extended 2>&1 |
+            Tee-Object -FilePath (Join-Path $ctestDirectory 'extended.log')
           $extendedExitCode = $LASTEXITCODE
-          $extendedOutput | Tee-Object -FilePath (Join-Path $ctestDirectory 'extended.log')
           if ($extendedExitCode -ne 0) {
             throw "Debug extended CTest preset failed with exit code $extendedExitCode."
           }
@@ -158,16 +158,13 @@ jobs:
           New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
           $env:TEMP = $ctestTemp
           $env:TMP = $ctestTemp
-          $releaseOutput = @(
-            & ctest --test-dir build\ninja-msvc-release-static `
-              -L '^release$' `
-              --output-on-failure `
-              --no-tests=error `
-              --timeout 600 2>&1
-          )
-          $releaseExitCode = $LASTEXITCODE
-          $releaseOutput |
+          & ctest --test-dir build\ninja-msvc-release-static `
+            -L '^release$' `
+            --output-on-failure `
+            --no-tests=error `
+            --timeout 600 2>&1 |
             Tee-Object -FilePath (Join-Path $ctestDirectory 'release.log')
+          $releaseExitCode = $LASTEXITCODE
           if ($releaseExitCode -ne 0) {
             throw "Static Release CTest verification failed with exit code $releaseExitCode."
           }
@@ -274,16 +271,13 @@ jobs:
         run: |
           $ctestDirectory = Join-Path $env:VERIFICATION_RUN_ROOT 'ctest'
           New-Item -ItemType Directory -Path $ctestDirectory -Force | Out-Null
-          $oracleOutput = @(
-            & ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
-              -L '^asdf-pinned-oracle$' `
-              --output-on-failure `
-              --no-tests=error `
-              --timeout 120 2>&1
-          )
-          $oracleExitCode = $LASTEXITCODE
-          $oracleOutput |
+          & ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
+            -L '^asdf-pinned-oracle$' `
+            --output-on-failure `
+            --no-tests=error `
+            --timeout 120 2>&1 |
             Tee-Object -FilePath (Join-Path $ctestDirectory 'asdf-pinned-oracle.log')
+          $oracleExitCode = $LASTEXITCODE
           if ($oracleExitCode -ne 0) {
             throw "Pinned ASDF oracle CTests failed with exit code $oracleExitCode."
           }

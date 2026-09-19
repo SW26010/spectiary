@@ -335,7 +335,7 @@ Assert-True `
         $releaseTests.Contains('--no-tests=error') -and
         [regex]::IsMatch(
             $releaseTests,
-            '(?m)^\s*--timeout\s+600\s+2>&1\s*$') -and
+            '(?m)^\s*--timeout\s+600\s+2>&1\s*\|\s*$') -and
         [regex]::IsMatch(
             $releaseTests,
             '(?m)^\s*timeout-minutes:\s*15\s*$') -and

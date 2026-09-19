@@ -1,6 +1,6 @@
 #include "platform/atomic_file.h"
+#include "helpers/temporary_directory.h"
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,8 +12,7 @@ namespace {
 void Require(bool condition, const std::string& message)
 {
     if (!condition) {
-        std::cerr << "FAIL: " << message << '\n';
-        std::exit(1);
+        throw std::runtime_error(message);
     }
 }
 
@@ -35,12 +34,8 @@ bool HasTemporarySibling(const std::filesystem::path& root)
 
 void TestWriterExceptionCleansTemporaryFile()
 {
-    const std::filesystem::path root =
-        std::filesystem::temp_directory_path() /
-        "spectiary-atomic-file-writer-exception";
-    std::error_code cleanup_error;
-    std::filesystem::remove_all(root, cleanup_error);
-    std::filesystem::create_directories(root);
+    const spectiary::test_support::TemporaryDirectory temporary;
+    const std::filesystem::path& root = temporary.path();
     const std::filesystem::path target = root / "metadata.json";
     {
         std::ofstream stream(target, std::ios::binary);
@@ -69,14 +64,56 @@ void TestWriterExceptionCleansTemporaryFile()
     Require(
         !HasTemporarySibling(root),
         "a writer exception should remove the temporary file");
+}
 
-    std::filesystem::remove_all(root, cleanup_error);
+void TestTemporaryDirectoriesAreIsolatedAndCleaned()
+{
+    const spectiary::test_support::TemporaryDirectory survivor;
+    const auto sentinel = survivor.path() / "keep.txt";
+    {
+        std::ofstream stream(sentinel);
+        stream << "keep";
+        Require(stream.good(), "surviving fixture should be writable");
+    }
+
+    std::filesystem::path normal_path;
+    {
+        const spectiary::test_support::TemporaryDirectory temporary;
+        normal_path = temporary.path();
+        Require(normal_path != survivor.path(), "temporary directory owners must be isolated");
+        std::filesystem::create_directories(normal_path / "nested");
+        std::ofstream stream(normal_path / "nested" / "fixture.txt");
+        stream << "fixture";
+        Require(stream.good(), "normal-scope fixture should be writable");
+    }
+    Require(!std::filesystem::exists(normal_path), "normal scope exit should clean all fixtures");
+
+    struct ExpectedFailure {};
+    std::filesystem::path failed_path;
+    try {
+        const spectiary::test_support::TemporaryDirectory temporary;
+        failed_path = temporary.path();
+        Require(failed_path != survivor.path(), "exception-scope owner must remain isolated");
+        std::ofstream stream(failed_path / "fixture.txt");
+        stream << "fixture";
+        Require(stream.good(), "exception-scope fixture should be writable");
+        throw ExpectedFailure{};
+    } catch (const ExpectedFailure&) {
+    }
+    Require(!std::filesystem::exists(failed_path), "exception unwinding should clean fixtures");
+    Require(std::filesystem::exists(sentinel), "cleanup must preserve another owner's fixtures");
 }
 
 }  // namespace
 
 int main()
 {
-    TestWriterExceptionCleansTemporaryFile();
+    try {
+        TestTemporaryDirectoriesAreIsolatedAndCleaned();
+        TestWriterExceptionCleansTemporaryFile();
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL: " << error.what() << '\n';
+        return 1;
+    }
     return 0;
 }

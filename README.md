@@ -9,7 +9,7 @@ for the pre-1.0 format cutover and historical compatibility boundaries.
 
 <p align="center">
   <a href="https://github.com/SW26010/spectiary/actions/workflows/automation.yml"><img src="https://github.com/SW26010/spectiary/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="Spectiary automation status"></a>
-  <a href="https://github.com/SW26010/spectiary/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/Release-v0.9.0-2ea44f?logo=github&amp;logoColor=white" alt="Latest release: v0.9.0"></a>
+  <a href="https://github.com/SW26010/spectiary/releases/latest"><img src="https://img.shields.io/github/v/release/SW26010/spectiary?label=Release&amp;color=2ea44f&amp;logo=github&amp;logoColor=white" alt="Latest Spectiary release"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus" alt="C++20">
   <img src="https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE" alt="Dear ImGui with docking">
   <img src="https://img.shields.io/badge/ImPlot-Plotting-8A2BE2" alt="ImPlot">
@@ -145,6 +145,12 @@ Start here if you want to build or work on Spectiary:
 - [Spectral line catalog contract](docs/spectral_line_catalog_contract.md) — public reference data rules
 
 The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
+
+## License
+
+Spectiary has not yet specified a license for its own source code. The planned license when the project is open-sourced is MIT; that plan is not currently in effect.
+
+[Third-party software notices](legal/THIRD_PARTY_NOTICES.txt) and [data source notices](legal/DATA_SOURCES.txt) cover their respective components and data, and do not specify a license for Spectiary itself.
 
 ---
 
