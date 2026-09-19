@@ -4,7 +4,7 @@
 
 <h1 align="center">Spectiary</h1>
 
-Formerly SpecForge. See [project identity and rename contracts](docs/project_rename.md)
+Formerly SpecForge. See [project identity and rename contracts](docs/development/project_rename.md)
 for the pre-1.0 format cutover and historical compatibility boundaries.
 
 <p align="center">
@@ -95,7 +95,7 @@ For `.fits.gz`, Spectiary first performs bounded transport decompression and the
 
 Spectiary also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
 
-For the exact loader and data-boundary behavior, see [Spectrum Snapshot Contract](docs/spectrum_snapshot_contract.md).
+For the exact loader and data-boundary behavior, see [Spectrum Snapshot Contract](docs/reference/spectra/spectrum_snapshot_contract.md).
 
 ## A Native, Performance-First Stack
 
@@ -134,17 +134,16 @@ The presentation path uses modern DXGI flip-model behavior and does not target W
 
 README is intentionally kept user-facing. Build configuration, implementation contracts, profiling details, automation interfaces, and packaging rules live in the documentation instead.
 
-Start here if you want to build or work on Spectiary:
+Start with the [documentation index](docs/README.md), or go directly to:
 
-- [Engineering setup](docs/engineering_setup.md) — toolchain, vcpkg, CMake presets, build and test guidance
-- [Technical direction](docs/technical_direction.md) — architecture and performance constraints
-- [Product requirements](docs/product_requirements.md) — product goals, workflows, milestones, and non-goals
-- [Performance testing](docs/performance_testing.md) — real-data interaction profiling
-- [Release artifacts](docs/release_artifacts.md) — portable packaging, metadata, hashes, and release contracts
-- [Automation control](docs/automation_control.md) — test/debug automation interface
-- [Spectral line catalog contract](docs/spectral_line_catalog_contract.md) — public reference data rules
+- [Engineering setup](docs/development/engineering_setup.md) — toolchain, configuration and supported build commands
+- [Product requirements](docs/product_requirements.md) and [technical direction](docs/technical_direction.md) — goals, behavior and architecture
+- [Domain reference](docs/reference/README.md) — spectrum, sample-labeling and spectral-line contracts
+- [Testing](docs/testing/README.md) — widget, automation and real-data performance validation
+- [Presentation](docs/presentation/README.md) — display policy, telemetry and window resizing
+- [Release artifacts](docs/development/release_artifacts.md) — portable packaging and metadata contracts
 
-The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
+The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/development/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
 
 ## License
 

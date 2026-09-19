@@ -8,7 +8,7 @@
 - 只在被真实 profile 证明后才引入更复杂的渲染或数据路径。
 - 代码结构保持普通、可读、可维护，避免过早抽象。
 
-响应性实现约束和已发生退化的复盘见 [UI 响应速度实现约束与复盘](ui_responsiveness.md)。
+响应性实现约束和已发生退化的复盘见 [UI 响应速度实现约束与复盘](development/ui_responsiveness.md)。
 
 ## 目标栈
 
@@ -27,7 +27,7 @@
 - vcpkg 的 `imgui` port 提供 `docking-experimental`、`win32-binding` 和 `dx11-binding` features: <https://vcpkg.io/en/package/imgui.html>
 - ImPlot README 提醒高密度绘图需要关注 16-bit index 限制、renderer vtx offset 或 32-bit indices，并说明 ImPlot 适合实时交互绘图: <https://github.com/epezent/implot>
 - Windows Precision Touchpad 对未启用原生手势的桌面程序通常回退为 wheel 消息；主图的双指平移和捏合缩放使用 Windows Direct Manipulation，并只接管命中 plot 的 `PT_TOUCHPAD`: <https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal>、<https://learn.microsoft.com/en-us/windows/win32/directmanipulation/direct-manipulation-portal>
-- Windows 11 DRR 的高刷新交互使用官方 compositor clock API 请求 boost，并通过 compositor clock tick 驱动帧节奏；最终 Present 策略必须遵循[显示呈现产品合同与验证矩阵](presentation_policy.md)：首选最高可用交互刷新率且无撕裂，发生冲突时先保持刷新率并允许可观测的 tearing，最后才降低刷新率。所有能力缺失、外部约束和降级都必须记录。不能只请求 boost 后继续依赖被虚拟化的 DXGI vblank，也不能仅凭全局 tearing capability 静默选择 `ALLOW_TEARING`: <https://learn.microsoft.com/en-us/windows/win32/directcomp/compositor-clock/compositor-clock>、<https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/nf-dxgi1_6-dxgidisablevblankvirtualization>
+- Windows 11 DRR 的高刷新交互使用官方 compositor clock API 请求 boost，并通过 compositor clock tick 驱动帧节奏；最终 Present 策略必须遵循[显示呈现产品合同与验证矩阵](presentation/policy.md)：首选最高可用交互刷新率且无撕裂，发生冲突时先保持刷新率并允许可观测的 tearing，最后才降低刷新率。所有能力缺失、外部约束和降级都必须记录。不能只请求 boost 后继续依赖被虚拟化的 DXGI vblank，也不能仅凭全局 tearing capability 静默选择 `ALLOW_TEARING`: <https://learn.microsoft.com/en-us/windows/win32/directcomp/compositor-clock/compositor-clock>、<https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/nf-dxgi1_6-dxgidisablevblankvirtualization>
 - CMake Presets 文档区分可提交的 `CMakePresets.json` 和本地的 `CMakeUserPresets.json`: <https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html>
 
 ## Docking 方向
@@ -68,7 +68,7 @@ DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在�
 
 当前真实数据 loader 支持 `.npy`、简单波长/流量 `.csv`，以及可识别的
 SDSS/LAMOST/generic image 或 table 单条 FITS 光谱。真实数据输入合同定义在
-[Spectrum Snapshot Contract](spectrum_snapshot_contract.md)，由 `domain` 产出
+[Spectrum Snapshot Contract](reference/spectra/spectrum_snapshot_contract.md)，由 `domain` 产出
 稳定快照，UI 和 plot 只读该快照。
 
 Python、IPC、native loader 或外部预处理都只能作为 producer 侧实现选择，不能写入 UI/plot 产品承诺。
@@ -107,21 +107,12 @@ JSONL profile 至少区分：
 
 ## 工程边界
 
-建议后续代码结构：
+模块职责边界：
 
 - `platform`: Win32 window、message loop、DPI、shutdown。
-- `platform/win32_message_render_observer`: 主消息泵显式转交 queued message，thread-local
-  `WH_CALLWNDPROC` hook 补充非队列 sent message；两条路径复用同一 render-invalidation
-  谓词，避免 secondary viewport 输入漏唤醒，同时排除 `WM_NCHITTEST` 反馈循环。挂载
-  Direct Manipulation manual-update viewport 的 HWND 还会把实机确认的内部 queued
-  message `0x0096` 分类为 input pump 而非 render invalidation；standalone pump 按 compositor tick 限速，
-  plot `Poll()` 仍保留自身的 `Update()`，同一 tick 因而可能推进两次。真实手势增量再通过专用 wake
-  请求帧，wake 投递失败会释放 coalescing latch 以允许重试。不要把单次实测的一帧一个 gesture
-  提升为 `Update()` 调用次数不变量。
-- `platform/win32_compositor_clock`: Windows 11 API 动态发现、成对 boost 生命周期和 clock tick 唤醒；
-  UI 主循环将普通输入无效化合并到下一次 tick，renderer 只负责 capability-gated DXGI present flags，
-  不把 DRR API 细节扩散到 plot/UI。正常 tick 仅授权已有失效；waiter 异常退出的最后一个 tick
-  请求一次过渡帧，使 scheduler 切入有界 fallback cadence，并记录 wait result。
+- `platform/win32_message_render_observer` 与 `platform/win32_compositor_clock`:
+  负责输入唤醒、消息观察、boost 生命周期和 tick pacing；详细时序及异常边界见
+  [平台呈现合同](presentation/platform_contract.md)，不向 UI/plot 扩散平台 API。
 - `renderer`: D3D11 device、swap chain、render target、resize。
 - `ui`: ImGui context、style、dockspace、panel orchestration。
 - `plot`: ImPlot spectrum view 和 overlay rendering。

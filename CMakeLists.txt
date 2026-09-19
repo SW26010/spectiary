@@ -806,7 +806,7 @@ add_test(
         -FixtureDirectory
             "${CMAKE_SOURCE_DIR}/tests/fixtures/automation/samples"
         -Documentation
-            "${CMAKE_SOURCE_DIR}/docs/automation_samples.md"
+            "${CMAKE_SOURCE_DIR}/docs/development/automation/automation_samples.md"
         -Runner
             "${CMAKE_SOURCE_DIR}/tests/automation_samples_tests.ps1"
         -CMakeLists

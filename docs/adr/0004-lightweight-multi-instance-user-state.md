@@ -45,7 +45,7 @@ startup snapshot must not replace or repair it. A missing cache remains the
 normal empty first-write state, and supported legacy migration is allowed only
 under the catalog contract's validation rules. The complete operational merge,
 canonicalization, migration, and failure rules are specified in the
-[spectral-line catalog concurrent user-state write contract](../spectral_line_catalog_contract.md#concurrent-user-state-write-contract).
+[spectral-line catalog concurrent user-state write contract](../reference/spectral-lines/spectral_line_catalog_contract.md#concurrent-user-state-write-contract).
 This is an intentional catalog-only exception, not a reusable multi-writer
 cache framework. This amendment records existing behavior and ownership; it
 does not change runtime ownership or introduce a new persistence facility.
@@ -114,7 +114,7 @@ Under the existing labeling commit lock, ordinary-state replacement precedes
 checkpoint replacement; either can fail independently. There is no cross-file
 transaction, and failed checkpoint cleanup cannot roll back canonical
 publication or a successful registration. See the
-[field audit and lifecycle contract](../labeling_persistence_ownership.md).
+[field audit and lifecycle contract](../reference/labeling/labeling_persistence_ownership.md).
 
 Temporary-to-formal conversion publishes a complete ASDF from the current
 in-memory draft, reopens and validates it, and only then adopts the canonical

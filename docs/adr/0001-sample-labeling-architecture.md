@@ -9,7 +9,7 @@ creates an output-free draft; explicit Save As establishes an ASDF owner
 without rewriting the import files. Legacy registrations reopen their unchanged
 NPY/sidecar inputs for explicit ASDF migration, with no legacy autosave or
 persisted pending overlay.
-See [recovery compatibility](../agents/legacy-labeling-recovery-audit.md).
+See [recovery compatibility](../reference/labeling/legacy-labeling-recovery-audit.md).
 Sample labeling registrations, workflow/session settings, and output paths
 belong to ordinary local state; pre-canonical draft content has a separate
 best-effort checkpoint. Pending formal value and metadata edits remain in memory
@@ -59,91 +59,30 @@ about.
 
 ## Canonical schema 2.0 identity and provenance decision
 
-The canonical document keeps these concepts independent:
+The canonical document separates task identity, editable task name, user-selected
+output filename, Spectiary schema identity, build-generation provenance and ASDF
+container versions. Renaming or moving an output must not change the task's
+identity; a container version must not be mistaken for an application schema.
 
-| Concept | Decision |
-| --- | --- |
-| Task ID | Immutable `labeling_task.id`, using only lowercase hyphenated UUID v4 canonical text. |
-| Task name | Persistently editable UTF-8 canonical metadata. It must contain non-whitespace text, is neither trimmed nor normalized, and is not an identity. |
-| Output filename | User-selected shell/filesystem state. A sanitized task-name suggestion is presentation policy only; selecting or later renaming a file does not change task identity or task name. |
-| Spectiary schema identity and version | Exactly `format_kind: spectiary.sample_labeling` and `schema_version: 2.0.0` for current documents. |
-| Spectiary build source | Required `spectiary_build` generation provenance. `head` requires a full 40-character lowercase hexadecimal `source_revision`; `working_tree` requires the revision to be absent. |
-| Annotation alignment | Required `annotation.alignment` declaration with exactly `mode: by_index` and `target: sample_roster`; values follow roster/source index order. |
-| ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not Spectiary schema versions. |
+Schema 2.0 uses one explicit by-index alignment to the sample roster. It does not
+introduce a general alignment subsystem. Canonical timestamps describe semantic
+content mutations, while generation provenance identifies the binary that
+produced the durable document. A retry retains the mutation's timestamp rather
+than inventing a new edit. The producer declaration does not import local Git,
+release-sidecar, compiler or machine state at runtime.
 
-Issue #82 is a bounded self-description patch within `schema_version: 2.0.0`;
-it does not define or require schema `2.1.0`.
+Rewrites begin with a validated durable generation. Unknown-field preservation
+is bounded by the supported tree and roster; it is not an arbitrary ASDF
+round-trip promise. Task lineage, edit history, document revisions, incremental
+patches and local workflow/retry state remain outside the canonical format.
 
-Canonical time is a millisecond-resolution strong time point in the runtime and
-the exact `YYYY-MM-DDTHH:MM:SS.sssZ` form on the wire. Dates and ranges are
-validated, `created_at` is immutable, and `modified_at` is monotonic. Assigning
-or clearing a value, renaming a task, and adding/editing/removing a label
-definition are semantic mutations when their canonical result actually changes;
-future description/author editing must use the same rule. Output selection,
-export, activation, navigation/workflow settings, and save or retry state are
-not. Publication failure retains both the old durable timestamp and the
-mutation's pending timestamp; retry uses the original mutation timestamp rather
-than retry time.
-
-Fresh writers emit `manual` or `annotation_promotion` origins. A promotion names
-only a portable CSV/NPY basename and may carry `sha256:<64 lowercase hex>` over
-the complete raw bytes read from the same opened artifact generation as the
-parser. The digest is not computed from decoded labels, a sidecar, a path, or a
-source-collection fingerprint. Readers may preserve a syntactically valid
-future origin token unchanged, but current writers cannot introduce one and
-preserving rewrites cannot alter origin or `created_at`.
-
-The ASDF producer declaration is exactly `asdf_library.name: Spectiary`, with
-`asdf_library.version` set to the current build's generated application version.
-The adjacent `spectiary_build` map is deliberately narrow and comes only from
-the generated build-identity header: no runtime Git query,
-release sidecar, compiler, SDK, dependency inventory, executable hash, or
-completion timestamp participates. It identifies the producer of the current
-durable generation, so fresh writes and both values-only and full metadata
-rewrites stamp the current binary rather than preserving the replaced file's
-build identity.
-
-`description` and `authors` are optional canonical fields without current UI.
-Unset values stay absent; the supported author model contains required `name`
-plus optional `identifier` and optional `email`. Every present author field is
-non-whitespace UTF-8 text. Email is preserved exactly as user-supplied contact
-metadata; it is not parsed as an RFC address, normalized, or inferred from Git,
-the operating system, or other machine-local state.
-
-Schema 2.0 explicitly declares its only annotation alignment contract.
-annotation.values[i] annotates canonical sample i. For an
-`explicit_names` roster, `values[i]` labels `names[i]`; for a `source_index`
-roster, `values[i]` labels source index `i`. Readers reject a missing or
-ill-typed alignment map and any mode/target other than `by_index` and
-`sample_roster`. This is a fixed self-description field, not an extensible
-`by_id`/`by_key` alignment subsystem.
-
-Full and values-only rewrites must start from the validated durable generation
-of the same source, roster, annotation, and task. The preservation contract is
-limited to unknown mapping entries in the supported YAML tree; label-local
-entries follow stable label code. It does not cover arbitrary extra blocks or
-sequence schemas, removed labels, metadata byte layout/padding, or an old block
-index/trailer. In task-content terms, a values-only rewrite changes only
-annotation values and `modified_at`; as generation provenance,
-`spectiary_build` is still refreshed to the current binary as specified above.
-The rewrite reuses only the encoded roster block and recomputes the metadata and
-container layout.
-
-SpecForge labeling schema `1.0.0` and labeling cache schemas 1 through 3 have no
-migration path. The former `specforge.sample_labeling` namespace is not a read
-alias for current canonical documents, including schema `2.0.0`. Current
-ordinary state and draft checkpoint codecs each use their own schema 1
-envelope; the old monolithic schema 4 is a bounded migration input. Unsupported
-state is ignored/fails closed according to its owner rather than being guessed
-into canonical identity or provenance. See
-[ADR 0011](0011-project-identity-contracts.md) for the format-name cutover.
-
-Task copy/parent lineage, persisted edit history, canonical document revision,
-incremental patches, and workflow status are non-goals for schema 2.0. The
-controller's borrowed-view revision and local draft/formal, active, pending,
-retry, output-path, navigation, and UI state remain runtime/local concerns.
-The complete wire-tree example and field-level validation rules live in
-[`sample_labeling.md`](../sample_labeling.md#canonical-schema-20-identity-and-provenance).
+The complete field rules, versions, timestamps, provenance, preservation limits
+and wire-tree example are maintained in the
+[canonical ASDF schema](../reference/labeling/canonical_asdf_schema.md).
+The [persistence ownership contract](../reference/labeling/labeling_persistence_ownership.md)
+owns the separate ordinary-state/checkpoint envelopes and bounded legacy input
+rules. [ADR 0011](0011-project-identity-contracts.md) records the format-name
+cutover; historical names are not ongoing canonical read aliases.
 
 ## Local persistence failure semantics
 
@@ -158,7 +97,7 @@ Sparse state cannot yield a content view. Deactivation drops complete values
 into the sparse representation; canonical projection restores complete content
 from the ASDF base before applying pending edits. This is an implementation
 boundary that does not change canonical schema 2.0. Sparse edits are no longer
-serialized for formal tasks. See the [persistence field audit](../labeling_persistence_ownership.md).
+serialized for formal tasks. See the [persistence field audit](../reference/labeling/labeling_persistence_ownership.md).
 
 Source-session, navigation, labeling ordinary state, labeling draft checkpoints,
 and workflow state have separate JSON content owners. Their codecs own schema

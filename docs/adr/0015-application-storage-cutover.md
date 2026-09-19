@@ -1,7 +1,7 @@
 # Application-managed storage physical cutover
 
 Status: Implemented; final joint acceptance recorded in
-[storage acceptance](../storage_acceptance.md). Date: 2026-09-19.
+[storage acceptance](../evidence/storage/20260919-storage-acceptance.md). Date: 2026-09-19.
 Issues: #103 and the storage-coupled subset of #106.
 
 ## Final owners
@@ -68,7 +68,7 @@ state file; #104 is unchanged. #108/#109 canonical ownership/checkpoint lifecycl
 is unchanged. IPC, Win32/shell identity, ImGui internal IDs, format/digest domains,
 environment/CLI naming and broad public rename remain outside this phase.
 Stage 8 audited the combined implementation after the identity/public rename,
-without expanding the storage design. The [storage acceptance](../storage_acceptance.md)
+without expanding the storage design. The [storage acceptance](../evidence/storage/20260919-storage-acceptance.md)
 record preserves that original local pass and its validation limits. Its final
 commits were subsequently published, and [#103](https://github.com/SW26010/spectiary/issues/103)
 closed on 2026-09-19 following the

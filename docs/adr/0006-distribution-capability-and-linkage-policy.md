@@ -282,7 +282,7 @@ change must update validation so that:
   is historical and was already superseded by ADR 0003.
 - [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md)
   is superseded by this ADR.
-- [Release Artifacts](../release_artifacts.md) remains the contract for the
+- [Release Artifacts](../development/release_artifacts.md) remains the contract for the
   current schema 6 artifact and Portable pipeline, with identity and metadata
   boundaries defined by [ADR 0011](0011-project-identity-contracts.md).
 - [Technical Direction](../technical_direction.md) remains authoritative for

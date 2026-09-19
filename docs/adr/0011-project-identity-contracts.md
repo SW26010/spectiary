@@ -5,7 +5,7 @@ supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below
 Active persistence now uses the final config/state/logs/unsaved role layout.
 
 Stage-7 amendment: the final identity and format cutover below records the
-implemented #106/#107 decision. The [project rename procedure](../project_rename.md)
+implemented #106/#107 decision. The [project rename procedure](../development/project_rename.md)
 maintains the detailed contract inventory and future-rename checklist. The
 historical sections preserve the #106-A boundary, not current pending work.
 
@@ -39,7 +39,7 @@ aliases. Product text is required descriptive metadata, not an identity match
 key. Artifact path validation, executable SHA-256 binding during finalization
 and packaging, atomic publication and constrained failure cleanup are retained.
 Runtime deployment parsing remains independent of provenance availability.
-See [release artifacts](../release_artifacts.md) for the full build contract.
+See [release artifacts](../development/release_artifacts.md) for the full build contract.
 
 ## Final identity and format cutover (#106/#107)
 
@@ -97,5 +97,5 @@ state-file placement and data cutover remain decisions for #103/#109/#111.
 Existing identifiers and formats remain unchanged in A; they are not accepted
 as permanent old-brand contracts. Draft/recovery behavior belongs to #108/#109.
 Broad README/UI/source/repository rename adoption belongs to later #107 work.
-`docs/project_rename.md` is deferred until #106 closes around the final
+`docs/development/project_rename.md` is deferred until #106 closes around the final
 architecture. This decision completes the foundation only, not all of #106.

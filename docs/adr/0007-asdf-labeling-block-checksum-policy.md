@@ -122,7 +122,7 @@ Use the repository's required Windows build wrapper, then install the pinned
 oracle dependencies into an isolated target directory:
 
 The commands below use the current Spectiary target and executable names after
-the [project rename](../project_rename.md); the decision and recorded evidence
+the [project rename](../development/project_rename.md); the decision and recorded evidence
 above retain their historical names.
 
 ```powershell

@@ -45,7 +45,7 @@
 
 ## 文档边界
 
-长期维护的事件、字段、采集与校验规则放在 [presentation telemetry](../telemetry.md)，生产约束仍以 [presentation policy](../../presentation_policy.md) 和 [ADR 0005](../../adr/0005-detached-panel-win32-ownership.md) 为准。本目录保存窗口缩放调查的方案和证据。后续更新当前结论时编辑本页；新增报告只有在产生新证据时才需要。
+长期维护的事件、字段、采集与校验规则放在 [presentation telemetry](../telemetry.md)，生产约束仍以 [presentation policy](../policy.md) 和 [ADR 0005](../../adr/0005-detached-panel-win32-ownership.md) 为准。本目录保存窗口缩放调查的方案和证据。后续更新当前结论时编辑本页；新增报告只有在产生新证据时才需要。
 
 ## 证据索引
 

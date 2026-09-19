@@ -1,0 +1,145 @@
+# Automation CI
+
+Navigation: [Automation](README.md) · [Control-plane contract](automation_control.md) · [Sample sequences](automation_samples.md)
+
+Spectiary's automation workflow selects two CTest groups:
+
+| Group | CTest label | Environment | CI behavior |
+| --- | --- | --- | --- |
+| Native/headless gate | `automation-headless` | No GUI window or desktop interaction | Always runs on `windows-latest` for a manual dispatch |
+| Interactive desktop coverage | `real-gui` | A visible Windows desktop, normally self-hosted | Runs only for an explicitly authorized `workflow_dispatch` on protected `master` with `run_real_gui=true`; otherwise the workflow publishes an explicit diagnostic |
+
+The required headless gate covers the automation protocol/control plane, state
+root and seed isolation, the checked-in sample fixture contract, and the
+automation workflow contract. The comprehensive launcher workflow, the sample
+command sequences, and the
+two-process labeling coordination smoke are `real-gui` tests because they
+require a real Win32/D3D11 presentation path. They are not silently included
+in the hosted headless gate.
+
+`automation.yml` is manual-only and owns only those two automation selectors.
+The manual `repository-verification.yml` workflow owns the broader Debug
+`fast`/`extended`, static Release, and pinned ASDF oracle verification. Release
+packaging, Portable, PE/import, FITS, labeling, and other repository suites do
+not become automation work merely because they also retain the broad
+`ci-headless` or `required` repository labels.
+
+Historical scope and hosted-run measurements are retained in the
+[2026-09-02 timing evidence](../../evidence/automation/20260902-scope-timing.md).
+
+## Manual execution policy
+
+`automation.yml` does not run on `push` or `pull_request`, so its
+`Native/headless automation gate` check must not be configured as a required
+branch check: ordinary commits do not create that status. Start the workflow
+explicitly with `workflow_dispatch`. Every dispatch runs the hosted
+native/headless job. Real-GUI additionally requires protected `master`,
+`run_real_gui=true`, and `SPECTIARY_REAL_GUI_ENABLED=true`; an unprotected
+manual `master` dispatch records `unprotected_ref` without scheduling the
+self-hosted job. The CTest `required` label remains a local selection property,
+not a GitHub branch-protection policy.
+
+## Local commands
+
+Configure and build with the repository wrapper:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+    -Target spectiary_automation_headless_targets
+```
+
+Run the required gate and retain its bounded log:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
+    -Mode Headless `
+    -BuildDirectory build\ninja-msvc-debug `
+    -ArtifactsDirectory build\ninja-msvc-debug\test-artifacts\automation-headless -SuiteTimeoutSec 300 -TestTimeoutSec 120
+```
+
+On a desktop session, run the interactive group explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+    -Target spectiary_automation_real_gui_targets
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
+    -Mode RealGui `
+    -BuildDirectory build\ninja-msvc-debug `
+    -ArtifactsDirectory build\ninja-msvc-debug\test-artifacts\real-gui -SuiteTimeoutSec 900 -TestTimeoutSec 300
+```
+
+The CI helper fails when CTest fails or selects no tests. It always writes a
+CTest log and a small JSON summary under the current run root. It also writes a
+`ctest-temporary/manifest.json` plus only the files newly created or modified
+by this CTest invocation from `Testing/Temporary`; unchanged historical files
+are excluded. The workflow uploads the run root at
+`ci-artifacts/<run_id>-<run_attempt>/<job>/`, which also contains the sample
+runner's known failure artifacts under `automation-samples/`. It does not upload
+the shared build `logs/build` or the entire build-tree `Testing/Temporary`.
+The runner sets `SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS` only for the current
+CTest process and restores the caller's value afterward.
+The CTest wrapper captures the launched process's start ticks in a held
+`System.Diagnostics.Process` handle and places it in the shared kill-on-close
+Job Object. Timeout and exception cleanup therefore cannot fall through to a
+PID-only/taskkill operation or accidentally terminate a reused PID.
+
+The native job has a 90-minute job budget. Checkout and toolchain discovery are
+each bounded to five minutes, configure to ten, build to twenty, the headless
+gate step to ten, and artifact upload to five. The headless helper's
+`SuiteTimeoutSec 300` is the whole CTest-process budget; `TestTimeoutSec 120`
+is the timeout applied to each selected test. The five-minute suite budget
+therefore runs before the ten-minute step limit and leaves job-level cleanup
+headroom.
+
+The CI helper maps `Headless` to `automation-headless` and `RealGui` to `real-gui`.
+The workflow and the helper use these exact labels; `required` is an additional
+CTest label on the six headless tests, not a different selector. The six tests
+also retain `ci-headless` for repository-wide selection; automation does not
+consume that broader label.
+
+The real-GUI job is opt-in because an ordinary hosted Windows runner does not
+provide a stable interactive desktop contract for this D3D11 path. The job
+never runs for `pull_request`, even when
+`SPECTIARY_REAL_GUI_ENABLED=true`; this prevents untrusted PR code from being
+checked out, built, or executed on the self-hosted desktop. The repository
+variable is only one prerequisite: the workflow event/ref authorization must
+also match the protected `master` policy and GitHub's `github.ref_protected`
+fact must be true. The `real-gui` environment can additionally require
+reviewer approval on the self-hosted runner.
+
+The real-GUI job has a 75-minute job-level budget. Its checkout, toolchain,
+configure, build, CTest, and upload step limits sum to 65 minutes, leaving at
+least ten minutes for runner scheduling and final artifact transfer near the
+normal upper bound. Its `SuiteTimeoutSec 900` and per-test
+`TestTimeoutSec 300` budgets remain inside the 20-minute CTest step limit.
+
+When the authorization policy is not satisfied, a separate hosted job writes
+an explicit `skipped` diagnostic containing the event, ref, base ref,
+repository variable, manual input, `ref_protected`, headless result, runner
+preflight result, and watchdog result. An allowed event on an unprotected ref
+writes `unprotected_ref` and fails the diagnostic job without scheduling the
+self-hosted job. For an authorized run, a hosted preflight queries for an
+online idle runner with all three required labels before the self-hosted job
+can be scheduled. If the runner API cannot be read or the runner is
+offline/busy, the status is `runner_unavailable`. If environment approval or
+the self-hosted queue remains pending beyond the bounded watchdog deadline,
+the status is `approval_timeout`. An actual authorized test/build failure is
+reported as `failed`, while watchdog API/target/cancellation problems are
+reported as `watchdog_failure`; none of these are rewritten as `SKIPPED`.
+The watchdog retains its JSON record, attempts bounded cancellation of the
+workflow run (the GitHub API has no per-job cancellation endpoint) when the
+target is queued or missing, and fails with an actionable diagnostic when the
+Jobs API or target lookup cannot be trusted. The normal available-runner path
+still executes the real-GUI tests. Every GitHub API request has an eight-second
+request timeout, shorter than the fifteen-second poll interval; the ten-minute
+deadline is checked independently of API return timing. A failed workflow-run
+cancel is recorded as `cancel_failed` only when that cancellation request
+fails, and maps to `watchdog_failure`, not to an
+authorized test `failed` or a misleading `SKIPPED` result.
+
+The real-GUI job uploads sample evidence from the unique
+`ci-artifacts/<run_id>-<run_attempt>/real-gui/automation-samples/sample-run-*`
+paths (the native job uses the analogous `native-headless` root). This keeps
+logs and failure files isolated when independent CTest runs share the build
+tree.

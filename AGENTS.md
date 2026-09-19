@@ -9,7 +9,7 @@
   PowerShell or a restricted agent shell.
 - In restricted environments such as Codex, run the wrapper with sandbox escalation so MSVC and
   vcpkg can access their caches and the wrapper can terminate a timed-out process tree.
-- See [Ninja/MSVC 卡住排查](docs/engineering_setup.md#ninjamsvc-卡住排查) for the rationale and
+- See [Ninja/MSVC 卡住排查](docs/development/engineering_setup.md#ninjamsvc-卡住排查) for the rationale and
   recovery procedure.
 
 ## GitHub Actions trigger policy

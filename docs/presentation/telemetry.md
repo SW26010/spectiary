@@ -1,9 +1,10 @@
 # Live-resize presentation telemetry (schema 1)
 
-For investigation scope, evidence and current decisions, see [issue #56](live-resize/README.md).
-The ordinary instrumentation path does not select a resize strategy. It leaves
-buffer count, synchronous rebuilding, fallback, Present flags, frame scheduling,
-main acquire timeout (1000 ms) and detached acquire timeout (0 ms) unchanged.
+For investigation scope, evidence and current decisions, see the [resize investigation](live-resize/README.md).
+The current presentation and detached incremental-buffer policy is defined in
+[presentation policy](policy.md). Instrumentation observes that policy; enabling
+recording does not select a resize strategy or change fallback, Present flags,
+frame scheduling, main acquire timeout (1000 ms) or detached acquire timeout (0 ms).
 Enable the existing bounded JSONL recorder with `SPECTIARY_PROFILE=1` (or the UI).
 No per-event clock reads or JSON serialization occur while recording is inactive.
 Window identity bookkeeping remains bounded by live presentation objects.
@@ -92,7 +93,7 @@ It never force-terminates the application. Record from launch through normal
 shutdown for full lifecycle acceptance. Alternatively, use the bounded manual
 capture mode described below; unmatched spans or boundaries still fail acceptance.
 
-The follow-up to the 2026-09-11 capture needs only detached resize:
+For a capture scoped to detached resize, use:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.ps1 -Scenario Detached
@@ -111,22 +112,23 @@ callbacks stay null. These void calls leave `result_valid=false`; their spans
 measure duration without claiming a native API success result. Tests cover exact
 argument forwarding, disabled recording, nesting and handler restoration.
 
-Main/detached role is now captured when the presentation lifetime is registered,
-so native HWND teardown does not change it. The analyzer now rejects a role
-change within a lifetime. The original 00:33 recording retains its known final
-main-role mislabel and consequently fails this tightened check; its bytes and
-the previously recorded analysis remain unchanged.
+Main/detached role is captured when the presentation lifetime is registered,
+so native HWND teardown does not change it. The analyzer rejects a role change
+within a lifetime. The [2026-09-11 00:33 historical recording](live-resize/evidence/20260911-003332-baseline.md)
+retains its known final main-role mislabel and fails this check; the report
+preserves the limitation without changing the original bytes or analysis.
 
 Bounded tests cover disabled recording, nested failure results, HWND reuse,
 coalesced invalidations, production JSONL fields, malformed/incomplete captures,
 actual Win32 modal boundary messages and real D3D resize/Present calls. They
 establish observability and unchanged API outcomes, not a performance root cause.
 
-## Native size callback follow-up
+## Native size callback instrumentation
 
-The 00:50 capture places the largest detached resize stalls inside the original
-ImGui platform size callback. The next capture adds these events without replacing
-the compiled ImGui backend or changing its native calls:
+The native-size instrumentation observes the original ImGui platform size callback
+without replacing the compiled backend or changing its native calls. Historical
+motivation and measured stalls are preserved in the [00:50 detached capture](live-resize/evidence/20260911-005051-detached.md).
+The additional events are:
 
 | Event | Correlation and meaning |
 | --- | --- |
@@ -153,7 +155,7 @@ install the optional return hook does not change application startup success.
 The observer never dispatches messages, and the callback wrapper preserves the
 original arguments and last-error value. Disabled recording creates no spans.
 
-For this follow-up, repeat only the detached Spectrum outer-border resize:
+To capture only the detached Spectrum outer-border resize with native-size breakdown:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.ps1 -Scenario NativeSize
@@ -172,8 +174,9 @@ missing summaries, receiver/ID mismatch and incomplete hook observations.
 
 ## System scheduling capture
 
-The 07:20 recording places a 141.55 ms gap between WM_NCCALCSIZE return and
-WM_NCPAINT entry. Collect scheduling and stacks with the same interaction:
+To distinguish thread waiting from scheduling delay, collect scheduling and stacks
+alongside the native-size interaction. The [07:20 native-size report](live-resize/evidence/20260911-072054-native-size.md)
+records the historical 141.55 ms message gap that motivated this capture path.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.ps1 -Scenario NativeSize -SystemTrace
@@ -222,14 +225,14 @@ this capture path.
 
 ### Feedback and resource-release breakdown
 
-Capture-window follow-up: the live-resize runner now starts recording **off** when
+The live-resize runner starts recording **off** when
 `-FeedbackBreakdown` or `-WindowedCapture` is selected. Prepare the detached viewport,
 then use Settings > Diagnostics > Start Recording. `SPECTIARY_PROFILE_WINDOWED=1`
 sets the existing recorder duration bound to five seconds, retaining its ordinary
 queue/file bounds and frame-finalization tail. It does not affect runtime-resource
 workload duration policy. Close normally after recording finishes; only one recording
-is accepted by this runner. This replaces the former launch-to-exit capture instruction
-for detailed resize trials.
+is accepted by this runner. Detailed resize trials use this bounded manual capture;
+launch-to-exit capture remains the separate full-lifecycle scenario above.
 
 On manual start, presentation tracing waits for the next complete RenderFrame.
 `viewport_capture_boundary` begin snapshots each existing window's real identity,
@@ -244,9 +247,10 @@ If recording stops while no frame tail is available, absent boundaries still fai
 validation; five seconds is a recording limit, not a guarantee of complete evidence
 under every minimized/lost-device condition.
 
-The September 11 follow-up adds instrumentation only; polling remains zero-timeout,
-statistics are drained with the original loop, and resource release order is unchanged.
-All spans use the existing operation/parent-operation, frame and viewport-lifetime IDs.
+Feedback and resource-release tracing does not select the polling frequency or
+resource policy. Ordinary polling remains zero-timeout; spans observe statistics
+draining and resource release in their existing order. All spans use the
+operation/parent-operation, frame and viewport-lifetime IDs.
 
 | Event | Meaning and correlation |
 | --- | --- |
@@ -285,3 +289,36 @@ normally afterwards. Extra events increase overhead and file volume; keep the re
 limits and reject dropped or truncated captures. Absolute timings from different
 instrumentation versions are not directly comparable. Experimental configurations and
 results belong in the [issue #56 investigation](live-resize/README.md).
+
+## Incremental buffer events
+
+The production detached-buffer strategy and the isolated incremental diagnostic
+use the following event fields and acquisition/submission checks. Historical
+experiment activation is described in the [implementation record](live-resize/experiments/incremental-buffers.md);
+current production support and fallback remain defined by [policy](policy.md#独立面板缩放资源策略).
+The legacy enabled marker is described above; it does not prove that a viewport
+remained on Composition.
+
+| Event | Meaning |
+| --- | --- |
+| `presentation_resize_request` | Child of viewport_resize; latest request serial and target dimensions. |
+| `presentation_buffer_selection` | Child of viewport_acquire; action select/replace/skip_unavailable/skip_frame_budget/budget_failure, HRESULT and selected identity. |
+| `presentation_buffer_replace` | Child of selection; complete allocation/commit/old-release attempt. Failure means no installed-slot swap occurred. |
+| `presentation_buffer_submission` | Child of viewport_present; successful submission identity, not display completion. |
+
+Fields: `resize_request_serial`, `allocation_generation`, `bound_generation`,
+`bound_buffer_slot`, `buffer_slot`, `logical_bytes`, `buffer_action`, and existing
+new_width/new_height. Generation is unique within a viewport lifetime, not globally.
+For selection/replacement, `count` is the three-bit observed availability mask;
+`logical_bytes` is the planned peak including the temporary for replacement, or
+installed bytes for selection. Failure before a plan is feasible can report zero.
+Old-resource release spans carry the retired generation; an uncommitted partial
+temporary can have generation zero. Generation assignment occurs after creation.
+
+The analyzer checks typed fields, bounded slots/budget, event parents, one replacement
+attempt per viewport/frame, availability mask and bound-slot exclusion, and that a
+submitted identity/dimensions/request matches successful acquisition. With
+`-RequireIncrementalBuffers`, missing activation/replacement coverage, simultaneous
+acquisition-only feedback, or detached DXGI Present invalidates the performance trial.
+Existing zero-drop and complete capture requirements remain. Diagnostics of fallback
+can still be read without treating them as a valid performance comparison.
