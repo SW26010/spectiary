@@ -4,6 +4,11 @@ Storage-layout amendment: [ADR 0015](0015-application-storage-cutover.md)
 supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below.
 Active persistence now uses the final config/state/logs/unsaved role layout.
 
+Stage-7 amendment: [project rename contracts](../project_rename.md) records the
+implemented machine namespace, canonical format and public/source adoption.
+The deferred-work section below preserves the historical #106-A boundary;
+it is not the current implementation status.
+
 
 Status: Accepted for #106-A. Date: 2026-09-18. Issues: #106, #107, #103.
 
