@@ -11664,6 +11664,234 @@ void TestFloatingAnnotationsAreNotFilterable()
         "ignored floating condition should explain why it was ignored");
 }
 
+spectiary::SampleLabelingStateCache SplitOwnerOutcomeFixture()
+{
+    spectiary::SampleLabelingStateCache cache;
+    auto& source = cache.sources["source"];
+    source.sample_count = 3;
+    source.source_name = "Original source";
+    source.source_fingerprint = "source-fingerprint";
+    source.context_fingerprint = "source-context";
+    auto task = spectiary::CreateSampleLabelingTask(
+        "11111111-1111-4111-8111-111111111111", "Original draft", 3);
+    Require(spectiary::UpsertSampleLabel(task.label_set, {5, "Review", 'r'}),
+        "split owner fixture should define a label");
+    source.active_task_id = task.task_id;
+    source.tasks.push_back(std::move(task));
+    return cache;
+}
+
+void TestSplitOwnerLoadDiagnostics()
+{
+    using Completion = spectiary::SampleLabelingPersistenceCompletion;
+    using Issue = spectiary::SampleLabelingStateCacheLoadIssueKind;
+    const auto directory = FreshTestDirectory("spectiary_split_owner_load_outcomes");
+    const auto state_path = directory / "sample-labeling-state.json";
+    const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+    Require(spectiary::SaveSampleLabelingStateCache({}, state_path, SplitOwnerOutcomeFixture()),
+        "split owner load fixture should save");
+    auto unsupported = nlohmann::json::parse(ReadTextFile(draft_path));
+    unsupported["schema_version"] = 999;
+    WriteTextFile(state_path, "{malformed ordinary state");
+    WriteTextFile(draft_path, unsupported.dump());
+
+    const auto loaded = spectiary::LoadSampleLabelingStateCache({}, state_path);
+    Require(loaded.ordinary_state.completion == Completion::Failed &&
+            loaded.ordinary_state.issue_kind == Issue::InvalidDocument &&
+            loaded.draft_checkpoint.completion == Completion::Failed &&
+            loaded.draft_checkpoint.issue_kind == Issue::UnsupportedFormatOrSchema,
+        "each failed load must retain its own completion and distinct issue kind");
+    Require(!loaded.ordinary_state.diagnostic_detail.empty() &&
+            !loaded.draft_checkpoint.diagnostic_detail.empty() &&
+            loaded.diagnostic_detail.find(loaded.ordinary_state.diagnostic_detail) != std::string::npos &&
+            loaded.diagnostic_detail.find(loaded.draft_checkpoint.diagnostic_detail) != std::string::npos &&
+            loaded.diagnostic_detail.find("Ordinary state:") != std::string::npos &&
+            loaded.diagnostic_detail.find("Draft checkpoint:") != std::string::npos,
+        "combined load diagnostics must preserve both owner failures");
+    spectiary::SampleLabelingController controller(state_path);
+    controller.ActivateSource("source", 3);
+    const auto status = controller.PersistenceStatus();
+    Require(!controller.state_load_warning().empty() &&
+            status.load_diagnostic_detail.find(loaded.ordinary_state.diagnostic_detail) != std::string::npos &&
+            status.load_diagnostic_detail.find(loaded.draft_checkpoint.diagnostic_detail) != std::string::npos,
+        "controller persistence diagnostics must expose both failed load causes");
+
+    const auto registrations = spectiary::LoadSampleLabelingStateCache({}, state_path, {},
+        spectiary::SampleLabelingStateCacheLoadPolicy::OrdinaryRegistrationsOnly);
+    Require(registrations.ordinary_state.completion == Completion::Failed &&
+            registrations.draft_checkpoint.completion == Completion::NotAttempted &&
+            registrations.draft_checkpoint.issue_kind == Issue::None &&
+            registrations.draft_checkpoint.diagnostic_detail.empty() &&
+            registrations.diagnostic_detail.find("Draft checkpoint:") == std::string::npos,
+        "registration-only loads must not claim a checkpoint read or report its failure");
+
+    const auto missing_path = directory / "missing" / "sample-labeling-state.json";
+    const auto missing = spectiary::LoadSampleLabelingStateCache({}, missing_path);
+    Require(missing.ordinary_state.completion == Completion::Succeeded &&
+            missing.draft_checkpoint.completion == Completion::Succeeded &&
+            missing.issue_kind == Issue::None && missing.cache.sources.empty(),
+        "missing owner files should count as successful reads of empty defaults");
+}
+
+void TestSplitOwnerWriteOutcomes()
+{
+    using Completion = spectiary::SampleLabelingPersistenceCompletion;
+    for (const bool commit : {false, true}) {
+        for (const auto [block_state, block_draft] :
+            {std::pair{true, false}, std::pair{false, true}, std::pair{true, true}}) {
+            const auto directory = FreshTestDirectory(
+                "spectiary_split_owner_write_outcomes_" + std::to_string(commit) +
+                std::to_string(block_state) + std::to_string(block_draft));
+            const auto state_path = directory / "sample-labeling-state.json";
+            const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+            auto cache = SplitOwnerOutcomeFixture();
+            Require(spectiary::SaveSampleLabelingStateCache({}, state_path, cache),
+                "split owner write fixture should save");
+            const auto state_before = ReadTextFile(state_path);
+            const auto draft_before = ReadTextFile(draft_path);
+            auto& source = cache.sources.at("source");
+            source.source_name = "Updated source";
+            source.tasks.front().task_name = "Updated draft";
+            source.tasks.front().values.Complete()[1] = 5;
+            spectiary::SampleLabelingStateCachePatch patch;
+            auto& source_patch = patch.sources["source"];
+            source_patch.metadata = spectiary::SampleLabelingSourceMetadataPatch{
+                source.sample_count, source.source_name, source.source_fingerprint, source.context_fingerprint};
+            source_patch.task_upserts.push_back(source.tasks.front());
+
+            HANDLE held_state = INVALID_HANDLE_VALUE;
+            HANDLE held_draft = INVALID_HANDLE_VALUE;
+            if (block_state) held_state = CreateFileW(state_path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (block_draft) held_draft = CreateFileW(draft_path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            const bool opened = (!block_state || held_state != INVALID_HANDLE_VALUE) &&
+                (!block_draft || held_draft != INVALID_HANDLE_VALUE);
+            if (!opened) {
+                if (held_state != INVALID_HANDLE_VALUE) CloseHandle(held_state);
+                if (held_draft != INVALID_HANDLE_VALUE) CloseHandle(held_draft);
+                Require(false, "split owner write fixture should deny selected replacements");
+            }
+            std::string error;
+            const auto result = commit
+                ? spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error)
+                : spectiary::SaveSampleLabelingStateCache({}, state_path, cache, &error);
+            if (held_state != INVALID_HANDLE_VALUE) CloseHandle(held_state);
+            if (held_draft != INVALID_HANDLE_VALUE) CloseHandle(held_draft);
+            Require(!result && !result.Succeeded() &&
+                    result.ordinary_state.completion == (block_state ? Completion::Failed : Completion::Succeeded) &&
+                    result.draft_checkpoint.completion == (block_draft ? Completion::Failed : Completion::Succeeded) &&
+                    result.RegistrationSucceeded() == !block_state &&
+                    result.CheckpointCleanupPending() == (!block_state && block_draft),
+                "save and commit must retain both owner outcomes in either partial-failure direction");
+            Require(result.ordinary_state.diagnostic_detail.empty() != block_state &&
+                    result.draft_checkpoint.diagnostic_detail.empty() != block_draft,
+                "only failed owner writes should retain failure details");
+            if (block_state) Require(error.find(result.ordinary_state.diagnostic_detail) != std::string::npos,
+                "write summary must retain ordinary state failure details");
+            if (block_draft) Require(error.find(result.draft_checkpoint.diagnostic_detail) != std::string::npos,
+                "write summary must retain checkpoint failure details");
+            Require((ReadTextFile(state_path) == state_before) == block_state &&
+                    (ReadTextFile(draft_path) == draft_before) == block_draft,
+                "reported owner completion must match the independently published files");
+            const auto restored = spectiary::LoadSampleLabelingStateCache({}, state_path);
+            const auto* task = FindTask(restored.cache, "source", source.tasks.front().task_id);
+            Require(task && task->values.Complete()[1] == (block_draft ? -1 : 5),
+                "checkpoint publication must remain independent of ordinary registration failure");
+            const auto retried = spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error);
+            Require(retried && retried.ordinary_state.completion == Completion::Succeeded &&
+                    retried.draft_checkpoint.completion == Completion::Succeeded &&
+                    !retried.CheckpointCleanupPending() && error.empty(),
+                "partial owner writes must converge and clear their diagnostics after the blockers are released");
+        }
+    }
+}
+
+void TestSplitOwnerWritesNotAttemptedBeforePreconditions()
+{
+    using Completion = spectiary::SampleLabelingPersistenceCompletion;
+    const auto directory = FreshTestDirectory("spectiary_split_owner_write_preconditions");
+    const auto state_path = directory / "sample-labeling-state.json";
+    const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+    const auto cache = SplitOwnerOutcomeFixture();
+    Require(spectiary::SaveSampleLabelingStateCache({}, state_path, cache),
+        "split owner precondition fixture should save");
+    const auto state_before = ReadTextFile(state_path);
+    const auto draft_before = ReadTextFile(draft_path);
+    const auto require_not_attempted = [&](const auto& result, std::string_view reason) {
+        Require(!result && result.ordinary_state.completion == Completion::NotAttempted &&
+                result.draft_checkpoint.completion == Completion::NotAttempted &&
+                result.ordinary_state.diagnostic_detail.empty() && result.draft_checkpoint.diagnostic_detail.empty(),
+            reason);
+        Require(ReadTextFile(state_path) == state_before && ReadTextFile(draft_path) == draft_before,
+            "rejected persistence preconditions must preserve both files");
+    };
+    auto invalid = cache;
+    invalid.sources.at("source").sample_count = 0;
+    std::string error;
+    const auto invalid_save = spectiary::SaveSampleLabelingStateCache({}, state_path, invalid, &error);
+    require_not_attempted(invalid_save, "save validation failure must not claim either owner was written");
+    Require(!error.empty(), "validation failure should retain its operation diagnostic");
+
+    spectiary::SampleLabelingStateCachePatch patch;
+    auto& source_patch = patch.sources["source"];
+    source_patch.task_upserts.push_back(cache.sources.at("source").tasks.front());
+    source_patch.task_ids_expected_absent.insert(source_patch.task_upserts.front().task_id);
+    const auto invalid_commit = spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error);
+    require_not_attempted(invalid_commit, "commit conflict rejection must leave both owner writes unattempted");
+    Require(!error.empty(), "commit conflict should retain its operation diagnostic");
+    source_patch.task_ids_expected_absent.clear();
+    auto lock = spectiary::TryAcquireExclusiveFileLease(
+        spectiary::SampleLabelingStateCoordinationDirectory(state_path) / "cache-commit.lock");
+    Require(lock.status == spectiary::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "split owner precondition fixture should block the commit lock");
+    const auto blocked_commit = spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error);
+    lock.lease.Reset();
+    require_not_attempted(blocked_commit, "commit lock failure must leave both owner writes unattempted");
+    Require(!error.empty(), "commit lock failure should retain its operation diagnostic");
+
+    WriteTextFile(draft_path, "{invalid checkpoint");
+    const auto corrupt_draft = ReadTextFile(draft_path);
+    const auto rejected_reload = spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error);
+    Require(!rejected_reload &&
+            rejected_reload.ordinary_state.completion == Completion::NotAttempted &&
+            rejected_reload.draft_checkpoint.completion == Completion::NotAttempted && !error.empty() &&
+            ReadTextFile(state_path) == state_before && ReadTextFile(draft_path) == corrupt_draft,
+        "untrusted commit reload must preserve both owners without claiming writes were attempted");
+
+    HANDLE held = CreateFileW(state_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Require(held != INVALID_HANDLE_VALUE, "block state save before preservation read");
+    const auto preservation_failed = spectiary::SaveSampleLabelingStateCache({}, state_path, cache, &error);
+    CloseHandle(held);
+    Require(!preservation_failed && preservation_failed.ordinary_state.completion == Completion::Failed &&
+            preservation_failed.draft_checkpoint.completion == Completion::NotAttempted &&
+            !preservation_failed.ordinary_state.diagnostic_detail.empty() &&
+            !preservation_failed.draft_checkpoint.diagnostic_detail.empty() &&
+            error.find(preservation_failed.ordinary_state.diagnostic_detail) != std::string::npos &&
+            error.find(preservation_failed.draft_checkpoint.diagnostic_detail) != std::string::npos &&
+            ReadTextFile(state_path) == state_before &&
+            ReadTextFile(draft_path) == corrupt_draft,
+        "failed ordinary registration plus unreadable retained checkpoint must skip checkpoint replacement");
+
+    auto unsupported = nlohmann::json::parse(draft_before);
+    unsupported["schema_version"] = 999;
+    WriteTextFile(state_path, "{malformed ordinary state");
+    WriteTextFile(draft_path, unsupported.dump());
+    const auto damaged_state = ReadTextFile(state_path);
+    const auto unsupported_draft = ReadTextFile(draft_path);
+    const auto failed_load = spectiary::LoadSampleLabelingStateCache({}, state_path);
+    const auto rejected_both = spectiary::CommitSampleLabelingStateCachePatch({}, state_path, patch, &error);
+    Require(!rejected_both && rejected_both.ordinary_state.completion == Completion::NotAttempted &&
+            rejected_both.draft_checkpoint.completion == Completion::NotAttempted &&
+            rejected_both.ordinary_state.diagnostic_detail == failed_load.ordinary_state.diagnostic_detail &&
+            rejected_both.draft_checkpoint.diagnostic_detail == failed_load.draft_checkpoint.diagnostic_detail &&
+            error.find(failed_load.ordinary_state.diagnostic_detail) != std::string::npos &&
+            error.find(failed_load.draft_checkpoint.diagnostic_detail) != std::string::npos &&
+            ReadTextFile(state_path) == damaged_state && ReadTextFile(draft_path) == unsupported_draft,
+        "commit reload failures must retain both owner causes while leaving both replacements unattempted");
+}
+
 void TestSplitDraftCheckpointCleanupAndCloseForProfile(spectiary::StorageProfile profile)
 {
     const auto base = FreshTestDirectory(profile == spectiary::StorageProfile::Portable
@@ -11796,6 +12024,9 @@ int main(int argc, char* argv[])
         }
     };
     try {
+        run("TestSplitOwnerLoadDiagnostics", TestSplitOwnerLoadDiagnostics);
+        run("TestSplitOwnerWriteOutcomes", TestSplitOwnerWriteOutcomes);
+        run("TestSplitOwnerWritesNotAttemptedBeforePreconditions", TestSplitOwnerWritesNotAttemptedBeforePreconditions);
         run("TestSplitDraftCheckpointCleanupAndClose", TestSplitDraftCheckpointCleanupAndClose);
         if (argc == 2 && std::string_view(argv[1]) == "--legacy-retirement") {
             TestNpyPromotionCreatesDraftWithoutModifyingImport();
