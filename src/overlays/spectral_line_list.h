@@ -33,6 +33,8 @@ struct Marker {
 struct Group {
     std::string id;
     std::string name;
+    // Preserve representation order losslessly. v1 assigns no presentation,
+    // priority or scientific meaning to this order.
     std::vector<std::string> marker_ids;
     bool operator==(const Group&) const = default;
 };

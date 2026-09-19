@@ -53,8 +53,12 @@ void Run()
     auto add_a = groups, add_b = groups;
     add_a.overlay.grouping_views[0].groups.push_back({"new", "A", {"a"}});
     add_b.overlay.grouping_views[0].groups.push_back({"new", "B", {"b"}});
+    add_a.session.group_names["new"] = {GeneratedNameSource::DefaultGroup, 2, 0, {}};
+    add_b.session.group_names["new"] = {GeneratedNameSource::DefaultGroup, 3, 0, {}};
     Require(ReconcileBuiltInSpectralLineTask(base, groups, add_a, add_b, {}, loaded.state, error), error);
     Require(loaded.state.overlay.grouping_views[0].groups.size() == 3, "concurrent ID collision preserves both additions");
+    Require(loaded.state.session.group_names.at("new").ordinal == 3 && loaded.state.session.group_names.at("new-2").ordinal == 2,
+            "remapping must preserve each writer's localization metadata independently");
 
     Json legacy = {{"format_kind", "spectiary.catalog_user_state.cache"}, {"schema_version", 6},
         {"catalogs", {{base.id, {{"active_view_id", "v"}, {"marker_visibility", {{"a", true}}},
@@ -69,8 +73,8 @@ void Run()
     loaded = LoadBuiltInSpectralLineState(path, base);
     Require(loaded.error.empty() && loaded.requires_save, loaded.error);
     Require(loaded.state.overlay.grouping_views[0].groups.size() == 1 &&
-            loaded.state.overlay.grouping_views[0].groups[0].marker_ids == std::vector<std::string>{"b", "a"},
-            "migration materializes display order and removes only system Unassigned");
+            loaded.state.overlay.grouping_views[0].groups[0].marker_ids == std::vector<std::string>{"a", "b"},
+            "migration preserves stored representation order and removes only system Unassigned");
     Require(loaded.state.overlay.color_schemes->front().colors.at("a") == "#8000FFFF", "legacy color quantization");
     Require(loaded.state.session.view_names.at("v").source == GeneratedNameSource::DefaultGroupingView, "generated name provenance retained outside canonical views");
     Require(SaveBuiltInSpectralLineState(path, base, loaded.state, error), error);

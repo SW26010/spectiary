@@ -1,324 +1,152 @@
-# Spectral Line Grouping Views
+# Spectral Line Grouping Views and Built-in Overlay
 
-## Purpose
+The public document contract is [Spectral Line List v1](spectral_line_list_v1.md).
+The packaged base is a complete, read-only v1 document. `BuiltInSpectralLineAdapter`
+resolves it with local customization into one validated `SpectralLineList`.
+The controller and plot consume this effective content; they do not decode or
+compose overlay JSON. User-owned canonical documents use the same model, with
+open/edit/save workflows owned by issues #65–#67.
 
-Spectral line grouping views let users organize catalog markers for inspection
-without changing the spectral-line catalog itself. The public catalog remains
-the source of marker definitions, wavelengths, and any catalog-provided grouping.
+## Ownership and interaction
 
-This document describes user-owned grouping state and its local persistence. The
-cache format is structured and versioned, but it is not a public import/export
-format in the first implementation.
+Every base marker and base grouping view is immutable. Ownership is identified
+by stable IDs, including when the base has several views. Overlay views append
+after base views and are editable. New views/groups and copies receive UUID v4
+identities. Group references contain only marker IDs from this list.
 
-## Scope
+Group order drives group presentation. Marker-array order is preserved by the
+codec as representation data, without presentation/priority/scientific meaning
+in v1. The UI projects markers by wavelength without rewriting stored arrays.
+Moving/copying adds a reference; no marker-order operation or ordering merge is
+introduced.
+The same marker can occur in several groups, with a shared-reference indicator.
+Moving/removing one reference does not remove another occurrence. Deleting a
+group/view does not delete markers or reset visibility. Group dragging retains
+the existing insertion-line interaction and temporary collapse behavior.
 
-The first implementation has one active spectral-line catalog at a time. The
-Spectral Lines panel may switch the active catalog, but the plot receives visible
-markers from that active catalog only. Simultaneous overlays from multiple
-catalogs are out of scope.
+Unassigned is computed as all markers minus membership in ordinary groups of
+the current view. It is shown after ordinary groups, cannot be renamed, deleted
+or reordered, and is never persisted. Authored names/IDs, including `Unassigned`
+and the legacy system spelling, remain ordinary canonical identities. The UI
+allocates a noncolliding temporary key for its derived area.
 
-## Concepts
+Selecting a view changes no marker visibility or color. Visibility defaults to
+visible and is shared across occurrences/views. Group bulk visibility is disabled
+while grouping view search is active. Search preserves tree structure, matches
+marker IDs/names/notes/coordinates, and does not change the stored membership.
+Dragging during search edits real membership. Cross-tab dragging is outside scope.
 
-The glossary source for these terms is [CONTEXT.md](../../../CONTEXT.md).
+Color schemes are independent from grouping. Their selection is session state.
+The current UI edits the selected scheme, creating an ordinary `builtin.user-colors`
+scheme named `Custom colors` when no scheme exists. This stable built-in
+customization identity also allows two first edits from empty defaults to merge.
+It does not encode inheritance. Explicit colors use v1 RGBA8; Auto has no mapping.
 
-- `Spectral-line catalog`: marker definitions and optional catalog grouping.
-- `Catalog identity`: the key that owns user state for one catalog.
-- `Catalog grouping view`: read-only grouping derived from catalog grouping.
-- `User grouping view`: editable user-owned marker organization.
-- `Catalog user state`: saved user grouping views and marker visibility for one
-  catalog identity.
+## Local persistence
 
-## Catalog Identity
-
-Grouping state is scoped to a catalog identity, not to the currently selected
-tab or to a file path alone.
-
-- The built-in catalog uses a fixed identity, such as `public-spectral-lines.v1`.
-- Imported catalogs should prefer a declared stable catalog id when available.
-- Imported catalogs without a declared id should receive a generated local
-  identity. The original path and a content fingerprint may be recorded as
-  matching hints, but the generated identity remains the user-state key.
-
-This avoids applying grouping state from one catalog to an unrelated catalog that
-happens to share a path.
-
-## Grouping Views
-
-Catalog and user grouping views share the same tree shape:
-
-```text
-grouping view
-  group
-    marker reference
-```
-
-A catalog grouping view exists only when the catalog supplies grouping. Its
-marker membership is read-only. Users may still change marker visibility from
-that view because visibility belongs to catalog user state, not to the grouping
-membership.
-
-The built-in public catalog must provide grouping. Imported catalogs may omit
-grouping. If a catalog has no grouping and no user grouping views, the panel
-should show an empty state that guides the user to create a user grouping view
-with the `+` action.
-
-Creating a user grouping view puts all current catalog marker references in the
-non-removable, non-renamable `Unassigned` user group. The action does not reset
-marker visibility. Duplicating an existing user grouping view is a separate tab
-context-menu action.
-
-## Ordering
-
-Ordinary user groups can be reordered inside a user grouping view by dragging a
-group and dropping it on an insertion line between groups. While a group is
-being dragged, groups are temporarily displayed collapsed. The visible drop
-indicator is always an insertion line; each insertion point has one continuous
-hit area spanning the line itself, the upper half of the group below it, and the
-lower half of the group above it.
-After drop or cancel, the previous expanded state is restored. `Unassigned` is
-fixed after ordinary groups and cannot be reordered. Marker references within
-every group are displayed by catalog marker position, normally wavelength
-position. Moving or copying a marker reference changes group membership only; it
-does not store a per-group marker order.
-
-## Marker References
-
-User grouping views store marker references, not copied marker definitions. A
-marker reference is identified by catalog identity and marker id.
-
-If a referenced marker id is missing from the current catalog contents, keep the
-reference as an unresolved marker reference. Show it as a disabled placeholder,
-do not draw it on the plot, and do not guess a replacement by label or
-wavelength. Optional last-known display fields may be stored only to make the
-placeholder readable.
-
-Markers present in the catalog but not organized into an ordinary user group in
-the active user grouping view belong to `Unassigned`.
-
-## Shared References
-
-A marker reference should usually appear in one group within a user grouping
-view, but the user may intentionally place it in multiple groups.
-
-- A normal drag moves a marker reference between groups.
-- An explicit copy action creates a shared marker reference.
-- Shared references should show a status icon. The hover text should explain
-  that the same marker also appears in other groups.
-
-Marker visibility is shared across all occurrences of a marker in all grouping
-views for the same catalog identity.
-
-## Visibility
-
-The plot only cares whether each marker is visible. Selecting a grouping view or
-switching tabs does not change plot visibility.
-
-When a catalog identity has no saved marker visibility, all current markers in
-that catalog default to visible. After user changes exist, visibility is read
-from catalog user state.
-
-Each group has a bulk visibility control:
-
-- all resolved markers visible;
-- all resolved markers hidden;
-- mixed visibility;
-- non-actionable search state while search is active.
-
-The bulk control changes marker visibility for resolved marker references. It is
-not separate group visibility state.
-
-## Search And Dragging
-
-Search narrows the active grouping view tree while preserving group structure.
-Groups with matching marker references may be expanded; groups without matching
-children should not be expanded merely because search is active.
-
-Dragging a marker while search is active moves the real marker reference in the
-active editable user grouping view. Search is not a temporary result set.
-
-The first implementation does not support cross-tab dragging.
-
-## Local Persistence
-
-Catalog user state should be saved automatically to local user storage, scoped by
-catalog identity. Panel state such as expanded tree groups may be saved in the
-same internal cache, but it remains separate from catalog user state because it
-is UI layout state, not marker organization. On Windows, the default location
-should be under the user's local application data directory, for example:
-
-```text
-%LOCALAPPDATA%\Spectiary\state\spectral-line-grouping-views.json
-```
-
-The cache should be written after edits with a short debounce and flushed on
-normal shutdown. Save and load failures should be non-blocking warnings in the
-Spectral Lines panel. Failed saves must use a retry backoff instead of writing
-again every frame. A corrupt or unsupported cache must not prevent the catalog
-from loading.
-
-This local cache remains a startup snapshot and is not live-synchronized across
-ordinary GUI instances. Its task-level commit behavior follows the
-[concurrent user-state write contract](#concurrent-user-state-write-contract)
-and the bounded exception in
-[ADR 0004](../../adr/0004-lightweight-multi-instance-user-state.md#catalog-user-state-reconciliation-is-a-bounded-exception);
-the JSON format itself does not provide generic merge semantics.
-
-The cache should be normalized and versioned:
+The existing path stays `state/spectral-line-grouping-views.json`, beneath the
+resolved Portable or LocalAppData application root. The internal envelope retains
+`format_kind: "spectiary.catalog_user_state.cache"` and uses schema version **7**.
+It is not an importable public v1 file. All record fields are closed and null is
+invalid. One `catalogs` mapping key scopes the record to the packaged list ID:
 
 ```json
 {
   "format_kind": "spectiary.catalog_user_state.cache",
-  "schema_version": 6,
+  "schema_version": 7,
   "catalogs": {
     "public-spectral-lines.v1": {
-      "active_view_id": "view-1",
-      "marker_visibility": {
-        "h_alpha": true
-      },
-      "marker_colors": {
-        "h_alpha": {
-          "mode": "explicit-color",
-          "red": "0.95",
-          "green": "0.42",
-          "blue": "0.35",
-          "alpha": "1"
-        }
-      },
-      "grouping_views": [
-        {
-          "id": "view-1",
-          "name": "Grouping 1",
-          "name_source": "default_grouping_view",
-          "name_ordinal": 1,
-          "groups": [{
-            "id": "__unassigned__",
-            "name": "Unassigned",
-            "is_unassigned": true,
-            "marker_references": []
-          }]
-        }
-      ]
-    }
-  },
-  "catalog_panel_state": {
-    "public-spectral-lines.v1": {
-      "expanded_group_ids": [
-        "view-1/group-1"
-      ]
+      "overlay": {"grouping_views": []},
+      "session": {
+        "active_view_id": "__catalog_grouping_view__",
+        "active_color_scheme_id": "",
+        "marker_visibility": {},
+        "expanded_group_ids": [],
+        "view_names": {},
+        "group_names": {}
+      }
     }
   }
 }
 ```
 
-Schema 3 introduced explicit, writer-owned generated-name provenance. Schema 4
-added the required monotonic allocator high-water marks and durable identity
-reservation sets. Schema 5 added `marker_colors`, which stores only per-marker
-`explicit-color` RGBA overrides keyed by stable marker id. An absent marker
-entry is canonical Auto state; a theme-resolved Auto color is never persisted.
-Schema 6 removes the sequence counters and reservation sets. New user views
-and ordinary groups use UUID v4 identities; existing live IDs such as `view-1`
-remain valid. Copies receive new identities, while built-in IDs remain unchanged.
-Names and display order do not expose or depend on the UUIDs.
-Generated names participate in UI localization only when a supported schema stores that
-provenance explicitly.
+Overlay requires `grouping_views` (possibly empty), decoded by the canonical
+subrecord codec. Optional `color_schemes` uses the same canonical scheme codec:
 
-Schema 1 and 2 do not contain immutable name provenance. Every editable grouping
-view and group name loaded from those schemas remains user-owned and is displayed
-verbatim in every language, including names shaped like `Grouping 1`, `Group 1`,
-or `Catalog grouping view copy`. Migration must not infer ownership from editable
-text, ids, or array order.
+| Overlay value | Effective schemes |
+| --- | --- |
+| omitted | Complete current base collection |
+| `[]` | Empty collection, all Auto |
+| nonempty array | Complete replacement collection |
 
-Schemas 1 through 4 are supported migration inputs. The cache body is validated
-before migration is scheduled. A legacy cache with
-only the catalog currently being migrated must first pass raw view/group
-identity checks, current-catalog marker-reference checks, and schema-three
-unassigned identity/flag checks; only then is it canonicalized, validated, and
-rewritten once using the current schema, preserving those names without adding
-generated-name provenance. Empty, duplicate, cross-catalog, or mismatched
-legacy identities are therefore preserved as failure evidence rather than
-repaired. A legacy cache containing unrelated
-catalog or panel state entries is not safely migratable without their domain
-definitions and is therefore rejected without a partial schema-six rewrite.
-Schema 5 is also a migration input: its live identities, references, names,
-colors, and panel state are preserved after semantic validation; obsolete
-allocator history is discarded. A current-schema cache missing `marker_colors`,
-with duplicate live identities, or with a malformed marker color mode/RGBA
-payload is invalid and is never rewritten or merged. An
-invalid body is reported and is never rewritten merely by opening and closing
-the application.
+First actual color mutation copies the effective collection before editing the
+selected mapping. Merely viewing/selecting, canceling, or an unchanged color
+creates no override. Reset to Auto erases one mapping, never resumes inheritance.
+Restore defaults removes the entire collection override; explicit empty is a
+different operation. Explicit ownership is retained even if values match base.
 
-The first implementation should treat this as an internal writer-owned cache,
-not as a public exchange format. Its reader exists to load Spectiary's own
-versioned cache plus supported legacy cache versions. Future import/export can
-reuse the same core model, but should use a mature JSON library with stricter
-validation, conflict handling, and explicit user confirmation.
+Session owns active view/scheme, visibility, expansion, and generated-name
+localization metadata. `view_names` and `group_names` map stable IDs to records
+with optional `name_source`, `name_ordinal`, `generated_copy_count`, and
+`generated_copy_base_name`. Existing name-source enum spellings and copy-count
+limit (1024) are retained. No ownership is inferred from display text. Search
+and label visibility remain in-memory UI state. Session restoration does not
+modify canonical definitions.
+
+Startup accepts only a wholly valid overlay/effective model. Wrong base IDs,
+colliding group/view IDs, dangling references, unsupported versions and malformed
+input produce a nonblocking diagnostic and leave the file untouched. A valid base
+can still be displayed. Fallback does not authorize overwriting rejected state.
+No guessed reference repair, placeholder content, or automatic reset is performed.
+
+## Bounded schema 6 conversion
+
+Only immediately preceding schema 6 is supported. Earlier pre-release schemas
+are rejected unchanged. Validate old shapes, names, identities, references,
+Unassigned identity/flag pairing, and explicit colors before producing a complete
+valid effective model. Reject unrelated list identities, duplicate/dangling
+references and composed collisions without publishing a partial conversion.
+
+Preserve ordinary group membership, stored array order and stable identities.
+Migration does not normalize marker arrays to UI wavelength order. Omit only the validated legacy system Unassigned
+group; an ordinary group named Unassigned survives. Move localization provenance
+to session maps. Quantize finite normalized old color channels to RGBA8 using the
+v1 conversion, putting explicit colors in one ordinary scheme. No old explicit
+colors means no override. Preserve compatible selections/visibility/expansion.
+Conversion is reloaded and validated under the existing commit lease before
+atomic publication. Schema 7 becomes the sole writable owner; no old writer or
+legacy runtime domain model remains.
 
 ## Concurrent user-state write contract
 
-This is the operational contract for the catalog-only reconciliation exception
-recorded in
-[ADR 0004: Lightweight Multi-Instance Runs Share User State](../../adr/0004-lightweight-multi-instance-user-state.md#catalog-user-state-reconciliation-is-a-bounded-exception).
-It does not change the policy of unrelated settings or caches.
+This is the bounded exception in [ADR 0004](../../adr/0004-lightweight-multi-instance-user-state.md#catalog-user-state-reconciliation-is-a-bounded-exception).
+It provides commit-time reconciliation, with no live synchronization, IPC owner,
+WAL, persistent tombstones, historical generations, or generic merge framework.
 
-Catalog user state is a startup snapshot. Ordinary GUI instances do not live-
-synchronize their panel state, but a task-level write must reconcile that
-snapshot with the durable cache immediately before replacement. Startup
-canonicalization is applied before the reconciliation base snapshot is taken;
-trimming names, repairing references, and selecting a valid fallback are
-normalization, not an explicit task delta. The controller holds the cache's
-short-lived commit lease while it reloads the latest document, merges the task,
-canonicalizes the result, and uses the existing atomic cache writer. The lease
-is named `<cache-path>.commit.lock`; its ownership is the live OS file handle,
-not a stale PID or a best-effort marker.
+Edits debounce for 500 ms; failed saves retry after 10 seconds and flush on normal
+shutdown. Acquire `<state-path>.commit.lock` through the existing exclusive OS
+file handle, with bounded retry. Hold it across reload, trust checks, task merge,
+complete-model validation and atomic replacement. A failed save retains pending
+in-memory work. An untrusted latest file is never repaired by a stale snapshot.
 
-The merge ownership is intentionally narrow:
+Grouping reconciliation retains field/entity membership, names, addition/deletion
+and explicit group-order rules. Disjoint changes survive. Concurrent additions
+with an ID collision are deterministically assigned fresh IDs, including their
+session expansion/name keys. An edit to an entity deleted in latest is a conflict;
+it must not recreate the entity. An explicit local deletion owns that deletion.
+Task group ordering includes newly added groups; concurrent-only additions remain.
+Marker membership reconciliation retains the latest surviving array order and
+appends task additions, without inferring any marker-order intent.
 
-- catalog additions are keyed by stable opaque view/group IDs. New user views
-  and ordinary groups, including copies, use the existing UUID v4 generator.
-  Built-in identities remain explicit. Names and order are independent of IDs;
-  deletion does not persist an allocator reservation. Concurrent additions keep
-  their distinct UUIDs. Defensive remapping still preserves both live additions
-  if malformed/imported snapshots genuinely request the same identity. A local
-  deletion wins over a concurrent edit to that same entity.
-- names, generated-name provenance, unassigned flags, per-marker visibility,
-  and per-marker explicit color overrides are field-owned. A field unchanged
-  by the stale task is taken from the latest durable state; a field changed by
-  the task wins a same-field conflict. Removing a color override is the marker
-  color field's Reset-to-Auto tombstone and does not erase a peer's change to a
-  different marker.
-- marker references are keyed by catalog identity plus marker id. Disjoint
-  additions/removals survive, while a removal from a group is a local tombstone
-  for that group reference.
-- ordering is owned only when the task explicitly issues a reorder. That
-  explicit order includes newly created entities, so a new group moved before
-  an existing group remains there on the first flush; durable-only additions
-  are retained before the first task addition. Without an explicit reorder,
-  concurrent additions remain in durable-addition then task-addition order.
-  Selection is a scalar task field:
-  an explicit task selection wins a conflict, while an unchanged selection is
-  refreshed from durable state. A fallback selected automatically after the
-  active view is deleted is not an explicit task selection and must not
-  override a peer's explicit selection of a surviving view.
-- panel expansion keys use the same view/group identity remapping and are
-  reconciled independently from the catalog data. Labeling leases and unrelated
-  local caches are not part of this contract.
+Ordinary color ownership is `(scheme_id, marker_id)`, including concurrent first
+overrides. Copying inherited collections is initialization, not ownership of all
+copied fields. Same-field task edits win; Auto reset is a field deletion for this
+commit, with no persisted tombstone. Whole clear/replace/restore operations own
+the whole collection. A later ordinary edit uses the latest effective collection
+and cannot resurrect untouched values from an older override. A deleted scheme
+causes a controlled conflict rather than implicit resurrection.
 
-An existing latest document that cannot be parsed, has an unsupported schema,
-fails its body-shape checks, or violates semantic identity invariants (such as
-empty/duplicate view or group identities, group identity reuse, or invalid
-reference identity) is untrusted before any replacement. Maintenance,
-destructor, and explicit task writes fail closed with the parser/semantic
-diagnostic and leave the durable file untouched. Schema-one/two/three/four
-documents are supported migration inputs only when every persisted catalog
-entry belongs to the catalog being migrated; a legacy multi-catalog document
-without domain definitions for all entries fails closed rather than producing
-a partially migrated schema-six file. A single-catalog legacy document is
-checked for raw view/group identity uniqueness, current-catalog marker
-references, and (for schema three) the unassigned identity/flag pairing before
-canonicalization, then canonicalized under the commit lease and validated again
-before it is atomically rewritten. Schema-five migration preserves all live
-identities and references, validates semantic state, and discards only obsolete
-allocator fields. Schema six contains no sequence counters or reservation sets.
-Current-schema semantic corruption is never repaired by a write. A missing cache
-is still treated as the normal first-write empty state, preserving
-single-instance startup behavior.
+Session restoration is reconciled separately. Explicit selections, including a
+round-trip to the base value, own the selection; automatic fallback does not.
+Visibility, expansion and localization metadata retain field-level updates.
+Session normalization never repairs or rewrites durable canonical content.

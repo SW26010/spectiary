@@ -52,6 +52,8 @@ https://doi.org/10.1086/317349
 Spectiary-curated approximate markers
 ==============================================================================
 
-Rows carrying the source handle "spectiary_curated_approximate" are rounded visual annotations curated by Spectiary rather than redistributed precision measurements. Sr II 4078 is stored as an approximate 4078.9 Angstrom vacuum marker. It is not intended for wavelength calibration.
+Markers tagged in the former TSV by the source handle "spectiary_curated_approximate" are rounded visual annotations curated by Spectiary rather than redistributed precision measurements. Sr II 4078 is stored as an approximate 4078.9 Angstrom vacuum marker. It is not intended for wavelength calibration.
 
-Other rows carrying the historical handle "carbon_star_requirements" are approximate molecular or feature markers originating in the public Spectiary requirements catalog. They are likewise intended only for visual annotation.
+Other markers tagged in the former TSV by the historical handle "carbon_star_requirements" are approximate molecular or feature markers originating in the public Spectiary requirements catalog. They are likewise intended only for visual annotation.
+
+The canonical JSON conversion preserves the marker IDs and scientific values of these records. Source handles are historical transformation metadata retained here, not fields in ordinary Spectral Line List v1 documents.

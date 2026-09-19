@@ -1,126 +1,55 @@
-# Spectral Line Catalog Contract
+# Built-in Spectral Line List and Plot Contract
 
-## Purpose
+## Packaged document
 
-Spectiary keeps public spectral reference markers in a versioned config file:
+`config/spectral_lines.public.json` is a complete [Spectral Line List v1](spectral_line_list_v1.md)
+using the same production codec as user documents. There is one packaged path,
+loaded from the package-root path in Debug or embedded JSON in static release.
+The former TSV loader and intrinsic marker group/display-label/source fields
+are retired. Base scientific content is program-owned and read-only.
 
-```text
-config/spectral_lines.public.tsv
-```
+The public list contains physical line and band references only, never subtype
+presets, classification combinations, navigation windows or private criteria.
+The default grouping is an ordinary v1 grouping view. Unchanged marker, view and
+group identities are retained; filename/schema/name changes do not redefine them.
 
-This file is the public default catalog and example catalog. It contains
-physical line and band markers only. It must not contain subtype presets,
-classification combinations, zoom windows, local research notes, line-strength
-expectations, or private criteria.
+## Physical and presentation contract
 
-This contract is intentionally strict for the built-in public catalog. Future
-imported catalogs may omit catalog grouping and should then be treated as
-ungrouped catalogs by the grouping-view layer.
+The packaged reference coordinates are laboratory/rest, vacuum Angstroms.
+Public atomic air values are converted to vacuum as recorded in
+`legal/DATA_SOURCES.txt`, consistent with the existing LAMOST/SDSS display axis.
+Approximate molecular features remain identified as approximate in marker notes.
+A band is a display reference range, never a range-navigation window.
 
-## Coordinate Contract
+Plot capability flags still control availability and rest-frame warnings. UI and
+plot code do not infer or apply radial-velocity, heliocentric or barycentric
+corrections. Broader observed-coordinate semantics belong to #105.
 
-- Unit: Angstrom.
-- Wavelength medium: vacuum.
-- Frame: rest-frame reference wavelengths.
-- Atomic visible/NIR values in public references are often listed as air
-  wavelengths. The catalog stores the vacuum equivalents because LAMOST/SDSS
-  spectrum axes are normally vacuum wavelengths in this project.
-- Molecular features and band heads may be approximate markers. They must be
-  labeled as approximate markers rather than promoted to exact classification
-  truth.
+Names are plain UTF-8 Unicode: Hα, C₂, Na I D₂, ¹³C¹²C and ¹³CN retain scientific
+notation. The scientific text renderer interprets Unicode superscript/subscript
+digits as script runs in its dedicated font, with shared measurement/drawing.
+There is no general markup or LaTeX interpretation. Wavelength labels are derived
+from the numeric coordinates; there is no separately stored display label.
 
-The plot may show the catalog when
-`SpectrumCapabilities::can_show_spectral_lines` is true. If
-`requires_rest_frame_warning` is true, the UI must warn that the rest-frame
-catalog is reference-only for the current axis. Plot and UI code must not infer
-or apply radial-velocity correction on their own.
+Built-in provenance, licensing and transformation records remain in
+`legal/DATA_SOURCES.txt` and About/Data Sources. Combined multiplets retain a
+record of constituent transition values and transformation there. Copying content
+to a user document does not inject hidden provenance or rights fields.
 
-## TSV Schema
+## UI and overlay contract
 
-The first non-comment row is the header. Lines beginning with `#` are comments.
-Columns are tab-delimited. Required columns must be present in the public
-catalog header; optional columns may be omitted. Empty trailing optional columns
-are valid.
-
-| Column | Required | Meaning |
-| --- | --- | --- |
-| `id` | yes | Unique stable ASCII id for UI state, tests, and local overlays. |
-| `label` | yes | Domain label shown in the UI and plot annotations. |
-| `kind` | yes | `line` or `band`. |
-| `group` | yes | Public catalog group such as `Balmer`, `Ca II`, `CN`, or `Isotope`. Required for the built-in public catalog. |
-| `vacuum_angstrom` | for `line` | Positive finite rest vacuum wavelength for a single line. |
-| `start_vacuum_angstrom` | for `band` | Positive finite rest vacuum start for a band marker. |
-| `end_vacuum_angstrom` | for `band` | Positive finite rest vacuum end for a band marker. |
-| `display_label` | yes | Short plot label. May preserve familiar rounded labels. |
-| `source_ref` | yes | Non-empty short public source handle or derivation handle. |
-| `notes` | no | Public source/precision note only. No classification criteria. |
-
-`label` is UTF-8 presentation text, not an ASCII transliteration or a markup
-language. Scientific notation should use the corresponding Unicode glyphs:
-Greek letters without an intervening space for named Balmer lines (`Hα`
-through `Hδ`), subscripts for molecular atom counts and transition indices
-(`C₂`, `Na I D₂`), and superscript mass numbers for isotopologues (`¹³C¹²C`,
-`¹³CN`). The native UI font atlas must therefore merge coverage for Greek and
-the Unicode superscript/subscript blocks in addition to its CJK fallback.
-
-Plot rendering interprets only Unicode superscript and subscript digits as
-semantic script runs. It draws those runs with scaled ordinary digits from one
-dedicated scientific font, while keeping Greek and baseline text in that same
-font. Measurement and drawing must share this run model so collision avoidance
-uses the rendered width. This is deliberately not a general markup or LaTeX
-contract.
-
-The built-in catalog's third-party attribution and transformation record lives
-in the repository at `legal/DATA_SOURCES.txt`, is embedded in the executable,
-and is available from About as Data Sources. An approximate marker may use a
-Spectiary-owned derivation handle, but its note must state that it is approximate
-and must not imply laboratory or calibration precision. Removing an external
-attribution requires replacing both the value and its provenance; changing only
-`source_ref` is not sufficient.
-
-When one catalog marker combines multiple source transitions, such as an
-unresolved multiplet represented as a band, `legal/DATA_SOURCES.txt` must list
-every constituent transition wavelength and describe how they were combined.
-A shared `source_ref` alone is not a sufficient transformation record.
-
-Rows are sorted by marker position after loading. `line` rows draw vertical
-reference lines. `band` rows draw shaded ranges. Bands are display markers, not
-range-navigation windows.
-
-## UI Contract
-
-The Spectral Lines panel owns runtime catalog inspection state. The first
-implementation has one active catalog at a time. The panel should expose:
-
-- active catalog selection, even when only the built-in public catalog exists;
-- read-only catalog grouping when the catalog supplies `group`;
-- editable user grouping-view tabs that store marker references by catalog
-  identity and marker id;
-- per-marker visibility shared by every grouping view for the same catalog
-  identity;
-- per-marker Auto or explicit RGBA color shared by every grouping view for the
-  same catalog identity, with Reset to Auto represented by removing the
-  override;
-- text search over marker identity and display fields;
-- a plot-label toggle.
-
-There is no separate public `group` selection contract. Catalog groups and user
-groups are tree organization surfaces with bulk visibility controls; they do not
-create independent plot state. Hiding every marker in the active catalog is
-represented by marker visibility state, not by a separate "hide public catalog"
-switch.
+The panel consumes one effective SpectralLineList with independently selected
+grouping and color dimensions. Base views are read-only by owner, while overlay
+views are editable. Visibility is session state shared by every occurrence of a
+marker; all markers initially default to visible. Grouping view search and label
+visibility do not alter canonical content. The [grouping and overlay contract](spectral_line_grouping_views.md)
+defines derived Unassigned, ordering, persistence, and bounded schema 6 conversion.
 
 ## Concurrent user-state write contract
 
-The authoritative [concurrent write contract](spectral_line_grouping_views.md#concurrent-user-state-write-contract)
-lives with catalog user-state persistence. Catalog definitions remain read-only;
-the bounded reconciliation exception applies to user grouping and panel state.
-
-Subtype-specific combinations are a separate, local/private overlay layer and
-are not part of the public default catalog. A future local overlay may select
-from public `id` values, but it must not override the public physical
-wavelengths in this file.
-
+See the authoritative [overlay commit contract](spectral_line_grouping_views.md#concurrent-user-state-write-contract).
+Only application-managed built-in customization uses that reconciliation; it does
+not extend to canonical user-owned file saves.
 ## Plot Contract
 
 The main plot receives visible markers from the active catalog only. Switching
@@ -132,7 +61,7 @@ draws the supplied markers against the current X axis.
 Every line and band owns an independent `Auto / ExplicitColor` selection keyed
 by stable catalog identity plus marker id. Auto colors use the shared
 theme-aware plot-series palette and a stable slot that is unaffected by frame,
-filter, grouping, or visibility order. Explicit RGBA is theme-independent.
+grouping view search, grouping, or visibility order. Explicit RGBA is theme-independent.
 Line strokes and band outlines use the same resolved color as both labels; a
 band fill may derive lower opacity while retaining that resolved RGB.
 

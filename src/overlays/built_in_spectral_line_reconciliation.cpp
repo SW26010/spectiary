@@ -79,11 +79,6 @@ struct ReconciliationContext {
         std::unordered_map<std::string, std::string>> local_group_id_remap;
 };
 
-std::string ReferenceKey(const std::string& reference)
-{
-    return reference;
-}
-
 void AppendUnique(
     std::vector<std::string>& output,
     const std::unordered_set<std::string>& allowed,
@@ -181,86 +176,26 @@ std::vector<std::string> MergeOrderedIds(
     return result;
 }
 
-std::unordered_map<std::string, const std::string*> IndexReferences(
-    const std::vector<std::string>& references)
-{
-    std::unordered_map<std::string, const std::string*> result;
-    result.reserve(references.size());
-    for (const std::string& reference : references) {
-        result.emplace(ReferenceKey(reference), &reference);
-    }
-    return result;
-}
-
-std::vector<std::string> ReferenceKeys(
-    const std::vector<std::string>& references)
-{
-    std::vector<std::string> result;
-    result.reserve(references.size());
-    for (const std::string& reference : references) {
-        result.push_back(ReferenceKey(reference));
-    }
-    return result;
-}
-
+// Marker arrays preserve representation order, but v1 has no marker-order
+// operation. Reconcile only membership: retain latest surviving order and
+// append task additions in their existing order. No ordering intent is inferred.
 std::vector<std::string> MergeReferences(
     const std::vector<std::string>& base,
     const std::vector<std::string>& local,
     const std::vector<std::string>& latest)
 {
-    const auto base_by_id = IndexReferences(base);
-    const auto local_by_id = IndexReferences(local);
-    const auto latest_by_id = IndexReferences(latest);
-    std::unordered_set<std::string> final_ids;
-    final_ids.reserve(base.size() + local.size() + latest.size());
-
-    for (const auto& [id, reference] : base_by_id) {
-        (void)reference;
-        if (local_by_id.contains(id) && latest_by_id.contains(id)) {
-            final_ids.insert(id);
-        }
-    }
-    for (const auto& [id, reference] : local_by_id) {
-        (void)reference;
-        if (!base_by_id.contains(id)) {
-            final_ids.insert(id);
-        }
-    }
-    for (const auto& [id, reference] : latest_by_id) {
-        (void)reference;
-        if (!base_by_id.contains(id)) {
-            final_ids.insert(id);
-        }
-    }
-
+    const std::unordered_set<std::string> base_ids(base.begin(), base.end());
+    const std::unordered_set<std::string> local_ids(local.begin(), local.end());
+    std::unordered_set<std::string> emitted;
     std::vector<std::string> result;
-    for (const std::string& id : MergeOrderedIds(
-             ReferenceKeys(base),
-             ReferenceKeys(local),
-             ReferenceKeys(latest),
-             final_ids)) {
-        const auto local_match = local_by_id.find(id);
-        const auto latest_match = latest_by_id.find(id);
-        const auto base_match = base_by_id.find(id);
-        if (base_match != base_by_id.end() &&
-            local_match != local_by_id.end() &&
-            latest_match != latest_by_id.end()) {
-            // Reference identity is the ownership key. The value is normally
-            // identical; prefer the task copy if an imported display identity
-            // differs.
-            result.push_back(
-                (*local_match->second == *base_match->second)
-                    ? *latest_match->second
-                    : *local_match->second);
-        } else if (local_match != local_by_id.end()) {
-            result.push_back(*local_match->second);
-        } else if (latest_match != latest_by_id.end()) {
-            result.push_back(*latest_match->second);
-        }
+    for (const auto& id : latest) {
+        if ((!base_ids.contains(id) || local_ids.contains(id)) && emitted.insert(id).second) result.push_back(id);
+    }
+    for (const auto& id : local) {
+        if (!base_ids.contains(id) && emitted.insert(id).second) result.push_back(id);
     }
     return result;
 }
-
 std::vector<line_list::Group> MergeGroups(
     const std::vector<line_list::Group>& base,
     const std::vector<line_list::Group>& local,
@@ -728,15 +663,22 @@ bool ReconcileBuiltInSpectralLineTask(const SpectralLineList& packaged,
         session.active_view_id = context.local_view_id_remap.at(session.active_view_id);
     MergeMarkerFields(base.session.marker_visibility, local.session.marker_visibility, latest.session.marker_visibility, session.marker_visibility);
     MergeExpandedGroups(base.session.expanded_group_ids, local.session.expanded_group_ids, latest.session.expanded_group_ids, context, session.expanded_group_ids);
-    MergeMarkerFields(base.session.view_names, local.session.view_names, latest.session.view_names, session.view_names);
-    MergeMarkerFields(base.session.group_names, local.session.group_names, latest.session.group_names, session.group_names);
-    for (const auto& [old, fresh] : context.local_view_id_remap)
-        if (local.session.view_names.contains(old)) session.view_names[fresh] = local.session.view_names.at(old);
+    auto local_view_names = local.session.view_names;
+    auto local_group_names = local.session.group_names;
+    for (const auto& [old, fresh] : context.local_view_id_remap) {
+        if (local.session.view_names.contains(old)) local_view_names[fresh] = local.session.view_names.at(old);
+        local_view_names.erase(old);
+    }
     for (const auto& [view, remap] : context.local_group_id_remap) {
         (void)view;
         for (const auto& [old, fresh] : remap)
-            if (local.session.group_names.contains(old)) session.group_names[fresh] = local.session.group_names.at(old);
+            if (local.session.group_names.contains(old)) {
+                local_group_names[fresh] = local.session.group_names.at(old);
+                local_group_names.erase(old);
+            }
     }
+    MergeMarkerFields(base.session.view_names, local_view_names, latest.session.view_names, session.view_names);
+    MergeMarkerFields(base.session.group_names, local_group_names, latest.session.group_names, session.group_names);
     const auto composed = ComposeBuiltInSpectralLineList(packaged, merged.overlay);
     if (!composed.list) { error = composed.error; return false; }
     NormalizeSpectralLineSession(session, *composed.list);
@@ -744,5 +686,3 @@ bool ReconcileBuiltInSpectralLineTask(const SpectralLineList& packaged,
     return true;
 }
 } // namespace spectiary
-
-

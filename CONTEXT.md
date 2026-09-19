@@ -36,25 +36,34 @@ examples, alias lists, and migration notes. Existing code and test hits should
 be treated as terminology migration candidates rather than immediate definition
 violations.
 
-**Spectral-line catalog**:
-A set of physical spectral reference markers with stable marker identifiers,
-optional grouping supplied by the catalog, and declared wavelength semantics.
+**Spectral Line List**:
+A complete portable document with stable identity, laboratory wavelength
+semantics, markers, independent grouping views and color schemes. The normative
+[v1 JSON contract](docs/reference/spectral-lines/spectral_line_list_v1.md) owns
+validation and canonical field definitions.
+_Avoid_: Generic catalog schema, ViewProfile, session state
+
+**Public spectral-line list**:
+The program-owned, read-only complete v1 document packaged with Spectiary.
+Existing UI text may still call it the public spectral-line catalog.
 _Avoid_: User line groups, private presets
 
-**Public spectral-line catalog**:
-The built-in spectral-line catalog shipped with Spectiary.
-_Avoid_: User line groups, private presets
-
-**Catalog identity**:
-The identity used to decide which user grouping views belong to which
-spectral-line catalog.
+**Line-list identity**:
+The declared stable identity independent of path, filename, display name and
+schema version. It scopes application-managed built-in state.
 _Avoid_: File path alone, active tab
 
-**Catalog user state**:
-The user's saved organization and marker visibility for one catalog identity. It
-does not include the catalog's marker definitions.
-_Avoid_: Catalog content, app layout
+**Built-in spectral-line overlay**:
+Application-managed durable customization containing additional grouping views
+and an optional complete color-scheme override. Composition produces a valid
+complete SpectralLineList; it owns no marker definitions or session state.
+_Avoid_: A second public file format, copied catalog, deep patch
 
+**Spectral-line session state**:
+Active grouping/color selections, marker visibility, group expansion and UI name
+localization provenance. It stays outside canonical content. The old catalog
+user-state monolith is retired.
+_Avoid_: Canonical grouping or color definitions
 **Source collection**:
 A loaded set of one or more spectrum samples that share one source identity and
 one sample ordering.
@@ -203,18 +212,17 @@ may support resuming it before explicit canonical Save As.
 _Avoid_: Final label output, label set, source data
 
 **Spectral-line marker**:
-A single reference line or band from a catalog that can be displayed on the plot.
+A single laboratory reference line or band from a Spectral Line List that can be displayed on the plot.
 _Avoid_: User group item, classification rule
 
 **Marker visibility**:
 The user-controlled display state of a spectral-line marker on the plot for a
-catalog identity. The state belongs to the marker, even when the marker appears
+line-list identity. The state belongs to the marker, even when the marker appears
 in multiple groups or grouping views.
 _Avoid_: Group row visibility, per-reference visibility
 
 **Marker reference**:
-A user-owned reference to a spectral-line marker by catalog identity and marker
-identifier.
+A reference to a spectral-line marker by stable marker ID within the same list.
 _Avoid_: Copied marker data, label match
 
 **Shared marker reference**:
@@ -239,44 +247,39 @@ grouping view.
 _Avoid_: New blank view, catalog grouping view
 
 **Unresolved marker reference**:
-A marker reference whose catalog identity is present but whose marker identifier
-is not present in the current catalog contents.
-_Avoid_: Deleted line, invalid catalog row
-
+An invalid canonical or overlay reference whose marker ID is absent from the
+same line list. Reads fail without partial application; there are no durable
+placeholder references in v1.
+_Avoid_: A disabled canonical marker, guessed name/wavelength match
 **Grouping view**:
-A tree-shaped organization of spectral-line marker references for one catalog
-identity. Its marker visibility controls are shared catalog user state.
-_Avoid_: Plot-filter language, catalog content
+A document-owned named ordered list of groups, each referencing markers only by
+stable ID. Visibility and current selection are separate session state.
+_Avoid_: Plot-filter language, paired color profile
 
 **User grouping view**:
-A named, editable grouping view whose marker membership belongs to the user. It
-does not change the public spectral-line catalog or its public groups, and
-creating or selecting it does not change plot visibility by itself.
-_Avoid_: Catalog group, line-table group
+An editable ordinary grouping view owned by a user document or built-in overlay.
+Creating/selecting it does not itself change marker visibility.
+_Avoid_: Intrinsic marker category
 
-**Catalog grouping view**:
-A grouping view whose marker membership is derived from the spectral-line
-catalog's own grouping and is read-only. It exists only when the catalog
-provides grouping.
-_Avoid_: User grouping view, editable catalog groups
+**Base grouping view**:
+An ordinary grouping view owned by the packaged base. Its membership is read-only
+because of its owner. Existing UI may call it a catalog grouping view.
+_Avoid_: Array index zero, canonical read_only flag
 
-**Ungrouped spectral-line catalog**:
-A spectral-line catalog that does not provide its own grouping. It has no
-catalog grouping view.
-_Avoid_: All markers view, empty catalog
+**Ungrouped Spectral Line List**:
+A valid list with no grouping views. Users can create an empty grouping view.
+_Avoid_: Empty marker collection
 
-**User group**:
-A top-level group inside a user grouping view. It contains marker references and
-does not nest other user groups. Ordinary user groups can be reordered within a
-user grouping view.
-_Avoid_: Catalog group, subgroup
+**Group**:
+A named ordered list of marker IDs within one grouping view. Groups do not nest,
+IDs are unique across the entire list, and one marker may occur in multiple groups.
+_Avoid_: Intrinsic marker group field
 
-**Unassigned user group**:
-The non-removable, non-renamable user group that contains current catalog marker
-references not organized into ordinary user groups in the same user grouping
-view. It is fixed after ordinary user groups.
-_Avoid_: Catalog group, missing markers
-
+**Unassigned**:
+A derived UI area containing markers absent from all ordinary groups of the
+current view. It is fixed after ordinary groups and has no canonical special
+identity/flag. An authored group named Unassigned is an ordinary group.
+_Avoid_: Durable system group, unresolved reference storage
 **User group visibility control**:
 A bulk control on a user group that changes marker visibility for the group's
 resolved marker references. It is not separate visibility state for the group,
@@ -291,7 +294,7 @@ _Avoid_: Global-catalog-filter language, flat result list, sample filter
 
 **Grouping view set**:
 The user's optional collection of alternative user grouping views for one
-catalog identity. It may be empty.
+line-list identity. It may be empty.
 _Avoid_: Catalog set, line-table variants
 
 ## Architecture Constraints

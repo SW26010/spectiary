@@ -1,6 +1,6 @@
 #pragma once
 
-#include "overlays/spectral_line_user_state.h"
+#include "overlays/spectral_line_session_state.h"
 #include "ui/ui_text.h"
 
 #include <string>

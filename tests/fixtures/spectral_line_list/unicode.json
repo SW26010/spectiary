@@ -1,0 +1,27 @@
+{
+  "format_kind": "spectiary.spectral_line_list",
+  "schema_version": 1,
+  "id": "unicode-golden",
+  "name": "Hα C₂ ¹³CN",
+  "description": "",
+  "creator": "作者",
+  "created_at": "2026-09-20T00:00:00Z",
+  "modified_at": "2026-09-20T00:00:01Z",
+  "coordinate": {"unit": "nm", "medium": "air", "laboratory_rest": true},
+  "markers": [
+    {"id": "hydrogen", "name": "Hα", "kind": "line", "coordinate": 656.28, "note": "Laboratory line"},
+    {"id": "carbon", "name": "C₂", "kind": "band", "start": 510.0, "end": 520.0},
+    {"id": "isotope", "name": "¹³CN", "kind": "line", "coordinate": 626.0, "note": ""}
+  ],
+  "grouping_views": [
+    {"id": "view-one", "name": "One", "groups": [
+      {"id": "group-b", "name": "Unassigned", "marker_ids": ["carbon", "hydrogen"]},
+      {"id": "group-a", "name": "Shared", "marker_ids": ["hydrogen"]}
+    ]},
+    {"id": "view-two", "name": "Two", "groups": [{"id": "group-c", "name": "Hydrogen", "marker_ids": ["hydrogen"]}]}
+  ],
+  "color_schemes": [
+    {"id": "warm", "name": "Warm", "colors": {"hydrogen": "#FF000080"}},
+    {"id": "cool", "name": "Cool", "colors": {"hydrogen": "#0000FFFF", "carbon": "#00FF00FF"}}
+  ]
+}

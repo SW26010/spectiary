@@ -17,6 +17,7 @@ struct SpectralLineListParseResult {
 
 [[nodiscard]] SpectralLineListParseResult ParseSpectralLineListJson(std::string_view bytes);
 [[nodiscard]] SpectralLineListParseResult LoadSpectralLineListFromPath(const std::filesystem::path& path);
+[[nodiscard]] SpectralLineListParseResult LoadPackagedPublicSpectralLineList(const std::filesystem::path& path);
 [[nodiscard]] bool WriteSpectralLineListJson(const SpectralLineList& list, std::ostream& stream, std::string& error);
 [[nodiscard]] bool SaveSpectralLineListToPathAtomic(const std::filesystem::path& path, const SpectralLineList& list, std::string& error);
 

@@ -118,7 +118,7 @@ The main spectrum plot is the first visual layer. Supporting tools live in ordin
 
 Panels can be docked, undocked, and restored through the Dear ImGui docking layout. Detached panels use native Windows viewports, while `F11` provides a dedicated immersive plot presentation for focused inspection.
 
-Spectral references come from the tracked public catalog in [`config/spectral_lines.public.tsv`](config/spectral_lines.public.tsv). The Spectral Lines panel can search and organize those references and render line or band overlays on the main plot.
+Spectral references come from the tracked public Spectral Line List in [`config/spectral_lines.public.json`](config/spectral_lines.public.json). The Spectral Lines panel can search and organize those references and render line or band overlays on the main plot.
 
 ## Platform
 

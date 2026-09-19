@@ -30,7 +30,7 @@ std::string LocalizedCatalogName(
     const CatalogUserStateView& state)
 {
     if (state.catalog_id ==
-        PublicSpectralLineCatalogIdentity().id) {
+        "public-spectral-lines.v1") {
         return std::string(
             UiText(
                 language,

@@ -14,42 +14,36 @@ and LocalAppData storage contracts.
 
 ## Catalog User-State Reconciliation Is a Bounded Exception
 
-Catalog user state retains the startup-snapshot model: ordinary GUI instances
-do not observe another instance's panel edits as they happen, and no watcher,
-IPC owner, or background synchronization refreshes an already loaded panel.
-A task-level write is nevertheless not a blind complete-snapshot write. The
-task records its explicit changes against a canonicalized reconciliation base,
-then reconciles only that task-owned delta with the latest durable catalog user
-state at commit time. Startup normalization such as trimming names, repairing
-references, or selecting a valid fallback is part of the base and is not
-treated as explicit task intent.
+Built-in spectral-line customization retains startup snapshots, with no watcher,
+IPC owner or live propagation. The #104/#114 cutover replaces the old catalog
+monolith with a complete canonical SpectralLineList plus an internal overlay and
+separate session state. The same application-managed state file now has schema 7;
+only immediately preceding schema 6 is a bounded read-only conversion input.
+Canonical user-owned line-list saves do not inherit this merge policy.
 
-The catalog controller acquires the short-lived `<cache-path>.commit.lock`
-lease before reloading the latest durable document and holds it through trust
-validation, catalog-specific reconciliation, canonicalization and validation
-of the result, and completion or failure of the atomic replacement. The live
-operating-system file handle owns the lease. The lease does not span the GUI
-instance lifetime or ordinary in-memory panel editing. Stable catalog view and
-group identities, field ownership, marker-reference membership, explicit
-ordering and selection intent, per-marker visibility and explicit-color fields,
-and remapped panel expansion keys define the merge boundary. A marker color
-Reset to Auto is an explicit field deletion for that stable marker identity;
-disjoint marker color edits survive concurrently. The catalog controller and
-its reconciliation module own those semantics; the generic atomic-file and
-local-user-state facilities do not.
+The built-in adapter holds `<state-path>.commit.lock` through reload, trust
+validation, explicit task reconciliation, effective-model validation and atomic
+replacement. The OS file handle owns the short-lived lease. Corrupt, unsupported,
+wrong-identity or unresolved state fails closed and is left untouched; a valid
+packaged base may still be shown with a nonblocking diagnostic. Missing state is
+normal first-write state. No startup repair of canonical references is allowed.
 
-If the latest durable document cannot be trusted because parsing, schema,
-shape, or semantic-identity validation fails, the commit
-fails closed with the diagnostic and leaves that document untouched. A stale
-startup snapshot must not replace or repair it. A missing cache remains the
-normal empty first-write state, and supported legacy migration is allowed only
-under the catalog contract's validation rules. The complete operational merge,
-canonicalization, migration, and failure rules are specified in the
-[spectral-line catalog concurrent user-state write contract](../reference/spectral-lines/spectral_line_catalog_contract.md#concurrent-user-state-write-contract).
-This is an intentional catalog-only exception, not a reusable multi-writer
-cache framework. This amendment records existing behavior and ownership; it
-does not change runtime ownership or introduce a new persistence facility.
+The overlay reuses canonical grouping/color submodels. Base grouping views append
+with editable overlay views; an optional color collection shadows the entire base
+collection. Absent means inherit, present-empty means no schemes. First mutation
+copies the effective collection but does not claim every copied field. Ordinary
+color reconciliation owns `(scheme_id, marker_id)`, preserving disjoint edits even
+for simultaneous first overrides. Whole collection clear/replace/restore owns the
+collection at that commit. Deleted edited entities cause controlled conflicts
+rather than implicit resurrection. No durable tombstones or history are added.
 
+Grouping names, memberships, identities and explicit ordering retain the bounded
+entity merge. Session selections, visibility, expansion and localization metadata
+are reconciled separately; automatic fallback has no explicit selection authority.
+Unassigned is a UI projection, with no stored group or flag. Migration retains
+ordinary IDs and stored representation order, preserves compatible session state, and is
+validated/published under the same lease. The complete operational contract is
+[spectral-line overlay persistence](../reference/spectral-lines/spectral_line_grouping_views.md#concurrent-user-state-write-contract).
 Labeling is a separate exception because canonical ASDF documents and
 pre-canonical drafts represent user-authored work. Canonical content belongs to
 the user-owned ASDF; local registration/session state and draft checkpoints have

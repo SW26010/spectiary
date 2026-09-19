@@ -21,6 +21,13 @@ void Run()
     auto packaged = LoadSpectralLineListFromPath(root / "config/spectral_lines.public.json");
     Require(packaged.list.has_value(), packaged.error);
     Require(packaged.list->markers.size() > 20, "packaged data must be complete");
+    const auto golden = LoadSpectralLineListFromPath(root / "tests/fixtures/spectral_line_list/unicode.json");
+    Require(golden.list && golden.list->name == "Hα C₂ ¹³CN" && golden.list->color_schemes.size() == 2,
+            "representative golden fixture includes Unicode and independent schemes");
+    std::ostringstream golden_bytes;
+    std::string golden_error;
+    Require(WriteSpectralLineListJson(*golden.list, golden_bytes, golden_error), golden_error);
+    Require(ParseSpectralLineListJson(golden_bytes.str()).list == golden.list, "golden round trip is lossless");
     auto list = *minimal.list;
     list.name = "Hα C₂ ¹³CN";
     list.description = ""; list.creator = "作者";
@@ -108,6 +115,21 @@ void Run()
     reject([](auto& j) { j["color_schemes"][0]["colors"]["missing"] = "#12345678"; });
     reject([](auto& j) { j["color_schemes"][0]["colors"]["a"] = "#FFFFFF"; });
     reject([](auto& j) { j["color_schemes"][1]["id"] = "s1"; });
+    reject([](auto& j) { j["grouping_views"][1]["id"] = "v1"; });
+    reject([](auto& j) { j["coordinate"].erase("laboratory_rest"); });
+    reject([](auto& j) { j["markers"][0].erase("coordinate"); });
+    reject([](auto& j) { j["markers"][0]["coordinate"] = -1; });
+    reject([](auto& j) { j["markers"][1]["coordinate"] = 5000; });
+    reject([](auto& j) { j["color_schemes"] = nullptr; });
+    reject([](auto& j) { j["grouping_views"][0]["read_only"] = true; });
+    reject([](auto& j) { j["grouping_views"][0]["groups"][0]["extra"] = "unsupported"; });
+    auto one_scheme = list;
+    one_scheme.color_schemes.resize(1);
+    std::ostringstream one_bytes;
+    Require(WriteSpectralLineListJson(one_scheme, one_bytes, error) && ParseSpectralLineListJson(one_bytes.str()).list == one_scheme,
+            "one-scheme round trip");
+    Require(!ParseSpectralLineListJson("{\"name\":\"\xff\"}").list, "invalid UTF-8 rejected");
+    Require(!ParseSpectralLineListJson(std::string(80, '[') + "0" + std::string(80, ']')).list, "nesting budget enforced");
     Require(!ParseSpectralLineListJson("{\"id\":1,\"id\":2}").list, "duplicate keys rejected");
     test_support::TemporaryDirectory directory;
     const auto path = directory.path() / "list.json";

@@ -783,7 +783,7 @@ if ($Configuration -ceq 'Release') {
 $legalRoot = Join-Path $RepoRoot 'legal'
 $noticesPath = Join-Path $legalRoot 'THIRD_PARTY_NOTICES.txt'
 $dataSourcesPath = Join-Path $legalRoot 'DATA_SOURCES.txt'
-$catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.tsv'
+$catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.json'
 $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
 $portableVerifierPath = Join-Path $RepoRoot 'scripts\verify-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
@@ -982,53 +982,29 @@ foreach ($expected in @(
     Assert-Contains $dataSources $expected 'Data-source notice'
 }
 
-$catalogLines = Get-Content -LiteralPath $catalogPath -Encoding UTF8 |
-    Where-Object { -not $_.StartsWith('#') }
-$catalog = @($catalogLines | ConvertFrom-Csv -Delimiter "`t")
-if ($catalog.Count -eq 0) {
-    throw 'Public spectral-line catalog did not parse any rows.'
+$lineList = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($lineList.format_kind -cne 'spectiary.spectral_line_list' -or $lineList.schema_version -ne 1 -or
+    $lineList.coordinate.unit -cne 'angstrom' -or $lineList.coordinate.medium -cne 'vacuum' -or
+    $lineList.coordinate.laboratory_rest -ne $true) {
+    throw 'Packaged line list must use the canonical laboratory/vacuum Angstrom v1 contract.'
 }
-
-if (@($catalog | Where-Object { $_.source_ref -match '(?i)nist' }).Count -ne 0) {
-    throw 'The release catalog still contains a direct NIST source handle.'
-}
-
+$catalog = @($lineList.markers)
+if ($catalog.Count -lt 30) { throw 'Packaged line list is missing reference markers.' }
 $sr = @($catalog | Where-Object { $_.id -eq 'sr_ii_4078' })
-if ($sr.Count -ne 1 -or $sr[0].vacuum_angstrom -ne '4078.9' -or
-    $sr[0].source_ref -ne 'spectiary_curated_approximate') {
-    throw 'Sr II must remain the curated approximate 4078.9 Angstrom marker.'
+if ($sr.Count -ne 1 -or $sr[0].coordinate -ne 4078.9) {
+    throw 'Sr II must retain the curated approximate 4078.9 Angstrom coordinate.'
 }
-
-foreach ($markerId in @(
-    'c_i_5382',
-    'c_ii_3920',
-    'c_ii_4268_multiplet',
-    'c_ii_6580',
-    'c_ii_6585',
-    'li_i_6708',
-    'k_i_7667',
-    'k_i_7701',
-    'mg_i_8809'
-)) {
-    $markerRows = @($catalog | Where-Object { $_.id -eq $markerId })
-    if ($markerRows.Count -ne 1) {
-        throw "Expected exactly one release-catalog row for '$markerId', found $($markerRows.Count)."
-    }
-    if ($markerRows[0].source_ref -ne 'atll_v3_00b5') {
-        throw "Release-catalog marker '$markerId' must use source_ref 'atll_v3_00b5'."
+foreach ($markerId in @('c_i_5382','c_ii_3920','c_ii_4268_multiplet','c_ii_6580','c_ii_6585','li_i_6708','k_i_7667','k_i_7701','mg_i_8809')) {
+    if (@($catalog | Where-Object { $_.id -eq $markerId }).Count -ne 1) {
+        throw "Expected exactly one packaged marker for '$markerId'."
     }
 }
-
-$atllRows = @($catalog | Where-Object { $_.source_ref -eq 'atll_v3_00b5' })
-if ($atllRows.Count -ne 43) {
-    throw "Expected 43 Atomic Line List rows, found $($atllRows.Count)."
+# Provenance is owned by legal/DATA_SOURCES.txt, whose checks remain above.
+foreach ($marker in $catalog) {
+    if ($marker.PSObject.Properties.Name -contains 'source_ref' -or $marker.PSObject.Properties.Name -contains 'display_label') {
+        throw 'Legacy provenance/display-label fields must not leak into the canonical marker schema.'
+    }
 }
-
-$baRows = @($catalog | Where-Object { $_.source_ref -eq 'ferrara_et_al_2024_air_to_vacuum' })
-if ($baRows.Count -ne 2) {
-    throw "Expected two Ferrara et al. Ba II rows, found $($baRows.Count)."
-}
-
 $packageScript = Get-Content -Raw -LiteralPath $packageScriptPath
 $aboutSource = @(
     Get-Content -Raw -LiteralPath $aboutSourcePath

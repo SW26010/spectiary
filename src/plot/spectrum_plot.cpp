@@ -383,14 +383,14 @@ void WritePanDragEvent(
                                 });
 }
 
-bool IsVisibleInPlot(const SpectralLineMarker& marker, const ImPlotRect& limits)
+bool IsVisibleInPlot(const line_list::Marker& marker, const ImPlotRect& limits)
 {
-    if (marker.kind == SpectralLineMarkerKind::Line) {
-        return marker.vacuum_angstrom && *marker.vacuum_angstrom >= limits.X.Min &&
-               *marker.vacuum_angstrom <= limits.X.Max;
+    if (marker.kind == line_list::MarkerKind::Line) {
+        return marker.coordinate && *marker.coordinate >= limits.X.Min &&
+               *marker.coordinate <= limits.X.Max;
     }
-    return marker.start_vacuum_angstrom && marker.end_vacuum_angstrom &&
-           *marker.end_vacuum_angstrom >= limits.X.Min && *marker.start_vacuum_angstrom <= limits.X.Max;
+    return marker.start && marker.end &&
+           *marker.end >= limits.X.Min && *marker.start <= limits.X.Max;
 }
 
 void RenderSpectralLineOverlays(
@@ -451,7 +451,7 @@ void RenderSpectralLineOverlays(
     }
     ImPlot::PushPlotClipRect();
     for (std::size_t index = 0; index < marker_count; ++index) {
-        const SpectralLineMarker* marker =
+        const line_list::Marker* marker =
             overlays.spectral_lines[index].marker;
         if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
             continue;
@@ -461,9 +461,9 @@ void RenderSpectralLineOverlays(
             resolved_colors[index];
         const ImVec4 color = colors.marker_and_label;
 
-        if (marker->kind == SpectralLineMarkerKind::Band) {
-            const ImVec2 start_min = ImPlot::PlotToPixels(*marker->start_vacuum_angstrom, limits.Y.Min);
-            const ImVec2 end_max = ImPlot::PlotToPixels(*marker->end_vacuum_angstrom, limits.Y.Max);
+        if (marker->kind == line_list::MarkerKind::Band) {
+            const ImVec2 start_min = ImPlot::PlotToPixels(*marker->start, limits.Y.Min);
+            const ImVec2 end_max = ImPlot::PlotToPixels(*marker->end, limits.Y.Max);
             const ImVec2 rect_min(std::min(start_min.x, end_max.x), std::min(start_min.y, end_max.y));
             const ImVec2 rect_max(std::max(start_min.x, end_max.x), std::max(start_min.y, end_max.y));
             draw_list->AddRectFilled(
@@ -474,8 +474,8 @@ void RenderSpectralLineOverlays(
                 rect_min,
                 rect_max,
                 ImGui::GetColorU32(color));
-        } else if (marker->vacuum_angstrom) {
-            const double x = *marker->vacuum_angstrom;
+        } else if (marker->coordinate) {
+            const double x = *marker->coordinate;
             const ImVec2 bottom = ImPlot::PlotToPixels(x, limits.Y.Min);
             const ImVec2 top = ImPlot::PlotToPixels(x, limits.Y.Max);
             draw_list->AddLine(bottom, top, ImGui::GetColorU32(color), 1.0f);
@@ -485,9 +485,10 @@ void RenderSpectralLineOverlays(
         if (overlays.show_spectral_line_labels &&
             IsSpectralLineLabelAnchorInViewport(label_anchor, limits.X.Min, limits.X.Max)) {
             const float label_anchor_x = ImPlot::PlotToPixels(label_anchor, limits.Y.Min).x;
-            const std::string& name = marker->label.empty() ? marker->id : marker->label;
-            const std::string& wavelength =
-                marker->display_label.empty() ? marker->id : marker->display_label;
+            const std::string& name = marker->name.empty() ? marker->id : marker->name;
+            char wavelength_text[96]{};
+            std::snprintf(wavelength_text, sizeof(wavelength_text), "%.3f", SpectralLineMarkerPosition(*marker));
+            const std::string wavelength = wavelength_text;
             const ScientificLabel& scientific_name =
                 scientific_label_cache.Resolve(
                     overlays.layout_scope_id,
@@ -542,7 +543,7 @@ void RenderSpectralLineOverlays(
 
         std::size_t label_index = 0;
         for (std::size_t index = 0; index < marker_count; ++index) {
-            const SpectralLineMarker* marker =
+            const line_list::Marker* marker =
                 overlays.spectral_lines[index].marker;
             if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
                 continue;
@@ -554,9 +555,10 @@ void RenderSpectralLineOverlays(
                 continue;
             }
 
-            const std::string& name = marker->label.empty() ? marker->id : marker->label;
-            const std::string& wavelength =
-                marker->display_label.empty() ? marker->id : marker->display_label;
+            const std::string& name = marker->name.empty() ? marker->id : marker->name;
+            char wavelength_text[96]{};
+            std::snprintf(wavelength_text, sizeof(wavelength_text), "%.3f", SpectralLineMarkerPosition(*marker));
+            const std::string wavelength = wavelength_text;
             const ScientificLabel& scientific_name =
                 scientific_label_cache.Resolve(
                     overlays.layout_scope_id,

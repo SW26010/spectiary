@@ -80,7 +80,7 @@ void TestStorageContext(const fs::path& test_root)
                 "pre-canonical checkpoint belongs to unsaved");
         Require(p.profile_log_directory == p.logs_root && p.frame_capture_directory == p.logs_root / "captures",
                 "diagnostics belong to logs");
-        Require(p.public_spectral_line_catalog_path == package / "config/spectral_lines.public.tsv",
+        Require(p.public_spectral_line_catalog_path == package / "config/spectral_lines.public.json",
                 "public catalog remains a package resource in either profile");
     }
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });

@@ -99,7 +99,7 @@ set(SPECTIARY_MANIFEST_TEMPLATE
 set(SPECTIARY_MANIFEST
     "${CMAKE_BINARY_DIR}/generated/spectiary/spectiary.exe.manifest"
 )
-set(SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
+set(SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.json")
 set(SPECTIARY_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
 set(SPECTIARY_LEGAL_DOCUMENTS
     "${SPECTIARY_THIRD_PARTY_NOTICES}"
@@ -205,11 +205,11 @@ if(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated/spectiary"
         COMMAND
             "${CMAKE_COMMAND}"
-            "-DINPUT=${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
+            "-DINPUT=${SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON}"
             "-DOUTPUT=${SPECTIARY_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
             -P "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
         DEPENDS
-            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON}"
             "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
         VERBATIM
     )
@@ -292,16 +292,13 @@ add_library(spectiary_core STATIC
     src/domain/spectrum_smoothing.cpp
     src/domain/utf8.cpp
     src/domain/uuid_v4.cpp
-    src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_list.cpp
     src/overlays/spectral_line_list_json.cpp
     src/overlays/built_in_spectral_line_overlay.cpp
     src/overlays/built_in_spectral_line_state_io.cpp
     src/overlays/built_in_spectral_line_reconciliation.cpp
+    src/overlays/built_in_spectral_line_adapter.cpp
     src/overlays/spectral_line_session_state.cpp
-    src/overlays/catalog_user_state_reconciliation.cpp
-    src/overlays/spectral_line_user_state_cache_io.cpp
-    src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp
     src/platform/exclusive_file_lease.cpp
     src/platform/file_sha256.cpp
@@ -524,8 +521,8 @@ if(NOT SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET spectiary_native POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_native>/config"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
-            "$<TARGET_FILE_DIR:spectiary_native>/config/spectral_lines.public.tsv"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON}"
+            "$<TARGET_FILE_DIR:spectiary_native>/config/spectral_lines.public.json"
     )
 endif()
 
@@ -1667,8 +1664,8 @@ spectiary_add_test(
     spectiary_desktop_ui
 )
 spectiary_add_test(
-    spectiary_spectral_line_catalog_tests
-    tests/spectral_line_catalog_tests.cpp
+    spectiary_spectral_line_packaged_tests
+    tests/spectral_line_packaged_tests.cpp
     spectiary_core
 )
 spectiary_add_test(
@@ -1684,30 +1681,25 @@ spectiary_add_test(
     spectiary_core
 )
 target_compile_definitions(
-    spectiary_spectral_line_catalog_tests
+    spectiary_spectral_line_packaged_tests
     PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 if(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
     target_compile_definitions(
-        spectiary_spectral_line_catalog_tests
+        spectiary_spectral_line_packaged_tests
         PRIVATE SPECTIARY_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
     )
 endif()
 
 if(NOT SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
-    add_custom_command(TARGET spectiary_spectral_line_catalog_tests POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_spectral_line_catalog_tests>/config"
+    add_custom_command(TARGET spectiary_spectral_line_packaged_tests POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_spectral_line_packaged_tests>/config"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
-            "$<TARGET_FILE_DIR:spectiary_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON}"
+            "$<TARGET_FILE_DIR:spectiary_spectral_line_packaged_tests>/config/spectral_lines.public.json"
     )
 endif()
 
-spectiary_add_test(
-    spectiary_spectral_line_user_state_tests
-    tests/spectral_line_user_state_tests.cpp
-    spectiary_core
-)
 spectiary_add_test(
     spectiary_spectral_lines_panel_controller_tests
     tests/spectral_lines_panel_controller_tests.cpp
@@ -1823,10 +1815,9 @@ set(SPECTIARY_FAST_TESTS
     spectiary_ui_scale_runtime_architecture_tests
     spectiary_native_window_title_architecture_tests
     spectiary_spectrum_view_session_tests
-    spectiary_spectral_line_catalog_tests
+    spectiary_spectral_line_packaged_tests
     spectiary_spectral_line_list_tests
     spectiary_built_in_spectral_line_state_tests
-    spectiary_spectral_line_user_state_tests
     spectiary_ctest_tier_contract_tests
 )
 set(SPECTIARY_EXTENDED_TESTS

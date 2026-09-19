@@ -27,8 +27,8 @@ endif()
 add_dependencies(spectiary_redirection_experiment spectiary_metadata_finalizer_tool)
 add_custom_command(TARGET spectiary_redirection_experiment POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_redirection_experiment>/config"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
-        "$<TARGET_FILE_DIR:spectiary_redirection_experiment>/config/spectral_lines.public.tsv"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${SPECTIARY_PUBLIC_SPECTRAL_LINES_JSON}"
+        "$<TARGET_FILE_DIR:spectiary_redirection_experiment>/config/spectral_lines.public.json"
     COMMAND "$<TARGET_FILE:spectiary_metadata_finalizer_tool>" "$<TARGET_FILE:spectiary_redirection_experiment>"
         "$<TARGET_FILE_DIR:spectiary_redirection_experiment>/${PROJECT_metadata_filename}"
     VERBATIM)

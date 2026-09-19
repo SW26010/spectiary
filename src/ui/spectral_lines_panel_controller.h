@@ -2,10 +2,10 @@
 
 #include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
-#include "overlays/catalog_user_state_reconciliation.h"
-#include "overlays/spectral_line_catalog.h"
+#include "overlays/built_in_spectral_line_adapter.h"
+
 #include "overlays/spectral_line_plot_marker.h"
-#include "overlays/spectral_line_user_state.h"
+
 
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +19,7 @@
 
 namespace spectiary {
 
+enum class GroupVisibilityState { Empty, AllVisible, AllHidden, Mixed, SearchFiltered };
 class SpectralLinesPanelController;
 
 enum class CatalogUserRenameEditState {
@@ -220,8 +221,7 @@ public:
         std::filesystem::path packaged_catalog_path,
         std::filesystem::path user_state_cache_path);
     SpectralLinesPanelController(
-        SpectralLineCatalog catalog,
-        CatalogIdentity catalog_identity,
+        SpectralLineList list,
         std::filesystem::path user_state_cache_path);
     ~SpectralLinesPanelController();
 
@@ -240,50 +240,23 @@ public:
     [[nodiscard]] bool Flush();
 
 private:
+    SpectralLinesPanelController(SpectralLineListParseResult parsed, std::filesystem::path state_path);
     [[nodiscard]] CatalogUserStateResult Applied(bool persistent_state_changed);
     [[nodiscard]] static CatalogUserStateResult NoChange();
     [[nodiscard]] static CatalogUserStateResult Rejected(std::string message);
-    [[nodiscard]] bool ViewExists(std::string_view view_id) const;
-    [[nodiscard]] bool MarkerExists(std::string_view marker_id) const;
-    [[nodiscard]] std::size_t MarkerAutomaticColorSlot(
-        std::string_view marker_id) const;
-    [[nodiscard]] GroupingView* FindUserGroupingView(std::string_view view_id);
-    [[nodiscard]] const GroupingView* FindUserGroupingView(std::string_view view_id) const;
-    [[nodiscard]] std::optional<GroupingView> EffectiveGroupingView(std::string_view view_id) const;
-    [[nodiscard]] static UserGroup* FindUserGroup(GroupingView& view, std::string_view group_id);
-    [[nodiscard]] static const UserGroup* FindUserGroup(
-        const GroupingView& view,
-        std::string_view group_id);
-    [[nodiscard]] std::string NextGroupingViewId();
-    [[nodiscard]] std::string NextUserGroupId();
-    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
-        SaveCatalogUserState();
-    void MarkCacheDirty();
-    void RequestGroupingViewSelection();
-
-    SpectralLineCatalog catalog_;
-    CatalogIdentity catalog_identity_;
-    std::optional<GroupingView> catalog_grouping_view_;
-    CatalogUserStateCache user_state_cache_;
-    CatalogUserState user_state_;
-    CatalogPanelState panel_state_;
+    [[nodiscard]] const line_list::GroupingView* FindView(std::string_view id) const;
+    [[nodiscard]] const line_list::Marker* FindMarker(std::string_view id) const;
+    [[nodiscard]] std::string NextId(bool group) const;
+    [[nodiscard]] std::vector<std::string> GroupMembers(const line_list::GroupingView& view, std::string_view id) const;
+    [[nodiscard]] bool Visible(std::string_view id) const;
+    [[nodiscard]] std::string UnassignedId(const line_list::GroupingView& view) const;
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult SaveState();
+    BuiltInSpectralLineAdapter adapter_;
     StablePlotSeriesColorAssignments marker_color_assignments_;
     std::unordered_map<std::string, std::size_t> marker_auto_slots_;
-    std::filesystem::path user_state_cache_path_;
-    CatalogUserState reconciliation_base_state_;
-    CatalogPanelState reconciliation_base_panel_state_;
     LocalUserStatePersistenceLifecycle cache_persistence_;
-    SpectralLineCacheLoadIssueKind load_issue_kind_ =
-        SpectralLineCacheLoadIssueKind::None;
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;
-    // Canonicalization may change active_view_id after a deletion without
-    // representing a user selection. Keep task provenance separate from the
-    // durable scalar so stale fallback cannot win a real peer selection.
-    bool explicit_selection_intent_pending_ = false;
-    std::unordered_set<std::string> explicit_group_ordering_view_ids_;
-    bool explicit_task_delta_pending_ = false;
 };
-
-}  // namespace spectiary
+} // namespace spectiary

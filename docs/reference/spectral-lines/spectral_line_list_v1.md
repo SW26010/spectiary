@@ -35,8 +35,14 @@ Marker, grouping-view, and color-scheme IDs are unique within their own kind.
 Group IDs are unique across every view in the document. Group references must
 resolve within the same document and cannot repeat within one group. A marker
 may occur in multiple groups/views or none. Color references must resolve.
-Each mapping key occurs once. Array order is authored order; readers and writers
-never sort groups or group membership. JSON object key order is not semantic.
+Each mapping key occurs once. Group order is the `groups` array order.
+`marker_ids` is an ordered JSON array and its order must round-trip without
+destructive normalization. v1 does not otherwise assign presentation, priority,
+or scientific semantics to that order. The UI may project wavelength order
+without rewriting the array. Validators check references, not a correct order.
+There is no marker-reordering operation in v1. A future presentation feature can
+consume the already preserved order without changing the wire representation.
+JSON object key order is not semantic.
 
 `Unassigned` is only a UI projection of markers unreferenced by the current
 view. No ID or name is reserved for it in v1. An authored group with this name
@@ -55,11 +61,12 @@ revision; unknown input is rejected rather than silently lost on save.
 
 `config/spectral_lines.public.json` is a complete v1 document. The conversion
 retains marker IDs, the existing default view ID and generated base-group IDs.
-The legacy group column becomes ordinary groups, initially ordered as in the
-existing panel. `source_ref` and `display_label` are not canonical fields.
+The legacy group column becomes ordinary groups, with member-array order
+preserved as representation data. `source_ref` and `display_label` are not
+canonical fields.
 Project provenance remains in `legal/DATA_SOURCES.txt`.
 
-Issue #114 owns the subsequent runtime cutover and internal overlay: base
-grouping views append with overlay views, and an optional complete color-scheme
+The built-in adapter introduced by #114 composes the internal overlay: overlay
+grouping views append to base views, and an optional complete color-scheme
 collection overrides the base. These are application-managed customizations,
 not an alternative public format. Issues #65–#67 own open/edit/save UI workflows.

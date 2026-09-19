@@ -183,7 +183,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
     Require(portable_paths.package_root == package_root, "portable package root should be the executable directory");
     Require(
         portable_paths.public_spectral_line_catalog_path ==
-            package_root / "config" / "spectral_lines.public.tsv",
+            package_root / "config" / "spectral_lines.public.json",
         "packaged spectral-line catalog should resolve from the package root");
     Require(portable_paths.application_data_root == package_root, "Portable application data root should equal the package root");
     RequireCompleteLocalUserStatePathMapping(
@@ -201,7 +201,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
     Require(installed_paths.package_root == package_root, "installed package root should still be the executable directory");
     Require(
         installed_paths.public_spectral_line_catalog_path ==
-            package_root / "config" / "spectral_lines.public.tsv",
+            package_root / "config" / "spectral_lines.public.json",
         "installed profile should use the same package resource root");
     Require(installed_paths.application_data_root == installed_root, "installed state should use local app data root");
     RequireCompleteLocalUserStatePathMapping(

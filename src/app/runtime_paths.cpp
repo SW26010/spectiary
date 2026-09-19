@@ -186,7 +186,7 @@ RuntimePaths RuntimePathsForDeployment(
     paths.executable_path = inputs.executable_path.empty() ? CurrentExecutablePath() : std::move(inputs.executable_path);
     paths.package_root = CheckedRoot(PackageRootForExecutable(paths.executable_path));
     paths.public_spectral_line_catalog_path =
-        paths.package_root / "config" / "spectral_lines.public.tsv";
+        paths.package_root / "config" / "spectral_lines.public.json";
 
     switch (deployment.storage_profile) {
     case StorageProfile::Portable:

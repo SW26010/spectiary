@@ -6,6 +6,9 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#ifdef SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES
+#include "spectiary/public_spectral_lines_embedded.h"
+#endif
 
 namespace spectiary {
 namespace {
@@ -173,6 +176,16 @@ SpectralLineListParseResult LoadSpectralLineListFromPath(const std::filesystem::
     std::string bytes;
     if (!stream || !ReadTextStreamCancelable(stream, bytes)) return {std::nullopt, "could not read bounded Spectral Line List JSON"};
     return ParseSpectralLineListJson(bytes);
+}
+
+SpectralLineListParseResult LoadPackagedPublicSpectralLineList(const std::filesystem::path& path)
+{
+#ifdef SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES
+    (void)path;
+    return ParseSpectralLineListJson(kEmbeddedPublicSpectralLineCatalog);
+#else
+    return LoadSpectralLineListFromPath(path);
+#endif
 }
 
 bool WriteSpectralLineListJson(const SpectralLineList& list, std::ostream& stream, std::string& error)

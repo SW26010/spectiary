@@ -130,7 +130,7 @@ BuiltInSpectralLineState MigrateSix(const Json& root, const SpectralLineList& ba
     BuiltInSpectralLineState state;
     if (catalogs.contains(base.id)) {
         const auto& value = catalogs.at(base.id);
-        Fields(value, {"active_view_id", "marker_visibility", "grouping_views"}, {"marker_colors"});
+        Fields(value, {"active_view_id", "marker_visibility", "grouping_views", "marker_colors"});
         state.session.active_view_id = value.at("active_view_id").get<std::string>();
         Visibility(value.at("marker_visibility"), state.session);
         std::unordered_map<std::string, double> positions;
@@ -162,8 +162,6 @@ BuiltInSpectralLineState MigrateSix(const Json& root, const SpectralLineList& ba
                     group.marker_ids.push_back(std::move(id));
                 }
                 if (unassigned) continue;
-                std::stable_sort(group.marker_ids.begin(), group.marker_ids.end(),
-                    [&](const auto& a, const auto& b) { return positions.at(a) < positions.at(b); });
                 state.session.group_names[group.id] = metadata;
                 view.groups.push_back(std::move(group));
             }
