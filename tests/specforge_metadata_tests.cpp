@@ -660,17 +660,16 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
             startup.runtime_paths().application_data_root ==
                 state_root &&
             startup.runtime_paths().source_session_state_path ==
-                state_root / "source-session.json" &&
-            startup.runtime_paths().legacy_spectrum_view_state_path ==
-                state_root / "spectrum-view-state.json" &&
+                state_root / "state" / "source-session.json" &&
+            startup.runtime_paths().legacy_spectrum_view_state_path.empty() &&
             startup.runtime_paths().spectrum_plot_preferences_path ==
                 state_root / "config" / "spectrum-plot-preferences.json" &&
             startup.runtime_paths().spectrum_viewport_state_path ==
                 state_root / "state" / "spectrum-viewport-state.json" &&
             startup.runtime_paths().sample_workflow_state_path ==
-                state_root / "sample-workflow-state.json" &&
+                state_root / "state" / "sample-workflow-state.json" &&
             startup.runtime_paths().spectral_line_user_state_path ==
-                state_root /
+                state_root / "state" /
                     "spectral-line-grouping-views.json",
         "validated startup facts should retain the one resolved "
         "executable and complete state-path decision");

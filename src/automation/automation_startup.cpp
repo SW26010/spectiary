@@ -666,6 +666,7 @@ OrdinaryUserStateRootForExecutable(
         CurrentProcessRuntimePathInputs(
             executable_path);
     inputs.application_data_root_override.reset();
+    inputs.legacy_application_data_root.clear();
     const SpecForgeStartup startup =
         PrepareSpecForgeStartup(
             std::move(inputs));

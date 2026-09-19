@@ -39,6 +39,8 @@ void TestOwners(const std::filesystem::path& root)
     std::string error;
     Require(SaveSampleLabelingOrdinaryState(paths, state_path, state, &error), error.c_str());
     Require(SaveSampleLabelingDraftCheckpoints(drafts_path, drafts, &error), error.c_str());
+    Require((GetFileAttributesW(drafts_path.parent_path().c_str()) & FILE_ATTRIBUTE_HIDDEN) != 0,
+        "unsaved checkpoints hide their directory by default");
     const auto state_json = nlohmann::json::parse(Read(state_path));
     const auto draft_json = nlohmann::json::parse(Read(drafts_path));
     const auto& registration = state_json["sources"][0]["tasks"][0];

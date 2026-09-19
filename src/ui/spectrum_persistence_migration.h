@@ -5,14 +5,10 @@
 
 namespace specforge {
 
-struct SpectrumPersistenceMigrationResult {
-    bool preferences_save_pending = false;
-    bool viewport_save_pending = false;
-};
-
 // One startup cutover, only into missing targets. Existing split documents,
 // including unreadable/unsupported ones, always retain their own authority.
-[[nodiscard]] SpectrumPersistenceMigrationResult MigrateLegacySpectrumViewState(
+// Failed imports keep the destination/defaults and never queue normal autosave.
+void MigrateLegacySpectrumViewState(
     const RuntimePaths& paths,
     SpectrumPlotPreferencesLoadResult& preferences,
     SpectrumViewportStateLoadResult& viewport);

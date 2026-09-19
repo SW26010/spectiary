@@ -790,20 +790,18 @@ int wmain(int argc, wchar_t** argv)
             automation_root &&
             startup.runtime_paths()
                     .ui_language_settings_path ==
-                automation_root /
+                automation_root / "config" /
                     "ui-language.json" &&
             startup.runtime_paths()
                     .appearance_settings_path ==
-                automation_root /
+                automation_root / "config" /
                     "appearance-settings.json" &&
             startup.runtime_paths()
                     .source_session_state_path ==
-                automation_root /
+                automation_root / "state" /
                     "source-session.json" &&
             startup.runtime_paths()
-                    .legacy_spectrum_view_state_path ==
-                automation_root /
-                    "spectrum-view-state.json" &&
+                    .legacy_spectrum_view_state_path.empty() &&
             startup.runtime_paths().spectrum_plot_preferences_path ==
                 automation_root / "config" / "spectrum-plot-preferences.json" &&
             startup.runtime_paths().spectrum_viewport_state_path ==

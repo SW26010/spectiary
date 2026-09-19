@@ -44,16 +44,20 @@ destination is missing, the legacy document is not decoded.
 
 A failed legacy load neither overwrites/deletes that input nor authorizes
 fallback writes into missing destinations. An existing healthy destination
-remains independently writable. A failed target write retains supported legacy
-values in runtime, schedules that owner's retry, and keeps the legacy file.
+remains independently writable. As tightened by the final #103 cutover
+([ADR 0015](0015-application-storage-cutover.md)), a failed target import retains
+the destination/defaults and diagnostics, keeps the legacy input, and does not
+schedule ordinary autosave of legacy values. This prevents a delayed migration
+retry from overwriting a new owner created by another instance. Imports publish
+complete staged files without replacing concurrently created destinations.
 The next startup can complete a partial migration without rewriting an already
-established target. Only after both destinations are established is the old
-regular file removed. Cleanup after a runtime retry can finish at next startup;
-a cleanup failure reports a warning while the split files remain authoritative.
-There is no cross-file transaction, live merge or concurrent-writer validation.
+established target. Only after both destinations are healthy and established is
+the exact old regular file removed; cleanup failure leaves split files authoritative.
+There is no cross-file transaction or live merge. Ordinary explicit mutations
+retain their independent complete-snapshot save policies.
 
-Only these spectrum files leave the transitional layout. Other settings,
-source/session owners, labeling and spectral-line state are unchanged.
+ADR 0015 subsequently cuts over the remaining application-managed owners.
+This spectrum split does not change their domain ownership or lifecycle.
 
 Regression coverage checks final role paths across deployment profiles, separate
 codecs, dirty triggers, byte/timestamp preservation of the untouched owner,

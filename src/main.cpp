@@ -1,4 +1,5 @@
 #include "app/application_settings.h"
+#include "app/local_user_state.h"
 #include "app/specforge_app.h"
 #include "app/runtime_paths.h"
 #include "automation/automation_startup.h"
@@ -89,6 +90,7 @@ specforge::SpecForgeStartup PrepareStartup(
     }
     inputs.application_data_root_override =
         command_line.automation->state_root;
+    inputs.legacy_application_data_root = command_line.automation->state_root;
     return specforge::PrepareSpecForgeStartup(
         std::move(inputs));
 }
@@ -212,6 +214,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
         }
         specforge::SpecForgeStartup startup =
             PrepareStartup(command_line);
+        specforge::MigrateLegacyApplicationStorage(startup.runtime_paths());
+        // Hidden is presentation only; checkpoint I/O owns and reports failures.
+        std::error_code unsaved_directory_error;
+        std::filesystem::create_directories(startup.runtime_paths().unsaved_root, unsaved_directory_error);
+        specforge::HideUnsavedCheckpointDirectory(startup.runtime_paths().unsaved_root);
         if (command_line.automation) {
             automation_diagnostic_root =
                 command_line.automation->state_root;

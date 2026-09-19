@@ -1,10 +1,14 @@
 #include "app/runtime_paths.h"
 
 #include "app/local_user_state_paths.h"
+#include "platform/atomic_file.h"
 #include "platform/win32_process_launcher.h"
+
+#include <nlohmann/json.hpp>
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -192,10 +196,8 @@ RuntimePaths RuntimePathsForDeployment(
     case StorageProfile::LocalAppData:
         if (inputs.application_data_root_override) {
             paths.application_data_root = CheckedRoot(*inputs.application_data_root_override);
-
         } else if (!inputs.local_app_data_user_state_root.empty()) {
             paths.application_data_root = CheckedRoot(inputs.local_app_data_user_state_root);
-
         } else {
             const auto local = CheckedRoot(inputs.local_app_data_directory
                 ? inputs.local_app_data_directory() : LocalAppDataDirectory());
@@ -213,6 +215,9 @@ RuntimePaths RuntimePathsForDeployment(
         // remains tied to the executable rather than this injected data root.
         paths.application_data_root = CheckedRoot(*inputs.application_data_root_override);
         paths.legacy_application_data_root.clear();
+    }
+    if (!inputs.legacy_application_data_root.empty()) {
+        paths.legacy_application_data_root = CheckedRoot(inputs.legacy_application_data_root);
     }
     paths.config_root = paths.application_data_root / "config";
     paths.state_root = paths.application_data_root / "state";
@@ -234,6 +239,67 @@ RuntimePaths RuntimePathsForDeployment(
     return paths;
 }
 
+void MigrateLegacyApplicationStorage(const RuntimePaths& paths)
+{
+    if (paths.legacy_application_data_root.empty()) return;
+    // An explicit allowlist of flat application-owned files. Old logs/captures
+    // and unknown files remain inert; no directory traversal or cleanup.
+    const auto import = [&](const std::filesystem::path& source,
+                            const std::filesystem::path& target) {
+        std::error_code error;
+        if (std::filesystem::exists(target, error) || error) return;
+        const auto status = std::filesystem::symlink_status(source, error);
+        if (error || !std::filesystem::is_regular_file(status)) return;
+        // Bound pre-release import cost and reset malformed JSON instead of
+        // installing a broken legacy file as the new authoritative owner.
+        const auto size = std::filesystem::file_size(source, error);
+        if (error || size > 16U * 1024U * 1024U) return;
+        nlohmann::json document;
+        if (source.extension() == ".json") {
+            std::ifstream stream(source, std::ios::binary);
+            document = nlohmann::json::parse(stream, nullptr, false);
+            if (!document.is_object()) return;
+        }
+        std::filesystem::create_directories(target.parent_path(), error);
+        if (error) return;
+        const auto temporary = TemporarySiblingPath(target);
+        // Publish a complete copy without replacing a destination created by
+        // another startup/writer since the initial existence check.
+        if (target == paths.profile_settings_path) {
+            // The legacy profile setting only holds an output-directory
+            // override. Reset it so no restored logger writes the retired root.
+            document["output_directory"] = nullptr;
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            stream << document.dump();
+            stream.close();
+            if (!stream) {
+                std::filesystem::remove(temporary, error);
+                return;
+            }
+        } else if (!CopyFileW(source.c_str(), temporary.c_str(), TRUE)) {
+            return;
+        }
+        if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            std::filesystem::remove(temporary, error);
+        }
+    };
+    if (paths.legacy_application_data_root == paths.application_data_root) {
+        import(paths.legacy_application_data_root / local_user_state_paths::kImGuiIni, paths.imgui_ini_path);
+    } else {
+        import(paths.legacy_application_data_root / "specforge-imgui-v2.ini", paths.imgui_ini_path);
+    }
+    import(paths.legacy_application_data_root / paths.ui_language_settings_path.filename(), paths.ui_language_settings_path);
+    import(paths.legacy_application_data_root / paths.appearance_settings_path.filename(), paths.appearance_settings_path);
+    import(paths.legacy_application_data_root / paths.ui_scale_settings_path.filename(), paths.ui_scale_settings_path);
+    import(paths.legacy_application_data_root / paths.input_settings_path.filename(), paths.input_settings_path);
+    import(paths.legacy_application_data_root / paths.external_source_settings_path.filename(), paths.external_source_settings_path);
+    import(paths.legacy_application_data_root / paths.profile_settings_path.filename(), paths.profile_settings_path);
+    import(paths.legacy_application_data_root / paths.panel_visibility_state_path.filename(), paths.panel_visibility_state_path);
+    import(paths.legacy_application_data_root / paths.source_session_state_path.filename(), paths.source_session_state_path);
+    import(paths.legacy_application_data_root / paths.sample_navigation_state_path.filename(), paths.sample_navigation_state_path);
+    import(paths.legacy_application_data_root / paths.sample_workflow_state_path.filename(), paths.sample_workflow_state_path);
+    import(paths.legacy_application_data_root / paths.spectral_line_user_state_path.filename(), paths.spectral_line_user_state_path);
+}
 
 SpecForgeStartup::SpecForgeStartup(
     RuntimePaths runtime_paths,
@@ -257,10 +323,11 @@ const SpecForgeMetadataReadResult& SpecForgeStartup::metadata()
 RuntimePathInputs CurrentProcessRuntimePathInputs(
     std::filesystem::path executable_path)
 {
+    const auto isolated_root = RuntimeResourceUserStateRootOverride();
     return {
         .executable_path = std::move(executable_path),
-        .application_data_root_override =
-            RuntimeResourceUserStateRootOverride(),
+        .application_data_root_override = isolated_root,
+        .legacy_application_data_root = isolated_root.value_or(std::filesystem::path{}),
     };
 }
 

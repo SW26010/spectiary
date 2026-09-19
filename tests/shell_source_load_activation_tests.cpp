@@ -1,3 +1,4 @@
+#include "app/initial_source.h"
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 #include "imgui_widget_harness.h"
 #endif
@@ -4024,7 +4025,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Access::EnableNavigationTracing(
         *shell,
         external_presentation_frame);
-    shell->OpenExternalSource(preferred);
+    const auto relative_preferred = std::filesystem::relative(preferred, std::filesystem::current_path());
+    Require(!relative_preferred.is_absolute(), "startup regression must exercise a relative CLI path");
+    specforge::OpenInitialSource(*shell, relative_preferred);
     Require(
         DrainAllSourceLoads(*shell),
         "external FITS startup source should finish loading");
@@ -5256,6 +5259,7 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
         const auto startup = PrepareSpecForgeStartup({
             .executable_path = CurrentExecutablePath(),
             .application_data_root_override = root,
+            .legacy_application_data_root = root,
         });
         const auto& paths = startup.runtime_paths();
         const auto legacy = paths.legacy_spectrum_view_state_path;
@@ -5404,14 +5408,14 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
     std::filesystem::create_directories(root);
 
     const std::filesystem::path language_path =
-        root / "ui-language.json";
+        root / "config" / "ui-language.json";
     const std::filesystem::path ui_scale_path =
-        root / "ui-scale.json";
+        root / "config" / "ui-scale.json";
     const std::filesystem::path panel_path =
-        root / "panel-visibility.json";
-    std::filesystem::create_directory(language_path);
-    std::filesystem::create_directory(ui_scale_path);
-    std::filesystem::create_directory(panel_path);
+        root / "state" / "panel-visibility.json";
+    std::filesystem::create_directories(language_path);
+    std::filesystem::create_directories(ui_scale_path);
+    std::filesystem::create_directories(panel_path);
 
     specforge::RuntimePathInputs inputs;
     inputs.executable_path = specforge::CurrentExecutablePath();
@@ -5420,7 +5424,7 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
         specforge::PrepareSpecForgeStartup(std::move(inputs));
     const std::filesystem::path spectral_path =
         startup.runtime_paths().spectral_line_user_state_path;
-    std::filesystem::create_directory(spectral_path);
+    std::filesystem::create_directories(spectral_path);
 
     {
         specforge::ShellUi shell(startup);

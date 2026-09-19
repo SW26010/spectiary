@@ -1514,7 +1514,7 @@ private:
 void PrintUsage()
 {
     std::cout
-        << "Usage: SpecForgeAutomation [--app <Spectiary.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>] [--imgui-layout-seed <specforge-imgui-v2.ini>]\n"
+        << "Usage: SpecForgeAutomation [--app <Spectiary.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>] [--imgui-layout-seed <imgui-layout-v2.ini>]\n"
         << "Commands: setting get <ui.language|ui.scale|ui.theme>, setting set <ui.language|ui.scale|ui.theme> <value>, panel get <name>, panel set <name> <true|false>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }

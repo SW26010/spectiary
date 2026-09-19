@@ -15,6 +15,8 @@ struct RuntimePathInputs {
     std::filesystem::path local_app_data_user_state_root;
     std::optional<std::filesystem::path>
         application_data_root_override;
+    // Explicit isolated migration input (for automation seed staging only).
+    std::filesystem::path legacy_application_data_root;
     // Platform seams. Invoked only when the selected profile needs them.
     std::function<std::filesystem::path()> local_app_data_directory;
     std::function<std::filesystem::path()> system_temp_directory;
@@ -92,5 +94,9 @@ private:
     RuntimePathInputs inputs);
 [[nodiscard]] const SpecForgeStartup& DefaultSpecForgeStartup();
 [[nodiscard]] RuntimePaths DefaultRuntimePaths();
+
+// Startup-only, bounded best-effort import. Existing destinations always win.
+// Never scans, moves or deletes a directory or user-owned documents.
+void MigrateLegacyApplicationStorage(const RuntimePaths& paths);
 
 }  // namespace specforge

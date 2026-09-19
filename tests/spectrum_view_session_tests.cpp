@@ -612,17 +612,14 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
     auto viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
     // A destination becomes unwritable after the initial missing-file probe.
     std::filesystem::create_directories(paths.spectrum_viewport_state_path);
-    auto migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
-    Require(!migrated.preferences_save_pending && migrated.viewport_save_pending &&
-            std::filesystem::exists(paths.legacy_spectrum_view_state_path),
-        "partial migration must retain the legacy input and retry only the failed destination");
-    Require(preferences.document_present && viewport.state.locked &&
-            viewport.state.source_collection_identity == "source-A" &&
-            viewport.state.limits.x_min == 1.25 && viewport.state.limits.x_max == 8.5 &&
-            viewport.state.limits.y_min == -2 && viewport.state.limits.y_max == 3 &&
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(std::filesystem::exists(paths.legacy_spectrum_view_state_path),
+        "partial migration must retain the legacy input for a later startup");
+    Require(preferences.document_present && !viewport.state.locked &&
+            viewport.issue_kind == VersionedJsonCacheLoadIssueKind::ReadFailed &&
             LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors.raw_spectrum ==
                 PlotSeriesColor::ExplicitColor({0.25f, 0.5f, 0.75f, 1}),
-        "a failed migration write must retain supported legacy values for runtime and retry");
+        "failed migration must reset only its destination and never schedule a stale autosave");
     // A user changes the established config before the next startup.
     preferences.state.plot_colors.raw_spectrum = PlotSeriesColor::Auto();
     Require(SaveSpectrumPlotPreferences(paths.spectrum_plot_preferences_path, preferences.state),
@@ -630,9 +627,8 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
     std::filesystem::remove(paths.spectrum_viewport_state_path);
     preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
     viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
-    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
-    Require(!migrated.preferences_save_pending && !migrated.viewport_save_pending &&
-            !std::filesystem::exists(paths.legacy_spectrum_view_state_path) &&
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(!std::filesystem::exists(paths.legacy_spectrum_view_state_path) &&
             preferences.state.plot_colors.raw_spectrum.mode() == PlotSeriesColorMode::Auto &&
             LoadSpectrumViewportState(paths.spectrum_viewport_state_path).state == viewport.state,
         "restart must fill only the missing viewport and retire legacy after both targets exist");
@@ -642,16 +638,28 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
         R"({"format_kind":"specforge.spectrum_view.state","schema_version":1,"locked":false})";
     preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
     viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
-    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
     Require(preferences.document_present && viewport.document_present &&
             preferences.state.plot_colors == SpectrumPlotColors{} && !viewport.state.locked &&
             !std::filesystem::exists(paths.legacy_spectrum_view_state_path),
         "legacy schema 1 should establish independent Auto preferences and automatic viewport");
+    // A normal writer can establish a destination after our initial load.
+    std::filesystem::remove(paths.spectrum_plot_preferences_path);
+    std::filesystem::remove(paths.spectrum_viewport_state_path);
+    preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+    viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+    const SpectrumPlotPreferences winner{{.raw_spectrum = PlotSeriesColor::ExplicitColor({1, 0, 0, 1})}};
+    Require(SaveSpectrumPlotPreferences(paths.spectrum_plot_preferences_path, winner), "publish concurrent winner");
+    std::ofstream(paths.legacy_spectrum_view_state_path) << legacy;
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    Require(preferences.state.plot_colors == winner.plot_colors &&
+            LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors == winner.plot_colors,
+        "migration must preserve a destination created after the initial missing-file snapshot");
     // Established split files must not decode even an unreadable legacy input.
     std::filesystem::create_directory(paths.legacy_spectrum_view_state_path);
     preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
     viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
-    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
     Require(preferences.warning.empty() && viewport.warning.empty(),
         "both established owners must bypass legacy decoding entirely");
     std::filesystem::remove(paths.legacy_spectrum_view_state_path);
@@ -662,7 +670,7 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
     std::filesystem::remove(paths.spectrum_viewport_state_path);
     preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
     viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
-    migrated = MigrateLegacySpectrumViewState(paths, preferences, viewport);
+    MigrateLegacySpectrumViewState(paths, preferences, viewport);
     {
         std::ifstream stream(paths.spectrum_plot_preferences_path);
         Require(std::string((std::istreambuf_iterator<char>(stream)), {}) == future &&

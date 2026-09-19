@@ -142,7 +142,7 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
     Require(stream.good(), "could not write text file");
 }
 
-void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
+void TestDefaultLocalUserStatePathUsesStateRoleRoot()
 {
     const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json", specforge::DefaultRuntimePaths());
     const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
@@ -154,11 +154,11 @@ void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
     if (runtime_paths.storage_profile == specforge::StorageProfile::Portable) {
         Require(
             path.parent_path().parent_path().filename() == "state",
-            "portable local state path should live under the package Data root");
+            "portable local state path should live under the package state root");
     } else {
         Require(
             path.parent_path().parent_path().filename() == "state",
-            "LocalAppData state path should live under the SpecForge root");
+            "LocalAppData state path should live under the state role root");
     }
 }
 
@@ -185,7 +185,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         portable_paths.public_spectral_line_catalog_path ==
             package_root / "config" / "spectral_lines.public.tsv",
         "packaged spectral-line catalog should resolve from the package root");
-    Require(portable_paths.application_data_root == package_root, "portable state should live under Data");
+    Require(portable_paths.application_data_root == package_root, "Portable application data root should equal the package root");
     RequireCompleteLocalUserStatePathMapping(
         portable_paths,
         package_root);
@@ -1358,7 +1358,7 @@ void TestCancelableTextStreamReadStopsBetweenChunks()
 int main()
 {
     try {
-        TestDefaultLocalUserStatePathUsesSpecForgeRoot();
+        TestDefaultLocalUserStatePathUsesStateRoleRoot();
         TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
         TestAtomicWriteCreatesParentAndReplacesExistingFile();
         TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();

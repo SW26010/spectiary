@@ -74,7 +74,7 @@ void TestStorageContext(const fs::path& test_root)
     const auto overridden = RuntimePathsForDeployment({}, inputs);
     Require(overridden.application_data_root == *inputs.application_data_root_override,
             "override injects an already resolved root without platform lookup");
-    Require(overridden.application_data_root == overridden.application_data_root, "isolated business writes");
+    Require(overridden.legacy_application_data_root.empty(), "override disables production legacy discovery");
     const auto portable_override = RuntimePathsForDeployment(portable, inputs);
     Require(portable_override.package_root == package &&
             portable_override.application_data_root == *inputs.application_data_root_override,
@@ -106,6 +106,56 @@ void TestStorageContext(const fs::path& test_root)
     std::ofstream(file) << "sentinel";
     inputs.application_data_root_override = file / "nested";
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
+}
+
+void TestBoundedMigration(const fs::path& root)
+{
+    for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
+        const auto base = root / (profile == StorageProfile::Portable ? "portable-migration" : "local-migration");
+        const auto paths = RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = base / "package/app.exe",
+            .local_app_data_directory = [=] { return base / "local"; },
+            .system_temp_directory = [=] { return base / "temp"; },
+        });
+        const auto write = [](const fs::path& path, const char* text) {
+            fs::create_directories(path.parent_path());
+            std::ofstream(path, std::ios::binary) << text;
+        };
+        const auto read = [](const fs::path& path) {
+            std::ifstream stream(path, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(stream), {});
+        };
+        const auto legacy = paths.legacy_application_data_root;
+        write(legacy / "ui-language.json", R"({"legacy":true})");
+        write(legacy / "appearance-settings.json", R"({"legacy":true})");
+        write(paths.appearance_settings_path, "new target must win even if corrupt");
+        write(legacy / "input-settings.json", "broken json");
+        write(legacy / "profile-settings.json", R"({"output_directory":"retired logs"})");
+        write(legacy / "spectral-line-grouping-views.json", R"({"groups":[1,2]})");
+        write(legacy / "specforge-imgui-v2.ini", "layout fixture");
+        write(legacy / "unknown/nested/user.asdf", "canonical legacy sentinel");
+        write(paths.application_data_root / "user.asdf", "canonical root sentinel");
+        write(paths.application_data_root / "my-work/source.fits", "user source sentinel");
+        write(legacy / "logs/old.log", "old log");
+        const auto first = std::async(std::launch::async, [&] { MigrateLegacyApplicationStorage(paths); });
+        MigrateLegacyApplicationStorage(paths);
+        first.wait();
+        Require(read(paths.ui_language_settings_path) == R"({"legacy":true})", "known setting imports");
+        Require(read(paths.appearance_settings_path) == "new target must win even if corrupt", "never replace existing target");
+        Require(!fs::exists(paths.input_settings_path), "malformed legacy settings reset");
+        Require(nlohmann::json::parse(read(paths.profile_settings_path))["output_directory"].is_null(),
+            "legacy profile destination resets to final logs root");
+        Require(read(paths.spectral_line_user_state_path) == R"({"groups":[1,2]})", "grouping views import whole");
+        Require(read(paths.imgui_ini_path) == "layout fixture", "layout imports to neutral filename");
+        Require(read(legacy / "unknown/nested/user.asdf") == "canonical legacy sentinel", "unknown legacy work untouched");
+        Require(read(paths.application_data_root / "user.asdf") == "canonical root sentinel", "canonical root work untouched");
+        Require(read(paths.application_data_root / "my-work/source.fits") == "user source sentinel", "user subdirectory untouched");
+        Require(read(legacy / "logs/old.log") == "old log" && !fs::exists(paths.logs_root / "old.log"), "no recursive log migration");
+        write(paths.ui_language_settings_path, R"({"active":true})");
+        MigrateLegacyApplicationStorage(paths);
+        Require(read(paths.ui_language_settings_path) == R"({"active":true})", "new startup cannot resurrect stale data");
+        Require(read(legacy / "ui-language.json") == R"({"legacy":true})", "active updates never write legacy input");
+    }
 }
 
 RuntimePaths Context(const fs::path& package, StorageProfile profile)
@@ -238,6 +288,7 @@ int main()
     try {
         fs::create_directories(root);
         TestStorageContext(root);
+        TestBoundedMigration(root);
         TestLocators(root);
         TestReservedNamespaces(root);
         TestConsumersKeepInjectedContext(root);

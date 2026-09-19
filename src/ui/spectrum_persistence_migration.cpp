@@ -2,16 +2,40 @@
 
 #include "ui/legacy_spectrum_view_state_io.h"
 
+#include "platform/atomic_file.h"
+#include <Windows.h>
 #include <system_error>
 
 namespace specforge {
+namespace {
+// Stage the domain-validated document, then publish only if still absent.
+// Ordinary writers do not need a migration lock and can win this race safely.
+template<class State, class Save, class Load, class Result>
+bool ImportMissing(const std::filesystem::path& path, const State& state,
+    Save save, Load load, Result& loaded, std::string& error)
+{
+    const auto staged = TemporarySiblingPath(path);
+    if (!save(staged, state, &error)) return false;
+    const bool published = MoveFileExW(staged.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+    std::error_code ignored;
+    if (!published) {
+        std::filesystem::remove(staged, ignored);
+        if (std::filesystem::is_regular_file(path, ignored)) {
+            loaded = load(path);
+            return true; // An existing owner, even corrupt, outranks legacy.
+        }
+        error = "Could not publish the missing spectrum migration destination.";
+    }
+    return published;
+}
+} // namespace
 
-SpectrumPersistenceMigrationResult MigrateLegacySpectrumViewState(
+
+void MigrateLegacySpectrumViewState(
     const RuntimePaths& paths,
     SpectrumPlotPreferencesLoadResult& preferences,
     SpectrumViewportStateLoadResult& viewport)
 {
-    SpectrumPersistenceMigrationResult result;
     const auto healthy = VersionedJsonCacheLoadIssueKind::None;
     const bool preferences_missing = !preferences.document_present &&
         preferences.issue_kind == healthy;
@@ -37,7 +61,7 @@ SpectrumPersistenceMigrationResult MigrateLegacySpectrumViewState(
 
     if (!preferences_missing && !viewport_missing) {
         retire_legacy();
-        return result;
+        return;
     }
 
     const auto legacy = LoadLegacySpectrumViewState(paths.legacy_spectrum_view_state_path);
@@ -54,22 +78,27 @@ SpectrumPersistenceMigrationResult MigrateLegacySpectrumViewState(
             viewport.warning = legacy.warning;
             viewport.diagnostic_detail = legacy.diagnostic_detail;
         }
-        return result;
+        return;
     }
     if (!legacy.document_present) {
-        return result;
+        // Another startup may have published both owners and retired legacy
+        // after this caller took its initial missing-file snapshots.
+        if (preferences_missing) preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+        if (viewport_missing) viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+        return;
     }
 
     if (preferences_missing) {
         preferences.state.plot_colors = legacy.state.plot_colors;
         preferences.warning = legacy.warning;
         std::string error;
-        preferences.document_present = SaveSpectrumPlotPreferences(
-            paths.spectrum_plot_preferences_path, preferences.state, &error);
-        result.preferences_save_pending = !preferences.document_present;
-        if (result.preferences_save_pending) {
-            preferences.warning += " Spectrum plot preference migration save will be retried.";
-            preferences.diagnostic_detail = std::move(error);
+        const bool established = ImportMissing(paths.spectrum_plot_preferences_path,
+            preferences.state, SaveSpectrumPlotPreferences, LoadSpectrumPlotPreferences, preferences, error);
+        if (established && preferences.issue_kind == healthy) preferences.document_present = true;
+        if (!established) {
+            preferences = LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path);
+            preferences.warning += " Legacy spectrum preference import was skipped; the destination or defaults remain active.";
+            preferences.diagnostic_detail += " " + error;
         }
     }
     if (viewport_missing) {
@@ -80,16 +109,17 @@ SpectrumPersistenceMigrationResult MigrateLegacySpectrumViewState(
         };
         viewport.warning = legacy.warning;
         std::string error;
-        viewport.document_present = SaveSpectrumViewportState(
-            paths.spectrum_viewport_state_path, viewport.state, &error);
-        result.viewport_save_pending = !viewport.document_present;
-        if (result.viewport_save_pending) {
-            viewport.warning += " Spectrum viewport migration save will be retried.";
-            viewport.diagnostic_detail = std::move(error);
+        const bool established = ImportMissing(paths.spectrum_viewport_state_path,
+            viewport.state, SaveSpectrumViewportState, LoadSpectrumViewportState, viewport, error);
+        if (established && viewport.issue_kind == healthy) viewport.document_present = true;
+        if (!established) {
+            viewport = LoadSpectrumViewportState(paths.spectrum_viewport_state_path);
+            viewport.warning += " Legacy spectrum viewport import was skipped; the destination or defaults remain active.";
+            viewport.diagnostic_detail += " " + error;
         }
     }
     retire_legacy();
-    return result;
+    return;
 }
 
 }  // namespace specforge

@@ -1037,14 +1037,8 @@ ShellUi::ShellUi(
         LoadSpectrumViewportState(
             spectrum_viewport_state_path_);
     auto preferences = LoadSpectrumPlotPreferences(spectrum_plot_preferences_path_);
-    const auto migration = MigrateLegacySpectrumViewState(
+    MigrateLegacySpectrumViewState(
         startup.runtime_paths(), preferences, viewport_state);
-    if (migration.preferences_save_pending) {
-        spectrum_plot_preferences_persistence_.MarkDirty();
-    }
-    if (migration.viewport_save_pending) {
-        spectrum_viewport_state_persistence_.MarkDirty();
-    }
     spectrum_viewport_state_writeback_allowed_ =
         viewport_state.issue_kind ==
         VersionedJsonCacheLoadIssueKind::None;

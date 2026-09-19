@@ -781,7 +781,7 @@ int wmain(int argc, wchar_t** argv)
         Require(
             !cleanup_error,
             "layout test root should be creatable");
-        const std::filesystem::path target = root / "specforge-imgui-v2.ini";
+        const std::filesystem::path target = root / "imgui-layout-v2.ini";
 
         TestContentionKeepsEveryCompletedSnapshotReadable(target);
         TestCrossProcessContentionKeepsEveryCompletedSnapshotReadable(target);
