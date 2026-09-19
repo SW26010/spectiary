@@ -526,7 +526,7 @@ to output ownership, write-ahead recovery, publication, and retry. That product
 lifecycle work is complete.
 
 Remaining hardening is tracked separately in
-[GitHub issue #78](https://github.com/SW26010/SpecForge/issues/78):
+[GitHub issue #78](https://github.com/SW26010/spectiary/issues/78):
 
 1. benchmark the exact production native reuse/read/write paths at 1M scale;
 2. broaden bounded fuzz/property coverage for YAML, block headers/indexes,

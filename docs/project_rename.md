@@ -1,9 +1,11 @@
 # Project identity and rename procedure
 
-Spectiary was formerly SpecForge. Stage 7 of #106/#107 adopts the selected
-product name locally. This does not rename the GitHub repository or publish a
-release. Links to `SW26010/SpecForge` remain real repository addresses until a
-separate repository rename; historical ADRs and dated evidence retain their names.
+Spectiary was formerly SpecForge. Stage 7 of #106/#107 adopted the selected
+product name locally; the GitHub repository has since been renamed to
+[`SW26010/spectiary`](https://github.com/SW26010/spectiary). Current README,
+documentation and CI entry points use that repository address. Historical ADRs,
+issue references and dated run evidence may retain `SW26010/SpecForge` URLs.
+Repository adoption does not change the immutable identity contracts below.
 
 ## Independent contracts
 

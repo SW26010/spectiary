@@ -8,8 +8,8 @@ Formerly SpecForge. See [project identity and rename contracts](docs/project_ren
 for the pre-1.0 format cutover and historical compatibility boundaries.
 
 <p align="center">
-  <a href="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml"><img src="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="Spectiary automation status"></a>
-  <a href="https://github.com/SW26010/SpecForge/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/Release-v0.9.0-2ea44f?logo=github&amp;logoColor=white" alt="Latest release: v0.9.0"></a>
+  <a href="https://github.com/SW26010/spectiary/actions/workflows/automation.yml"><img src="https://github.com/SW26010/spectiary/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="Spectiary automation status"></a>
+  <a href="https://github.com/SW26010/spectiary/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/Release-v0.9.0-2ea44f?logo=github&amp;logoColor=white" alt="Latest release: v0.9.0"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus" alt="C++20">
   <img src="https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE" alt="Dear ImGui with docking">
   <img src="https://img.shields.io/badge/ImPlot-Plotting-8A2BE2" alt="ImPlot">

@@ -26,7 +26,7 @@
 
 ### Issue tracker
 
-Issues and PRDs for this repository live in GitHub Issues at `SW26010/SpecForge`; use `gh` from the repository checkout. See `docs/agents/issue-tracker.md`.
+Issues and PRDs for this repository live in GitHub Issues at `SW26010/spectiary`; use `gh` from the repository checkout. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

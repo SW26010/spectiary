@@ -1,7 +1,7 @@
 # Issue tracker: GitHub
 
 Issues and PRDs for this repository live in GitHub Issues at
-`https://github.com/SW26010/SpecForge`. Use the `gh` CLI from the repository
+`https://github.com/SW26010/spectiary`. Use the `gh` CLI from the repository
 checkout for issue operations.
 
 ## Conventions
