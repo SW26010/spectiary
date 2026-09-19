@@ -30,6 +30,12 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+void Require(const spectiary::SampleLabelingStateCacheSaveResult& result,
+             std::string_view message)
+{
+    Require(result.Succeeded(), message);
+}
+
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();

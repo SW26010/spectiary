@@ -69,6 +69,25 @@ reused. Explicit deletion and successful canonical registration remove obsolete
 checkpoints on the next successful checkpoint replacement. The single checkpoint
 file is rewritten, rather than accumulating historical checkpoint generations.
 
+The labeling persistence seam retains separate ordinary-state and draft-checkpoint
+load and save outcomes. Each outcome identifies successful, failed, or unattempted
+work and retains its diagnostic. A rejected commit (for example, an unavailable
+lock or untrusted input) leaves both replacements unattempted. If ordinary-state
+replacement fails, checkpoint replacement still runs when the previous checkpoint
+can be trusted, retaining any slot whose registration has not succeeded.
+
+Combined diagnostics name each affected owner and retain simultaneous failures.
+The controller uses the same result for registration and ordinary flushes: ordinary
+registration may succeed while checkpoint cleanup remains pending, and the existing
+pending patch and retry scheduler retain the incomplete work. Load causes reach the
+existing persistence-health diagnostics without turning routine checkpoint success
+into a canonical document-save notification.
+
+After a partial save, a new task's expected-absent precondition is consumed only
+when its identity becomes visible to the next commit reload: checkpoint success
+for a draft, or ordinary registration success for a formal task. Its pending
+upsert and leases remain held until the combined save succeeds.
+
 ## Publication and failures
 
 Save As constructs the full canonical document from current memory, acquires its

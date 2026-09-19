@@ -883,6 +883,7 @@ void SampleLabelingController::ActivateSourceInternal(
         if (latest.issue_kind ==
             SampleLabelingStateCacheLoadIssueKind::None) {
             state_cache_load_warning_ = latest.warning;
+            state_cache_load_diagnostic_detail_ = latest.diagnostic_detail;
             state_cache_snapshot_ =
                 std::make_shared<
                     const SampleLabelingStateCacheLoadResult>(
@@ -1093,6 +1094,7 @@ SampleLabelingController::ActivatePreparedSource(
         if (latest.issue_kind ==
             SampleLabelingStateCacheLoadIssueKind::None) {
             state_cache_load_warning_ = latest.warning;
+            state_cache_load_diagnostic_detail_ = latest.diagnostic_detail;
             state_cache_snapshot_ =
                 std::make_shared<
                     const SampleLabelingStateCacheLoadResult>(
@@ -1226,6 +1228,7 @@ BackgroundRetirementHandle SampleLabelingController::AdoptPreparedStateCache(
     state_cache_loaded_ = true;
     if (first_load) {
         state_cache_load_warning_ = state_cache_snapshot_->warning;
+        state_cache_load_diagnostic_detail_ = state_cache_snapshot_->diagnostic_detail;
     }
     Touch();
     return retired;
@@ -3037,15 +3040,13 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     // The owner switch itself is durable before the controller releases any
     // legacy artifact lease. If this commit fails, the newly written ASDF is
     // left unowned and the unchanged NPY+sidecar pair remains authoritative.
-    std::string adoption_error;
+    const auto registration = state_cache_path_.empty()
+        ? SampleLabelingStateCacheSaveResult{}
+        : CommitTaskRegistration(
+            *active_source_identity_, *state, candidate, false);
     const bool canonical_owner_saved =
         state_cache_path_.empty() ||
-        CommitTaskRegistration(
-            *active_source_identity_,
-            *state,
-            candidate,
-            false,
-            &adoption_error);
+        registration.RegistrationSucceeded();
     if (!canonical_owner_saved) {
         SampleLabelingOperationResult failed;
         failed.accepted = true;
@@ -3056,9 +3057,9 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
         failed.issue =
             SampleLabelingOperationResult::Issue::
                 OutputMigrationOwnerSwitchFailed;
-        failed.diagnostic = adoption_error.empty()
+        failed.diagnostic = registration.diagnostic_detail.empty()
             ? "could not register the canonical owner after ASDF migration"
-            : adoption_error;
+            : registration.diagnostic_detail;
         failed.revision = revision_;
         return failed;
     }
@@ -3794,12 +3795,11 @@ SampleLabelingController::PublishCanonicalTaskCreation(
     return attempt;
 }
 
-bool SampleLabelingController::CommitTaskRegistration(
+SampleLabelingStateCacheSaveResult SampleLabelingController::CommitTaskRegistration(
     std::string_view source_identity,
     const SourceState& state,
     const SampleLabelingTask& task,
-    bool expected_absent,
-    std::string* error_message)
+    bool expected_absent)
 {
     SampleLabelingStateCachePatch checkpoint;
     SampleLabelingSourceStatePatch& source_patch =
@@ -3815,23 +3815,22 @@ bool SampleLabelingController::CommitTaskRegistration(
         source_patch.task_ids_expected_absent.insert(
             task.task_id);
     }
-    bool registered = false;
-    const bool saved = CommitSampleLabelingStateCachePatch(
+    const auto result = CommitSampleLabelingStateCachePatch(
         runtime_paths_,
         state_cache_path_,
         checkpoint,
-        error_message,
-        kSynchronousCommitLockWait, &registered);
-    if (registered) {
+        nullptr,
+        kSynchronousCommitLockWait);
+    if (result.RegistrationSucceeded()) {
         ClearRecoveryTaskTrust(
             source_identity,
             task.task_id);
     }
-    if (registered && !saved) {
+    if (result.CheckpointCleanupPending()) {
         MarkTaskUpsert(source_identity, state, task);
         QueueStateSave();
     }
-    return registered;
+    return result;
 }
 
 void SampleLabelingController::
@@ -4067,6 +4066,7 @@ void SampleLabelingController::EnsureStateCacheLoaded()
         sources_.try_emplace(std::move(identity), std::move(state));
     }
     state_cache_load_warning_ = std::move(result.warning);
+    state_cache_load_diagnostic_detail_ = std::move(result.diagnostic_detail);
     Touch();
 }
 
@@ -5969,17 +5969,24 @@ bool SampleLabelingController::TrySaveStateCache(
             normalize_saved_task(task);
         }
     }
-    std::string save_error;
-    const bool saved =
+    const auto result =
         CommitSampleLabelingStateCachePatch(
             runtime_paths_,
             state_cache_path_,
             patch,
-            &save_error,
+            nullptr,
             wait_for_commit_lock
                 ? kSynchronousCommitLockWait
                 : std::chrono::milliseconds::zero());
-    if (saved) {
+    for (auto& [identity, source_patch] : pending_cache_patch_.sources) {
+        (void)identity;
+        for (const auto& task : source_patch.task_upserts) {
+            if (result.TaskIdentityPersisted(task)) {
+                source_patch.task_ids_expected_absent.erase(task.task_id);
+            }
+        }
+    }
+    if (result.Succeeded()) {
         normalize_saved_states(sources_);
         pending_cache_patch_ = {};
         ReleaseUnneededActiveLeaseComponents();
@@ -6008,6 +6015,7 @@ bool SampleLabelingController::TrySaveStateCache(
             }
         }
         state_cache_load_warning_.clear();
+        state_cache_load_diagnostic_detail_.clear();
         state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
     } else {
         state_cache_save_scheduler_.MarkDirty();
@@ -6018,12 +6026,12 @@ bool SampleLabelingController::TrySaveStateCache(
             source_patch.active_task_id.reset();
         }
         state_cache_save_status_.MarkFailed(
-            save_error.empty()
+            result.diagnostic_detail.empty()
                 ? "could not write local sample-labeling task record"
-                : std::move(save_error));
+                : result.diagnostic_detail);
     }
     Touch();
-    return saved;
+    return result.Succeeded();
 }
 
 SampleLabelingMaintenanceResult
@@ -6087,6 +6095,8 @@ SampleLabelingController::PersistenceStatus() const
         .recovered = state_cache_save_status_.recovered(),
         .load_warning = state_cache_load_warning_,
         .save_message = state_cache_save_status_.message(),
+        .load_diagnostic_detail = state_cache_load_diagnostic_detail_,
+        .save_diagnostic_detail = state_cache_save_status_.message(),
     };
 }
 

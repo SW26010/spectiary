@@ -799,6 +799,69 @@ void SetError(
     }
 }
 
+void AppendDiagnostic(std::string& target, std::string_view detail)
+{
+    if (detail.empty()) return;
+    if (!target.empty()) target += "\n";
+    target += detail;
+}
+
+void AppendOwnerDiagnostic(
+    std::string& target, std::string_view owner, std::string_view detail)
+{
+    if (detail.empty()) return;
+    AppendDiagnostic(target, std::string(owner) + ": " + std::string(detail));
+}
+
+SampleLabelingStateCacheLoadIssueKind CacheLoadIssueKind(
+    VersionedJsonCacheLoadIssueKind issue)
+{
+    switch (issue) {
+    case VersionedJsonCacheLoadIssueKind::None:
+        return SampleLabelingStateCacheLoadIssueKind::None;
+    case VersionedJsonCacheLoadIssueKind::ReadFailed:
+        return SampleLabelingStateCacheLoadIssueKind::ReadFailed;
+    case VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema:
+        return SampleLabelingStateCacheLoadIssueKind::UnsupportedFormatOrSchema;
+    default:
+        return SampleLabelingStateCacheLoadIssueKind::InvalidDocument;
+    }
+}
+
+void ReportOwnerLoad(
+    SampleLabelingStateCacheLoadResult& result,
+    SampleLabelingStateCacheOwnerLoadOutcome& owner,
+    std::string_view owner_name,
+    VersionedJsonCacheLoadIssueKind issue,
+    const std::string& diagnostic)
+{
+    owner.completion = issue == VersionedJsonCacheLoadIssueKind::None
+        ? SampleLabelingPersistenceCompletion::Succeeded
+        : SampleLabelingPersistenceCompletion::Failed;
+    owner.issue_kind = CacheLoadIssueKind(issue);
+    AppendDiagnostic(owner.diagnostic_detail, diagnostic);
+    AppendOwnerDiagnostic(result.diagnostic_detail, owner_name, diagnostic);
+    if (issue != VersionedJsonCacheLoadIssueKind::None) {
+        result.issue_kind = owner.issue_kind;
+        result.warning = "Could not read labeling state or unsaved checkpoint.";
+    }
+}
+
+SampleLabelingStateCacheSaveResult FinishSave(
+    SampleLabelingStateCacheSaveResult result, std::string* error_message)
+{
+    SetError(error_message, result.diagnostic_detail);
+    return result;
+}
+
+SampleLabelingStateCacheSaveResult SaveNotAttempted(
+    std::string diagnostic, std::string* error_message)
+{
+    SampleLabelingStateCacheSaveResult result;
+    result.diagnostic_detail = std::move(diagnostic);
+    return FinishSave(std::move(result), error_message);
+}
+
 bool ValidateCacheTaskIds(
     const SampleLabelingStateCache& cache,
     std::string* error_message)
@@ -1318,6 +1381,18 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
     SampleLabelingStateCacheLoadPolicy policy)
 {
     SampleLabelingStateCacheLoadResult result;
+    const auto finish = [&]() {
+        result.legacy_seed = {
+            result.issue_kind == SampleLabelingStateCacheLoadIssueKind::None
+                ? SampleLabelingPersistenceCompletion::Succeeded
+                : SampleLabelingPersistenceCompletion::Failed,
+            result.issue_kind,
+            result.diagnostic_detail};
+        result.diagnostic_detail.clear();
+        AppendOwnerDiagnostic(result.diagnostic_detail, "Legacy seed",
+            result.legacy_seed.diagnostic_detail);
+        return std::move(result);
+    };
     VersionedJsonCacheLoadResult cache =
         LoadVersionedJsonCacheFile(
             path,
@@ -1348,7 +1423,7 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
         std::move(cache.diagnostic_detail);
     if (!cache.document) {
         result.warning = std::move(cache.warning);
-        return result;
+        return finish();
     }
 
     const nlohmann::json* sources = ObjectMember(cache.document->root, "sources");
@@ -1360,7 +1435,7 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
                 InvalidDocument;
         result.diagnostic_detail =
             "sources must be an array";
-        return result;
+        return finish();
     }
 
     for (std::size_t source_index = 0; source_index < (*sources).size(); ++source_index) {
@@ -1465,7 +1540,10 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
                         result.cache = {};
                         result.warning =
                             "Persistent labeling output paths are not permitted in an automation state seed.";
-                        return result;
+                        result.issue_kind =
+                            SampleLabelingStateCacheLoadIssueKind::InvalidDocument;
+                        AppendDiagnostic(result.diagnostic_detail, result.warning);
+                        return finish();
                     }
                     if (parsed.task) {
                         const bool duplicate_task_id =
@@ -1526,7 +1604,7 @@ static SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingStateCache(
     if (cancellation_checkpoint) {
         cancellation_checkpoint();
     }
-    return result;
+    return finish();
 }
 
 SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingDraftSeed(
@@ -1583,20 +1661,12 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
         ? SampleLabelingOwnerLoadResult<SampleLabelingDraftCheckpoints>{}
         : LoadSampleLabelingDraftCheckpoints(draft_path, cancellation_checkpoint);
     SampleLabelingStateCacheLoadResult result;
-    const auto report = [&](VersionedJsonCacheLoadIssueKind issue, const std::string& diagnostic) {
-        if (issue == VersionedJsonCacheLoadIssueKind::None) return;
-        switch (issue) {
-        case VersionedJsonCacheLoadIssueKind::ReadFailed:
-            result.issue_kind = SampleLabelingStateCacheLoadIssueKind::ReadFailed; break;
-        case VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema:
-            result.issue_kind = SampleLabelingStateCacheLoadIssueKind::UnsupportedFormatOrSchema; break;
-        default: result.issue_kind = SampleLabelingStateCacheLoadIssueKind::InvalidDocument; break;
-        }
-        result.warning = "Could not read labeling state or unsaved checkpoint.";
-        result.diagnostic_detail = diagnostic;
-    };
-    report(ordinary.issue_kind, ordinary.diagnostic);
-    report(drafts.issue_kind, drafts.diagnostic);
+    ReportOwnerLoad(result, result.ordinary_state, "Ordinary state",
+        ordinary.issue_kind, ordinary.diagnostic);
+    if (policy != SampleLabelingStateCacheLoadPolicy::OrdinaryRegistrationsOnly) {
+        ReportOwnerLoad(result, result.draft_checkpoint, "Draft checkpoint",
+            drafts.issue_kind, drafts.diagnostic);
+    }
     for (const auto& [identity, registration] : ordinary.owner.sources) {
         auto& source = result.cache.sources[identity];
         source.sample_count = registration.sample_count;
@@ -1608,9 +1678,11 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
             if (!record.output_path) continue; // Joined with its checkpoint below.
             if (policy == SampleLabelingStateCacheLoadPolicy::InternalDraftsOnly) {
                 result.cache = {};
-                report(VersionedJsonCacheLoadIssueKind::InvalidDocument,
+                ReportOwnerLoad(result, result.ordinary_state, "Ordinary state",
+                    VersionedJsonCacheLoadIssueKind::InvalidDocument,
                     "Persistent labeling output paths are not permitted in an automation state seed.");
-                result.warning = result.diagnostic_detail;
+                result.warning =
+                    "Persistent labeling output paths are not permitted in an automation state seed.";
                 return result;
             }
             auto task = CreateSampleLabelingTask(record.task_id, record.display_name_hint.value_or(record.task_id), 0);
@@ -1646,7 +1718,8 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
             (source.sample_count != checkpoint.sample_count ||
              source.source_fingerprint != checkpoint.source_fingerprint ||
              source.context_fingerprint != checkpoint.context_fingerprint)) {
-            report(VersionedJsonCacheLoadIssueKind::InvalidDocument,
+            ReportOwnerLoad(result, result.draft_checkpoint, "Draft checkpoint",
+                VersionedJsonCacheLoadIssueKind::InvalidDocument,
                 "Draft checkpoint conflicts with registered source compatibility information.");
             continue;
         }
@@ -1675,12 +1748,17 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     return result;
 }
 
-bool SaveSampleLabelingStateCache(const RuntimePaths& runtime_paths,
+SampleLabelingStateCacheSaveResult SaveSampleLabelingStateCache(const RuntimePaths& runtime_paths,
     const std::filesystem::path& path, const SampleLabelingStateCache& cache,
-    std::string* error_message, bool* ordinary_state_saved)
+    std::string* error_message)
 {
-    if (ordinary_state_saved) *ordinary_state_saved = false;
-    if (path.empty() || !ValidateCacheStructure(cache, error_message)) return false;
+    if (path.empty()) {
+        return SaveNotAttempted("sample-labeling cache path is empty", error_message);
+    }
+    std::string validation_error;
+    if (!ValidateCacheStructure(cache, &validation_error)) {
+        return SaveNotAttempted(std::move(validation_error), error_message);
+    }
     SampleLabelingOrdinaryState ordinary;
     SampleLabelingDraftCheckpoints drafts;
     for (const auto& [identity, source] : cache.sources) {
@@ -1696,25 +1774,37 @@ bool SaveSampleLabelingStateCache(const RuntimePaths& runtime_paths,
                 task.persistence.output_path ? std::optional{task.task_name} : std::nullopt});
             if (task.persistence.output_path) continue;
             if (!task.values.IsComplete() || drafts.sources.contains(identity)) {
-                SetError(error_message, "A source must have at most one complete unsaved draft checkpoint.");
-                return false;
+                return SaveNotAttempted(
+                    "A source must have at most one complete unsaved draft checkpoint.",
+                    error_message);
             }
             drafts.sources.emplace(identity, SampleLabelingSourceDraftCheckpoint{
                 source.sample_count, source.source_name, source.source_fingerprint, source.context_fingerprint,
                 {task.task_id, task.task_name, task.canonical_metadata, task.label_set, task.values.Complete()}});
         }
     }
-    std::string state_error, draft_error;
-    const bool state_saved = SaveSampleLabelingOrdinaryState(runtime_paths, path, ordinary, &state_error);
-    if (ordinary_state_saved) *ordinary_state_saved = state_saved;
+    SampleLabelingStateCacheSaveResult result;
+    const bool state_saved = SaveSampleLabelingOrdinaryState(runtime_paths, path, ordinary,
+        &result.ordinary_state.diagnostic_detail);
+    result.ordinary_state.completion = state_saved
+        ? SampleLabelingPersistenceCompletion::Succeeded
+        : SampleLabelingPersistenceCompletion::Failed;
+    AppendOwnerDiagnostic(result.diagnostic_detail, "Ordinary state",
+        result.ordinary_state.diagnostic_detail);
     const auto checkpoint_path = SampleLabelingDraftCheckpointPath(runtime_paths, path);
     if (!state_saved) {
         // Draft edits may still checkpoint when ordinary state is unavailable.
         // Do not remove an old slot until its replacement registration landed.
         auto previous = LoadSampleLabelingDraftCheckpoints(checkpoint_path);
         if (previous.issue_kind != VersionedJsonCacheLoadIssueKind::None) {
-            SetError(error_message, std::move(state_error));
-            return false;
+            result.draft_checkpoint.diagnostic_detail =
+                "Checkpoint replacement was not attempted because its previous contents could not be trusted";
+            if (!previous.diagnostic.empty()) {
+                result.draft_checkpoint.diagnostic_detail += ": " + previous.diagnostic;
+            }
+            AppendOwnerDiagnostic(result.diagnostic_detail, "Draft checkpoint",
+                result.draft_checkpoint.diagnostic_detail);
+            return FinishSave(std::move(result), error_message);
         }
         for (auto& [identity, checkpoint] : previous.owner.sources)
             drafts.sources.try_emplace(identity, std::move(checkpoint));
@@ -1722,36 +1812,34 @@ bool SaveSampleLabelingStateCache(const RuntimePaths& runtime_paths,
     // Cleanup follows canonical registration. Failure cannot roll back an ASDF
     // publication; the controller reports output and local-state status separately.
     const bool drafts_saved = SaveSampleLabelingDraftCheckpoints(
-        checkpoint_path, drafts, &draft_error);
-    if (!state_saved || !drafts_saved)
-        SetError(error_message, !state_saved ? std::move(state_error) : std::move(draft_error));
-    return state_saved && drafts_saved;
+        checkpoint_path, drafts, &result.draft_checkpoint.diagnostic_detail);
+    result.draft_checkpoint.completion = drafts_saved
+        ? SampleLabelingPersistenceCompletion::Succeeded
+        : SampleLabelingPersistenceCompletion::Failed;
+    AppendOwnerDiagnostic(result.diagnostic_detail, "Draft checkpoint",
+        result.draft_checkpoint.diagnostic_detail);
+    return FinishSave(std::move(result), error_message);
 }
 
-bool CommitSampleLabelingStateCachePatch(
+SampleLabelingStateCacheSaveResult CommitSampleLabelingStateCachePatch(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message,
-    std::chrono::milliseconds commit_lock_wait, bool* ordinary_state_saved)
+    std::chrono::milliseconds commit_lock_wait)
 {
-    if (ordinary_state_saved) *ordinary_state_saved = false;
     if (error_message != nullptr) {
         error_message->clear();
     }
     if (path.empty()) {
-        SetError(
-            error_message,
-            "sample-labeling cache path is empty");
-        return false;
+        return SaveNotAttempted(
+            "sample-labeling cache path is empty", error_message);
     }
     const std::vector<std::filesystem::path> coordination_directories =
         SampleLabelingStateCoordinationDirectories(path);
     if (coordination_directories.empty()) {
-        SetError(
-            error_message,
-            "could not resolve sample-labeling cache coordination identity");
-        return false;
+        return SaveNotAttempted(
+            "could not resolve sample-labeling cache coordination identity", error_message);
     }
     const auto deadline =
         std::chrono::steady_clock::now() +
@@ -1795,14 +1883,13 @@ bool CommitSampleLabelingStateCachePatch(
     } while (true);
     if (commit_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
-        SetError(
-            error_message,
+        return SaveNotAttempted(
             commit_status ==
                     ExclusiveFileLeaseAcquireStatus::Unavailable
                 ? "sample-labeling cache is being committed by another process"
                 : "could not acquire sample-labeling cache commit lock: " +
-                    commit_error);
-        return false;
+                    commit_error,
+            error_message);
     }
 
     SampleLabelingStateCacheLoadResult latest =
@@ -1821,17 +1908,23 @@ bool CommitSampleLabelingStateCachePatch(
         if (!latest.diagnostic_detail.empty()) {
             message += ": " + latest.diagnostic_detail;
         }
-        SetError(error_message, std::move(message));
-        return false;
+        SampleLabelingStateCacheSaveResult result;
+        result.ordinary_state.diagnostic_detail =
+            std::move(latest.ordinary_state.diagnostic_detail);
+        result.draft_checkpoint.diagnostic_detail =
+            std::move(latest.draft_checkpoint.diagnostic_detail);
+        result.diagnostic_detail = std::move(message);
+        return FinishSave(std::move(result), error_message);
     }
-    if (!ApplyPatch(latest.cache, patch, error_message)) {
-        return false;
+    std::string patch_error;
+    if (!ApplyPatch(latest.cache, patch, &patch_error)) {
+        return SaveNotAttempted(std::move(patch_error), error_message);
     }
     return SaveSampleLabelingStateCache(
         runtime_paths,
         path,
         latest.cache,
-        error_message, ordinary_state_saved);
+        error_message);
 }
 
 bool HasSampleLabelingOutputPathConflict(

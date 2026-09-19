@@ -53,6 +53,12 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+void Require(const spectiary::SampleLabelingStateCacheSaveResult& result,
+             std::string_view message)
+{
+    Require(result.Succeeded(), message);
+}
+
 spectiary::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
 {
     const auto timestamp =

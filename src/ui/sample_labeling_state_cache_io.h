@@ -35,12 +35,77 @@ enum class SampleLabelingStateCacheLoadIssueKind {
     UnsupportedFormatOrSchema,
 };
 
+enum class SampleLabelingPersistenceCompletion {
+    NotAttempted,
+    Succeeded,
+    Failed,
+};
+
+struct SampleLabelingStateCacheOwnerLoadOutcome {
+    SampleLabelingPersistenceCompletion completion =
+        SampleLabelingPersistenceCompletion::NotAttempted;
+    SampleLabelingStateCacheLoadIssueKind issue_kind =
+        SampleLabelingStateCacheLoadIssueKind::None;
+    std::string diagnostic_detail;
+};
+
 struct SampleLabelingStateCacheLoadResult {
     SampleLabelingStateCache cache;
+    SampleLabelingStateCacheOwnerLoadOutcome ordinary_state;
+    SampleLabelingStateCacheOwnerLoadOutcome draft_checkpoint;
+    // The bounded legacy reader does not read either split owner.
+    SampleLabelingStateCacheOwnerLoadOutcome legacy_seed;
     std::string warning;
     SampleLabelingStateCacheLoadIssueKind issue_kind =
         SampleLabelingStateCacheLoadIssueKind::None;
     std::string diagnostic_detail;
+};
+
+struct SampleLabelingStateCacheOwnerSaveOutcome {
+    // Describes the owner save operation, including its validation. Failed does
+    // not imply that atomic replacement reached the filesystem.
+    SampleLabelingPersistenceCompletion completion =
+        SampleLabelingPersistenceCompletion::NotAttempted;
+    std::string diagnostic_detail;
+};
+
+struct SampleLabelingStateCacheSaveResult {
+    SampleLabelingStateCacheOwnerSaveOutcome ordinary_state;
+    SampleLabelingStateCacheOwnerSaveOutcome draft_checkpoint;
+    // Includes preflight failures even when neither replacement was attempted.
+    std::string diagnostic_detail;
+
+    [[nodiscard]] bool Succeeded() const
+    {
+        return RegistrationSucceeded() &&
+            draft_checkpoint.completion ==
+                SampleLabelingPersistenceCompletion::Succeeded;
+    }
+
+    [[nodiscard]] bool RegistrationSucceeded() const
+    {
+        return ordinary_state.completion ==
+            SampleLabelingPersistenceCompletion::Succeeded;
+    }
+
+    [[nodiscard]] bool CheckpointCleanupPending() const
+    {
+        return RegistrationSucceeded() &&
+            draft_checkpoint.completion !=
+                SampleLabelingPersistenceCompletion::Succeeded;
+    }
+
+    // A successful owner save makes this upsert visible to the next commit
+    // reload, so its creation precondition has been consumed even on partial
+    // success. The caller must still retain the patch and its leases for retry.
+    [[nodiscard]] bool TaskIdentityPersisted(const SampleLabelingTask& task) const
+    {
+        return task.persistence.output_path
+            ? RegistrationSucceeded()
+            : draft_checkpoint.completion == SampleLabelingPersistenceCompletion::Succeeded;
+    }
+
+    explicit operator bool() const { return Succeeded(); }
 };
 
 struct SampleLabelingSourceMetadataPatch {
@@ -98,25 +163,23 @@ SampleLabelingStateCoordinationDirectories(
         SampleLabelingStateCacheLoadPolicy::
             AllowPersistentOutputs);
 
-[[nodiscard]] bool SaveSampleLabelingStateCache(
+[[nodiscard]] SampleLabelingStateCacheSaveResult SaveSampleLabelingStateCache(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCache& cache,
-    std::string* error_message = nullptr,
-    bool* ordinary_state_saved = nullptr);
+    std::string* error_message = nullptr);
 
 // Explicit, read-only schema-4 import for pinned automation fixtures.
 [[nodiscard]] SampleLabelingStateCacheLoadResult LoadLegacySampleLabelingDraftSeed(
     const std::filesystem::path& path);
 
-[[nodiscard]] bool CommitSampleLabelingStateCachePatch(
+[[nodiscard]] SampleLabelingStateCacheSaveResult CommitSampleLabelingStateCachePatch(
     const RuntimePaths& runtime_paths,
     const std::filesystem::path& path,
     const SampleLabelingStateCachePatch& patch,
     std::string* error_message = nullptr,
     std::chrono::milliseconds commit_lock_wait =
-        std::chrono::milliseconds::zero(),
-    bool* ordinary_state_saved = nullptr);
+        std::chrono::milliseconds::zero());
 
 [[nodiscard]] bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,
