@@ -1,4 +1,5 @@
 #include "app/local_user_state.h"
+#include "app/application_settings.h"
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 #include "ui/source_collection_session_state_cache_io.h"
@@ -65,6 +66,22 @@ void TestStorageContext(const fs::path& test_root)
         Require(p.unsaved_root == p.application_data_root / "unsaved", "unsaved namespace");
         Require(p.temp_root == disposable / project_identity::kApplicationId / "temp", "system temp");
         Require(p.cache_root == disposable / project_identity::kApplicationId / "cache", "disposable cache");
+        for (const auto& file : {p.ui_language_settings_path, p.appearance_settings_path,
+                p.ui_scale_settings_path, p.input_settings_path, p.external_source_settings_path,
+                p.profile_settings_path, p.spectrum_plot_preferences_path}) {
+            Require(file.parent_path() == p.config_root, "preferences have only the config owner");
+        }
+        for (const auto& file : {p.imgui_ini_path, p.panel_visibility_state_path,
+                p.source_session_state_path, p.sample_navigation_state_path, p.sample_workflow_state_path,
+                p.sample_labeling_state_path, p.spectrum_viewport_state_path, p.spectral_line_user_state_path}) {
+            Require(file.parent_path() == p.state_root, "session and grouping views have only the state owner");
+        }
+        Require(p.sample_labeling_drafts_path.parent_path() == p.unsaved_root,
+                "pre-canonical checkpoint belongs to unsaved");
+        Require(p.profile_log_directory == p.logs_root && p.frame_capture_directory == p.logs_root / "captures",
+                "diagnostics belong to logs");
+        Require(p.public_spectral_line_catalog_path == package / "config/spectral_lines.public.tsv",
+                "public catalog remains a package resource in either profile");
     }
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
     for (const auto& invalid : {fs::path{}, fs::path("relative")}) {
@@ -107,6 +124,11 @@ void TestStorageContext(const fs::path& test_root)
     std::ofstream(file) << "sentinel";
     inputs.application_data_root_override = file / "nested";
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
+    inputs.application_data_root_override.reset();
+    inputs.local_app_data_directory = [=] { return file / "nested"; };
+    RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
+    inputs.executable_path = file / "app.exe";
+    RequireFailure([&] { (void)RuntimePathsForDeployment(portable, inputs); });
 }
 
 void TestLegacyBrandState(const fs::path& test_root)
@@ -174,9 +196,9 @@ void TestBoundedMigration(const fs::path& root)
         write(paths.application_data_root / "user.asdf", "canonical root sentinel");
         write(paths.application_data_root / "my-work/source.fits", "user source sentinel");
         write(legacy / "logs/old.log", "old log");
-        const auto first = std::async(std::launch::async, [&] { MigrateLegacyApplicationStorage(paths); });
+        auto first = std::async(std::launch::async, [&] { MigrateLegacyApplicationStorage(paths); });
         MigrateLegacyApplicationStorage(paths);
-        first.wait();
+        first.get();
         Require(read(paths.ui_language_settings_path) == R"({"legacy":true})", "known setting imports");
         Require(read(paths.appearance_settings_path) == "new target must win even if corrupt", "never replace existing target");
         Require(!fs::exists(paths.input_settings_path), "malformed legacy settings reset");
@@ -203,11 +225,96 @@ RuntimePaths Context(const fs::path& package, StorageProfile profile)
     });
 }
 
+void TestFailedCutoverAndIndependentReset(const fs::path& root)
+{
+    for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
+        const auto base = root / (profile == StorageProfile::Portable ? "portable-failure" : "local-failure");
+        const auto paths = RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = base / "package/app.exe",
+            .local_app_data_directory = [=] { return base / "local"; },
+            .system_temp_directory = [=] { return base / "temp"; },
+        });
+        const auto write = [](const fs::path& path, const std::string& text) {
+            fs::create_directories(path.parent_path());
+            std::ofstream(path, std::ios::binary) << text;
+        };
+        const auto read = [](const fs::path& path) {
+            std::ifstream stream(path, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(stream), {});
+        };
+        const auto legacy_state = paths.legacy_application_data_root / paths.source_session_state_path.filename();
+        SourceCollectionSessionStateCache legacy;
+        legacy.sources.push_back({.path = paths.application_data_root / "my-work/source.fits"});
+        legacy.active_source_index = 0;
+        Require(SaveSourceCollectionSessionStateCache(paths, legacy_state, legacy), "seed valid legacy session");
+        const auto legacy_bytes = read(legacy_state);
+        const auto legacy_config = paths.legacy_application_data_root / paths.ui_scale_settings_path.filename();
+        write(legacy_config,
+              R"({"format_kind":"spectiary.ui_scale.settings","schema_version":1,"percentage":150})");
+        const auto legacy_config_bytes = read(legacy_config);
+        // Both active roles are blocked by files; migration and ordinary writes must fail independently.
+        write(paths.config_root, "config blocker");
+        write(paths.state_root, "state blocker");
+        const std::vector<fs::path> untouched{
+            paths.application_data_root / "user.asdf",
+            paths.application_data_root / "my-work/source.fits",
+            paths.legacy_application_data_root / "unknown/nested/user.asdf",
+            paths.legacy_application_data_root / "nested/source-session-state.json",
+            paths.logs_root / "keep.log", paths.unsaved_root / "keep-checkpoint.json",
+            paths.cache_root / "derived-index.bin",
+        };
+        for (const auto& path : untouched) write(path, "owned sentinel");
+        MigrateLegacyApplicationStorage(paths);
+        Require(LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache.sources.empty(),
+                "failed import cannot turn legacy session into an active read fallback");
+        Require(!SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path, {}),
+                "blocked state save must fail instead of falling back");
+        {
+            ApplicationSettings settings(ApplicationSettingsStorageForRuntimePaths(paths));
+            Require(settings.View().ui_scale_percentage == 100, "failed import must not load legacy preferences directly");
+            Require(settings.Apply(ApplicationSettingsIntent::SetUiScale(125), {}).outcome ==
+                        ApplicationSettingsOutcome::PersistenceFailed,
+                    "blocked config save must report failure instead of falling back");
+        }
+        Require(read(legacy_state) == legacy_bytes && read(legacy_config) == legacy_config_bytes &&
+                read(paths.state_root) == "state blocker" &&
+                read(paths.config_root) == "config blocker", "failed cutover must preserve every existing owner");
+        for (const auto& path : untouched) Require(read(path) == "owned sentinel", "failed migration damaged user or other-role data");
+
+        Require(fs::remove(paths.config_root) && fs::remove(paths.state_root), "remove exact fixture blockers");
+        MigrateLegacyApplicationStorage(paths);
+        Require(LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache.sources.size() == 1,
+                "a later explicit startup import can establish the missing owner");
+        // Reset preferences and clear session registrations through real writers, preserving other owners.
+        {
+            ApplicationSettings settings(ApplicationSettingsStorageForRuntimePaths(paths));
+            Require(settings.View().ui_scale_percentage == 150, "successful retry imports legacy config into its new owner");
+            Require(settings.Apply(ApplicationSettingsIntent::SetUiScale(125), {}).applied(), "set non-default scale");
+            Require(settings.Apply(ApplicationSettingsIntent::SetUiScale(100), {}).applied(), "reset scale");
+        }
+        Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path, {}), "clear session registrations");
+        MigrateLegacyApplicationStorage(paths);
+        Require(LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache.sources.empty(),
+                "cleared active session must outrank old registrations on restart");
+        Require(read(legacy_state) == legacy_bytes && read(legacy_config) == legacy_config_bytes,
+                "ordinary reset must never write legacy input");
+        Require(ApplicationSettings(ApplicationSettingsStorageForRuntimePaths(paths)).View().ui_scale_percentage == 100,
+                "reset config must outrank legacy on restart");
+        for (const auto& path : untouched) Require(read(path) == "owned sentinel", "reset or migration crossed ownership boundary");
+        Require(!fs::exists(paths.application_data_root / "cache"), "cache stays outside persistent layout");
+    }
+}
+
 void TestLocators(const fs::path& root)
 {
     const auto portable = Context(root / "package-a", StorageProfile::Portable);
     const auto moved = Context(root / "package-b", StorageProfile::Portable);
     const auto local = Context(root / "package-a", StorageProfile::LocalAppData);
+    const auto external = root / "outside" / "user.asdf";
+    const auto external_locator = PersistedPathReferenceJson(external, portable);
+    Require(external_locator.at("path_kind") == "absolute" &&
+            ReadPersistedPathReference(external_locator, moved) == external,
+            "Portable files outside the package stay absolute after relocation");
     Require(UserPathDisplayText({}, portable).empty(), "empty optional UI paths remain displayable");
     const auto file = portable.package_root / "work" / "source.npy";
     const auto encoded = PersistedPathReferenceJson(file, portable);
@@ -327,6 +434,7 @@ int main()
         TestStorageContext(root);
         TestLegacyBrandState(root);
         TestBoundedMigration(root);
+        TestFailedCutoverAndIndependentReset(root);
         TestLocators(root);
         TestReservedNamespaces(root);
         TestConsumersKeepInjectedContext(root);

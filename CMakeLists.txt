@@ -726,7 +726,7 @@ spectiary_add_portable_only_test(
 spectiary_add_test(
     spectiary_runtime_storage_context_tests
     tests/runtime_storage_context_tests.cpp
-    spectiary_sessions
+    spectiary_desktop_ui
 )
 spectiary_add_test(
     spectiary_render_wake_scheduler_tests

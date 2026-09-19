@@ -11658,15 +11658,31 @@ void TestFloatingAnnotationsAreNotFilterable()
         "ignored floating condition should explain why it was ignored");
 }
 
-void TestSplitDraftCheckpointCleanupAndClose()
+void TestSplitDraftCheckpointCleanupAndCloseForProfile(spectiary::StorageProfile profile)
 {
-    const auto directory = FreshTestDirectory("spectiary_split_draft_lifecycle");
-    const auto state_path = directory / "tasks.json";
-    const auto draft_path = spectiary::SampleLabelingDraftCheckpointPath({}, state_path);
+    const auto base = FreshTestDirectory(profile == spectiary::StorageProfile::Portable
+        ? "spectiary_split_draft_portable" : "spectiary_split_draft_local");
+    const auto paths = spectiary::RuntimePathsForDeployment({.storage_profile = profile}, {
+        .executable_path = base / "package/app.exe",
+        .local_app_data_directory = [=] { return base / "local"; },
+        .system_temp_directory = [=] { return base / "temp"; },
+    });
+    const auto directory = paths.application_data_root;
+    const auto state_path = paths.sample_labeling_state_path;
+    const auto draft_path = paths.sample_labeling_drafts_path;
     const auto output_path = directory / "saved.asdf";
+    const std::vector<std::filesystem::path> sentinels{
+        directory / "my-work/source.fits", paths.config_root / "keep.json",
+        paths.state_root / "unrelated.json", paths.logs_root / "keep.log",
+        paths.unsaved_root / "unrelated-checkpoint.json", paths.cache_root / "index.bin",
+    };
+    for (const auto& path : sentinels) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << "independent owner";
+    }
     std::string task_id;
     {
-        spectiary::SampleLabelingController first(state_path);
+        spectiary::SampleLabelingController first(state_path, paths);
         ActivateCanonicalTestSource(first, "source", 3);
         Require(first.StartOrResumeTemporaryTask().accepted, "start checkpoint fixture");
         task_id = ActiveTask(first)->task_id;
@@ -11674,7 +11690,7 @@ void TestSplitDraftCheckpointCleanupAndClose()
             first.AssignLabel(0, 5).write.changed && first.FlushStateCache(), "checkpoint draft content");
     }
     std::filesystem::remove(state_path);
-    spectiary::SampleLabelingController controller(state_path);
+    spectiary::SampleLabelingController controller(state_path, paths);
     ActivateCanonicalTestSource(controller, "source", 3);
     Require(controller.StartOrResumeTemporaryTask().accepted && ActiveTask(controller)->task_id == task_id &&
         ActiveTask(controller)->values.Complete()[0] == 5, "checkpoint alone must recover the same logical slot");
@@ -11696,12 +11712,17 @@ void TestSplitDraftCheckpointCleanupAndClose()
         "cleanup failure must not undo canonical ownership or report canonical save failure");
     Require(ReadCanonicalTestValues(output_path) == std::vector<std::int32_t>({5, 5, -1}),
         "canonical publication must contain current memory");
-    const auto restored = spectiary::LoadSampleLabelingStateCache({}, state_path);
+    const auto restored = spectiary::LoadSampleLabelingStateCache(paths, state_path);
     const auto* task = FindTask(restored.cache, "source", task_id);
     Require(task && task->persistence.output_path == output_path && restored.cache.sources.at("source").tasks.size() == 1,
         "canonical registration must supersede its stale draft checkpoint");
     Require(controller.FlushStateCache(), "retry best-effort cleanup");
     Require(nlohmann::json::parse(ReadTextFile(draft_path))["sources"].empty(), "canonicalized draft must leave no checkpoint");
+    const auto ordinary = nlohmann::json::parse(ReadTextFile(state_path));
+    const auto& registration = ordinary["sources"][0]["tasks"][0];
+    for (const auto field : {"values", "pending_values", "canonical_metadata", "initial_publication_pending", "save_state"}) {
+        Require(!registration.contains(field), "canonical content and retry state must not become managed recovery owners");
+    }
 
     Require(controller.DeactivateActiveTask().accepted && controller.StartOrResumeTemporaryTask().accepted,
         "create another draft after canonical adoption");
@@ -11732,6 +11753,19 @@ void TestSplitDraftCheckpointCleanupAndClose()
     Require(third_save.output_saved && !third_save.state_saved &&
         ReadCanonicalTestValues(third_output) == std::vector<std::int32_t>({-1, -1, 5}),
         "an unreadable checkpoint must not gate Save As from current memory");
+    Require(ReadCanonicalTestValues(output_path) == std::vector<std::int32_t>({5, 5, -1}),
+        "later checkpoint cleanup must preserve previously published canonical work at the data root");
+    for (const auto& path : sentinels) {
+        const auto bytes = ReadBinaryFile(path);
+        Require(std::string(bytes.begin(), bytes.end()) == "independent owner",
+            "checkpoint cleanup crossed its ownership boundary: " + path.string());
+    }
+}
+
+void TestSplitDraftCheckpointCleanupAndClose()
+{
+    TestSplitDraftCheckpointCleanupAndCloseForProfile(spectiary::StorageProfile::Portable);
+    TestSplitDraftCheckpointCleanupAndCloseForProfile(spectiary::StorageProfile::LocalAppData);
 }
 
 }  // namespace
