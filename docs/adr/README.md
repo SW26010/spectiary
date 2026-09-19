@@ -21,6 +21,7 @@ ADR 保留决策理由与取舍，编号不因目录整理改变。阅读旧决�
 | 0013 | [Spectrum-view automatic writeback authority (#110)](0013-spectrum-view-writeback-authority.md) |
 | 0014 | [Spectrum preference and viewport ownership (#111)](0014-spectrum-persistence-ownership.md) |
 | 0015 | [Application-managed storage physical cutover](0015-application-storage-cutover.md) |
+| 0016 | [External-open instance routing](0016-external-open-instance-routing.md) |
 
 存储与身份相关决策建议结合阅读：0011 定义身份合同，0012 定义启动上下文，
 0013/0014 定义 spectrum 写回与拆分 ownership，0015 定义最终物理目录切换。

@@ -1,5 +1,9 @@
 # Lightweight Multi-Instance Runs Share User State
 
+External-open routing is a bounded request-transfer facility under
+[ADR 0016](0016-external-open-instance-routing.md). It does not change the
+startup-snapshot or state-write contracts below.
+
 Spectiary supports concurrently running ordinary GUI processes as independent
 in-memory viewing contexts over the same resolved local user state root. It does
 not introduce persisted per-instance sessions, a primary process, an IPC

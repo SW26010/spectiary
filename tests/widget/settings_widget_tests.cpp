@@ -88,6 +88,22 @@ void TestThemeCombo()
     Require(f.intents == 1, "Theme selection must emit one intent");
 }
 
+void TestExternalOpenInstanceCombo()
+{
+    SettingsFixture f;
+    f.ui.Click("SettingsGeneral");
+    Require(f.settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance,
+        "instance routing must default to a new process");
+    f.ui.Click("ExternalOpenInstancePolicy");
+    f.ui.Click("Add to the most recently used instance and activate");
+    Require(f.settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::RecentInstance && f.intents == 1,
+        "recent-instance selection must emit one owner intent");
+    f.ui.Click("ExternalOpenInstancePolicy");
+    f.ui.Click("Open in a new instance");
+    Require(f.settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance && f.intents == 2,
+        "new-instance selection must restore the original policy");
+}
+
 void TestScaleKeyboardCommitAndReset()
 {
     SettingsFixture f;
@@ -232,7 +248,7 @@ int main(int argc, char** argv)
         Require(name == "all" || name == "failures" || name == "input" ||
                 name == "theme" || name == "scale" || name == "recording", "Unknown widget test case");
         if (name == "all" || name == "failures") { TestBoundedFailures(); TestClippedWidgetBounds(); }
-        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestLayoutRecoveryControlAndSettingsPlacement(); }
+        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestExternalOpenInstanceCombo(); TestLayoutRecoveryControlAndSettingsPlacement(); }
         if (name == "all" || name == "theme") TestThemeCombo();
         if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();
         if (name == "all" || name == "recording") TestRecordingDisablesDirectoryReset();

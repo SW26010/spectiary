@@ -327,8 +327,13 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::ExternalSourceSettingsSaveError) ==
-            "无法保存外部源文件夹偏好，仍继续使用此前的行为。",
+            "无法保存外部源设置，仍继续使用此前的行为。",
         "external source persistence feedback should be localized");
+    Require(UiText(UiLanguage::SimplifiedChinese, UiTextId::ExternalOpenNewInstance) ==
+            "在新实例中打开" &&
+        UiText(UiLanguage::SimplifiedChinese, UiTextId::ExternalOpenRecentInstance) ==
+            "添加到最近使用的实例并激活",
+        "both external-open routing modes should be localized");
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,

@@ -30,6 +30,11 @@ executable discovery, or a global replacement.
 | Application-managed JSON | `spectiary.*` format kinds, with the bounded historical readers described below. New writers emit only current kinds. |
 | C++ symbols / source filenames | `namespace spectiary`, `SpectiaryApp`, `SpectiaryStartup`, `spectiary_*.cpp/.h`; implementation names with no compatibility role. |
 
+Ordinary GUI external-open routing also uses the full founding token:
+`0238d5bf7b34bb99c006f9807537d31234ca2e3d.external-open.<config-root-digest>`
+for its message-only class and session-local request mappings. It remains
+independent of automation and product display text (ADR 0016).
+
 ## Cutover and compatibility
 
 Canonical ASDF takes a clean pre-1.0 cutover. Documents with
