@@ -36,7 +36,7 @@
 #include <thread>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct ShellUiTestAccess {
     static void RenderLayout(ShellUi& shell)
@@ -482,7 +482,7 @@ struct ShellUiTestAccess {
 
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -531,8 +531,8 @@ constexpr const char* kFileMenuTestHost =
     "File menu test host###FileMenuTestHost";
 
 void RenderShellFileMenuFrame(
-    specforge::ShellUi& shell,
-    const specforge::SourceCollectionPathPicker& choose_source_file)
+    spectiary::ShellUi& shell,
+    const spectiary::SourceCollectionPathPicker& choose_source_file)
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
@@ -550,9 +550,9 @@ void RenderShellFileMenuFrame(
         ImVec2(700.0f, 500.0f),
         ImGuiCond_Always);
     ImGui::Begin(kFileMenuTestHost, nullptr, kHostFlags);
-    specforge::ShellUiTestAccess::RenderMainMenuBar(
+    spectiary::ShellUiTestAccess::RenderMainMenuBar(
         shell,
-        specforge::ShellStatus{},
+        spectiary::ShellStatus{},
         choose_source_file);
     ImGui::End();
     ImGui::EndFrame();
@@ -583,7 +583,7 @@ std::filesystem::path UniqueTempPath(std::string_view suffix)
         .time_since_epoch().count();
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-           ("specforge_shell_activation_" + std::to_string(run_id) + "_" +
+           ("spectiary_shell_activation_" + std::to_string(run_id) + "_" +
             std::to_string(next_id.fetch_add(1)) + std::string(suffix));
 }
 
@@ -598,11 +598,11 @@ void WriteFixture(const std::filesystem::path& path)
     stream << "fixture";
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.id = "fixture";
     snapshot->source.display_name = "fixture";
     snapshot->source.path = path;
@@ -615,16 +615,16 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshotWithDestructionProbe(
+spectiary::SpectrumSnapshotHandle MakeSnapshotWithDestructionProbe(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     const std::shared_ptr<std::promise<std::thread::id>>& destroyed)
 {
-    const specforge::SpectrumSnapshotHandle source = MakeSnapshot(path, spectrum_index);
-    auto* snapshot = new specforge::SpectrumSnapshot(*source);
-    return specforge::SpectrumSnapshotHandle(
+    const spectiary::SpectrumSnapshotHandle source = MakeSnapshot(path, spectrum_index);
+    auto* snapshot = new spectiary::SpectrumSnapshot(*source);
+    return spectiary::SpectrumSnapshotHandle(
         snapshot,
-        [destroyed](const specforge::SpectrumSnapshot* value) {
+        [destroyed](const spectiary::SpectrumSnapshot* value) {
             delete value;
             destroyed->set_value(std::this_thread::get_id());
         });
@@ -635,30 +635,30 @@ bool SaveAnnotationFixture(
     std::vector<int> values,
     std::string* error)
 {
-    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task = spectiary::CreateSampleLabelingTask(
         "shell-drain-annotation",
         "Shell drain annotation",
         values.size());
     task.values.Complete() = std::move(values);
-    return specforge::test_support::LegacyFixtureIo{}.SaveLabelArray(path, task, error);
+    return spectiary::test_support::LegacyFixtureIo{}.SaveLabelArray(path, task, error);
 }
 
-specforge::SourceCollectionSession MakePreparedDeferredSession(
+spectiary::SourceCollectionSession MakePreparedDeferredSession(
     const std::filesystem::path& path,
     std::optional<std::string> context_fingerprint_override = std::nullopt)
 {
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path, 0);
-    specforge::SourceCollectionContext context;
-    context.identity = specforge::BuildSourceCollectionIdentity(
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    const spectiary::SpectrumSnapshotHandle snapshot = MakeSnapshot(path, 0);
+    spectiary::SourceCollectionContext context;
+    context.identity = spectiary::BuildSourceCollectionIdentity(
         *snapshot,
-        specforge::CaptureSourceCollectionSingleFileState(path));
+        spectiary::CaptureSourceCollectionSingleFileState(path));
     if (context_fingerprint_override) {
         context.identity.context_fingerprint = std::move(*context_fingerprint_override);
     }
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState workflow =
-        specforge::PrepareSampleWorkflowState(*snapshot, context, 0, {{}, {}});
+    spectiary::PreparedSampleWorkflowState workflow =
+        spectiary::PrepareSampleWorkflowState(*snapshot, context, 0, {{}, {}});
     Require(
         session.OpenPreparedSource(
                    path,
@@ -672,23 +672,23 @@ specforge::SourceCollectionSession MakePreparedDeferredSession(
 }
 
 void OpenPreparedFixtureSource(
-    specforge::SourceCollectionSession& session,
+    spectiary::SourceCollectionSession& session,
     const std::filesystem::path& path,
     std::size_t spectrum_index = 0,
     std::optional<std::filesystem::path> annotation_path = std::nullopt,
-    specforge::SampleWorkflowPreparationPaths preparation_paths = {})
+    spectiary::SampleWorkflowPreparationPaths preparation_paths = {})
 {
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(path, spectrum_index);
-    specforge::SourceCollectionContext context;
-    context.identity = specforge::BuildSourceCollectionIdentity(
+    spectiary::SourceCollectionContext context;
+    context.identity = spectiary::BuildSourceCollectionIdentity(
         *snapshot,
-        specforge::CaptureSourceCollectionSingleFileState(path));
+        spectiary::CaptureSourceCollectionSingleFileState(path));
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
     if (annotation_path) {
         std::string annotation_error;
-        std::optional<specforge::SampleAnnotationResult> annotation =
-            specforge::test_support::LegacyFixtureIo{}.Load(
+        std::optional<spectiary::SampleAnnotationResult> annotation =
+            spectiary::test_support::LegacyFixtureIo{}.Load(
                 *annotation_path,
                 context.identity.spectrum_count,
                 &annotation_error);
@@ -699,8 +699,8 @@ void OpenPreparedFixtureSource(
                 : annotation_error);
         context.manifest.annotations.push_back(std::move(*annotation));
     }
-    specforge::PreparedSampleWorkflowState workflow =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState workflow =
+        spectiary::PrepareSampleWorkflowState(
             *snapshot,
             context,
             spectrum_index,
@@ -723,21 +723,21 @@ struct SourceSessionCachePaths {
     std::filesystem::path workflow;
 };
 
-specforge::SourceCollectionSession MakeCachedSession(
+spectiary::SourceCollectionSession MakeCachedSession(
     const SourceSessionCachePaths& cache_paths)
 {
-    return specforge::SourceCollectionSession(
+    return spectiary::SourceCollectionSession(
         cache_paths.source_session,
         cache_paths.navigation,
         cache_paths.labeling,
         cache_paths.workflow);
 }
 
-specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
+spectiary::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
     const SourceSessionCachePaths& cache_paths)
 {
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
@@ -780,7 +780,7 @@ void TestFixtureLoadDependenciesPreserveCacheIsolation()
 
     bool rejected = false;
     try {
-        (void)specforge::MakeSourceCollectionLoadQueueForTesting(
+        (void)spectiary::MakeSourceCollectionLoadQueueForTesting(
             MakeFixtureLoadDependencies({{}, {}, isolated.labeling_state_cache_path, {}}));
     } catch (const std::invalid_argument&) {
         rejected = true;
@@ -788,21 +788,21 @@ void TestFixtureLoadDependenciesPreserveCacheIsolation()
     Require(rejected, "partial fixture caches must be rejected instead of mixing state roots");
 }
 
-std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
+std::unique_ptr<spectiary::ShellUi> MakeDeferredShell(
     const SourceSessionCachePaths& cache_paths,
-    specforge::SourceCollectionLoadDependencies dependencies)
+    spectiary::SourceCollectionLoadDependencies dependencies)
 {
-    using Access = specforge::ShellUiTestAccess;
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    using Access = spectiary::ShellUiTestAccess;
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakeCachedSession(cache_paths),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::BeginDeferredRestore(*shell);
     return shell;
 }
 
-bool DrainAllSourceLoads(specforge::ShellUi& shell)
+bool DrainAllSourceLoads(spectiary::ShellUi& shell)
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() < deadline) {
         Access::Drain(shell);
@@ -815,30 +815,30 @@ bool DrainAllSourceLoads(specforge::ShellUi& shell)
 }
 
 bool CurrentSourceMatches(
-    specforge::SourceCollectionSession& session,
+    spectiary::SourceCollectionSession& session,
     const std::filesystem::path& expected_path)
 {
-    const specforge::SourceCollectionSessionView view = session.View();
+    const spectiary::SourceCollectionSessionView view = session.View();
     if (!view.current_source_index ||
         *view.current_source_index >= view.sources.size()) {
         return false;
     }
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSampleSnapshot();
     const std::string expected_key =
-        specforge::SourcePathIdentityKey(expected_path);
+        spectiary::SourcePathIdentityKey(expected_path);
     return snapshot &&
-        specforge::SourcePathIdentityKey(
+        spectiary::SourcePathIdentityKey(
             view.sources[*view.current_source_index].path) == expected_key &&
-        specforge::SourcePathIdentityKey(snapshot->source.path) == expected_key;
+        spectiary::SourcePathIdentityKey(snapshot->source.path) == expected_key;
 }
 
 bool HasHealthMessage(
-    const specforge::LocalUserStateHealthView& health,
-    specforge::LocalUserStateArea area,
-    specforge::LocalUserStateHealthMessageKind kind)
+    const spectiary::LocalUserStateHealthView& health,
+    spectiary::LocalUserStateArea area,
+    spectiary::LocalUserStateHealthMessageKind kind)
 {
-    for (const specforge::LocalUserStateHealthMessage& message :
+    for (const spectiary::LocalUserStateHealthMessage& message :
          health.messages) {
         if (message.area == area && message.kind == kind) {
             return true;
@@ -849,7 +849,7 @@ bool HasHealthMessage(
 
 void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path source_path =
         UniqueTempPath("_viewport_restore.csv");
     const SourceSessionCachePaths cache_paths{
@@ -870,24 +870,24 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
 
     std::string source_collection_identity;
     {
-        specforge::SourceCollectionSession saved =
+        spectiary::SourceCollectionSession saved =
             MakeCachedSession(cache_paths);
-        const specforge::SpectrumSnapshotHandle snapshot =
+        const spectiary::SpectrumSnapshotHandle snapshot =
             MakeSnapshot(source_path, 0);
-        const specforge::SourceCollectionSingleFileState
+        const spectiary::SourceCollectionSingleFileState
             file_state =
-                specforge::CaptureSourceCollectionSingleFileState(
+                spectiary::CaptureSourceCollectionSingleFileState(
                     source_path);
-        specforge::SourceCollectionContext context;
+        spectiary::SourceCollectionContext context;
         context.identity =
-            specforge::BuildSourceCollectionIdentity(
+            spectiary::BuildSourceCollectionIdentity(
                 *snapshot,
                 file_state);
         context.manifest.sample_names = {
             "alpha", "beta", "gamma"};
         source_collection_identity = context.identity.id;
-        specforge::PreparedSampleWorkflowState workflow =
-            specforge::PrepareSampleWorkflowState(
+        spectiary::PreparedSampleWorkflowState workflow =
+            spectiary::PrepareSampleWorkflowState(
                 *snapshot,
                 context,
                 0,
@@ -897,13 +897,13 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
                      source_path,
                      0,
                      snapshot,
-                     specforge::PreparedSourceCollectionPlan{
+                     spectiary::PreparedSourceCollectionPlan{
                          std::move(context),
                          std::move(workflow)},
                      {},
-                     specforge::SourceCollectionContextReuseProof{
+                     spectiary::SourceCollectionContextReuseProof{
                          .identity =
-                             specforge::BuildSourceCollectionIdentity(
+                             spectiary::BuildSourceCollectionIdentity(
                                  *snapshot,
                                  file_state),
                          .dependency_state = file_state,
@@ -915,20 +915,20 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
             "viewport restore source session should be saved");
     }
 
-    const specforge::PlotViewLimits expected{
+    const spectiary::PlotViewLimits expected{
         .x_min = 4100.25,
         .x_max = 4900.75,
         .y_min = -0.5,
         .y_max = 2.25,
     };
-    std::unique_ptr<specforge::ShellUi> matching =
+    std::unique_ptr<spectiary::ShellUi> matching =
         Access::Create(
             MakeCachedSession(cache_paths),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *matching,
-        specforge::SpectrumViewportState{
+        spectiary::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 source_collection_identity,
@@ -938,12 +938,12 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
     Require(
         DrainAllSourceLoads(*matching),
         "matching viewport restore should finish its deferred source load");
-    const std::optional<specforge::PlotViewLimits>
+    const std::optional<spectiary::PlotViewLimits>
         matching_limits =
             Access::LockedViewportLimits(*matching);
     Require(
         Access::SpectrumView(*matching).viewport_range_mode ==
-                specforge::SpectrumViewportRangeMode::Locked &&
+                spectiary::SpectrumViewportRangeMode::Locked &&
             matching_limits &&
             matching_limits->x_min == expected.x_min &&
             matching_limits->x_max == expected.x_max &&
@@ -952,14 +952,14 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
         "a deferred restore of the same collection identity should reuse the locked viewport");
     matching.reset();
 
-    std::unique_ptr<specforge::ShellUi> mutated =
+    std::unique_ptr<spectiary::ShellUi> mutated =
         Access::Create(
             MakeCachedSession(cache_paths),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *mutated,
-        specforge::SpectrumViewportState{
+        spectiary::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 source_collection_identity,
@@ -972,19 +972,19 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
         "mutated viewport restore should finish its deferred source load");
     Require(
         Access::SpectrumView(*mutated).viewport_range_mode ==
-                specforge::SpectrumViewportRangeMode::Automatic &&
+                spectiary::SpectrumViewportRangeMode::Automatic &&
             !Access::LockedViewportLimits(*mutated),
         "a deferred viewport restore must not overwrite a newer user viewport mutation");
     mutated.reset();
 
-    std::unique_ptr<specforge::ShellUi> mismatched =
+    std::unique_ptr<spectiary::ShellUi> mismatched =
         Access::Create(
             MakeCachedSession(cache_paths),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 MakeFixtureLoadDependencies(cache_paths)));
     Access::SeedStartupSpectrumViewState(
         *mismatched,
-        specforge::SpectrumViewportState{
+        spectiary::SpectrumViewportState{
             .locked = true,
             .source_collection_identity =
                 "different-collection",
@@ -996,7 +996,7 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
         "mismatched viewport restore should finish its deferred source load");
     Require(
         Access::SpectrumView(*mismatched).viewport_range_mode ==
-                specforge::SpectrumViewportRangeMode::Automatic &&
+                spectiary::SpectrumViewportRangeMode::Automatic &&
             !Access::LockedViewportLimits(*mismatched),
         "a different collection identity must not reuse the saved viewport");
     mismatched.reset();
@@ -1011,7 +1011,7 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
 
 void TestShellShutdownFlushPersistsLockedViewport()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path source_path =
         UniqueTempPath("_viewport_flush.csv");
     const std::filesystem::path state_path =
@@ -1026,24 +1026,24 @@ void TestShellShutdownFlushPersistsLockedViewport()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {}, {}, {}, {});
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 0);
-    const specforge::SourceCollectionSingleFileState file_state =
-        specforge::CaptureSourceCollectionSingleFileState(
+    const spectiary::SourceCollectionSingleFileState file_state =
+        spectiary::CaptureSourceCollectionSingleFileState(
             source_path);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity =
-        specforge::BuildSourceCollectionIdentity(
+        spectiary::BuildSourceCollectionIdentity(
             *snapshot,
             file_state);
     context.manifest.sample_names = {
         "alpha", "beta", "gamma"};
     const std::string source_collection_identity =
         context.identity.id;
-    specforge::PreparedSampleWorkflowState workflow =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState workflow =
+        spectiary::PrepareSampleWorkflowState(
             *snapshot,
             context,
             0,
@@ -1053,13 +1053,13 @@ void TestShellShutdownFlushPersistsLockedViewport()
                    source_path,
                    0,
                    snapshot,
-                   specforge::PreparedSourceCollectionPlan{
+                   spectiary::PreparedSourceCollectionPlan{
                        std::move(context),
                        std::move(workflow)},
                    {},
-                   specforge::SourceCollectionContextReuseProof{
+                   spectiary::SourceCollectionContextReuseProof{
                        .identity =
-                           specforge::BuildSourceCollectionIdentity(
+                           spectiary::BuildSourceCollectionIdentity(
                                *snapshot,
                                file_state),
                        .dependency_state = file_state,
@@ -1067,24 +1067,24 @@ void TestShellShutdownFlushPersistsLockedViewport()
             .loaded,
         "viewport flush fixture should activate its source");
 
-    const specforge::PlotViewLimits expected{
+    const spectiary::PlotViewLimits expected{
         .x_min = 100.125,
         .x_max = 200.875,
         .y_min = -3.5,
         .y_max = 8.25,
     };
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             std::move(session),
-            specforge::MakeSourceCollectionLoadQueueForTesting());
+            spectiary::MakeSourceCollectionLoadQueueForTesting());
     Access::ConfigureSpectrumViewPersistence(
         *shell,
         state_path);
     Require(
         Access::RestoreLockedViewport(*shell, expected),
         "viewport flush fixture should lock valid limits");
-    const specforge::PlotSeriesColor custom_raw_color =
-        specforge::PlotSeriesColor::ExplicitColor({
+    const spectiary::PlotSeriesColor custom_raw_color =
+        spectiary::PlotSeriesColor::ExplicitColor({
             .red = 0.12f,
             .green = 0.34f,
             .blue = 0.56f,
@@ -1092,29 +1092,29 @@ void TestShellShutdownFlushPersistsLockedViewport()
         });
     Access::SetSpectrumSeriesColor(
         *shell,
-        specforge::SpectrumPlotSeries::RawSpectrum,
+        spectiary::SpectrumPlotSeries::RawSpectrum,
         custom_raw_color);
     const auto color_changed_at =
-        specforge::LocalUserStateSaveScheduler::
+        spectiary::LocalUserStateSaveScheduler::
             Clock::now();
     Access::MarkSpectrumViewStateDirtyAt(
         *shell,
         color_changed_at);
     shell->RunMaintenance(
         color_changed_at + 250ms);
-    const specforge::SpectrumPlotPreferencesLoadResult
+    const spectiary::SpectrumPlotPreferencesLoadResult
         maintained =
-            specforge::LoadSpectrumPlotPreferences(
+            spectiary::LoadSpectrumPlotPreferences(
                 state_path.string() + ".preferences");
     Require(
         maintained.warning.empty() &&
             maintained.state.plot_colors.raw_spectrum ==
                 custom_raw_color,
         "curve color edits should debounce into the plot preferences before shutdown");
-    const specforge::ShellLocalStateFlushResult flushed =
+    const spectiary::ShellLocalStateFlushResult flushed =
         shell->FlushLocalState();
-    const specforge::SpectrumViewportStateLoadResult loaded =
-        specforge::LoadSpectrumViewportState(state_path);
+    const spectiary::SpectrumViewportStateLoadResult loaded =
+        spectiary::LoadSpectrumViewportState(state_path);
     Require(
         flushed.spectrum_viewport_state_saved &&
             loaded.warning.empty() && loaded.state.locked &&
@@ -1124,22 +1124,22 @@ void TestShellShutdownFlushPersistsLockedViewport()
             loaded.state.limits.x_max == expected.x_max &&
             loaded.state.limits.y_min == expected.y_min &&
             loaded.state.limits.y_max == expected.y_max &&
-            specforge::LoadSpectrumPlotPreferences(state_path.string() + ".preferences").state.plot_colors.raw_spectrum ==
+            spectiary::LoadSpectrumPlotPreferences(state_path.string() + ".preferences").state.plot_colors.raw_spectrum ==
                 custom_raw_color,
         "shutdown flush should persist the locked viewport and global curve colors through separate owners");
     shell.reset();
 
-    std::unique_ptr<specforge::ShellUi> unlocked =
+    std::unique_ptr<spectiary::ShellUi> unlocked =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 {}, {}, {}, {}),
-            specforge::MakeSourceCollectionLoadQueueForTesting());
+            spectiary::MakeSourceCollectionLoadQueueForTesting());
     Access::ConfigureSpectrumViewPersistence(
         *unlocked,
         state_path);
     Require(
         unlocked->FlushLocalState().spectrum_viewport_state_saved &&
-            !specforge::LoadSpectrumViewportState(
+            !spectiary::LoadSpectrumViewportState(
                  state_path)
                  .state.locked,
         "an unlocked shutdown should clear an older persisted lock");
@@ -1153,12 +1153,12 @@ void TestShellShutdownFlushPersistsLockedViewport()
 
 void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path source_path =
         UniqueTempPath("_automation_sequence.npy");
     const std::optional<std::filesystem::path>
         annotation_path =
-            specforge::
+            spectiary::
                 SourceCollectionCompanionAnnotationPath(
                     source_path);
     Require(
@@ -1181,24 +1181,24 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
             : annotation_error);
 
     const auto make_dependencies = []() {
-        specforge::
+        spectiary::
             SourceCollectionLoadDependencies dependencies;
-            dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+            dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
         dependencies.snapshot_loader =
             [](const std::filesystem::path& source,
                std::size_t index,
                const auto&) {
                 return MakeSnapshot(source, index);
             };
-        dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+        dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
         return dependencies;
     };
 
-    specforge::SourceCollectionSession filtered =
+    spectiary::SourceCollectionSession filtered =
         MakePreparedDeferredSession(source_path);
-    std::optional<specforge::SampleAnnotationResult>
+    std::optional<spectiary::SampleAnnotationResult>
         annotation =
-            specforge::test_support::LegacyFixtureIo{}.
+            spectiary::test_support::LegacyFixtureIo{}.
                 Load(
                     *annotation_path,
                     3,
@@ -1207,36 +1207,36 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
         annotation.has_value(),
         "automation sequence annotation should load");
     const std::string filter_source_id =
-        specforge::BuildAnnotationFilterSourceId(
+        spectiary::BuildAnnotationFilterSourceId(
             *annotation);
     Require(
         filtered.Submit(
-                    specforge::
+                    spectiary::
                         SourceCollectionSessionIntent::
                             EditSourceCollection(
-                                specforge::
+                                spectiary::
                                     SourceCollectionIntent::
                                         AddReadOnlyAnnotationResult(
                                             *annotation_path)))
             .loaded,
         "automation sequence fixture should attach its filter annotation");
     (void)filtered.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     AddSource(filter_source_id)));
     (void)filtered.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     SetFilterValueSelected(
                         filter_source_id,
                         "1",
                         true)));
-    std::unique_ptr<specforge::ShellUi> filtered_shell =
+    std::unique_ptr<spectiary::ShellUi> filtered_shell =
         Access::Create(
             std::move(filtered),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting(
                     make_dependencies()));
     const auto included_index =
@@ -1256,17 +1256,17 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
             std::nullopt,
             "beta");
 
-    specforge::SourceCollectionSession sorted =
+    spectiary::SourceCollectionSession sorted =
         MakePreparedDeferredSession(source_path);
     (void)sorted.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleSorting(
-                specforge::SampleSortingIntent::
+                spectiary::SampleSortingIntent::
                     SetSortSource("sample-name")));
-    std::unique_ptr<specforge::ShellUi> sorted_shell =
+    std::unique_ptr<spectiary::ShellUi> sorted_shell =
         Access::Create(
             std::move(sorted),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting(
                     make_dependencies()));
     const auto sorted_index =
@@ -1284,34 +1284,34 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
     std::filesystem::remove(*annotation_path);
     Require(
         included_index.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         None &&
             included_index.target.index == 2 &&
             included_name.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         None &&
             included_name.target.index == 2,
         "source-row index/name targets retained by a filter should remain valid for goto and targeted-label navigation");
     Require(
         excluded_index.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         FilteredOut &&
             excluded_name.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         FilteredOut,
         "source-row index/name targets excluded by the active sequence should remain deterministically filtered out");
     Require(
         sorted_index.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         None &&
             sorted_index.target.index == 2 &&
             sorted_name.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         None &&
             sorted_name.target.index == 2,
@@ -1320,7 +1320,7 @@ void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
 
 void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_source_load_present.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1328,17 +1328,17 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 300;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -1347,7 +1347,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     bool activated = false;
     while (std::chrono::steady_clock::now() < activation_deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot =
+        const spectiary::SpectrumSnapshotHandle snapshot =
             Access::Session(*shell).CurrentSampleSnapshot();
         activated = snapshot && snapshot->source.path == path &&
                     Access::PendingLoadCount(*shell) == 0;
@@ -1362,10 +1362,10 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         presentation_frame,
         Access::Session(*shell).CurrentSampleSnapshot(),
         7);
-    const specforge::NavigationLatencyPresentation wrong_viewport_presentation{
+    const spectiary::NavigationLatencyPresentation wrong_viewport_presentation{
         8,
-        specforge::NavigationLatencyTrace::Now()};
-    const std::vector<specforge::SourceLoadLatencyReport>
+        spectiary::NavigationLatencyTrace::Now()};
+    const std::vector<spectiary::SourceLoadLatencyReport>
         wrong_viewport_reports =
             Access::
                 CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
@@ -1376,7 +1376,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
                         1));
     const bool waits_for_matching_viewport =
         wrong_viewport_reports.empty();
-    const std::vector<specforge::SourceLoadLatencyReport> reports =
+    const std::vector<spectiary::SourceLoadLatencyReport> reports =
         Access::CompleteSourceLoadFramePresentation(
             *shell,
             presentation_frame + 1,
@@ -1399,10 +1399,10 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         presentation_frame + 2,
         MakeSnapshot(path, 0),
         7);
-    const specforge::NavigationLatencyPresentation replacement_presentation{
+    const spectiary::NavigationLatencyPresentation replacement_presentation{
         7,
-        specforge::NavigationLatencyTrace::Now()};
-    const std::vector<specforge::SourceLoadLatencyReport>
+        spectiary::NavigationLatencyTrace::Now()};
+    const std::vector<spectiary::SourceLoadLatencyReport>
         wrong_snapshot_reports =
             Access::
                 CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
@@ -1424,7 +1424,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     Require(
         reports.size() == 1 &&
             reports.front().outcome ==
-                specforge::SourceLoadLatencyOutcome::Presented &&
+                spectiary::SourceLoadLatencyOutcome::Presented &&
             reports.front().attempts.size() == 1 &&
             reports.front().presentation_viewport_id == 7,
         "the exact loaded snapshot Present should complete one source load trace");
@@ -1440,14 +1440,14 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     Require(
         replacement_activated && wrong_snapshot_reports.size() == 1 &&
             wrong_snapshot_reports.front().outcome ==
-                specforge::SourceLoadLatencyOutcome::Superseded &&
+                spectiary::SourceLoadLatencyOutcome::Superseded &&
             wrong_snapshot_reports.front().first_present_ns == 0,
         "drawing a different snapshot must supersede rather than present the source load trace");
 }
 
 void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_source_load_failure.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1455,18 +1455,18 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path&, std::size_t, const auto&)
-            -> specforge::SpectrumSnapshotHandle {
+            -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error("synthetic decode failure");
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t frame_index = 301;
     Access::EnableNavigationTracing(*shell, frame_index);
 
@@ -1478,7 +1478,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
         std::this_thread::sleep_for(2ms);
     }
     Access::Drain(*shell);
-    const std::vector<specforge::SourceLoadLatencyReport> reports =
+    const std::vector<spectiary::SourceLoadLatencyReport> reports =
         Access::
             CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
                 *shell,
@@ -1490,7 +1490,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
     Require(
         reports.size() == 1 &&
             reports.front().outcome ==
-                specforge::SourceLoadLatencyOutcome::Failed &&
+                spectiary::SourceLoadLatencyOutcome::Failed &&
             reports.front().attempts.size() == 1 &&
             reports.front().first_present_ns == 0,
         "a failed explicit open should emit one terminal report without a Present");
@@ -1502,7 +1502,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
 
 void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_real_drain.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1516,8 +1516,8 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::shared_future<void> row_two_entered = row_two_entered_promise.get_future().share();
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_one_entered_promise,
          &row_two_entered_promise,
@@ -1540,27 +1540,27 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 77;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
-    const specforge::SourceCollectionSessionResult first = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult first = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())),
+        spectiary::NavigationLatencyInputKind::UiNext);
     const bool first_queued = first.follow_up_spectrum_index == 1;
     const bool row_one_started = row_one_entered.wait_for(2s) == std::future_status::ready;
-    const specforge::SourceCollectionSessionResult second = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult second = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())),
+        spectiary::NavigationLatencyInputKind::UiNext);
     const bool second_queued = second.follow_up_spectrum_index == 2;
     const bool row_two_started = row_two_entered.wait_for(2s) == std::future_status::ready;
     release_decoders_promise.set_value();
@@ -1569,7 +1569,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     bool latest_committed = false;
     while (std::chrono::steady_clock::now() < deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot =
+        const spectiary::SpectrumSnapshotHandle snapshot =
             Access::Session(*shell).CurrentSampleSnapshot();
         latest_committed = snapshot && snapshot->collection.current_index == 2 &&
             Access::PendingLoadCount(*shell) == 0;
@@ -1579,7 +1579,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         std::this_thread::sleep_for(2ms);
     }
     const bool no_load_error = Access::LoadError(*shell).empty();
-    std::vector<specforge::NavigationLatencyReport> navigation_reports =
+    std::vector<spectiary::NavigationLatencyReport> navigation_reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 99);
     const bool detached_mismatch_retained_presented_trace =
         std::none_of(
@@ -1587,10 +1587,10 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
             navigation_reports.end(),
             [](const auto& report) {
                 return report.outcome ==
-                    specforge::NavigationLatencyOutcome::
+                    spectiary::NavigationLatencyOutcome::
                         Presented;
             });
-    std::vector<specforge::NavigationLatencyReport> presented_reports =
+    std::vector<spectiary::NavigationLatencyReport> presented_reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 7);
     navigation_reports.insert(
         navigation_reports.end(),
@@ -1599,14 +1599,14 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     const auto presented_report = std::find_if(
         navigation_reports.begin(),
         navigation_reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Presented;
         });
     const auto superseded_report = std::find_if(
         navigation_reports.begin(),
         navigation_reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Superseded;
         });
     const bool terminal_outcomes_present =
         presented_report != navigation_reports.end() &&
@@ -1627,8 +1627,8 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         presented_report->snapshot_activated_ns >=
             presented_report->attempts[0].completion_drained_ns &&
         presented_report->first_present_ns >= presented_report->snapshot_activated_ns;
-    const auto target_resolution_sum = [](const specforge::NavigationLatencyReport& report) {
-        const specforge::NavigationTargetResolutionReport& resolution =
+    const auto target_resolution_sum = [](const spectiary::NavigationLatencyReport& report) {
+        const spectiary::NavigationTargetResolutionReport& resolution =
             report.target_resolution;
         return resolution.effective_index_ns +
             resolution.pending_activation_supersede_ns +
@@ -1671,7 +1671,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
 
 void TestGenericRowLocationDoesNotStartPreviousNextTrace()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_locate_row_trace.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1679,23 +1679,23 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 90);
 
-    const specforge::SourceCollectionSessionResult result = Access::Submit(
+    const spectiary::SourceCollectionSessionResult result = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::LocateRow(2))));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::LocateRow(2))));
     const auto deadline =
         std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() < deadline &&
@@ -1703,7 +1703,7 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
         Access::Drain(*shell);
         std::this_thread::sleep_for(2ms);
     }
-    const std::vector<specforge::NavigationLatencyReport>
+    const std::vector<spectiary::NavigationLatencyReport>
         reports = Access::CompleteFramePresentation(
             *shell,
             90,
@@ -1719,31 +1719,31 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
 
 void TestAcceptedNavigationUsesLatestMatchingRawKeyInput()
 {
-    using Access = specforge::ShellUiTestAccess;
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
-        specforge::SourceCollectionSession({}, {}, {}, {}),
-        specforge::MakeSourceCollectionLoadQueueForTesting());
-    const auto stale = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(10));
-    const auto accepted = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(20));
+    using Access = spectiary::ShellUiTestAccess;
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
+        spectiary::SourceCollectionSession({}, {}, {}, {}),
+        spectiary::MakeSourceCollectionLoadQueueForTesting());
+    const auto stale = spectiary::NavigationLatencyTimePoint(std::chrono::milliseconds(10));
+    const auto accepted = spectiary::NavigationLatencyTimePoint(std::chrono::milliseconds(20));
     Access::RecordNavigationKeyInput(
         *shell,
-        specforge::NavigationLatencyInputKind::KeyboardNext,
+        spectiary::NavigationLatencyInputKind::KeyboardNext,
         stale);
     Access::RecordNavigationKeyInput(
         *shell,
-        specforge::NavigationLatencyInputKind::KeyboardNext,
+        spectiary::NavigationLatencyInputKind::KeyboardNext,
         accepted);
 
-    const std::optional<specforge::NavigationLatencyTimePoint> correlated =
+    const std::optional<spectiary::NavigationLatencyTimePoint> correlated =
         Access::TakeNavigationKeyInput(
             *shell,
-            specforge::NavigationLatencyInputKind::KeyboardNext);
+            spectiary::NavigationLatencyInputKind::KeyboardNext);
     Require(correlated == accepted, "an accepted shortcut must correlate with the latest raw key edge");
 }
 
 void TestWorkflowAutoAdvanceStartsExplicitTrace()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_auto_advance_trace.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1751,38 +1751,38 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 91);
 
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(
-                specforge::SampleLabelDefinition{7, "accepted", 'a'})));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel(
+                spectiary::SampleLabelDefinition{7, "accepted", 'a'})));
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
 
     const auto drain_and_present =
         [&shell](std::size_t target_index, std::uint64_t presentation_frame) {
             const auto deadline = std::chrono::steady_clock::now() + 2s;
             while (std::chrono::steady_clock::now() < deadline) {
                 Access::Drain(*shell);
-                const specforge::SpectrumSnapshotHandle snapshot =
+                const spectiary::SpectrumSnapshotHandle snapshot =
                     Access::Session(*shell).CurrentSampleSnapshot();
                 if (snapshot && snapshot->collection.current_index == target_index &&
                     Access::PendingLoadCount(*shell) == 0) {
@@ -1793,8 +1793,8 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
             return Access::CompleteFramePresentation(*shell, presentation_frame, 7);
         };
     const auto has_complete_target_resolution =
-        [](const specforge::NavigationLatencyReport& report) {
-            const specforge::NavigationTargetResolutionReport& resolution =
+        [](const spectiary::NavigationLatencyReport& report) {
+            const spectiary::NavigationTargetResolutionReport& resolution =
                 report.target_resolution;
             const std::int64_t stage_sum =
                 resolution.effective_index_ns +
@@ -1817,46 +1817,46 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
                     report.target_resolved_ns - report.requested_ns;
         };
 
-    const specforge::SourceCollectionSessionResult assign_result = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult assign_result = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)),
-        specforge::NavigationLatencyInputKind::AutoAdvance);
-    const std::vector<specforge::NavigationLatencyReport> assign_reports =
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)),
+        spectiary::NavigationLatencyInputKind::AutoAdvance);
+    const std::vector<spectiary::NavigationLatencyReport> assign_reports =
         drain_and_present(1, 91);
 
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(false)));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(false)));
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
     Access::EnableNavigationTracing(*shell, 92);
-    const specforge::SourceCollectionSessionResult clear_result = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult clear_result = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()),
-        specforge::NavigationLatencyInputKind::AutoAdvance);
-    const std::vector<specforge::NavigationLatencyReport> clear_reports =
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()),
+        spectiary::NavigationLatencyInputKind::AutoAdvance);
+    const std::vector<spectiary::NavigationLatencyReport> clear_reports =
         drain_and_present(2, 92);
 
     const bool assign_report_complete =
         assign_reports.size() == 1 &&
-        assign_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented &&
-        assign_reports.front().input_kind == specforge::NavigationLatencyInputKind::AutoAdvance &&
+        assign_reports.front().outcome == spectiary::NavigationLatencyOutcome::Presented &&
+        assign_reports.front().input_kind == spectiary::NavigationLatencyInputKind::AutoAdvance &&
         assign_reports.front().from_index == 0 &&
         assign_reports.front().target_index == 1 &&
         has_complete_target_resolution(assign_reports.front());
     const bool clear_report_complete =
         clear_reports.size() == 1 &&
-        clear_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented &&
-        clear_reports.front().input_kind == specforge::NavigationLatencyInputKind::AutoAdvance &&
+        clear_reports.front().outcome == spectiary::NavigationLatencyOutcome::Presented &&
+        clear_reports.front().input_kind == spectiary::NavigationLatencyInputKind::AutoAdvance &&
         clear_reports.front().from_index == 1 &&
         clear_reports.front().target_index == 2 &&
         has_complete_target_resolution(clear_reports.front());
@@ -1875,7 +1875,7 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
 
 void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_warm_sequence_reuse.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -1884,8 +1884,8 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
     }
 
     std::atomic_int decoder_calls = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [&decoder_calls](
                                        const std::filesystem::path& source,
                                        std::size_t index,
@@ -1894,10 +1894,10 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
         std::this_thread::sleep_for(12ms);
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 200);
 
     struct ProjectionTimings {
@@ -1913,29 +1913,29 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
          &presentation_frame,
          &cold_decode_ns,
          &hit_decode_ns](
-            specforge::NavigationLatencyInputKind input_kind,
-            const specforge::SampleNavigationRequest& request,
+            spectiary::NavigationLatencyInputKind input_kind,
+            const spectiary::SampleNavigationRequest& request,
             std::size_t from_index,
             std::size_t target_index,
             bool expected_cache_hit,
             ProjectionTimings& projection_timings) {
-            const specforge::SpectrumSnapshotHandle before =
+            const spectiary::SpectrumSnapshotHandle before =
                 Access::Session(*shell).CurrentSampleSnapshot();
             Require(
                 before && before->collection.current_index == from_index,
                 "warm navigation repetition should start from its fixed source index");
             Access::EnableNavigationTracing(*shell, presentation_frame);
             const bool keyboard_input =
-                input_kind == specforge::NavigationLatencyInputKind::KeyboardPrevious ||
-                input_kind == specforge::NavigationLatencyInputKind::KeyboardNext;
-            const specforge::SourceCollectionSessionResult result = Access::SubmitNavigation(
+                input_kind == spectiary::NavigationLatencyInputKind::KeyboardPrevious ||
+                input_kind == spectiary::NavigationLatencyInputKind::KeyboardNext;
+            const spectiary::SourceCollectionSessionResult result = Access::SubmitNavigation(
                 *shell,
-                specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::Move(request)),
+                spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                    spectiary::SampleNavigationIntent::Move(request)),
                 input_kind,
                 keyboard_input
-                    ? std::optional<specforge::NavigationLatencyTimePoint>{
-                          specforge::NavigationLatencyTrace::Now()}
+                    ? std::optional<spectiary::NavigationLatencyTimePoint>{
+                          spectiary::NavigationLatencyTrace::Now()}
                     : std::nullopt);
             Require(
                 result.follow_up_spectrum_index == target_index,
@@ -1944,7 +1944,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
             const auto deadline = std::chrono::steady_clock::now() + 2s;
             while (std::chrono::steady_clock::now() < deadline) {
                 Access::Drain(*shell, false);
-                const specforge::SpectrumSnapshotHandle snapshot =
+                const spectiary::SpectrumSnapshotHandle snapshot =
                     Access::Session(*shell).CurrentSampleSnapshot();
                 if (snapshot && snapshot->collection.current_index == target_index &&
                     Access::PendingLoadCount(*shell) == 0) {
@@ -1953,10 +1953,10 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                 std::this_thread::sleep_for(1ms);
             }
 
-            const std::vector<specforge::NavigationLatencyReport> reports =
+            const std::vector<spectiary::NavigationLatencyReport> reports =
                 Access::CompleteFramePresentation(*shell, presentation_frame++, 7);
             if (reports.size() != 1) {
-                const specforge::SpectrumSnapshotHandle after =
+                const spectiary::SpectrumSnapshotHandle after =
                     Access::Session(*shell).CurrentSampleSnapshot();
                 throw std::runtime_error(
                     "each warm navigation should complete one trace; frame=" +
@@ -1967,11 +1967,11 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                     "; pending_loads=" + std::to_string(Access::PendingLoadCount(*shell)) +
                     "; load_error=" + std::string(Access::LoadError(*shell)));
             }
-            const specforge::NavigationLatencyReport& report = reports.front();
-            const specforge::NavigationTargetResolutionReport& resolution =
+            const spectiary::NavigationLatencyReport& report = reports.front();
+            const spectiary::NavigationTargetResolutionReport& resolution =
                 report.target_resolution;
             Require(
-                report.outcome == specforge::NavigationLatencyOutcome::Presented &&
+                report.outcome == spectiary::NavigationLatencyOutcome::Presented &&
                     report.input_kind == input_kind &&
                     report.from_index == from_index &&
                     report.target_index == target_index &&
@@ -1982,7 +1982,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                     resolution.sequence_cache_hit &&
                     resolution.sequence_build_count == 0,
                 "fixed-index warm navigation should reuse sequence state without rebuilding");
-            const specforge::SourceCollectionNavigationView navigation =
+            const spectiary::SourceCollectionNavigationView navigation =
                 Access::Session(*shell).View().navigation;
             Require(
                 !navigation.exact_sample_name_match &&
@@ -2004,15 +2004,15 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
 
     for (std::size_t repetition = 0; repetition < 100; ++repetition) {
         navigate_and_present(
-            specforge::NavigationLatencyInputKind::UiNext,
-            specforge::SampleNavigationRequest::Next(),
+            spectiary::NavigationLatencyInputKind::UiNext,
+            spectiary::SampleNavigationRequest::Next(),
             0,
             1,
             repetition > 0,
             timings[0]);
         navigate_and_present(
-            specforge::NavigationLatencyInputKind::UiPrevious,
-            specforge::SampleNavigationRequest::Previous(),
+            spectiary::NavigationLatencyInputKind::UiPrevious,
+            spectiary::SampleNavigationRequest::Previous(),
             1,
             0,
             repetition > 0,
@@ -2020,15 +2020,15 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
     }
     for (std::size_t repetition = 0; repetition < 100; ++repetition) {
         navigate_and_present(
-            specforge::NavigationLatencyInputKind::KeyboardNext,
-            specforge::SampleNavigationRequest::Next(),
+            spectiary::NavigationLatencyInputKind::KeyboardNext,
+            spectiary::SampleNavigationRequest::Next(),
             0,
             1,
             true,
             timings[2]);
         navigate_and_present(
-            specforge::NavigationLatencyInputKind::KeyboardPrevious,
-            specforge::SampleNavigationRequest::Previous(),
+            spectiary::NavigationLatencyInputKind::KeyboardPrevious,
+            spectiary::SampleNavigationRequest::Previous(),
             1,
             0,
             true,
@@ -2088,7 +2088,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
 
 void TestNewActivationSupersedesAnUnpresentedOlderTrace()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_activation_present_owner.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2096,32 +2096,32 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 101;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
     const auto submit_next = [&shell]() {
         return Access::SubmitNavigation(
             *shell,
-            specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::SampleNavigationRequest::Next())),
-            specforge::NavigationLatencyInputKind::UiNext);
+            spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::SampleNavigationRequest::Next())),
+            spectiary::NavigationLatencyInputKind::UiNext);
     };
     const auto drain_to_index = [&shell](std::size_t target_index) {
         const auto deadline = std::chrono::steady_clock::now() + 2s;
         while (std::chrono::steady_clock::now() < deadline) {
             Access::Drain(*shell);
-            const specforge::SpectrumSnapshotHandle snapshot =
+            const spectiary::SpectrumSnapshotHandle snapshot =
                 Access::Session(*shell).CurrentSampleSnapshot();
             if (snapshot && snapshot->collection.current_index == target_index &&
                 Access::PendingLoadCount(*shell) == 0) {
@@ -2142,19 +2142,19 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
             .empty();
     const bool second_requested = submit_next().follow_up_spectrum_index == 2;
     const bool second_activated = drain_to_index(2);
-    const std::vector<specforge::NavigationLatencyReport> reports =
+    const std::vector<spectiary::NavigationLatencyReport> reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 7);
     const std::size_t presented_count = static_cast<std::size_t>(std::count_if(
         reports.begin(),
         reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Presented;
         }));
     const std::size_t superseded_count = static_cast<std::size_t>(std::count_if(
         reports.begin(),
         reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Superseded;
         }));
     shell.reset();
     std::filesystem::remove(path);
@@ -2169,7 +2169,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
 
 void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path_a = UniqueTempPath("_present_target_a.csv");
     const std::filesystem::path path_b = UniqueTempPath("_present_target_b.csv");
     {
@@ -2180,13 +2180,13 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
         stream_b << "fixture-b";
     }
 
-    specforge::SourceCollectionSession session = MakePreparedDeferredSession(path_a);
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(path_b, 0);
-    specforge::SourceCollectionContext context_b;
+    spectiary::SourceCollectionSession session = MakePreparedDeferredSession(path_a);
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(path_b, 0);
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {"present-target-b", "b", "b-source", "b-context", 3};
     context_b.manifest.sample_names = {"one", "two", "three"};
-    specforge::PreparedSampleWorkflowState workflow_b =
-        specforge::PrepareSampleWorkflowState(*snapshot_b, context_b, 0, {{}, {}});
+    spectiary::PreparedSampleWorkflowState workflow_b =
+        spectiary::PrepareSampleWorkflowState(*snapshot_b, context_b, 0, {{}, {}});
     Require(
         session.OpenPreparedSource(
                    path_b,
@@ -2196,37 +2196,37 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
                    std::move(workflow_b))
             .loaded,
         "source B should be cached before the navigation fixture starts");
-    (void)session.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::SwitchActive(0)));
+    (void)session.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::SwitchActive(0)));
     Require(
         session.CurrentSampleSnapshot() &&
             session.CurrentSampleSnapshot()->source.path == path_a,
         "source A should be active before navigation");
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 202;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
-    const specforge::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())),
+        spectiary::NavigationLatencyInputKind::UiNext);
     const auto activation_deadline = std::chrono::steady_clock::now() + 2s;
     bool target_activated = false;
     while (std::chrono::steady_clock::now() < activation_deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+        const spectiary::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
         target_activated = snapshot && snapshot->source.path == path_a &&
             snapshot->collection.current_index == 1 && Access::PendingLoadCount(*shell) == 0;
         if (target_activated) {
@@ -2234,25 +2234,25 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SourceCollectionSessionResult switched = Access::Submit(
+    const spectiary::SourceCollectionSessionResult switched = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::EditSourceCollection(
-            specforge::SourceCollectionIntent::SwitchActive(1)));
-    const specforge::SpectrumSnapshotHandle active_snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+        spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+            spectiary::SourceCollectionIntent::SwitchActive(1)));
+    const spectiary::SpectrumSnapshotHandle active_snapshot = Access::Session(*shell).CurrentSampleSnapshot();
     Access::SubmitSpectrumDraw(*shell, presentation_frame, active_snapshot, 7);
-    const std::vector<specforge::NavigationLatencyReport> reports =
+    const std::vector<spectiary::NavigationLatencyReport> reports =
         Access::CompleteFramePresentationWithoutSpectrumDraw(*shell, presentation_frame, 7);
     const std::size_t presented_count = static_cast<std::size_t>(std::count_if(
         reports.begin(),
         reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Presented;
         }));
     const std::size_t superseded_count = static_cast<std::size_t>(std::count_if(
         reports.begin(),
         reports.end(),
-        [](const specforge::NavigationLatencyReport& report) {
-            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        [](const spectiary::NavigationLatencyReport& report) {
+            return report.outcome == spectiary::NavigationLatencyOutcome::Superseded;
         }));
     shell.reset();
     std::filesystem::remove(path_a);
@@ -2269,7 +2269,7 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
 
 void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_hidden_spectrum.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2277,30 +2277,30 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 203;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
-    const specforge::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
+    const spectiary::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())),
+        spectiary::NavigationLatencyInputKind::UiNext);
     const auto activation_deadline = std::chrono::steady_clock::now() + 2s;
     bool target_activated = false;
     while (std::chrono::steady_clock::now() < activation_deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+        const spectiary::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
         target_activated = snapshot && snapshot->collection.current_index == 1 &&
             Access::PendingLoadCount(*shell) == 0;
         if (target_activated) {
@@ -2308,7 +2308,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const std::vector<specforge::NavigationLatencyReport> reports =
+    const std::vector<spectiary::NavigationLatencyReport> reports =
         Access::CompleteFramePresentationWithoutSpectrumDraw(*shell, presentation_frame, 7);
     const bool trace_retained = reports.empty();
     Access::SubmitSpectrumDraw(
@@ -2316,14 +2316,14 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
         presentation_frame + 1,
         Access::Session(*shell).CurrentSampleSnapshot(),
         7);
-    const std::vector<specforge::NavigationLatencyReport> visible_reports =
+    const std::vector<spectiary::NavigationLatencyReport> visible_reports =
         Access::CompleteFramePresentationWithoutSpectrumDraw(
             *shell,
             presentation_frame + 1,
             7);
     const bool presented_after_visible_draw =
         visible_reports.size() == 1 &&
-        visible_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented;
+        visible_reports.front().outcome == spectiary::NavigationLatencyOutcome::Presented;
     shell.reset();
     std::filesystem::remove(path);
 
@@ -2338,7 +2338,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
 
 void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_published_stale_completion.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2355,9 +2355,9 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     std::promise<void> release_row_two_promise;
     std::shared_future<void> release_row_two = release_row_two_promise.get_future().share();
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [stale_snapshot_destroyed_promise,
          &row_two_entered_promise,
@@ -2380,11 +2380,11 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     std::promise<void> completion_ready_promise;
     std::shared_future<void> completion_ready =
@@ -2398,20 +2398,20 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
             }
         });
 
-    const specforge::SourceCollectionSessionResult first = Access::Submit(
+    const spectiary::SourceCollectionSessionResult first = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool stale_completion_published =
         completion_ready.wait_for(2s) ==
         std::future_status::ready;
 
-    const specforge::SourceCollectionSessionResult second = Access::Submit(
+    const spectiary::SourceCollectionSessionResult second = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool row_two_started =
         row_two_entered.wait_for(2s) == std::future_status::ready;
     const std::thread::id drain_thread = std::this_thread::get_id();
@@ -2422,7 +2422,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     const std::thread::id retirement_thread = stale_snapshot_retired
         ? stale_snapshot_destroyed.get()
         : std::thread::id{};
-    const specforge::SpectrumSnapshotHandle snapshot_after_stale_drain =
+    const spectiary::SpectrumSnapshotHandle snapshot_after_stale_drain =
         Access::Session(*shell).CurrentSampleSnapshot();
     const bool no_load_error = Access::LoadError(*shell).empty();
     const bool new_ticket_retained = Access::PendingLoadCount(*shell) == 1;
@@ -2455,7 +2455,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
 
 void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_stale_plan_drain.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2467,8 +2467,8 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     std::shared_future<void> decoder_entered = decoder_entered_promise.get_future().share();
     std::promise<void> release_decoder_promise;
     std::shared_future<void> release_decoder = release_decoder_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_entered_promise,
          release_decoder](
@@ -2482,34 +2482,34 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
                 "timed out waiting to release the stale-plan decoder");
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path, "older-context"),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
-    const specforge::SourceCollectionSessionResult navigation = Access::Submit(
+    const spectiary::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool navigation_queued = navigation.follow_up_spectrum_index == 1;
     const bool decoder_started = decoder_entered.wait_for(2s) == std::future_status::ready;
-    const specforge::SourceCollectionSessionResult labeling_started = Access::Submit(
+    const spectiary::SourceCollectionSessionResult labeling_started = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
-    const specforge::SourceCollectionSessionResult label_added = Access::Submit(
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
+    const spectiary::SourceCollectionSessionResult label_added = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(
-                specforge::SampleLabelDefinition{7, "live", 'l'})));
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel(
+                spectiary::SampleLabelDefinition{7, "live", 'l'})));
     release_decoder_promise.set_value();
 
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     bool completion_drained = false;
     while (std::chrono::steady_clock::now() < deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot =
+        const spectiary::SpectrumSnapshotHandle snapshot =
             Access::Session(*shell).CurrentSampleSnapshot();
         completion_drained = snapshot && snapshot->collection.current_index == 1 &&
             Access::PendingLoadCount(*shell) == 0;
@@ -2518,10 +2518,10 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SourceCollectionSessionView view = Access::Session(*shell).View();
+    const spectiary::SourceCollectionSessionView view = Access::Session(*shell).View();
     const bool live_workflow_preserved =
         view.labeling.has_active_task &&
-        specforge::ContainsSampleLabelCode(view.labeling.label_set, 7);
+        spectiary::ContainsSampleLabelCode(view.labeling.label_set, 7);
     const bool no_load_error = Access::LoadError(*shell).empty();
     shell.reset();
     std::filesystem::remove(path);
@@ -2539,10 +2539,10 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
 
 void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_reentrant_drain.npy");
     const std::optional<std::filesystem::path> annotation_path =
-        specforge::SourceCollectionCompanionAnnotationPath(path);
+        spectiary::SourceCollectionCompanionAnnotationPath(path);
     Require(annotation_path.has_value(), "NPY drain fixture should expose its companion path");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2554,25 +2554,25 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         SaveAnnotationFixture(*annotation_path, {1, 1, 0}, &annotation_error),
         annotation_error.empty() ? "initial drain annotation should save" : annotation_error);
 
-    specforge::SourceCollectionSession session = MakePreparedDeferredSession(path);
-    std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(
+    spectiary::SourceCollectionSession session = MakePreparedDeferredSession(path);
+    std::optional<spectiary::SampleAnnotationResult> initial_annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(
             *annotation_path,
             3,
             &annotation_error);
     Require(initial_annotation.has_value(), "initial drain annotation should load");
     const std::string filter_source_id =
-        specforge::BuildAnnotationFilterSourceId(*initial_annotation);
+        spectiary::BuildAnnotationFilterSourceId(*initial_annotation);
     Require(
-        session.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                           specforge::SourceCollectionIntent::AddReadOnlyAnnotationResult(
+        session.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                           spectiary::SourceCollectionIntent::AddReadOnlyAnnotationResult(
                                *annotation_path)))
             .loaded,
         "reentrant drain fixture should attach its annotation");
-    (void)session.Submit(specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-        specforge::SampleFilteringIntent::AddSource(filter_source_id)));
-    (void)session.Submit(specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-        specforge::SampleFilteringIntent::SetFilterValueSelected(
+    (void)session.Submit(spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+        spectiary::SampleFilteringIntent::AddSource(filter_source_id)));
+    (void)session.Submit(spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+        spectiary::SampleFilteringIntent::SetFilterValueSelected(
             filter_source_id,
             "1",
             true)));
@@ -2593,8 +2593,8 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         intermediate_destroyed_promise->get_future();
     std::atomic_bool initial_open_failed = false;
     std::atomic_int row_one_decode_count = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&first_decode_entered_promise,
          release_first_decode,
@@ -2634,10 +2634,10 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
     shell->OpenSource(path);
     const auto initial_failure_deadline =
@@ -2657,11 +2657,11 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         std::this_thread::sleep_for(2ms);
     }
 
-    const specforge::SourceCollectionSessionResult navigation = Access::Submit(
+    const spectiary::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool navigation_queued = navigation.follow_up_spectrum_index == 1;
     const bool first_decode_started =
         first_decode_entered.wait_for(2s) == std::future_status::ready;
@@ -2681,9 +2681,9 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SpectrumSnapshotHandle snapshot_while_requeued =
+    const spectiary::SpectrumSnapshotHandle snapshot_while_requeued =
         Access::Session(*shell).CurrentSampleSnapshot();
-    const specforge::SourceCollectionSessionView view_while_requeued =
+    const spectiary::SourceCollectionSessionView view_while_requeued =
         Access::Session(*shell).View();
     const bool failure_retained_while_requeued =
         Access::LoadError(*shell).find(
@@ -2701,7 +2701,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
     bool final_row_committed = false;
     while (std::chrono::steady_clock::now() < commit_deadline) {
         Access::Drain(*shell);
-        const specforge::SpectrumSnapshotHandle snapshot =
+        const spectiary::SpectrumSnapshotHandle snapshot =
             Access::Session(*shell).CurrentSampleSnapshot();
         final_row_committed = snapshot && snapshot->collection.current_index == 2 &&
             Access::PendingLoadCount(*shell) == 0;
@@ -2710,7 +2710,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SourceCollectionSessionView final_view = Access::Session(*shell).View();
+    const spectiary::SourceCollectionSessionView final_view = Access::Session(*shell).View();
     const bool no_load_error = Access::LoadError(*shell).empty();
     shell.reset();
     std::filesystem::remove(*annotation_path);
@@ -2755,49 +2755,49 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session =
+    spectiary::SourceCollectionSession session =
         MakePreparedDeferredSession(path);
-    const specforge::SpectrumSnapshotHandle
+    const spectiary::SpectrumSnapshotHandle
         initial_snapshot = session.CurrentSampleSnapshot();
 
-    const specforge::SpectrumSnapshotHandle other_snapshot = MakeSnapshot(other_path, 0);
-    specforge::SourceCollectionContext other_context;
+    const spectiary::SpectrumSnapshotHandle other_snapshot = MakeSnapshot(other_path, 0);
+    spectiary::SourceCollectionContext other_context;
     other_context.identity = {"shell-other", "other", "other-source", "other-context", 3};
     other_context.manifest.sample_names = {"one", "two", "three"};
-    specforge::PreparedSampleWorkflowState other_workflow =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState other_workflow =
+        spectiary::PrepareSampleWorkflowState(
             *other_snapshot,
             other_context,
             0,
             {{}, {}});
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
            const auto&) {
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    specforge::SourceCollectionActivationTransaction activation(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionActivationTransaction activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     std::promise<void> completion_ready_promise;
     std::shared_future<void> completion_ready =
         completion_ready_promise.get_future().share();
-    specforge::ShellUiTestAccess::
+    spectiary::ShellUiTestAccess::
         RegisterCompletionReadyCallback(
             activation,
             [&completion_ready_promise]() {
                 completion_ready_promise.set_value();
             });
 
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         navigation = activation.Submit(
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     Require(
         navigation.follow_up_spectrum_index == 1,
         "source A should issue the async row 1 follow-up used by the Shell ticket");
@@ -2805,7 +2805,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
     const bool completion_published =
         completion_ready.wait_for(2s) ==
         std::future_status::ready;
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         switched_to_b = session.OpenPreparedSource(
             other_path,
             0,
@@ -2816,21 +2816,21 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         switched_to_b.loaded &&
         !switched_to_b.canceled_source_follow_up_path;
     const bool lifecycle_ticket_preserved =
-        specforge::ShellUiTestAccess::
+        spectiary::ShellUiTestAccess::
             PendingLoadCount(activation) == 1;
 
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         switched_back_to_a = activation.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 EditSourceCollection(
-                    specforge::SourceCollectionIntent::
+                    spectiary::SourceCollectionIntent::
                         SwitchActive(0)));
     const bool pending_intent_restored =
         switched_back_to_a.follow_up_spectrum_index == 1 &&
         session.CurrentSampleSnapshot() ==
             initial_snapshot;
     const bool existing_ticket_reused =
-        specforge::ShellUiTestAccess::
+        spectiary::ShellUiTestAccess::
             PendingLoadCount(activation) == 1;
     bool row_one_committed = false;
     const auto deadline =
@@ -2870,7 +2870,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
 
 void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_failed_restore.csv");
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -2878,25 +2878,25 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path&,
            std::size_t,
-           const auto&) -> specforge::SpectrumSnapshotHandle {
+           const auto&) -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error("expected deferred restore follow-up failure");
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
-    const specforge::SourceCollectionSessionResult navigation = Access::Submit(
+    const spectiary::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool deferred_follow_up_created = navigation.follow_up_spectrum_index == 1;
 
     const auto deadline = std::chrono::steady_clock::now() + 2s;
@@ -2910,12 +2910,12 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SpectrumSnapshotHandle retained_snapshot =
+    const spectiary::SpectrumSnapshotHandle retained_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
-    const specforge::SourceCollectionSessionResult retry = Access::Session(*shell).Submit(
-        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-            specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+    const spectiary::SourceCollectionSessionResult retry = Access::Session(*shell).Submit(
+        spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            spectiary::SampleNavigationIntent::Move(
+                spectiary::SampleNavigationRequest::Next())));
     const bool retry_created = retry.follow_up_spectrum_index == 1;
     const bool retry_canceled =
         Access::Session(*shell).CancelPendingSampleNavigation(path, 1);
@@ -2938,7 +2938,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
 
 void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::array<std::filesystem::path, 3> source_paths{
         UniqueTempPath("_restore_a.csv"),
         UniqueTempPath("_restore_b.csv"),
@@ -2973,39 +2973,39 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     }
 
     {
-        specforge::SourceCollectionSession saved_session =
+        spectiary::SourceCollectionSession saved_session =
             MakeCachedSession(cache_paths);
         for (const std::filesystem::path& path : source_paths) {
             OpenPreparedFixtureSource(saved_session, path);
         }
         (void)saved_session.Submit(
-            specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                specforge::SourceCollectionIntent::SwitchActive(1)));
-        const specforge::SourceCollectionSessionView saved_view =
+            spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                spectiary::SourceCollectionIntent::SwitchActive(1)));
+        const spectiary::SourceCollectionSessionView saved_view =
             saved_session.View();
         Require(
             saved_view.current_source_index &&
                 *saved_view.current_source_index == 1 &&
-                specforge::SourcePathIdentityKey(
+                spectiary::SourcePathIdentityKey(
                     saved_view.sources[*saved_view.current_source_index].path) ==
-                    specforge::SourcePathIdentityKey(source_paths[1]),
+                    spectiary::SourcePathIdentityKey(source_paths[1]),
             "fixture should activate source B before saving");
         Require(
             saved_session.FlushStateCaches(),
             "source-session fixture should flush successfully");
     }
 
-    const specforge::SourceCollectionSessionStateCache saved_cache =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCache saved_cache =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     Require(
         saved_cache.sources.size() == 3 &&
             saved_cache.active_source_index &&
             *saved_cache.active_source_index == 1 &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 saved_cache.sources[*saved_cache.active_source_index].path) ==
-                specforge::SourcePathIdentityKey(source_paths[1]),
+                spectiary::SourcePathIdentityKey(source_paths[1]),
         "save phase should persist source B as the active source");
 
     std::promise<void> release_a_promise;
@@ -3026,7 +3026,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         source_b_decoded_promise.get_future().share();
     std::atomic_bool source_b_decoded_once = false;
 
-    specforge::SourceCollectionLoadDependencies dependencies =
+    spectiary::SourceCollectionLoadDependencies dependencies =
         MakeFixtureLoadDependencies(cache_paths);
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
@@ -3036,8 +3036,8 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
                 source_paths.begin(),
                 source_paths.end(),
                 [&source](const std::filesystem::path& candidate) {
-                    return specforge::SourcePathIdentityKey(candidate) ==
-                           specforge::SourcePathIdentityKey(source);
+                    return spectiary::SourcePathIdentityKey(candidate) ==
+                           spectiary::SourcePathIdentityKey(source);
                 });
             Require(
                 match != source_paths.end(),
@@ -3061,7 +3061,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
                     canceled,
                     "source C decoder should be released last");
             }
-            specforge::SpectrumSnapshotHandle snapshot =
+            spectiary::SpectrumSnapshotHandle snapshot =
                 MakeSnapshot(source, index);
             if (source_index == 1 &&
                 !source_b_decoded_once.exchange(
@@ -3071,7 +3071,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
             }
             return snapshot;
         };
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         MakeDeferredShell(cache_paths, std::move(dependencies));
 
     const bool source_b_finished_first =
@@ -3085,13 +3085,13 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         source_b_finished_first,
         "source B should decode while source A and C remain blocked");
-    const specforge::ShellWindowTitleView
+    const spectiary::ShellWindowTitleView
         active_restore_loading = shell->WindowTitleView();
     Require(
         active_restore_loading.loading_source_path != nullptr &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 *active_restore_loading.loading_source_path) ==
-                specforge::SourcePathIdentityKey(
+                spectiary::SourcePathIdentityKey(
                     source_paths[1]),
         "deferred restore should project only its saved active source while multiple sources are loading");
 
@@ -3102,14 +3102,14 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     while (std::chrono::steady_clock::now() <
            source_b_activation_deadline) {
         Access::Drain(*shell);
-        const specforge::SourceCollectionSessionView view =
+        const spectiary::SourceCollectionSessionView view =
             Access::Session(*shell).View();
         source_b_activated =
             view.sources.size() == 2 &&
             view.current_source_index &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 view.sources[*view.current_source_index].path) ==
-                specforge::SourcePathIdentityKey(source_paths[1]);
+                spectiary::SourcePathIdentityKey(source_paths[1]);
         if (source_b_activated) {
             break;
         }
@@ -3119,7 +3119,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         source_b_activated,
         "source B should be active before the later source C completion");
-    const specforge::ShellWindowTitleView
+    const spectiary::ShellWindowTitleView
         active_source_with_inactive_restore_pending =
             shell->WindowTitleView();
     Require(
@@ -3127,10 +3127,10 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
                 .loading_source_path == nullptr &&
             active_source_with_inactive_restore_pending
                 .source_path != nullptr &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 *active_source_with_inactive_restore_pending
                      .source_path) ==
-                specforge::SourcePathIdentityKey(
+                spectiary::SourcePathIdentityKey(
                     source_paths[1]),
         "an inactive deferred source should not replace the restored active source projection");
 
@@ -3143,7 +3143,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const specforge::SourceCollectionSessionView restored_view =
+    const spectiary::SourceCollectionSessionView restored_view =
         Access::Session(*shell).View();
     Require(
         restored_view.sources.size() == 3 &&
@@ -3155,16 +3155,16 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         Access::Session(*shell).FlushStateCaches(),
         "restored source-session cache should flush successfully");
-    const specforge::SourceCollectionSessionStateCache flushed_cache =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCache flushed_cache =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     Require(
         flushed_cache.active_source_index &&
             *flushed_cache.active_source_index < flushed_cache.sources.size() &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 flushed_cache.sources[*flushed_cache.active_source_index].path) ==
-                specforge::SourcePathIdentityKey(source_paths[1]),
+                spectiary::SourcePathIdentityKey(source_paths[1]),
         "flush after deferred restore should retain source B as active");
 
     shell.reset();
@@ -3174,7 +3174,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         DrainAllSourceLoads(*shell),
         "second deferred restore should finish");
-    const specforge::SourceCollectionSessionView second_restored_view =
+    const spectiary::SourceCollectionSessionView second_restored_view =
         Access::Session(*shell).View();
     Require(
         second_restored_view.sources.size() == 3 &&
@@ -3210,7 +3210,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
 
 void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path =
         UniqueTempPath("_prefetch_consumed.csv");
     {
@@ -3220,8 +3220,8 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
         stream << "fixture";
     }
     std::array<std::atomic_int, 3> decoder_calls{};
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls](
             const std::filesystem::path& source,
@@ -3230,23 +3230,23 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
             ++decoder_calls.at(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell =
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 300);
 
-    const specforge::SourceCollectionSessionResult first =
+    const spectiary::SourceCollectionSessionResult first =
         Access::SubmitNavigation(
             *shell,
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::Move(
-                        specforge::
+                    spectiary::SampleNavigationIntent::Move(
+                        spectiary::
                             SampleNavigationRequest::Next())),
-            specforge::NavigationLatencyInputKind::UiNext);
+            spectiary::NavigationLatencyInputKind::UiNext);
     Require(
         first.follow_up_spectrum_index == 1,
         "first next should queue raw row 1");
@@ -3271,11 +3271,11 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
     Require(
         first_reports.size() == 1 &&
             first_reports.front().cache_kind ==
-                specforge::
+                spectiary::
                     NavigationSnapshotCacheKind::None,
         "first next should remain a foreground decode");
 
-    std::vector<specforge::NavigationPrefetchReport>
+    std::vector<spectiary::NavigationPrefetchReport>
         prefetch_reports;
     const auto prefetch_deadline =
         std::chrono::steady_clock::now() + 2s;
@@ -3293,7 +3293,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
                 prefetch_reports.end(),
                 [](const auto& report) {
                     return report.outcome ==
-                        specforge::
+                        spectiary::
                             NavigationPrefetchOutcome::
                                 Completed;
                 })) {
@@ -3303,15 +3303,15 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
     }
 
     Access::EnableNavigationTracing(*shell, 301);
-    const specforge::SourceCollectionSessionResult second =
+    const spectiary::SourceCollectionSessionResult second =
         Access::SubmitNavigation(
             *shell,
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::Move(
-                        specforge::
+                    spectiary::SampleNavigationIntent::Move(
+                        spectiary::
                             SampleNavigationRequest::Next())),
-            specforge::NavigationLatencyInputKind::UiNext);
+            spectiary::NavigationLatencyInputKind::UiNext);
     Require(
         second.follow_up_spectrum_index == 2,
         "second next should queue raw row 2");
@@ -3345,7 +3345,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
         second_reports.size() == 1 &&
             second_reports.front().cache_hit &&
             second_reports.front().cache_kind ==
-                specforge::
+                spectiary::
                     NavigationSnapshotCacheKind::
                         Prefetch,
         "second same-direction navigation should identify a prefetch cache hit");
@@ -3367,7 +3367,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
             prefetch_reports.end(),
             [](const auto& report) {
                 return report.outcome ==
-                    specforge::
+                    spectiary::
                         NavigationPrefetchOutcome::Completed;
             }) &&
             std::any_of(
@@ -3375,7 +3375,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
                 prefetch_reports.end(),
                 [](const auto& report) {
                     return report.outcome ==
-                        specforge::
+                        spectiary::
                             NavigationPrefetchOutcome::Consumed;
                 }),
         "prefetch observability should record completed and consumed");
@@ -3385,7 +3385,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
 
 void TestPublishedPrefetchBecomesStaleAfterQueryInput()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path =
         UniqueTempPath("_prefetch_stale.csv");
     {
@@ -3401,8 +3401,8 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
     std::promise<void> release_prefetch_promise;
     std::shared_future<void> release_prefetch =
         release_prefetch_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&decoder_calls,
          &prefetch_entered_promise,
@@ -3420,21 +3420,21 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell =
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     (void)Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::NavigationLatencyInputKind::UiNext);
     const auto activation_deadline =
         std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() <
@@ -3469,9 +3469,9 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
 
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::
+                spectiary::SampleNavigationIntent::
                     SetSampleNameQuery("gamma")));
     Access::Drain(*shell);
     const auto reports =
@@ -3483,7 +3483,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
             reports.end(),
             [](const auto& report) {
                 return report.outcome ==
-                    specforge::
+                    spectiary::
                         NavigationPrefetchOutcome::Stale;
             }),
         "query input should invalidate an already-published old prefetch");
@@ -3498,7 +3498,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
 
 void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path =
         UniqueTempPath("_prefetch_canceled.csv");
     {
@@ -3518,8 +3518,8 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
         release_canceled_worker_promise.get_future().share();
     std::atomic_bool entered_once = false;
     std::atomic_int64_t decoder_returned_ns = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
             std::size_t index,
@@ -3538,7 +3538,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
                 decoder_returned_ns.store(
                     std::chrono::duration_cast<
                         std::chrono::nanoseconds>(
-                        specforge::
+                        spectiary::
                             NavigationLatencyTrace::Now()
                                 .time_since_epoch())
                         .count(),
@@ -3546,21 +3546,21 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
             }
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    std::unique_ptr<specforge::ShellUi> shell =
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     (void)Access::SubmitNavigation(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())),
-        specforge::NavigationLatencyInputKind::UiNext);
+        spectiary::NavigationLatencyInputKind::UiNext);
     const auto activation_deadline =
         std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() <
@@ -3575,14 +3575,14 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
 
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::
+                spectiary::SampleNavigationIntent::
                     SetSampleNameQuery("gamma")));
     const bool cancel_seen =
         cancellation_observed.wait_for(2s) ==
         std::future_status::ready;
-    std::vector<specforge::NavigationPrefetchReport>
+    std::vector<spectiary::NavigationPrefetchReport>
         reports = Access::TakePrefetchReports(*shell);
     const bool canceled_reported_before_exit =
         std::any_of(
@@ -3590,7 +3590,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
             reports.end(),
             [](const auto& report) {
                 return report.outcome ==
-                    specforge::
+                    spectiary::
                         NavigationPrefetchOutcome::
                             Canceled;
             });
@@ -3612,7 +3612,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
                 reports.end(),
                 [](const auto& report) {
                     return report.outcome ==
-                        specforge::
+                        spectiary::
                             NavigationPrefetchOutcome::
                                 Canceled;
                 })) {
@@ -3625,7 +3625,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
         reports.end(),
         [](const auto& report) {
             return report.outcome ==
-                specforge::
+                spectiary::
                     NavigationPrefetchOutcome::Canceled;
         });
     const bool terminal_after_decoder =
@@ -3660,13 +3660,13 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
 
 void TestAutomationSourceObservationHidesActivationToken()
 {
-    using Access = specforge::ShellUiTestAccess;
-    using State = specforge::ShellAutomationSourceOutcome::State;
+    using Access = spectiary::ShellUiTestAccess;
+    using State = spectiary::ShellAutomationSourceOutcome::State;
     const auto path = UniqueTempPath("_automation_source_observation.csv");
     WriteFixture(path);
     auto shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             MakeFixtureLoadDependencies({{}, {}, {}, {}})));
     auto observe = shell->BeginSourceOpenForAutomation(path);
     Require(DrainAllSourceLoads(*shell), "source observation fixture should finish loading");
@@ -3677,13 +3677,13 @@ void TestAutomationSourceObservationHidesActivationToken()
     shell->PresentFrame(400, {});
     Require(observe().state == State::Pending,
         "failed Present must not complete the opaque source operation");
-    const specforge::NavigationLatencyPresentation wrong{
-        18, specforge::NavigationLatencyTrace::Now()};
+    const spectiary::NavigationLatencyPresentation wrong{
+        18, spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(400, std::span(&wrong, 1));
     Require(observe().state == State::Pending,
         "another viewport cannot complete the opaque source operation");
-    const specforge::NavigationLatencyPresentation presented{
-        17, specforge::NavigationLatencyTrace::Now()};
+    const spectiary::NavigationLatencyPresentation presented{
+        17, spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(400, std::span(&presented, 1));
     const auto outcome = observe();
     Require(outcome.state == State::Succeeded && outcome.source_path == path &&
@@ -3697,7 +3697,7 @@ void TestAutomationSourceObservationHidesActivationToken()
 
 void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path path =
         UniqueTempPath(
             "_automation_presented_view.csv");
@@ -3715,39 +3715,39 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
     auto dependencies =
         MakeFixtureLoadDependencies(
             {{}, {}, {}, {}});
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting(
                     std::move(dependencies)));
     (void)Access::Submit(
         *shell,
-        specforge::
+        spectiary::
             SourceCollectionSessionIntent::
                 ChangeActiveSampleWorkflow(
-                    specforge::
+                    spectiary::
                         ActiveSampleWorkflowIntent::
                             StartOrResumeTemporaryLabelingTask()));
     (void)Access::Submit(
         *shell,
-        specforge::
+        spectiary::
             SourceCollectionSessionIntent::
                 ChangeActiveSampleWorkflow(
-                    specforge::
+                    spectiary::
                         ActiveSampleWorkflowIntent::
                             UpsertActiveLabel(
-                                specforge::
+                                spectiary::
                                     SampleLabelDefinition{
                                         7,
                                         "presented",
                                         'p'})));
     (void)Access::Submit(
         *shell,
-        specforge::
+        spectiary::
             SourceCollectionSessionIntent::
                 ChangeActiveSampleWorkflow(
-                    specforge::
+                    spectiary::
                         ActiveSampleWorkflowIntent::
                             AssignActiveLabelToCurrentSample(
                                 7)));
@@ -3761,18 +3761,18 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
         Access::Session(*shell).
             CurrentSampleSnapshot(),
         17);
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         first_presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         401,
         std::span(&first_presentation, 1));
-    const specforge::ShellAutomationView
+    const spectiary::ShellAutomationView
         first_presented =
             shell->PresentedAutomationView();
 
-    const specforge::ShellAutomationNavigationResult
+    const spectiary::ShellAutomationNavigationResult
         navigation =
             shell->GotoSpectrumForAutomation(
                 1,
@@ -3793,9 +3793,9 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
         }
         std::this_thread::sleep_for(1ms);
     }
-    const specforge::ShellAutomationView live_after_drain =
+    const spectiary::ShellAutomationView live_after_drain =
         shell->AutomationView();
-    const specforge::ShellAutomationView
+    const spectiary::ShellAutomationView
         presented_before_retry =
             shell->PresentedAutomationView();
 
@@ -3809,27 +3809,27 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
             CurrentSampleSnapshot(),
         17);
     shell->PresentFrame(402, {});
-    const specforge::ShellAutomationView
+    const spectiary::ShellAutomationView
         presented_after_retry =
             shell->PresentedAutomationView();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         wrong_viewport{
             18,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         402,
         std::span(&wrong_viewport, 1));
-    const specforge::ShellAutomationView
+    const spectiary::ShellAutomationView
         presented_after_wrong_viewport =
             shell->PresentedAutomationView();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         latest_presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         402,
         std::span(&latest_presentation, 1));
-    const specforge::ShellAutomationView
+    const spectiary::ShellAutomationView
         latest_presented =
             shell->PresentedAutomationView();
 
@@ -3837,7 +3837,7 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
     std::filesystem::remove(path);
     Require(
         navigation.error ==
-                specforge::
+                spectiary::
                     ShellAutomationNavigationError::
                         None &&
             first_presented.spectrum.present &&
@@ -3883,7 +3883,7 @@ void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
 
 void TestShellFlushResultNamesEveryFailedOwner()
 {
-    specforge::ShellLocalStateFlushResult result;
+    spectiary::ShellLocalStateFlushResult result;
     Require(
         result.all_saved() &&
             result.FailureMessage().empty(),
@@ -3933,7 +3933,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
 
     const std::string chinese_message =
         result.FailureMessage(
-            specforge::UiLanguage::SimplifiedChinese);
+            spectiary::UiLanguage::SimplifiedChinese);
     Require(
         chinese_message.find("语言") !=
                 std::string::npos &&
@@ -3962,7 +3962,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
 
 void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_external_fits_folder");
     std::error_code cleanup_error;
@@ -3975,8 +3975,8 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     WriteFixture(folder / "zzz.csv");
 
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -3993,19 +3993,19 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
                 source,
                 index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession({}, {}, {}, {}),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::SourceCollectionSession({}, {}, {}, {}),
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     shell->OpenSource(folder);
     Require(
         DrainAllSourceLoads(*shell),
         "an existing folder source should finish loading before the external open");
-    const specforge::SpectrumSnapshotHandle existing_snapshot =
+    const spectiary::SpectrumSnapshotHandle existing_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         existing_snapshot &&
@@ -4017,7 +4017,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(true))
             .applied(),
         "external FITS folder setting should apply in the startup shell");
@@ -4027,11 +4027,11 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         external_presentation_frame);
     const auto relative_preferred = std::filesystem::relative(preferred, std::filesystem::current_path());
     Require(!relative_preferred.is_absolute(), "startup regression must exercise a relative CLI path");
-    specforge::OpenInitialSource(*shell, relative_preferred);
+    spectiary::OpenInitialSource(*shell, relative_preferred);
     Require(
         DrainAllSourceLoads(*shell),
         "external FITS startup source should finish loading");
-    const specforge::SpectrumSnapshotHandle external_snapshot =
+    const spectiary::SpectrumSnapshotHandle external_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         external_snapshot &&
@@ -4044,7 +4044,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         external_snapshot->collection.current_index == 1,
         "external FITS startup should present the requested non-first folder member");
-    const std::vector<specforge::SourceLoadLatencyReport>
+    const std::vector<spectiary::SourceLoadLatencyReport>
         external_reports =
             Access::CompleteSourceLoadFramePresentation(
                 *shell,
@@ -4083,7 +4083,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(false))
             .applied(),
         "external FITS folder setting should be disableable");
@@ -4091,7 +4091,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "disabled external FITS startup should finish loading");
-    const specforge::SpectrumSnapshotHandle disabled_snapshot =
+    const spectiary::SpectrumSnapshotHandle disabled_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         disabled_snapshot &&
@@ -4102,7 +4102,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(true))
             .applied(),
         "external FITS folder setting should be re-enabled for origin checks");
@@ -4110,7 +4110,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "in-app FITS open should finish loading");
-    const specforge::SpectrumSnapshotHandle in_app_snapshot =
+    const spectiary::SpectrumSnapshotHandle in_app_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         in_app_snapshot &&
@@ -4122,7 +4122,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "automation FITS open should finish loading");
-    const specforge::SpectrumSnapshotHandle automation_snapshot =
+    const spectiary::SpectrumSnapshotHandle automation_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         automation_snapshot &&
@@ -4135,7 +4135,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "external CSV startup source should finish loading");
-    const specforge::SpectrumSnapshotHandle external_csv_snapshot =
+    const spectiary::SpectrumSnapshotHandle external_csv_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         external_csv_snapshot &&
@@ -4158,7 +4158,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(false))
             .applied(),
         "external CSV folder setting should be disableable");
@@ -4166,7 +4166,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "disabled external CSV startup should finish loading");
-    const specforge::SpectrumSnapshotHandle disabled_csv_snapshot =
+    const spectiary::SpectrumSnapshotHandle disabled_csv_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         disabled_csv_snapshot &&
@@ -4177,7 +4177,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(true))
             .applied(),
         "external CSV folder setting should be re-enabled for origin checks");
@@ -4187,14 +4187,14 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     bool file_picker_called = false;
     {
         ScopedImGuiContext menu_context;
-        const specforge::SourceCollectionPathPicker choose_source_file =
+        const spectiary::SourceCollectionPathPicker choose_source_file =
             [&]() -> std::optional<std::filesystem::path> {
                 file_picker_called = true;
                 return csv_preferred;
             };
-        specforge::test::WidgetHarness ui{[&] {
+        spectiary::test::WidgetHarness ui{[&] {
             RenderShellFileMenuFrame(*shell, choose_source_file);
-        }, specforge::test::WidgetHarness::FrameMode::ExistingContext};
+        }, spectiary::test::WidgetHarness::FrameMode::ExistingContext};
         ui.Frames(2);
         ui.Click("FileMenu");
         ui.Click("OpenFile");
@@ -4205,7 +4205,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "File > Open File CSV should finish loading");
-    const specforge::SpectrumSnapshotHandle file_menu_snapshot =
+    const spectiary::SpectrumSnapshotHandle file_menu_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         file_menu_snapshot &&
@@ -4220,7 +4220,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "in-app CSV open should finish loading");
-    const specforge::SpectrumSnapshotHandle in_app_csv_snapshot =
+    const spectiary::SpectrumSnapshotHandle in_app_csv_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         in_app_csv_snapshot &&
@@ -4232,7 +4232,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     Require(
         DrainAllSourceLoads(*shell),
         "automation CSV open should finish loading");
-    const specforge::SpectrumSnapshotHandle automation_csv_snapshot =
+    const spectiary::SpectrumSnapshotHandle automation_csv_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         automation_csv_snapshot &&
@@ -4247,7 +4247,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
 
 void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_external_fits_filtered_folder");
     const std::filesystem::path state_root =
@@ -4274,9 +4274,9 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         annotation_error.empty()
             ? "filtered external FITS annotation should save"
             : annotation_error);
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation =
-            specforge::test_support::LegacyFixtureIo{}.Load(
+            spectiary::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -4284,13 +4284,13 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         annotation.has_value(),
         "filtered external FITS annotation should load");
     const std::string filter_source_id =
-        specforge::BuildAnnotationFilterSourceId(*annotation);
+        spectiary::BuildAnnotationFilterSourceId(*annotation);
     const std::filesystem::path workflow_cache_path =
         state_root / "workflow.json";
 
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4312,45 +4312,45 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         .navigation_state_cache_path =
             state_root / "navigation.json"};
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 state_root / "source-session.json",
                 state_root / "navigation.json",
                 state_root / "labeling.json",
                 workflow_cache_path),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     shell->OpenSource(folder);
     Require(
         DrainAllSourceLoads(*shell),
         "filtered external FITS fixture should open its folder source");
-    specforge::SourceCollectionSession& session =
+    spectiary::SourceCollectionSession& session =
         Access::Session(*shell);
     Require(
         session.Submit(
-                   specforge::SourceCollectionSessionIntent::
+                   spectiary::SourceCollectionSessionIntent::
                        EditSourceCollection(
-                           specforge::SourceCollectionIntent::
+                           spectiary::SourceCollectionIntent::
                                AddReadOnlyAnnotationResult(
                                    annotation_path)))
             .loaded,
         "filtered external FITS fixture should attach its annotation");
     (void)session.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     AddSource(filter_source_id)));
     (void)session.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     SetFilterValueSelected(
                         filter_source_id,
                         "1",
                         true)));
-    const specforge::SourceCollectionSessionView filtered_view =
+    const spectiary::SourceCollectionSessionView filtered_view =
         session.View();
     Require(
         filtered_view.filter.evaluation.active &&
@@ -4366,7 +4366,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
     Require(
         Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "filtered external FITS folder setting should apply");
@@ -4375,7 +4375,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         DrainAllSourceLoads(*shell),
         "filtered external FITS startup should settle after rejection");
     const std::string load_error(Access::LoadError(*shell));
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSampleSnapshot();
     Require(
         load_error.find("excluded by the active sample filter") !=
@@ -4396,7 +4396,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
 
 void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_external_fits_live_filter_folder");
     const std::filesystem::path state_root =
@@ -4423,9 +4423,9 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         annotation_error.empty()
             ? "live-filter external FITS annotation should save"
             : annotation_error);
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation =
-            specforge::test_support::LegacyFixtureIo{}.Load(
+            spectiary::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -4433,7 +4433,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         annotation.has_value(),
         "live-filter external FITS annotation should load");
     const std::string filter_source_id =
-        specforge::BuildAnnotationFilterSourceId(*annotation);
+        spectiary::BuildAnnotationFilterSourceId(*annotation);
 
     std::promise<void> external_decode_entered_promise;
     std::shared_future<void> external_decode_entered =
@@ -4443,8 +4443,8 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         release_external_decode_promise.get_future().share();
     std::atomic_size_t folder_loader_calls = 0;
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4475,28 +4475,28 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
             folder_decode_indices.push_back(index);
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 {},
                 {},
                 {},
                 {}),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     shell->OpenSource(folder);
     Require(
         DrainAllSourceLoads(*shell),
         "live-filter external FITS fixture should open its folder source");
-    specforge::SourceCollectionSession& session =
+    spectiary::SourceCollectionSession& session =
         Access::Session(*shell);
     Require(
         session.Submit(
-                   specforge::SourceCollectionSessionIntent::
+                   spectiary::SourceCollectionSessionIntent::
                        EditSourceCollection(
-                           specforge::SourceCollectionIntent::
+                           spectiary::SourceCollectionIntent::
                                AddReadOnlyAnnotationResult(
                                    annotation_path)))
             .loaded,
@@ -4505,7 +4505,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
     Require(
         Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "live-filter external FITS folder setting should apply");
@@ -4516,14 +4516,14 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
             std::future_status::ready,
         "external FITS worker should reach its folder decoder before the live filter update");
     (void)session.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     AddSource(filter_source_id)));
     (void)session.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::
+                spectiary::SampleFilteringIntent::
                     SetFilterValueSelected(
                         filter_source_id,
                         "1",
@@ -4539,7 +4539,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         "live-filter external FITS startup should settle after the worker update");
 
     const std::string load_error(Access::LoadError(*shell));
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSampleSnapshot();
     Require(
         load_error.find("excluded by the active sample filter") !=
@@ -4560,7 +4560,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
 
 void TestSourceOpenResolutionRunsOnWorkerAndCancels()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_source_open_worker_folder");
     std::error_code cleanup_error;
@@ -4594,9 +4594,9 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
         }
     };
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4609,14 +4609,14 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
             (void)listing;
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.source_open_probe =
         [&probe_entered_promise,
          &probe_canceled_promise,
          &release_probe,
          &probe_started,
          &probe_cancel_was_observed](
-            const specforge::SourceOpenRequest& request,
+            const spectiary::SourceOpenRequest& request,
             const auto& checkpoint) {
             if (!probe_started.exchange(
                     true,
@@ -4628,7 +4628,7 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
                        std::future_status::ready) {
                     checkpoint();
                 }
-            } catch (const specforge::SourceCollectionPreparationCanceled&) {
+            } catch (const spectiary::SourceCollectionPreparationCanceled&) {
                 if (!probe_cancel_was_observed.exchange(
                         true,
                         std::memory_order_relaxed)) {
@@ -4636,20 +4636,20 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
                 }
                 throw;
             }
-            return specforge::ProbeSourceOpenRequest(
+            return spectiary::ProbeSourceOpenRequest(
                 request,
                 checkpoint);
         };
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession({}, {}, {}, {}),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::SourceCollectionSession({}, {}, {}, {}),
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     Require(
         Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "worker resolver test should enable external FITS folder opening");
@@ -4694,7 +4694,7 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
 
 void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_external_fits_deferred_context_folder");
     const std::filesystem::path state_root =
@@ -4721,9 +4721,9 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
         annotation_error.empty()
             ? "deferred external FITS annotation should save"
             : annotation_error);
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation =
-            specforge::test_support::LegacyFixtureIo{}.Load(
+            spectiary::test_support::LegacyFixtureIo{}.Load(
                 annotation_path,
                 3,
                 &annotation_error);
@@ -4731,7 +4731,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
         annotation.has_value(),
         "deferred external FITS annotation should load");
     const std::string filter_source_id =
-        specforge::BuildAnnotationFilterSourceId(*annotation);
+        spectiary::BuildAnnotationFilterSourceId(*annotation);
     const SourceSessionCachePaths cache_paths{
         state_root / "source-session.json",
         state_root / "navigation.json",
@@ -4740,7 +4740,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
 
     const auto configure_common_dependencies =
         [&cache_paths](
-            specforge::SourceCollectionLoadDependencies& dependencies) {
+            spectiary::SourceCollectionLoadDependencies& dependencies) {
         dependencies.snapshot_loader =
             [](const auto& source, std::size_t index, const auto&) {
                 return MakeSnapshot(source, index);
@@ -4757,8 +4757,8 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     // Persist the same folder annotation and Sample Filter context that a
     // previous application run would leave for deferred startup restore.
     {
-        specforge::SourceCollectionLoadDependencies dependencies;
-        dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+        spectiary::SourceCollectionLoadDependencies dependencies;
+        dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
         configure_common_dependencies(dependencies);
         dependencies.folder_snapshot_loader =
             [](const auto& source,
@@ -4770,40 +4770,40 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
                     source,
                     index);
             };
-        std::unique_ptr<specforge::ShellUi> seed_shell =
+        std::unique_ptr<spectiary::ShellUi> seed_shell =
             Access::Create(
                 MakeCachedSession(cache_paths),
-                specforge::MakeSourceCollectionLoadQueueForTesting(
+                spectiary::MakeSourceCollectionLoadQueueForTesting(
                     std::move(dependencies)));
         seed_shell->OpenSource(folder);
         Require(
             DrainAllSourceLoads(*seed_shell),
             "deferred external FITS seed folder should open");
-        specforge::SourceCollectionSession& seed_session =
+        spectiary::SourceCollectionSession& seed_session =
             Access::Session(*seed_shell);
         Require(
             seed_session.Submit(
-                       specforge::SourceCollectionSessionIntent::
+                       spectiary::SourceCollectionSessionIntent::
                            EditSourceCollection(
-                               specforge::SourceCollectionIntent::
+                               spectiary::SourceCollectionIntent::
                                    AddReadOnlyAnnotationResult(
                                        annotation_path)))
                 .loaded,
             "deferred external FITS seed annotation should attach");
         (void)seed_session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 ApplySampleFiltering(
-                    specforge::SampleFilteringIntent::
+                    spectiary::SampleFilteringIntent::
                         AddSource(filter_source_id)));
         (void)seed_session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 ApplySampleFiltering(
-                    specforge::SampleFilteringIntent::
+                    spectiary::SampleFilteringIntent::
                         SetFilterValueSelected(
                             filter_source_id,
                             "1",
                             true)));
-        const specforge::SourceCollectionSessionView seed_view =
+        const spectiary::SourceCollectionSessionView seed_view =
             seed_session.View();
         Require(
             seed_view.filter.evaluation.active &&
@@ -4831,8 +4831,8 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     std::atomic_bool restore_cancel_was_observed = false;
     std::atomic_bool external_completion_was_signaled = false;
     std::vector<std::size_t> folder_decode_indices;
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     configure_common_dependencies(dependencies);
     dependencies.folder_snapshot_loader =
         [&restore_decode_entered_promise,
@@ -4875,7 +4875,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
                 index);
         };
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         MakeDeferredShell(cache_paths, std::move(dependencies));
     Require(
         restore_decode_entered.wait_for(2s) ==
@@ -4887,7 +4887,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     Require(
         Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "deferred external FITS folder setting should apply");
@@ -4913,7 +4913,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     Access::Drain(*shell);
     release_restore_promise.set_value();
 
-    specforge::SourceCollectionSession& session =
+    spectiary::SourceCollectionSession& session =
         Access::Session(*shell);
     const std::string load_error(Access::LoadError(*shell));
     const bool unresolved_source_retained =
@@ -4932,23 +4932,23 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
     Require(
         session.FlushStateCaches(),
         "deferred external FITS failure should preserve source session state");
-    const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCache persisted =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             cache_paths.source_session)
             .cache;
     const auto persisted_source = std::find_if(
         persisted.sources.begin(),
         persisted.sources.end(),
         [&folder](const auto& source) {
-            return specforge::SourcePathIdentityKey(source.path) ==
-                specforge::SourcePathIdentityKey(folder);
+            return spectiary::SourcePathIdentityKey(source.path) ==
+                spectiary::SourcePathIdentityKey(folder);
         });
     Require(
         persisted_source != persisted.sources.end() &&
             persisted_source->annotation_paths.size() == 1 &&
-            specforge::SourcePathIdentityKey(
+            spectiary::SourcePathIdentityKey(
                 persisted_source->annotation_paths.front()) ==
-                specforge::SourcePathIdentityKey(annotation_path),
+                spectiary::SourcePathIdentityKey(annotation_path),
         "deferred restore annotation path should remain persisted after replacement failure");
 
     shell->UnregisterSourceLoadCompletionReadyCallback();
@@ -4959,7 +4959,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
 
 void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
         UniqueTempPath("_external_fits_superseded_folder");
     std::error_code cleanup_error;
@@ -4971,9 +4971,9 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
     WriteFixture(preferred);
     WriteFixture(folder / "zzz.csv");
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const auto& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -4986,17 +4986,17 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
             (void)listing;
             return MakeSnapshot(source, index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
 
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession({}, {}, {}, {}),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::SourceCollectionSession({}, {}, {}, {}),
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     Require(
         Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "superseded external FITS folder setting should apply");
@@ -5025,16 +5025,16 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
     // activation transaction before collecting its superseded trace.
     Access::Drain(*shell);
 
-    const std::vector<specforge::SourceLoadLatencyReport> reports =
+    const std::vector<spectiary::SourceLoadLatencyReport> reports =
         Access::CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
             *shell,
             presentation_frame + 1);
     const auto superseded = std::find_if(
         reports.begin(),
         reports.end(),
-        [](const specforge::SourceLoadLatencyReport& report) {
+        [](const spectiary::SourceLoadLatencyReport& report) {
             return report.outcome ==
-                specforge::SourceLoadLatencyOutcome::Superseded;
+                spectiary::SourceLoadLatencyOutcome::Superseded;
         });
     const bool resolved_trace =
         superseded != reports.end() &&
@@ -5060,10 +5060,10 @@ std::string SpectrumPersistenceBytes(const std::filesystem::path& path)
 
 void TestSpectrumOwnersWriteAndResetIndependently()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     const auto root = UniqueTempPath("_split_owners");
-    const auto startup = PrepareSpecForgeStartup({
+    const auto startup = PrepareSpectiaryStartup({
         .executable_path = CurrentExecutablePath(),
         .application_data_root_override = root,
     });
@@ -5138,12 +5138,12 @@ void TestSpectrumOwnersWriteAndResetIndependently()
 
 void TestSpectrumOwnerFailuresAreIndependent()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     for (const bool preferences_failed : {false, true}) {
         for (int failure = 0; failure < 4; ++failure) {
             const auto root = UniqueTempPath("_split_failure");
-            const auto startup = PrepareSpecForgeStartup({
+            const auto startup = PrepareSpectiaryStartup({
                 .executable_path = CurrentExecutablePath(),
                 .application_data_root_override = root,
             });
@@ -5210,11 +5210,11 @@ void TestSpectrumOwnerFailuresAreIndependent()
 
 void TestSpectrumSaveFailureRetriesOnlyItsOwner()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     for (const bool preferences_failed : {false, true}) {
         const auto root = UniqueTempPath("_split_save_retry");
-        const auto startup = PrepareSpecForgeStartup({
+        const auto startup = PrepareSpectiaryStartup({
             .executable_path = CurrentExecutablePath(),
             .application_data_root_override = root,
         });
@@ -5252,11 +5252,11 @@ void TestSpectrumSaveFailureRetriesOnlyItsOwner()
 
 void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     for (int failure = 0; failure < 4; ++failure) {
         const auto root = UniqueTempPath("_legacy_failure");
-        const auto startup = PrepareSpecForgeStartup({
+        const auto startup = PrepareSpectiaryStartup({
             .executable_path = CurrentExecutablePath(),
             .application_data_root_override = root,
             .legacy_application_data_root = root,
@@ -5304,14 +5304,14 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
 
 void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     const auto root = UniqueTempPath("_view_writeback_safety");
     std::filesystem::create_directories(root);
     RuntimePathInputs inputs;
     inputs.executable_path = CurrentExecutablePath();
     inputs.application_data_root_override = root;
-    const auto startup = PrepareSpecForgeStartup(std::move(inputs));
+    const auto startup = PrepareSpectiaryStartup(std::move(inputs));
     const auto path = startup.runtime_paths().spectrum_viewport_state_path;
     std::filesystem::create_directories(path.parent_path());
     const std::array<std::string, 4> documents{
@@ -5417,65 +5417,65 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
     std::filesystem::create_directories(ui_scale_path);
     std::filesystem::create_directories(panel_path);
 
-    specforge::RuntimePathInputs inputs;
-    inputs.executable_path = specforge::CurrentExecutablePath();
+    spectiary::RuntimePathInputs inputs;
+    inputs.executable_path = spectiary::CurrentExecutablePath();
     inputs.application_data_root_override = root;
-    const specforge::SpecForgeStartup startup =
-        specforge::PrepareSpecForgeStartup(std::move(inputs));
+    const spectiary::SpectiaryStartup startup =
+        spectiary::PrepareSpectiaryStartup(std::move(inputs));
     const std::filesystem::path spectral_path =
         startup.runtime_paths().spectral_line_user_state_path;
     std::filesystem::create_directories(spectral_path);
 
     {
-        specforge::ShellUi shell(startup);
+        spectiary::ShellUi shell(startup);
         Require(
             shell.SetUiLanguageForAutomation(
-                     specforge::UiLanguage::SimplifiedChinese)
+                     spectiary::UiLanguage::SimplifiedChinese)
                     .outcome ==
-                specforge::ApplicationSettingsOutcome::PersistenceFailed,
+                spectiary::ApplicationSettingsOutcome::PersistenceFailed,
             "real ShellUi language owner should report a blocked save");
         Require(
             shell.SetUiScaleForAutomation(125).outcome ==
-                specforge::ApplicationSettingsOutcome::PersistenceFailed,
+                spectiary::ApplicationSettingsOutcome::PersistenceFailed,
             "real ShellUi UI scale owner should report a blocked save");
         Require(
             shell.SetPanelVisibilityForAutomation(
-                       specforge::ApplicationPanel::Annotations,
+                       spectiary::ApplicationPanel::Annotations,
                        false)
                 .applied(),
             "real ShellUi panel owner should retain its live mutation while blocked");
-        const specforge::CatalogUserStateResult spectral_result =
-            specforge::ShellUiTestAccess::SubmitSpectralLines(
+        const spectiary::CatalogUserStateResult spectral_result =
+            spectiary::ShellUiTestAccess::SubmitSpectralLines(
                 shell,
-                specforge::CatalogUserStateIntent::CreateUserGroupingView());
+                spectiary::CatalogUserStateIntent::CreateUserGroupingView());
         Require(
             spectral_result.status ==
-                    specforge::CatalogUserStateResultStatus::Applied &&
+                    spectiary::CatalogUserStateResultStatus::Applied &&
                 spectral_result.persistent_state_changed,
             "real spectral-line owner should create a dirty persistent state");
 
-        const specforge::LocalUserStateHealthView warned =
-            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        const spectiary::LocalUserStateHealthView warned =
+            spectiary::ShellUiTestAccess::PersistenceHealth(shell);
         Require(
             HasHealthMessage(
                 warned,
-                specforge::LocalUserStateArea::Language,
-                specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                spectiary::LocalUserStateArea::Language,
+                spectiary::LocalUserStateHealthMessageKind::LoadWarning) &&
                 HasHealthMessage(
                     warned,
-                    specforge::LocalUserStateArea::UiScale,
-                    specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                    spectiary::LocalUserStateArea::UiScale,
+                    spectiary::LocalUserStateHealthMessageKind::LoadWarning) &&
                 HasHealthMessage(
                     warned,
-                    specforge::LocalUserStateArea::PanelVisibility,
-                    specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                    spectiary::LocalUserStateArea::PanelVisibility,
+                    spectiary::LocalUserStateHealthMessageKind::LoadWarning) &&
                 HasHealthMessage(
                     warned,
-                    specforge::LocalUserStateArea::SpectralLines,
-                    specforge::LocalUserStateHealthMessageKind::LoadWarning),
+                    spectiary::LocalUserStateArea::SpectralLines,
+                    spectiary::LocalUserStateHealthMessageKind::LoadWarning),
             "real ShellUi health should retain each settings owner's load warning");
 
-        const specforge::ShellLocalStateFlushResult failed =
+        const spectiary::ShellLocalStateFlushResult failed =
             shell.FlushLocalState();
         Require(
             failed.application_settings.language_saved &&
@@ -5502,34 +5502,34 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
                     std::string::npos,
             "real shutdown aggregation should retain a failed top-level spectral owner");
 
-        const specforge::LocalUserStateHealthView retrying =
-            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        const spectiary::LocalUserStateHealthView retrying =
+            spectiary::ShellUiTestAccess::PersistenceHealth(shell);
         Require(
-            retrying.kind == specforge::LocalUserStateHealthKind::Retrying &&
+            retrying.kind == spectiary::LocalUserStateHealthKind::Retrying &&
                 HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::Language,
-                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                    spectiary::LocalUserStateArea::Language,
+                    spectiary::LocalUserStateHealthMessageKind::SaveWarning) &&
                 HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::UiScale,
-                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                    spectiary::LocalUserStateArea::UiScale,
+                    spectiary::LocalUserStateHealthMessageKind::SaveWarning) &&
                 !HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::Language,
-                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                    spectiary::LocalUserStateArea::Language,
+                    spectiary::LocalUserStateHealthMessageKind::SaveRetrying) &&
                 !HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::UiScale,
-                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                    spectiary::LocalUserStateArea::UiScale,
+                    spectiary::LocalUserStateHealthMessageKind::SaveRetrying) &&
                 HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::PanelVisibility,
-                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                    spectiary::LocalUserStateArea::PanelVisibility,
+                    spectiary::LocalUserStateHealthMessageKind::SaveRetrying) &&
                 HasHealthMessage(
                     retrying,
-                    specforge::LocalUserStateArea::SpectralLines,
-                    specforge::LocalUserStateHealthMessageKind::SaveRetrying),
+                    spectiary::LocalUserStateArea::SpectralLines,
+                    spectiary::LocalUserStateHealthMessageKind::SaveRetrying),
             "real ShellUi health should retain retrying messages per failed owner");
 
         std::filesystem::remove_all(language_path);
@@ -5542,15 +5542,15 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
             "real ShellUi should expose a settings retry deadline after shutdown failure");
         shell.RunMaintenance(*retry_deadline + 10s);
 
-        const std::optional<specforge::UiLanguage> applied_language =
+        const std::optional<spectiary::UiLanguage> applied_language =
             shell.TakeAppliedUiLanguage();
         const std::optional<int> applied_ui_scale =
             shell.TakeAppliedUiScalePercentage();
         Require(
             !applied_language && !applied_ui_scale &&
-                shell.ui_language() == specforge::UiLanguage::English &&
+                shell.ui_language() == spectiary::UiLanguage::English &&
                 shell.ui_scale_percentage() ==
-                    specforge::kDefaultUiScalePercentage,
+                    spectiary::kDefaultUiScalePercentage,
             "crossing the retry deadline must not publish a terminally failed automation setting");
         Require(
             !shell.TakeAppliedUiLanguage().has_value() &&
@@ -5558,7 +5558,7 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
             "a terminally failed automation setting must not publish delayed duplicate updates");
 
         shell.RunMaintenance(
-            specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+            spectiary::LocalUserStateSaveScheduler::Clock::now() + 10s);
         Require(
             !shell.TakeAppliedUiLanguage().has_value() &&
                 !shell.TakeAppliedUiScalePercentage().has_value(),
@@ -5567,41 +5567,41 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
             std::filesystem::is_regular_file(spectral_path),
             "the real spectral owner should write after settings failures are recovered");
 
-        const specforge::LocalUserStateHealthView recovered =
-            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        const spectiary::LocalUserStateHealthView recovered =
+            spectiary::ShellUiTestAccess::PersistenceHealth(shell);
         Require(
                 HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::Language,
-                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                    spectiary::LocalUserStateArea::Language,
+                    spectiary::LocalUserStateHealthMessageKind::SaveWarning) &&
                 HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::UiScale,
-                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                    spectiary::LocalUserStateArea::UiScale,
+                    spectiary::LocalUserStateHealthMessageKind::SaveWarning) &&
                 !HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::Language,
-                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                    spectiary::LocalUserStateArea::Language,
+                    spectiary::LocalUserStateHealthMessageKind::Recovered) &&
                 !HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::UiScale,
-                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                    spectiary::LocalUserStateArea::UiScale,
+                    spectiary::LocalUserStateHealthMessageKind::Recovered) &&
                 HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::PanelVisibility,
-                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                    spectiary::LocalUserStateArea::PanelVisibility,
+                    spectiary::LocalUserStateHealthMessageKind::Recovered) &&
                 HasHealthMessage(
                     recovered,
-                    specforge::LocalUserStateArea::SpectralLines,
-                    specforge::LocalUserStateHealthMessageKind::Recovered),
+                    spectiary::LocalUserStateArea::SpectralLines,
+                    spectiary::LocalUserStateHealthMessageKind::Recovered),
             "real ShellUi health should retain terminal setting warnings and cache-owner recovery");
 
         Require(
             shell.SetUiLanguageForAutomation(
-                       specforge::UiLanguage::SimplifiedChinese)
+                       spectiary::UiLanguage::SimplifiedChinese)
                     .applied() &&
                 shell.TakeAppliedUiLanguage() ==
-                    specforge::UiLanguage::SimplifiedChinese,
+                    spectiary::UiLanguage::SimplifiedChinese,
             "a new explicit automation language request should retry after repair");
         Require(
             shell.SetUiScaleForAutomation(125).applied() &&
@@ -5610,10 +5610,10 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
     }
 
     {
-        specforge::ShellUi reloaded(startup);
+        spectiary::ShellUi reloaded(startup);
         Require(
             reloaded.ui_language() ==
-                    specforge::UiLanguage::SimplifiedChinese &&
+                    spectiary::UiLanguage::SimplifiedChinese &&
                 reloaded.ui_scale_percentage() == 125 &&
                 !reloaded.PanelVisibilityForAutomation().annotations,
             "a real ShellUi restart should reload all recovered settings owners");
@@ -5627,71 +5627,71 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
 
 void TestAutomationSettingsUseApplicationSettingsOwner()
 {
-    using Access = specforge::ShellUiTestAccess;
-    std::unique_ptr<specforge::ShellUi> shell =
+    using Access = spectiary::ShellUiTestAccess;
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 std::filesystem::path{},
                 std::filesystem::path{},
                 std::filesystem::path{},
                 std::filesystem::path{}),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting());
 
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         language_result =
             shell->SetUiLanguageForAutomation(
-                specforge::UiLanguage::
+                spectiary::UiLanguage::
                     SimplifiedChinese);
     Require(
         language_result.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Applied &&
             shell->ui_language() ==
-                specforge::UiLanguage::
+                spectiary::UiLanguage::
                     SimplifiedChinese &&
             shell->TakeAppliedUiLanguage() ==
-                specforge::UiLanguage::
+                spectiary::UiLanguage::
                     SimplifiedChinese &&
             !shell->TakeAppliedUiLanguage(),
         "automation language changes should use the production owner and emit the normal one-shot UI notification");
 
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         rejected_language =
             shell->SetUiLanguageForAutomation(
-                specforge::UiLanguage::Count);
+                spectiary::UiLanguage::Count);
     Require(
         rejected_language.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Rejected &&
             shell->ui_language() ==
-                specforge::UiLanguage::
+                spectiary::UiLanguage::
                     SimplifiedChinese &&
             !shell->TakeAppliedUiLanguage(),
         "automation should retain the previous language when production validation rejects a value");
 
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         rejected_scale =
             shell->SetUiScaleForAutomation(151);
     Require(
         rejected_scale.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Rejected &&
             shell->ui_scale_percentage() ==
-                specforge::
+                spectiary::
                     kDefaultUiScalePercentage &&
             !shell->TakeAppliedUiScalePercentage(),
         "automation should not partially apply an out-of-range UI scale");
 
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         scale_result =
             shell->SetUiScaleForAutomation(125);
     Require(
         scale_result.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Applied &&
             shell->ui_scale_percentage() == 125 &&
@@ -5699,22 +5699,22 @@ void TestAutomationSettingsUseApplicationSettingsOwner()
             !shell->TakeAppliedUiScalePercentage(),
         "automation UI scale changes should emit the same one-shot application notification as the settings panel");
 
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         settings_ui_scale_result =
             Access::ApplySettingsUiIntent(
                 *shell,
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetUiScale(130));
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         same_value_automation_result =
             shell->SetUiScaleForAutomation(130);
     Require(
         settings_ui_scale_result.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Applied &&
             same_value_automation_result.outcome ==
-                specforge::
+                spectiary::
                     ApplicationSettingsOutcome::
                         Unchanged &&
             shell->ui_scale_percentage() == 130 &&
@@ -5722,39 +5722,39 @@ void TestAutomationSettingsUseApplicationSettingsOwner()
             !shell->TakeAppliedUiScalePercentage(),
         "a same-value automation write must preserve the production UI scale notification that was already pending from the Settings UI");
 
-    const specforge::ThemeSelection explicit_light =
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInLightThemeId());
-    const specforge::ApplicationSettingsResult
+    const spectiary::ThemeSelection explicit_light =
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInLightThemeId());
+    const spectiary::ApplicationSettingsResult
         theme_result = Access::ApplySettingsUiIntent(
             *shell,
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetThemeSelection(explicit_light));
     Require(
         theme_result.outcome ==
-                specforge::ApplicationSettingsOutcome::Applied &&
+                spectiary::ApplicationSettingsOutcome::Applied &&
             shell->theme_selection() == explicit_light &&
             shell->TakeAppliedThemeSelection() ==
                 explicit_light &&
             !shell->TakeAppliedThemeSelection(),
         "a Settings appearance change should publish one runtime theme notification through the application settings owner");
 
-    const specforge::ApplicationSettingsResult panel_result =
+    const spectiary::ApplicationSettingsResult panel_result =
         shell->SetPanelVisibilityForAutomation(
-            specforge::ApplicationPanel::Navigation,
+            spectiary::ApplicationPanel::Navigation,
             false);
-    const specforge::ApplicationSettingsResult
+    const spectiary::ApplicationSettingsResult
         same_panel_result =
             shell->SetPanelVisibilityForAutomation(
-                specforge::ApplicationPanel::Navigation,
+                spectiary::ApplicationPanel::Navigation,
                 false);
-    const specforge::PanelVisibilityState panel_visibility =
+    const spectiary::PanelVisibilityState panel_visibility =
         shell->PanelVisibilityForAutomation();
     Require(
         panel_result.outcome ==
-                specforge::ApplicationSettingsOutcome::Applied &&
+                spectiary::ApplicationSettingsOutcome::Applied &&
             same_panel_result.outcome ==
-                specforge::ApplicationSettingsOutcome::Unchanged &&
+                spectiary::ApplicationSettingsOutcome::Unchanged &&
             !panel_visibility.navigation &&
             panel_visibility.files &&
             panel_visibility.annotations,
@@ -5763,18 +5763,18 @@ void TestAutomationSettingsUseApplicationSettingsOwner()
 
 void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
 {
-    using Access = specforge::ShellUiTestAccess;
-    std::unique_ptr<specforge::ShellUi> shell =
+    using Access = spectiary::ShellUiTestAccess;
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 std::filesystem::path{},
                 std::filesystem::path{},
                 std::filesystem::path{},
                 std::filesystem::path{}),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting());
 
-    specforge::PanelVisibilityState first;
+    spectiary::PanelVisibilityState first;
     first.files = false;
     first.navigation = false;
     first.annotations = false;
@@ -5789,17 +5789,17 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         501,
         17,
         first);
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         first_presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         501,
         std::span(&first_presentation, 1));
     const auto first_presented =
         shell->PresentedPanelVisibilityForAutomation();
 
-    specforge::PanelVisibilityState second = first;
+    spectiary::PanelVisibilityState second = first;
     second.files = true;
     Access::SubmitPanelVisibilityDraw(
         *shell,
@@ -5808,39 +5808,39 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         second);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Files,
+        spectiary::ApplicationPanel::Files,
         18);
     const std::array<
-        specforge::ShellAutomationViewportPresentationState,
+        spectiary::ShellAutomationViewportPresentationState,
         2>
         detached_active{{
             {.viewport_id = 17, .renderable = true},
             {.viewport_id = 18, .renderable = true},
         }};
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         main_only_presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         502,
         std::span(&main_only_presentation, 1),
         detached_active);
     const auto after_main_only_present =
         shell->PresentedPanelVisibilityForAutomation();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         wrong_viewport{
             19,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         502,
         std::span(&wrong_viewport, 1),
         detached_active);
     const auto after_wrong_viewport =
         shell->PresentedPanelVisibilityForAutomation();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         target_presentation{
             18,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         502,
         std::span(&target_presentation, 1),
@@ -5848,7 +5848,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
     const auto second_presented =
         shell->PresentedPanelVisibilityForAutomation();
 
-    specforge::PanelVisibilityState third = first;
+    spectiary::PanelVisibilityState third = first;
     Access::SubmitPanelVisibilityDraw(
         *shell,
         503,
@@ -5867,7 +5867,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
     const auto hidden_after_target_present =
         shell->PresentedPanelVisibilityForAutomation();
 
-    specforge::PanelVisibilityState fourth = first;
+    spectiary::PanelVisibilityState fourth = first;
     fourth.files = true;
     Access::SubmitPanelVisibilityDraw(
         *shell,
@@ -5876,19 +5876,19 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         fourth);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Files,
+        spectiary::ApplicationPanel::Files,
         20);
     const std::array<
-        specforge::ShellAutomationViewportPresentationState,
+        spectiary::ShellAutomationViewportPresentationState,
         2>
         second_detached_active{{
             {.viewport_id = 17, .renderable = true},
             {.viewport_id = 20, .renderable = true},
         }};
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         second_target_presentation{
             20,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         504,
         std::span(&second_target_presentation, 1),
@@ -5899,7 +5899,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         17,
         first);
     const std::array<
-        specforge::ShellAutomationViewportPresentationState,
+        spectiary::ShellAutomationViewportPresentationState,
         1>
         main_only_active{{
             {.viewport_id = 17, .renderable = true},
@@ -5911,7 +5911,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
     const auto hidden_after_target_teardown =
         shell->PresentedPanelVisibilityForAutomation();
 
-    specforge::PanelVisibilityState shared_visible = first;
+    spectiary::PanelVisibilityState shared_visible = first;
     shared_visible.files = true;
     shared_visible.navigation = true;
     Access::SubmitPanelVisibilityDraw(
@@ -5921,23 +5921,23 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         shared_visible);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Files,
+        spectiary::ApplicationPanel::Files,
         30);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Navigation,
+        spectiary::ApplicationPanel::Navigation,
         30);
     const std::array<
-        specforge::ShellAutomationViewportPresentationState,
+        spectiary::ShellAutomationViewportPresentationState,
         2>
         shared_active{{
             {.viewport_id = 17, .renderable = true},
             {.viewport_id = 30, .renderable = true},
         }};
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         shared_target_presentation{
             30,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         506,
         std::span(&shared_target_presentation, 1),
@@ -5950,14 +5950,14 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         shared_visible);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Files,
+        spectiary::ApplicationPanel::Files,
         30);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Navigation,
+        spectiary::ApplicationPanel::Navigation,
         30);
     const std::array<
-        specforge::ShellAutomationViewportPresentationState,
+        spectiary::ShellAutomationViewportPresentationState,
         2>
         shared_minimized{{
             {.viewport_id = 17, .renderable = true},
@@ -5972,7 +5972,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
     const auto shown_minimized_status =
         shell->PanelPresentationStatusForAutomation();
 
-    specforge::PanelVisibilityState shared_hidden =
+    spectiary::PanelVisibilityState shared_hidden =
         shared_visible;
     shared_hidden.files = false;
     Access::SubmitPanelVisibilityDraw(
@@ -5982,7 +5982,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         shared_hidden);
     Access::SubmitPanelDraw(
         *shell,
-        specforge::ApplicationPanel::Navigation,
+        spectiary::ApplicationPanel::Navigation,
         30);
     shell->PresentFrame(
         508,
@@ -6000,10 +6000,10 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         shell->PresentedPanelVisibilityForAutomation();
 
     shell->EnterImmersivePlotMode();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         immersive_presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     shell->PresentFrame(
         509,
         std::span(&immersive_presentation, 1));
@@ -6012,13 +6012,13 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
 
     Require(
         first_presented.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 501 &&
             first_presented.visibility == first,
         "the exact successful main-viewport Present should publish the normal Shell panel snapshot");
     Require(
         after_main_only_present.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 501 &&
             !after_main_only_present.visibility.files &&
             after_wrong_viewport ==
@@ -6026,44 +6026,44 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         "a main-only or unrelated Present must not publish a panel submitted to a detached viewport");
     Require(
         second_presented.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 502 &&
             second_presented.visibility == second,
         "the target detached viewport Present should publish the shown panel state");
     Require(
         after_hide_main_only.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 502 &&
             after_hide_main_only.visibility.files &&
             hidden_after_target_present.FrameIndex(
-                    specforge::ApplicationPanel::Files) ==
+                    spectiary::ApplicationPanel::Files) ==
                 503 &&
             !hidden_after_target_present.visibility.files,
         "hiding a detached panel should wait until its prior viewport presents a frame without the panel");
     Require(
         hidden_after_target_teardown.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 505 &&
             !hidden_after_target_teardown.visibility.files,
         "tearing down a detached panel viewport should also qualify the hidden state without an impossible Present");
     Require(
         shown_while_target_minimized.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 506 &&
             shown_minimized_status.BlockedAfter(
-                specforge::ApplicationPanel::Files,
+                spectiary::ApplicationPanel::Files,
                 506),
         "a minimized detached target must block a same-value shown-panel presentation instead of remaining silently pending");
     Require(
         hidden_while_shared_target_minimized.FrameIndex(
-                specforge::ApplicationPanel::Files) ==
+                spectiary::ApplicationPanel::Files) ==
                 506 &&
             hidden_while_shared_target_minimized.visibility.files &&
             hidden_minimized_status.BlockedAfter(
-                specforge::ApplicationPanel::Files,
+                spectiary::ApplicationPanel::Files,
                 507) &&
             hidden_after_shared_target_present.FrameIndex(
-                    specforge::ApplicationPanel::Files) ==
+                    spectiary::ApplicationPanel::Files) ==
                 508 &&
             !hidden_after_shared_target_present.visibility.files &&
             hidden_after_shared_target_present.visibility.navigation,
@@ -6076,7 +6076,7 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
 
 void TestReloadDoesNotSchedulePersistedFormalRetry()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     std::string task_id;
     const std::filesystem::path source_path =
         UniqueTempPath("_maintenance_navigation_source.npy");
@@ -6097,27 +6097,27 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
             "maintenance topology fixture should create its source");
         stream << "fixture";
     }
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 1);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity =
-        specforge::BuildSourceCollectionIdentity(
+        spectiary::BuildSourceCollectionIdentity(
             *snapshot,
-            specforge::CaptureSourceCollectionSingleFileState(
+            spectiary::CaptureSourceCollectionSingleFileState(
                 source_path));
     context.manifest.sample_names = {
         "alpha",
         "beta",
         "gamma"};
-    const specforge::SampleWorkflowPreparationPaths paths{
+    const spectiary::SampleWorkflowPreparationPaths paths{
         labeling_cache,
         workflow_cache,
         navigation_cache};
 
     {
-        specforge::SampleLabelingController creator(labeling_cache);
+        spectiary::SampleLabelingController creator(labeling_cache);
         creator.ActivateSource(context.identity,
-            specforge::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
+            spectiary::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
         Require(creator.CreateTask("Maintenance task").accepted &&
             creator.UpsertActiveLabel({2, "selected", 's'}).accepted &&
             creator.AssignLabel(1, 2).write.accepted &&
@@ -6130,13 +6130,13 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
     }
 
     {
-        specforge::SourceCollectionSession seed(
+        spectiary::SourceCollectionSession seed(
             {},
             navigation_cache,
             labeling_cache,
             workflow_cache);
-        specforge::PreparedSampleWorkflowState prepared =
-            specforge::PrepareSampleWorkflowState(
+        spectiary::PreparedSampleWorkflowState prepared =
+            spectiary::PrepareSampleWorkflowState(
                 *snapshot,
                 context,
                 1,
@@ -6153,14 +6153,14 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
         const std::string filter_source_id =
             "labeling:" + task_id;
         (void)seed.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 ApplySampleFiltering(
-                    specforge::SampleFilteringIntent::
+                    spectiary::SampleFilteringIntent::
                         AddSource(filter_source_id)));
         (void)seed.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 ApplySampleFiltering(
-                    specforge::SampleFilteringIntent::
+                    spectiary::SampleFilteringIntent::
                         SetFilterValueSelected(
                             filter_source_id,
                             "2",
@@ -6170,8 +6170,8 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
             "maintenance topology fixture should persist seed workflow state");
     }
 
-    specforge::SampleLabelingStateCacheLoadResult pending =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+    spectiary::SampleLabelingStateCacheLoadResult pending =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache);
     auto pending_source = pending.cache.sources.find(
         context.identity.id);
@@ -6184,21 +6184,21 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
         .persistence.pending_sample_indices.insert(0);
     pending_source->second.tasks[0].values.SetPendingValue(0, -1);
     pending_source->second.tasks[0].persistence.save_state.kind =
-        specforge::SampleLabelSaveStateKind::Pending;
+        spectiary::SampleLabelSaveStateKind::Pending;
     pending_source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             pending.cache),
         "maintenance topology fixture should persist a pending retry");
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         navigation_cache,
         labeling_cache,
         workflow_cache);
-    specforge::PreparedSampleWorkflowState prepared =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState prepared =
+        spectiary::PrepareSampleWorkflowState(
             *snapshot,
             context,
             1,
@@ -6222,8 +6222,8 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
     std::promise<void> release_row_two_promise;
     std::shared_future<void> release_row_two =
         release_row_two_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [&row_two_entered_promise, release_row_two](
             const std::filesystem::path& source,
@@ -6239,32 +6239,32 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
             return MakeSnapshot(source, index);
         };
     dependencies.workflow_cache_paths = paths;
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             std::move(session),
-            specforge::MakeSourceCollectionLoadQueueForTesting(
+            spectiary::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     Access::SyncNavigationInputs(*shell);
     const std::optional<std::uint64_t> old_revision =
         Access::SynchronizedNavigationTopologyRevision(
             *shell);
-    const specforge::SourceCollectionSessionResult pending_navigation =
+    const spectiary::SourceCollectionSessionResult pending_navigation =
         Access::Submit(
             *shell,
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::Move(
-                        specforge::SampleNavigationRequest::Next())));
+                    spectiary::SampleNavigationIntent::Move(
+                        spectiary::SampleNavigationRequest::Next())));
     Require(
         pending_navigation.follow_up_spectrum_index == 2 &&
             row_two_entered.wait_for(2s) ==
                 std::future_status::ready,
         "maintenance topology fixture should start the stale row-two follow-up");
 
-    specforge::SampleLabelingController editor(
+    spectiary::SampleLabelingController editor(
         labeling_cache);
     editor.ActivateSource(context.identity,
-        specforge::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
+        spectiary::BuildSampleLabelingCanonicalSourceDescriptor(*snapshot, context));
     Require(
         editor.ActivateTask(
                   task_id)
@@ -6281,7 +6281,7 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
 
 void TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip()
 {
-    using Access = specforge::ShellUiTestAccess;
+    using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path source_a =
         UniqueTempPath("_annotation_dismissal_a.npy");
     const std::filesystem::path source_b =
@@ -6289,22 +6289,22 @@ void TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip()
     WriteFixture(source_a);
     WriteFixture(source_b);
 
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     OpenPreparedFixtureSource(session, source_a);
     OpenPreparedFixtureSource(session, source_b);
     (void)session.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             EditSourceCollection(
-                specforge::SourceCollectionIntent::
+                spectiary::SourceCollectionIntent::
                     SwitchActive(0)));
-    std::unique_ptr<specforge::ShellUi> shell =
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
             std::move(session),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting());
     Require(
         shell->SetPanelVisibilityForAutomation(
-                 specforge::ApplicationPanel::Annotations,
+                 spectiary::ApplicationPanel::Annotations,
                  false)
             .applied(),
         "annotation dismissal fixture should hide the Annotations panel");
@@ -6320,15 +6320,15 @@ void TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip()
 
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             EditSourceCollection(
-                specforge::SourceCollectionIntent::
+                spectiary::SourceCollectionIntent::
                     SwitchActive(1)));
     (void)Access::Submit(
         *shell,
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             EditSourceCollection(
-                specforge::SourceCollectionIntent::
+                spectiary::SourceCollectionIntent::
                     SwitchActive(0)));
 
     Require(
@@ -6346,28 +6346,28 @@ void TestHiddenAnnotationsPanelClearsDismissalAcrossSourceRoundTrip()
 
 void TestShellWorkflowResetPreservesSameFrameLabelingIssue()
 {
-    using Access = specforge::ShellUiTestAccess;
-    std::unique_ptr<specforge::ShellUi> shell =
+    using Access = spectiary::ShellUiTestAccess;
+    std::unique_ptr<spectiary::ShellUi> shell =
         Access::Create(
-            specforge::SourceCollectionSession(
+            spectiary::SourceCollectionSession(
                 {},
                 {},
                 {},
                 {}),
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting());
-    specforge::SourceCollectionSessionResult rejected;
+    spectiary::SourceCollectionSessionResult rejected;
     rejected.labeling_issue =
-        specforge::SampleLabelingOperationResult::Issue::
+        spectiary::SampleLabelingOperationResult::Issue::
             EditTargetChanged;
     rejected.action.workflow_changed = true;
     Access::CaptureLabelingOperationResult(
         *shell,
         rejected);
     const std::string expected{
-        specforge::UiText(
-            specforge::UiLanguage::English,
-            specforge::UiTextId::
+        spectiary::UiText(
+            spectiary::UiLanguage::English,
+            spectiary::UiTextId::
                 LabelingEditTargetChanged)};
     Require(
         Access::LabelingOperationMessage(*shell) ==
@@ -6400,7 +6400,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     for (const std::filesystem::path& path : {
              source_path,
              legacy_annotation_path,
-             specforge::test_support::LegacyFixtureIo::
+             spectiary::test_support::LegacyFixtureIo::
                  MetadataPathForResult(legacy_annotation_path),
              formal_output_path,
              cache_paths.source_session,
@@ -6411,18 +6411,18 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         std::filesystem::remove_all(path, cleanup_error);
     }
     WriteFixture(source_path);
-    specforge::SampleLabelingTask annotation_seed =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask annotation_seed =
+        spectiary::CreateSampleLabelingTask(
             "legacy-formal-task",
             "Legacy formal task",
             3);
     annotation_seed.label_set.labels.push_back(
-        specforge::SampleLabelDefinition{
+        spectiary::SampleLabelDefinition{
             8,
             "Review",
             'r'});
-    const specforge::test_support::SampleLabelResultWriteOutcome annotation_write =
-        specforge::test_support::LegacyFixtureIo{}.SaveLabelResult(
+    const spectiary::test_support::SampleLabelResultWriteOutcome annotation_write =
+        spectiary::test_support::LegacyFixtureIo{}.SaveLabelResult(
             legacy_annotation_path,
             annotation_seed);
     Require(
@@ -6430,21 +6430,21 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         "Shell recovery fixture should seed a formal annotation file");
 
     const auto change_workflow = [](
-                                      specforge::ActiveSampleWorkflowIntent intent) {
-        return specforge::SourceCollectionSessionIntent::
+                                      spectiary::ActiveSampleWorkflowIntent intent) {
+        return spectiary::SourceCollectionSessionIntent::
             ChangeActiveSampleWorkflow(std::move(intent));
     };
     std::string source_identity;
     std::string draft_task_id;
     {
-        specforge::SourceCollectionSession editor =
+        spectiary::SourceCollectionSession editor =
             MakeCachedSession(cache_paths);
         OpenPreparedFixtureSource(
             editor,
             source_path,
             0,
             legacy_annotation_path,
-            specforge::SampleWorkflowPreparationPaths{
+            spectiary::SampleWorkflowPreparationPaths{
                 .labeling_state_cache_path = cache_paths.labeling,
                 .workflow_state_cache_path = cache_paths.workflow,
                 .navigation_state_cache_path = cache_paths.navigation});
@@ -6453,7 +6453,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             "Shell recovery fixture should seed its persistent cache before task output save");
         (void)editor.Submit(
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     StartOrResumeTemporaryLabelingTask()));
         Require(
             editor.View().labeling.has_active_task &&
@@ -6462,7 +6462,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         source_identity = editor.View().labeling.source_identity;
         (void)editor.Submit(
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     SetActiveLabelingOutputPath(
                         formal_output_path)));
         Require(
@@ -6471,9 +6471,9 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         Require(
             editor.Submit(
                        change_workflow(
-                           specforge::ActiveSampleWorkflowIntent::
+                           spectiary::ActiveSampleWorkflowIntent::
                                UpsertActiveLabel(
-                                   specforge::SampleLabelDefinition{
+                                   spectiary::SampleLabelDefinition{
                                        8,
                                        "Review",
                                        'r'})))
@@ -6482,14 +6482,14 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         Require(
             editor.Submit(
                        change_workflow(
-                           specforge::ActiveSampleWorkflowIntent::
+                           spectiary::ActiveSampleWorkflowIntent::
                                AssignActiveLabelToCurrentSample(8)))
                 .label_write
                 .has_value(),
             "Shell recovery fixture should seed formal undo history");
         (void)editor.Submit(
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     StartOrResumeTemporaryLabelingTask()));
         Require(
             editor.View().labeling.active_task_is_temporary,
@@ -6497,7 +6497,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
         draft_task_id = editor.View().labeling.task_id;
         (void)editor.Submit(
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     ActivateLabelingTaskFromAnnotation(
                         formal_output_path)));
         Require(
@@ -6509,98 +6509,98 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             "Shell recovery fixture should persist its formal task and paused draft");
     }
 
-    std::unique_ptr<specforge::ShellUi> shell;
+    std::unique_ptr<spectiary::ShellUi> shell;
     {
-        specforge::SourceCollectionSession session =
+        spectiary::SourceCollectionSession session =
             MakeCachedSession(cache_paths);
         OpenPreparedFixtureSource(
             session,
             source_path,
             0,
             legacy_annotation_path,
-            specforge::SampleWorkflowPreparationPaths{
+            spectiary::SampleWorkflowPreparationPaths{
                 .labeling_state_cache_path = cache_paths.labeling,
                 .workflow_state_cache_path = cache_paths.workflow,
                 .navigation_state_cache_path = cache_paths.navigation});
-        shell = specforge::ShellUiTestAccess::Create(
+        shell = spectiary::ShellUiTestAccess::Create(
             std::move(session),
-            specforge::MakeSourceCollectionLoadQueueForTesting());
+            spectiary::MakeSourceCollectionLoadQueueForTesting());
     }
     const auto& shell_initial_view =
-        specforge::ShellUiTestAccess::Session(*shell).View();
+        spectiary::ShellUiTestAccess::Session(*shell).View();
     Require(
         shell_initial_view.labeling.has_active_task &&
             !shell_initial_view.labeling.active_task_is_temporary,
         "Shell recovery fixture should restore the formal active task");
 
-    (void)specforge::ShellUiTestAccess::Submit(
+    (void)spectiary::ShellUiTestAccess::Submit(
         *shell,
         change_workflow(
-            specforge::ActiveSampleWorkflowIntent::
+            spectiary::ActiveSampleWorkflowIntent::
                 ClearActiveLabelForCurrentSample()));
-    const specforge::SourceCollectionSessionResult shell_assignment =
-        specforge::ShellUiTestAccess::Submit(
+    const spectiary::SourceCollectionSessionResult shell_assignment =
+        spectiary::ShellUiTestAccess::Submit(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     AssignActiveLabelToCurrentSample(8)));
     Require(
         shell_assignment.label_write &&
             shell_assignment.label_write->write.changed &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8,
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8,
         "Shell recovery fixture should seed undo history on the restored formal task");
 
     const std::string active_task_id_before_delete =
-        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
-    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
-    const specforge::SourceCollectionSessionResult deleted =
-        specforge::ShellUiTestAccess::SubmitThroughPanel(
+        spectiary::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+    spectiary::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const spectiary::SourceCollectionSessionResult deleted =
+        spectiary::ShellUiTestAccess::SubmitThroughPanel(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     DeleteTemporaryLabelingTask(
                         source_identity,
                         draft_task_id)));
-    const specforge::SourceCollectionSessionAction delete_action =
-        specforge::ShellUiTestAccess::TakePanelAction(*shell);
-    specforge::ShellUiTestAccess::HandleSessionAction(
+    const spectiary::SourceCollectionSessionAction delete_action =
+        spectiary::ShellUiTestAccess::TakePanelAction(*shell);
+    spectiary::ShellUiTestAccess::HandleSessionAction(
         *shell,
         delete_action);
     const std::string active_task_id_after_delete =
-        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+        spectiary::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
     Require(
         deleted.changed &&
             deleted.view_invalidated &&
             !delete_action.workflow_changed &&
-            specforge::ShellUiTestAccess::HasLabelEditingState(*shell) &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.has_active_task &&
-            !specforge::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
+            spectiary::ShellUiTestAccess::HasLabelEditingState(*shell) &&
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.has_active_task &&
+            !spectiary::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
             active_task_id_after_delete == active_task_id_before_delete &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8 &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8 &&
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
         "Shell delete of an unrelated draft should refresh only recovery projection and preserve editing state");
 
-    const specforge::SourceCollectionSessionResult undone =
-        specforge::ShellUiTestAccess::Submit(
+    const spectiary::SourceCollectionSessionResult undone =
+        spectiary::ShellUiTestAccess::Submit(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     UndoLastLabelWrite()));
     Require(
         undone.label_write &&
             undone.label_write->write.changed &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code ==
-                specforge::kUnlabeledSampleLabelCode,
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.current_code ==
+                spectiary::kUnlabeledSampleLabelCode,
         "Shell delete of an unrelated draft should preserve formal undo history");
 
-    const specforge::SourceCollectionSessionResult replacement_started =
-        specforge::ShellUiTestAccess::Submit(
+    const spectiary::SourceCollectionSessionResult replacement_started =
+        spectiary::ShellUiTestAccess::Submit(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     StartOrResumeTemporaryLabelingTask()));
     const auto& replacement_view =
-        specforge::ShellUiTestAccess::Session(*shell).View().labeling;
+        spectiary::ShellUiTestAccess::Session(*shell).View().labeling;
     Require(
         replacement_started.view_invalidated &&
             replacement_view.has_active_task &&
@@ -6608,81 +6608,81 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             replacement_view.task_id != active_task_id_before_delete,
         "Shell recovery fixture should recreate a replacement draft");
     const std::string replacement_task_id =
-        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
-    const specforge::SourceCollectionSessionResult paused_replacement =
-        specforge::ShellUiTestAccess::Submit(
+        spectiary::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+    const spectiary::SourceCollectionSessionResult paused_replacement =
+        spectiary::ShellUiTestAccess::Submit(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     ActivateLabelingTaskFromAnnotation(
                         formal_output_path)));
     Require(
         paused_replacement.view_invalidated &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.has_temporary_task &&
-            !specforge::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
-            specforge::ShellUiTestAccess::Session(*shell).FlushStateCaches(),
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.has_temporary_task &&
+            !spectiary::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
+            spectiary::ShellUiTestAccess::Session(*shell).FlushStateCaches(),
         "Shell recovery fixture should pause the replacement draft beside the formal task");
 
-    specforge::SampleLabelingController holder(cache_paths.labeling);
+    spectiary::SampleLabelingController holder(cache_paths.labeling);
     holder.ActivateSource(source_identity, 3);
     Require(
         holder.ActivateTask(replacement_task_id).accepted,
         "Shell recovery fixture should hold the replacement draft lease externally");
 
-    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
-    const specforge::SourceCollectionSessionResult rejected_delete =
-        specforge::ShellUiTestAccess::SubmitThroughPanel(
+    spectiary::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const spectiary::SourceCollectionSessionResult rejected_delete =
+        spectiary::ShellUiTestAccess::SubmitThroughPanel(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     DeleteTemporaryLabelingTask(
                         source_identity,
                         replacement_task_id)));
-    const specforge::SourceCollectionSessionAction rejected_delete_action =
-        specforge::ShellUiTestAccess::TakePanelAction(*shell);
-    specforge::ShellUiTestAccess::HandleSessionAction(
+    const spectiary::SourceCollectionSessionAction rejected_delete_action =
+        spectiary::ShellUiTestAccess::TakePanelAction(*shell);
+    spectiary::ShellUiTestAccess::HandleSessionAction(
         *shell,
         rejected_delete_action);
     Require(
         rejected_delete.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable &&
             !rejected_delete_action.workflow_changed &&
-            specforge::ShellUiTestAccess::HasLabelEditingState(*shell),
+            spectiary::ShellUiTestAccess::HasLabelEditingState(*shell),
         "Shell should preserve editing state when an unrelated draft delete is lease-rejected");
 
     Require(
         holder.DeleteActiveTask().accepted,
         "Shell recovery fixture should delete the externally held replacement draft");
-    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
-    const specforge::SourceCollectionSessionResult reconciled_recovery =
-        specforge::ShellUiTestAccess::SubmitThroughPanel(
+    spectiary::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const spectiary::SourceCollectionSessionResult reconciled_recovery =
+        spectiary::ShellUiTestAccess::SubmitThroughPanel(
             *shell,
             change_workflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     RecoverTemporaryLabelingTask(
                         source_identity,
                         replacement_task_id)));
-    const specforge::SourceCollectionSessionAction recovery_action =
-        specforge::ShellUiTestAccess::TakePanelAction(*shell);
-    specforge::ShellUiTestAccess::HandleSessionAction(
+    const spectiary::SourceCollectionSessionAction recovery_action =
+        spectiary::ShellUiTestAccess::TakePanelAction(*shell);
+    spectiary::ShellUiTestAccess::HandleSessionAction(
         *shell,
         recovery_action);
     Require(
         reconciled_recovery.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditTargetChanged &&
             reconciled_recovery.view_invalidated &&
             !recovery_action.workflow_changed &&
-            specforge::ShellUiTestAccess::HasLabelEditingState(*shell) &&
-            specforge::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
+            spectiary::ShellUiTestAccess::HasLabelEditingState(*shell) &&
+            spectiary::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
         "Shell recovery projection convergence should not reset an unchanged formal workflow");
 
     shell.reset();
     for (const std::filesystem::path& path : {
              source_path,
              legacy_annotation_path,
-             specforge::test_support::LegacyFixtureIo::
+             spectiary::test_support::LegacyFixtureIo::
                  MetadataPathForResult(legacy_annotation_path),
              formal_output_path,
              cache_paths.source_session,
@@ -6697,7 +6697,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestRestoreDefaultLayout()
 {
-    using namespace specforge;
+    using namespace spectiary;
     using Access = ShellUiTestAccess;
     auto shell = Access::Create(
         MakePreparedDeferredSession("layout-recovery.csv"),

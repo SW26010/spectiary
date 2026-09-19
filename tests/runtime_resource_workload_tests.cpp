@@ -12,9 +12,9 @@
 namespace {
 
 using namespace std::chrono_literals;
-using Workload = specforge::RuntimeResourceWorkload;
+using Workload = spectiary::RuntimeResourceWorkload;
 using WorkloadAccess =
-    specforge::RuntimeResourceWorkloadTestAccess;
+    spectiary::RuntimeResourceWorkloadTestAccess;
 
 void Require(bool condition, std::string_view message)
 {
@@ -30,7 +30,7 @@ struct DeterministicWorkloadHost {
     {
     }
 
-    specforge::RuntimeResourceWorkloadOperations
+    spectiary::RuntimeResourceWorkloadOperations
     Operations()
     {
         return {
@@ -39,7 +39,7 @@ struct DeterministicWorkloadHost {
             },
             .write_status =
                 [this](
-                    const specforge::
+                    const spectiary::
                         ShellRuntimeResourceObservation&) {
                     ++status_write_count;
                     return true;
@@ -89,7 +89,7 @@ struct DeterministicWorkloadHost {
     }
 
     Workload& workload;
-    specforge::ShellRuntimeResourceObservation
+    spectiary::ShellRuntimeResourceObservation
         observation;
     std::vector<std::filesystem::path>
         opened_sources;
@@ -106,7 +106,7 @@ void TestDeterministicSuccessfulLifecycle()
         L"C:\\fixtures\\baseline.csv";
     const std::filesystem::path stress =
         L"C:\\fixtures\\stress.csv";
-    specforge::RuntimeResourceWorkloadConfiguration
+    spectiary::RuntimeResourceWorkloadConfiguration
         configuration;
     configuration.status_path =
         L"C:\\fixtures\\status.json";
@@ -257,7 +257,7 @@ void TestDeterministicSuccessfulLifecycle()
 
 void TestLocalStateFlushFailureBecomesRunnerFailure()
 {
-    specforge::RuntimeResourceWorkloadConfiguration
+    spectiary::RuntimeResourceWorkloadConfiguration
         configuration;
     configuration.status_path =
         L"C:\\fixtures\\status.json";

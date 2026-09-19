@@ -5,8 +5,8 @@
 #include <stdexcept>
 
 namespace {
-using namespace specforge;
-using specforge::test::WidgetHarness;
+using namespace spectiary;
+using spectiary::test::WidgetHarness;
 
 void Require(bool condition, const char* message)
 {

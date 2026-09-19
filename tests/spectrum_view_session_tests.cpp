@@ -48,11 +48,11 @@ void RequireNear(double actual, double expected, const std::string& message)
         message + ": expected " + std::to_string(expected) + ", got " + std::to_string(actual));
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     std::vector<double> x_values,
-    specforge::SpectrumValueVector y_values)
+    spectiary::SpectrumValueVector y_values)
 {
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->current_spectrum.name = "test spectrum";
     snapshot->current_spectrum.x_values =
         std::make_shared<const std::vector<double>>(std::move(x_values));
@@ -64,7 +64,7 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     std::vector<double> x_values,
     std::vector<double> y_values)
 {
@@ -78,21 +78,21 @@ std::filesystem::path UniqueTempPath()
 {
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-        ("specforge_activation_presentation_binding_" +
+        ("spectiary_activation_presentation_binding_" +
          std::to_string(next_id.fetch_add(1)) +
          ".csv");
 }
 
-specforge::SpectrumSnapshotHandle MakeActivationSnapshot(
+spectiary::SpectrumSnapshotHandle MakeActivationSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
-    const specforge::SpectrumSnapshotHandle source =
+    const spectiary::SpectrumSnapshotHandle source =
         MakeSnapshot(
             {1.0, 2.0, 3.0},
             {3.0, 2.0, 1.0});
     auto snapshot =
-        std::make_shared<specforge::SpectrumSnapshot>(
+        std::make_shared<spectiary::SpectrumSnapshot>(
             *source);
     snapshot->source.id = "binding-fixture";
     snapshot->source.display_name = "binding-fixture";
@@ -104,16 +104,16 @@ specforge::SpectrumSnapshotHandle MakeActivationSnapshot(
     return snapshot;
 }
 
-class QueuedTouchpadGestureSource final : public specforge::PlotTouchpadGestureSource {
+class QueuedTouchpadGestureSource final : public spectiary::PlotTouchpadGestureSource {
 public:
-    [[nodiscard]] specforge::PlotTouchpadGestureBatch Poll(std::uintptr_t) override
+    [[nodiscard]] spectiary::PlotTouchpadGestureBatch Poll(std::uintptr_t) override
     {
-        specforge::PlotTouchpadGestureBatch result = std::move(next_batch_);
+        spectiary::PlotTouchpadGestureBatch result = std::move(next_batch_);
         next_batch_ = {};
         return result;
     }
 
-    void SetTarget(const specforge::PlotTouchpadTarget& target) override
+    void SetTarget(const spectiary::PlotTouchpadTarget& target) override
     {
         target_ = target;
     }
@@ -136,9 +136,9 @@ public:
     void QueuePanAt(const ImVec2& anchor, float pan_x, float pan_y)
     {
         Require(target_.plot_rect.IsValid(), "touchpad target should be available after rendering");
-        specforge::PlotTouchpadGestureDelta pan;
-        pan.kind = specforge::PlotTouchpadGestureKind::Pan;
-        pan.axes = specforge::PlotGestureAxes::Both;
+        spectiary::PlotTouchpadGestureDelta pan;
+        pan.kind = spectiary::PlotTouchpadGestureKind::Pan;
+        pan.axes = spectiary::PlotGestureAxes::Both;
         pan.plot_rect = target_.plot_rect;
         pan.anchor_x = anchor.x;
         pan.anchor_y = anchor.y;
@@ -151,9 +151,9 @@ public:
     void QueueZoomAt(const ImVec2& anchor, double factor)
     {
         Require(target_.plot_rect.IsValid(), "touchpad target should be available after rendering");
-        specforge::PlotTouchpadGestureDelta zoom;
-        zoom.kind = specforge::PlotTouchpadGestureKind::Zoom;
-        zoom.axes = specforge::PlotGestureAxes::Both;
+        spectiary::PlotTouchpadGestureDelta zoom;
+        zoom.kind = spectiary::PlotTouchpadGestureKind::Zoom;
+        zoom.axes = spectiary::PlotGestureAxes::Both;
         zoom.plot_rect = target_.plot_rect;
         zoom.anchor_x = anchor.x;
         zoom.anchor_y = anchor.y;
@@ -173,8 +173,8 @@ public:
     }
 
 private:
-    specforge::PlotTouchpadTarget target_;
-    specforge::PlotTouchpadGestureBatch next_batch_;
+    spectiary::PlotTouchpadTarget target_;
+    spectiary::PlotTouchpadGestureBatch next_batch_;
 };
 
 class ScopedPlotUi {
@@ -205,13 +205,13 @@ public:
     ScopedPlotUi(const ScopedPlotUi&) = delete;
     ScopedPlotUi& operator=(const ScopedPlotUi&) = delete;
 
-    specforge::SpectrumViewRenderFeedback RenderFrame(
-        specforge::SpectrumViewSession& session,
-        const specforge::SpectrumSnapshotHandle& snapshot,
+    spectiary::SpectrumViewRenderFeedback RenderFrame(
+        spectiary::SpectrumViewSession& session,
+        const spectiary::SpectrumSnapshotHandle& snapshot,
         ImVec2 mouse_position = ImVec2(400.0f, 300.0f),
         bool left_button_down = false,
-        specforge::PlotTouchpadGestureSource* touchpad_gestures = nullptr,
-        specforge::SpectrumPlotDisplayOptions display = {},
+        spectiary::PlotTouchpadGestureSource* touchpad_gestures = nullptr,
+        spectiary::SpectrumPlotDisplayOptions display = {},
         float mouse_wheel = 0.0f)
     {
         ImGuiIO& io = ImGui::GetIO();
@@ -232,9 +232,9 @@ public:
         Require(
             ImGui::Begin("Spectrum view session test", nullptr, kWindowFlags),
             "test plot window should be visible");
-        const specforge::SpectrumViewRenderFeedback feedback = session.Render(
+        const spectiary::SpectrumViewRenderFeedback feedback = session.Render(
             snapshot,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             {},
             {},
             display,
@@ -245,13 +245,13 @@ public:
     }
 
     struct OverlayFrameFeedback {
-        specforge::ImmersiveContextOverlayRenderResult render;
+        spectiary::ImmersiveContextOverlayRenderResult render;
         ImGuiID plot_input_id_before_overlay = 0;
         ImGuiID plot_input_id_after_overlay = 0;
     };
 
     OverlayFrameFeedback RenderOverlayFrame(
-        const specforge::ImmersiveContextOverlayView& overlay,
+        const spectiary::ImmersiveContextOverlayView& overlay,
         ImVec2 mouse_position)
     {
         ImGuiIO& io = ImGui::GetIO();
@@ -275,7 +275,7 @@ public:
         feedback.plot_input_id_before_overlay =
             GImGui->LastItemData.ID;
         feedback.render =
-            specforge::RenderImmersiveContextOverlay(
+            spectiary::RenderImmersiveContextOverlay(
                 overlay);
         feedback.plot_input_id_after_overlay =
             GImGui->LastItemData.ID;
@@ -285,10 +285,10 @@ public:
     }
 };
 
-specforge::SourceCollectionSessionView
+spectiary::SourceCollectionSessionView
 MakeImmersiveContextSessionView()
 {
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.current_sample_snapshot =
         MakeSnapshot(
             {1.0, 2.0, 3.0},
@@ -312,13 +312,13 @@ MakeImmersiveContextSessionView()
 
 void TestImmersiveContextOverlayUsesResolvedPositionAndCurrentLabel()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeImmersiveContextSessionView();
     const auto overlay =
-        specforge::BuildImmersiveContextOverlayView(
+        spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
         overlay.has_value(),
         "immersive context should be available for a resolved sample");
@@ -331,12 +331,12 @@ void TestImmersiveContextOverlayUsesResolvedPositionAndCurrentLabel()
         "immersive context should present the current compact label");
 
     view.labeling.current_code =
-        specforge::kUnlabeledSampleLabelCode;
+        spectiary::kUnlabeledSampleLabelCode;
     const auto unset =
-        specforge::BuildImmersiveContextOverlayView(
+        spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
         unset &&
             unset->labeling_context_text ==
@@ -346,23 +346,23 @@ void TestImmersiveContextOverlayUsesResolvedPositionAndCurrentLabel()
 
 void TestImmersiveContextOverlayTracksAutoAdvanceProvenance()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeImmersiveContextSessionView();
     view.labeling.auto_advance = true;
     view.labeling.current_index = 5;
     view.labeling.current_code = 4;
     view.sample_transition =
-        specforge::SourceCollectionSampleTransitionView{
-            .reason = specforge::SourceCollectionSampleTransitionReason::LabelingAutoAdvance,
+        spectiary::SourceCollectionSampleTransitionView{
+            .reason = spectiary::SourceCollectionSampleTransitionReason::LabelingAutoAdvance,
             .from_sample_index = 4,
             .current_sample_index = 5,
             .accepted_label_value = 3,
         };
     const auto auto_advance =
-        specforge::BuildImmersiveContextOverlayView(
+        spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
         auto_advance &&
             auto_advance->labeling_context_text ==
@@ -371,16 +371,16 @@ void TestImmersiveContextOverlayTracksAutoAdvanceProvenance()
         "labeling auto-advance should present the accepted previous label");
 
     view.sample_transition =
-        specforge::SourceCollectionSampleTransitionView{
-            .reason = specforge::SourceCollectionSampleTransitionReason::LocateRow,
+        spectiary::SourceCollectionSampleTransitionView{
+            .reason = spectiary::SourceCollectionSampleTransitionReason::LocateRow,
             .from_sample_index = 5,
             .current_sample_index = 4,
         };
     const auto manual =
-        specforge::BuildImmersiveContextOverlayView(
+        spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
         manual &&
             manual->labeling_context_text == "Label: D" &&
@@ -390,21 +390,21 @@ void TestImmersiveContextOverlayTracksAutoAdvanceProvenance()
 
 void TestImmersiveContextOverlayIsImmersiveOnlyAndHandlesUnavailableContext()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeImmersiveContextSessionView();
     Require(
-        !specforge::BuildImmersiveContextOverlayView(
+        !spectiary::BuildImmersiveContextOverlayView(
             false,
             view,
-            specforge::UiLanguage::English),
+            spectiary::UiLanguage::English),
         "normal plot mode must not expose the immersive context overlay");
 
     view.labeling.has_active_task = false;
     const auto position_only =
-        specforge::BuildImmersiveContextOverlayView(
+        spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
         position_only &&
             position_only->sequence_position_text == "5 / 1000" &&
@@ -413,19 +413,19 @@ void TestImmersiveContextOverlayIsImmersiveOnlyAndHandlesUnavailableContext()
 
     view.navigation.resolved_sequence_position.zero_based_position.reset();
     Require(
-        !specforge::BuildImmersiveContextOverlayView(
+        !spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English),
+            spectiary::UiLanguage::English),
         "an unavailable resolved position must not fall back to legacy navigation fields");
 
     view.navigation.resolved_sequence_position.zero_based_position = 4;
     view.current_sample_snapshot.reset();
     Require(
-        !specforge::BuildImmersiveContextOverlayView(
+        !spectiary::BuildImmersiveContextOverlayView(
             true,
             view,
-            specforge::UiLanguage::English),
+            spectiary::UiLanguage::English),
         "a pending navigation cursor must not present a position before its sample is shown");
 }
 
@@ -434,7 +434,7 @@ void TestImmersiveContextOverlayDrawsWithoutCapturingPlotInput()
     ScopedPlotUi ui;
     const ScopedPlotUi::OverlayFrameFeedback feedback =
         ui.RenderOverlayFrame(
-            specforge::ImmersiveContextOverlayView{
+            spectiary::ImmersiveContextOverlayView{
                 .sequence_position_text = "5 / 1000",
                 .labeling_context_text = "Label: C",
             },
@@ -454,57 +454,57 @@ void TestImmersiveContextOverlayDrawsWithoutCapturingPlotInput()
         "immersive context should stay in the upper-left, away from Keep View in the lower-left");
 }
 
-void ConfigureGaussianSmoothing(specforge::SpectrumViewSession& session)
+void ConfigureGaussianSmoothing(spectiary::SpectrumViewSession& session)
 {
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowPoints(true));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowRawCurve(false));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetGaussianSigma(3.25));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetShowPoints(true));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetShowRawCurve(false));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetGaussianSigma(3.25));
 }
 
 void TestViewportTransitionPolicyUsesChangeReason()
 {
-    const specforge::SpectrumViewportTransition same_collection =
-        specforge::ResolveViewportTransition(
-            specforge::SpectrumViewportRangeMode::Locked,
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection);
+    const spectiary::SpectrumViewportTransition same_collection =
+        spectiary::ResolveViewportTransition(
+            spectiary::SpectrumViewportRangeMode::Locked,
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection);
     Require(
-        same_collection.range_mode == specforge::SpectrumViewportRangeMode::Locked &&
-            same_collection.range_action == specforge::SpectrumViewportRangeAction::Preserve,
+        same_collection.range_mode == spectiary::SpectrumViewportRangeMode::Locked &&
+            same_collection.range_action == spectiary::SpectrumViewportRangeAction::Preserve,
         "a locked view should preserve its range for samples in the same collection");
 
-    const specforge::SpectrumViewportTransition same_sample_reload =
-        specforge::ResolveViewportTransition(
-            specforge::SpectrumViewportRangeMode::Locked,
-            specforge::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection);
+    const spectiary::SpectrumViewportTransition same_sample_reload =
+        spectiary::ResolveViewportTransition(
+            spectiary::SpectrumViewportRangeMode::Locked,
+            spectiary::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection);
     Require(
-        same_sample_reload.range_mode == specforge::SpectrumViewportRangeMode::Locked &&
-            same_sample_reload.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        same_sample_reload.range_mode == spectiary::SpectrumViewportRangeMode::Locked &&
+            same_sample_reload.range_action == spectiary::SpectrumViewportRangeAction::Fit,
         "reloading the current sample should fit without leaving Keep View mode");
 
-    const specforge::SpectrumViewportTransition different_collection =
-        specforge::ResolveViewportTransition(
-            specforge::SpectrumViewportRangeMode::Locked,
-            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged);
+    const spectiary::SpectrumViewportTransition different_collection =
+        spectiary::ResolveViewportTransition(
+            spectiary::SpectrumViewportRangeMode::Locked,
+            spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged);
     Require(
-        different_collection.range_mode == specforge::SpectrumViewportRangeMode::Automatic &&
-            different_collection.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        different_collection.range_mode == spectiary::SpectrumViewportRangeMode::Automatic &&
+            different_collection.range_action == spectiary::SpectrumViewportRangeAction::Fit,
         "switching collections should unlock and fit the viewport");
 
-    const specforge::SpectrumViewportTransition cleared =
-        specforge::ResolveViewportTransition(
-            specforge::SpectrumViewportRangeMode::Locked,
-            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionCleared);
+    const spectiary::SpectrumViewportTransition cleared =
+        spectiary::ResolveViewportTransition(
+            spectiary::SpectrumViewportRangeMode::Locked,
+            spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionCleared);
     Require(
-        cleared.range_mode == specforge::SpectrumViewportRangeMode::Automatic &&
-            cleared.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        cleared.range_mode == spectiary::SpectrumViewportRangeMode::Automatic &&
+            cleared.range_action == spectiary::SpectrumViewportRangeAction::Fit,
         "clearing the active collection should unlock and fit the viewport");
 }
 
 void TestLockedViewportStateCacheRoundTripsAndClears()
 {
     const std::filesystem::path path = UniqueTempPath();
-    const specforge::SpectrumViewportState locked{
+    const spectiary::SpectrumViewportState locked{
         .locked = true,
         .source_collection_identity =
             "viewport-cache-collection",
@@ -515,17 +515,17 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
             .y_max = 2.0625,
         },
     };
-    const specforge::SpectrumPlotPreferences preferences{
+    const spectiary::SpectrumPlotPreferences preferences{
         .plot_colors = {
             .raw_spectrum =
-                specforge::PlotSeriesColor::ExplicitColor({
+                spectiary::PlotSeriesColor::ExplicitColor({
                     .red = 0.125f,
                     .green = 0.25f,
                     .blue = 0.5f,
                     .alpha = 0.75f,
                 }),
             .median_smoothing =
-                specforge::PlotSeriesColor::ExplicitColor({
+                spectiary::PlotSeriesColor::ExplicitColor({
                     .red = 0.9f,
                     .green = 0.7f,
                     .blue = 0.3f,
@@ -535,15 +535,15 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
     };
     std::string error;
     Require(
-        specforge::SaveSpectrumViewportState(
+        spectiary::SaveSpectrumViewportState(
             path,
             locked,
             &error),
         error.empty()
             ? "locked viewport cache should save"
             : error);
-    const specforge::SpectrumViewportStateLoadResult loaded =
-        specforge::LoadSpectrumViewportState(path);
+    const spectiary::SpectrumViewportStateLoadResult loaded =
+        spectiary::LoadSpectrumViewportState(path);
     Require(
         loaded.warning.empty() && loaded.state.locked &&
             loaded.state.source_collection_identity ==
@@ -565,9 +565,9 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
     }
 
     const auto preferences_path = path.string() + ".preferences";
-    Require(specforge::SaveSpectrumPlotPreferences(preferences_path, preferences, &error),
+    Require(spectiary::SaveSpectrumPlotPreferences(preferences_path, preferences, &error),
         "preferences save should not require a source or locked viewport");
-    Require(specforge::LoadSpectrumPlotPreferences(preferences_path).state.plot_colors == preferences.plot_colors,
+    Require(spectiary::LoadSpectrumPlotPreferences(preferences_path).state.plot_colors == preferences.plot_colors,
         "all Auto and explicit RGBA colors should round trip independently");
     {
         std::ifstream stream(preferences_path);
@@ -579,13 +579,13 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
     std::filesystem::remove(preferences_path);
 
     Require(
-        specforge::SaveSpectrumViewportState(
+        spectiary::SaveSpectrumViewportState(
             path,
             {},
             &error),
         "an unlocked shutdown should clear the persisted locked viewport");
     Require(
-        !specforge::LoadSpectrumViewportState(path)
+        !spectiary::LoadSpectrumViewportState(path)
              .state.locked,
         "the cleared viewport cache should reload in automatic mode");
     std::filesystem::remove(path);
@@ -593,7 +593,7 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
 
 void TestLegacySpectrumMigrationCompletesPartialCutover()
 {
-    using namespace specforge;
+    using namespace spectiary;
     const auto root = UniqueTempPath();
     std::filesystem::create_directories(root);
     RuntimePaths paths;
@@ -693,13 +693,13 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             "{\"format_kind\":\"specforge.spectrum_view.state\","
             "\"schema_version\":1,\"locked\":false}\n";
     }
-    const specforge::LegacySpectrumViewStateLoadResult legacy =
-        specforge::LoadLegacySpectrumViewState(path);
+    const spectiary::LegacySpectrumViewStateLoadResult legacy =
+        spectiary::LoadLegacySpectrumViewState(path);
     Require(
         legacy.warning.empty() &&
-            legacy.issue_kind == specforge::VersionedJsonCacheLoadIssueKind::None &&
+            legacy.issue_kind == spectiary::VersionedJsonCacheLoadIssueKind::None &&
             legacy.state.plot_colors ==
-                specforge::SpectrumPlotColors{},
+                spectiary::SpectrumPlotColors{},
         "schema 1 viewport state should migrate to canonical Auto colors without a warning");
 
     {
@@ -718,18 +718,18 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             "\"red\":\"0.4\",\"green\":\"0.5\","
             "\"blue\":\"0.6\",\"alpha\":\"0.7\"}}}\n";
     }
-    const specforge::SpectrumPlotPreferencesLoadResult damaged =
-        specforge::LoadSpectrumPlotPreferences(path);
-    const std::optional<specforge::RgbaColor>& median =
+    const spectiary::SpectrumPlotPreferencesLoadResult damaged =
+        spectiary::LoadSpectrumPlotPreferences(path);
+    const std::optional<spectiary::RgbaColor>& median =
         damaged.state.plot_colors.median_smoothing.
             explicit_color();
     Require(
         !damaged.warning.empty() &&
-            damaged.issue_kind == specforge::VersionedJsonCacheLoadIssueKind::None &&
+            damaged.issue_kind == spectiary::VersionedJsonCacheLoadIssueKind::None &&
             damaged.state.plot_colors.raw_spectrum.mode() ==
-                specforge::PlotSeriesColorMode::Auto &&
+                spectiary::PlotSeriesColorMode::Auto &&
             damaged.state.plot_colors.gaussian_smoothing.mode() ==
-                specforge::PlotSeriesColorMode::Auto &&
+                spectiary::PlotSeriesColorMode::Auto &&
             median && median->red == 0.4f &&
             median->green == 0.5f &&
             median->blue == 0.6f &&
@@ -740,19 +740,19 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
 
 void TestSpectrumViewSessionOwnsCustomCurveColors()
 {
-    specforge::SpectrumViewSession automatic;
-    const specforge::SemanticPalette& palette =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+    spectiary::SpectrumViewSession automatic;
+    const spectiary::SemanticPalette& palette =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
             ->palette;
     const ImVec4 raw = automatic.ResolveSeriesColor(
-        specforge::SpectrumPlotSeries::RawSpectrum,
+        spectiary::SpectrumPlotSeries::RawSpectrum,
         palette);
     const ImVec4 gaussian = automatic.ResolveSeriesColor(
-        specforge::SpectrumPlotSeries::GaussianSmoothing,
+        spectiary::SpectrumPlotSeries::GaussianSmoothing,
         palette);
     const ImVec4 median = automatic.ResolveSeriesColor(
-        specforge::SpectrumPlotSeries::MedianSmoothing,
+        spectiary::SpectrumPlotSeries::MedianSmoothing,
         palette);
     Require(
         raw.x == palette.plot_auto_series[0].x &&
@@ -760,47 +760,47 @@ void TestSpectrumViewSessionOwnsCustomCurveColors()
             median.x == palette.plot_auto_series[2].x,
         "built-in curves should reserve distinct Auto slots in their stable rendering order");
 
-    specforge::SpectrumViewSession session;
-    specforge::SpectrumPlotColors colors;
+    spectiary::SpectrumViewSession session;
+    spectiary::SpectrumPlotColors colors;
     colors.raw_spectrum =
-        specforge::PlotSeriesColor::ExplicitColor({
+        spectiary::PlotSeriesColor::ExplicitColor({
             .red = 0.11f,
             .green = 0.22f,
             .blue = 0.33f,
             .alpha = 0.44f,
         });
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetPlotColors(
+        spectiary::SpectrumViewSessionCommand::SetPlotColors(
             colors));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetPlotSeriesColor(
-            specforge::SpectrumPlotSeries::GaussianSmoothing,
-            specforge::PlotSeriesColor::ExplicitColor({
+        spectiary::SpectrumViewSessionCommand::SetPlotSeriesColor(
+            spectiary::SpectrumPlotSeries::GaussianSmoothing,
+            spectiary::PlotSeriesColor::ExplicitColor({
                 .red = 0.55f,
                 .green = 0.66f,
                 .blue = 0.77f,
                 .alpha = 0.88f,
             })));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetPlotSeriesColor(
-            specforge::SpectrumPlotSeries::MedianSmoothing,
-            specforge::PlotSeriesColor::Auto()));
+        spectiary::SpectrumViewSessionCommand::SetPlotSeriesColor(
+            spectiary::SpectrumPlotSeries::MedianSmoothing,
+            spectiary::PlotSeriesColor::Auto()));
 
-    const specforge::SpectrumPlotColors expected =
+    const spectiary::SpectrumPlotColors expected =
         session.View().plot_colors;
     Require(
         expected.raw_spectrum == colors.raw_spectrum &&
             expected.gaussian_smoothing.mode() ==
-                specforge::PlotSeriesColorMode::ExplicitColor &&
+                spectiary::PlotSeriesColorMode::ExplicitColor &&
             expected.median_smoothing.mode() ==
-                specforge::PlotSeriesColorMode::Auto,
+                spectiary::PlotSeriesColorMode::Auto,
         "series color commands should target the requested raw or smoothing curve without index mapping");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ResetSmoothing());
+        spectiary::SpectrumViewSessionCommand::ResetSmoothing());
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::
                 SourceCollectionChanged));
     Require(
         session.View().plot_colors == expected,
@@ -809,8 +809,8 @@ void TestSpectrumViewSessionOwnsCustomCurveColors()
 
 void TestSpectrumViewSessionCapturesAndRestoresLockedLimits()
 {
-    specforge::SpectrumViewSession session;
-    const specforge::PlotViewLimits expected{
+    spectiary::SpectrumViewSession session;
+    const spectiary::PlotViewLimits expected{
         .x_min = 12.5,
         .x_max = 18.75,
         .y_min = -4.0,
@@ -819,11 +819,11 @@ void TestSpectrumViewSessionCapturesAndRestoresLockedLimits()
     Require(
         session.RestoreLockedViewport(expected),
         "valid persisted limits should restore");
-    const std::optional<specforge::PlotViewLimits> restored =
+    const std::optional<spectiary::PlotViewLimits> restored =
         session.LockedViewportLimits();
     Require(
         session.View().viewport_range_mode ==
-                specforge::SpectrumViewportRangeMode::Locked &&
+                spectiary::SpectrumViewportRangeMode::Locked &&
             restored && restored->x_min == expected.x_min &&
             restored->x_max == expected.x_max &&
             restored->y_min == expected.y_min &&
@@ -831,43 +831,43 @@ void TestSpectrumViewSessionCapturesAndRestoresLockedLimits()
         "restored limits should become the logical view's locked viewport");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::
                 SourceCollectionChanged));
     Require(
         session.View().viewport_range_mode ==
-                specforge::SpectrumViewportRangeMode::Automatic &&
+                spectiary::SpectrumViewportRangeMode::Automatic &&
             !session.LockedViewportLimits(),
         "a later collection change should still unlock a restored viewport");
 }
 
 void TestIndependentSpectrumViewsDoNotShareViewportLock()
 {
-    specforge::SpectrumViewSession first;
-    specforge::SpectrumViewSession second;
+    spectiary::SpectrumViewSession first;
+    spectiary::SpectrumViewSession second;
     first.Submit(
-        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
-            specforge::SpectrumViewportRangeMode::Locked));
+        spectiary::SpectrumViewSessionCommand::SetViewportRangeMode(
+            spectiary::SpectrumViewportRangeMode::Locked));
 
     Require(
-        first.View().viewport_range_mode == specforge::SpectrumViewportRangeMode::Locked,
+        first.View().viewport_range_mode == spectiary::SpectrumViewportRangeMode::Locked,
         "the owning spectrum view should observe its viewport lock");
     Require(
-        second.View().viewport_range_mode == specforge::SpectrumViewportRangeMode::Automatic,
+        second.View().viewport_range_mode == spectiary::SpectrumViewportRangeMode::Automatic,
         "independent spectrum views must not share viewport lock state");
 }
 
 void TestSourceRosterClassifiesSnapshotChanges()
 {
-    specforge::SourceCollectionRoster roster;
+    spectiary::SourceCollectionRoster roster;
     const std::filesystem::path first_path = "viewport-source-a.csv";
     const std::filesystem::path second_path = "viewport-source-b.csv";
-    specforge::SourceCollectionContextReuseProof first_proof;
+    spectiary::SourceCollectionContextReuseProof first_proof;
     first_proof.identity.id = "viewport-collection-a";
-    specforge::SourceCollectionContextReuseProof second_proof;
+    spectiary::SourceCollectionContextReuseProof second_proof;
     second_proof.identity.id = "viewport-collection-b";
 
-    const specforge::SourceCollectionRosterOpenResult first =
+    const spectiary::SourceCollectionRosterOpenResult first =
         roster.OpenPreparedSource(
             first_path,
             0,
@@ -876,10 +876,10 @@ void TestSourceRosterClassifiesSnapshotChanges()
             first_proof);
     Require(
         first.action.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+            spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
         "opening the first source should be classified as a collection change");
 
-    const specforge::SourceCollectionRosterOpenResult next_sample =
+    const spectiary::SourceCollectionRosterOpenResult next_sample =
         roster.OpenPreparedSource(
             first_path,
             1,
@@ -888,12 +888,12 @@ void TestSourceRosterClassifiesSnapshotChanges()
             first_proof);
     Require(
         next_sample.action.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
         "loading another sample with the same collection identity should preserve its scope");
 
-    const specforge::SpectrumSnapshotHandle current_snapshot =
+    const spectiary::SpectrumSnapshotHandle current_snapshot =
         roster.snapshot();
-    const specforge::SourceCollectionRosterOpenResult unchanged =
+    const spectiary::SourceCollectionRosterOpenResult unchanged =
         roster.OpenPreparedSource(
             first_path,
             1,
@@ -903,10 +903,10 @@ void TestSourceRosterClassifiesSnapshotChanges()
     Require(
         !unchanged.action.snapshot_changed &&
             unchanged.action.snapshot_change_reason ==
-                specforge::SourceCollectionSnapshotChangeReason::None,
+                spectiary::SourceCollectionSnapshotChangeReason::None,
         "re-presenting the same snapshot handle and index should be a no-op");
 
-    const specforge::SourceCollectionRosterOpenResult reloaded =
+    const spectiary::SourceCollectionRosterOpenResult reloaded =
         roster.OpenPreparedSource(
             first_path,
             1,
@@ -915,11 +915,11 @@ void TestSourceRosterClassifiesSnapshotChanges()
             first_proof);
     Require(
         reloaded.action.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection,
+            spectiary::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection,
         "replacing the current sample should retain an explicit reload reason");
 
     roster.RememberActiveSourceIndex(2);
-    const specforge::SourceCollectionRosterOpenResult corrective_follow_up =
+    const spectiary::SourceCollectionRosterOpenResult corrective_follow_up =
         roster.OpenPreparedSource(
             first_path,
             2,
@@ -928,10 +928,10 @@ void TestSourceRosterClassifiesSnapshotChanges()
             first_proof);
     Require(
         corrective_follow_up.action.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
         "a corrective follow-up should compare against the displayed snapshot index, not the roster target");
 
-    const specforge::SourceCollectionRosterOpenResult second =
+    const spectiary::SourceCollectionRosterOpenResult second =
         roster.OpenPreparedSource(
             second_path,
             0,
@@ -940,47 +940,47 @@ void TestSourceRosterClassifiesSnapshotChanges()
             second_proof);
     Require(
         second.action.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+            spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
         "opening a different collection identity should be classified as a collection change");
 
-    const specforge::SourceCollectionSessionAction reactivated =
+    const spectiary::SourceCollectionSessionAction reactivated =
         roster.ActivateSource(0);
     Require(
         reactivated.snapshot_change_reason ==
-            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+            spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
         "reactivating another roster source should be classified as a collection change");
 
-    const specforge::SourceCollectionSessionAction unchanged_activation =
+    const spectiary::SourceCollectionSessionAction unchanged_activation =
         roster.ActivateSource(0);
     Require(
         !unchanged_activation.snapshot_changed &&
             unchanged_activation.snapshot_change_reason ==
-                specforge::SourceCollectionSnapshotChangeReason::None,
+                spectiary::SourceCollectionSnapshotChangeReason::None,
         "activating the current roster source should be a no-op");
 }
 
 void TestSnapshotResetPreservesControlsAndFitsNewData()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
+    spectiary::SpectrumViewSession session;
     ConfigureGaussianSmoothing(session);
 
-    const specforge::SpectrumViewRenderFeedback first =
+    const spectiary::SpectrumViewRenderFeedback first =
         ui.RenderFrame(session, MakeSnapshot({1.0, 2.0, 3.0}, {2.0, 4.0, 3.0}));
     Require(
         first.plot_submitted && first.fit_applied && first.visible_limits,
         "first render should submit and fit the spectrum");
-    std::vector<specforge::SpectrumValueVector> retained =
+    std::vector<spectiary::SpectrumValueVector> retained =
         session.RetainHeavySnapshotResources();
     Require(
         retained.size() == 2,
         "smoothed render should expose both heavy cache resources for retention");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
 
-    const specforge::SpectrumViewSessionView view = session.View();
+    const spectiary::SpectrumViewSessionView view = session.View();
     Require(view.show_points, "snapshot reset should preserve show-points state");
     Require(!view.show_raw_curve, "snapshot reset should preserve raw-curve visibility");
     Require(
@@ -996,7 +996,7 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
         "snapshot reset should release current smoothing caches");
     Require(retained[0] && retained[1], "retained handles should keep retired resources alive");
 
-    const specforge::SpectrumViewRenderFeedback second =
+    const spectiary::SpectrumViewRenderFeedback second =
         ui.RenderFrame(session, MakeSnapshot({100.0, 200.0, 300.0}, {5.0, 6.0, 7.0}));
     Require(
         second.plot_submitted && second.fit_applied && second.visible_limits,
@@ -1009,20 +1009,20 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
 void TestHiddenCurvesStillReportPresentedPlotFrame()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    spectiary::SpectrumViewSession session;
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({1.0, 2.0, 3.0}, {2.0, 4.0, 3.0});
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetShowRawCurve(false));
+        spectiary::SpectrumViewSessionCommand::SetShowRawCurve(false));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetShowPoints(false));
+        spectiary::SpectrumViewSessionCommand::SetShowPoints(false));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(false));
+        spectiary::SpectrumViewSessionCommand::SetShowGaussianSmoothed(false));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetShowMedianSmoothed(false));
+        spectiary::SpectrumViewSessionCommand::SetShowMedianSmoothed(false));
 
-    const specforge::SpectrumViewRenderFeedback feedback =
+    const spectiary::SpectrumViewRenderFeedback feedback =
         ui.RenderFrame(session, snapshot);
     Require(
         feedback.plot_submitted,
@@ -1035,18 +1035,18 @@ void TestHiddenCurvesStillReportPresentedPlotFrame()
 void TestFitAndStoredLimitReuseAreObservable()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    spectiary::SpectrumViewSession session;
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({4100.0, 4500.0, 4900.0}, {-0.25, 1.75, 0.5});
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
-    const specforge::SpectrumViewRenderFeedback first = ui.RenderFrame(session, snapshot);
+    session.Submit(spectiary::SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
+    const spectiary::SpectrumViewRenderFeedback first = ui.RenderFrame(session, snapshot);
     Require(
         first.fit_applied && !first.stored_limits_reused && first.visible_limits,
         "limit sync before the first render should remain a no-op");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
-    const specforge::SpectrumViewRenderFeedback reused = ui.RenderFrame(session, snapshot);
+    session.Submit(spectiary::SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
+    const spectiary::SpectrumViewRenderFeedback reused = ui.RenderFrame(session, snapshot);
     Require(
         reused.stored_limits_reused && !reused.fit_applied && reused.visible_limits,
         "mode-switch sync should reuse stored limits");
@@ -1067,8 +1067,8 @@ void TestFitAndStoredLimitReuseAreObservable()
         first.visible_limits->y_max,
         "stored limit sync should preserve y max");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::RequestFitView());
-    const specforge::SpectrumViewRenderFeedback fitted = ui.RenderFrame(session, snapshot);
+    session.Submit(spectiary::SpectrumViewSessionCommand::RequestFitView());
+    const spectiary::SpectrumViewRenderFeedback fitted = ui.RenderFrame(session, snapshot);
     Require(
         fitted.fit_applied && !fitted.stored_limits_reused,
         "fit command should supersede stored-limit reuse");
@@ -1077,9 +1077,9 @@ void TestFitAndStoredLimitReuseAreObservable()
 void TestViewportLockOverlayTogglesInAxisCorner()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
+    spectiary::SpectrumViewSession session;
     QueuedTouchpadGestureSource touchpad_gestures;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({4100.0, 4500.0, 4900.0}, {-0.25, 1.75, 0.5});
 
     Require(
@@ -1097,30 +1097,30 @@ void TestViewportLockOverlayTogglesInAxisCorner()
     (void)ui.RenderFrame(session, snapshot, lock_center, false);
     Require(
         session.View().viewport_range_mode ==
-            specforge::SpectrumViewportRangeMode::Locked,
+            spectiary::SpectrumViewportRangeMode::Locked,
         "clicking the axis-corner overlay should lock the viewport");
 
     (void)ui.RenderFrame(session, snapshot, lock_center, true);
     (void)ui.RenderFrame(session, snapshot, lock_center, false);
     Require(
         session.View().viewport_range_mode ==
-            specforge::SpectrumViewportRangeMode::Automatic,
+            spectiary::SpectrumViewportRangeMode::Automatic,
         "clicking the axis-corner overlay again should unlock the viewport");
 }
 
 void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
+    spectiary::SpectrumViewSession session;
     QueuedTouchpadGestureSource touchpad_gestures;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({0.0, 50.0, 100.0}, {-10.0, 0.0, 10.0});
-    const specforge::SpectrumPlotDisplayOptions immersive{
+    const spectiary::SpectrumPlotDisplayOptions immersive{
         .edge_axis_overlay = true,
         .include_edge_pixels = true,
     };
 
-    const specforge::SpectrumViewRenderFeedback initial =
+    const spectiary::SpectrumViewRenderFeedback initial =
         ui.RenderFrame(
             session,
             snapshot,
@@ -1133,7 +1133,7 @@ void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
         "immersive wheel regression should establish initial plot limits");
     const ImVec2 lock_center =
         touchpad_gestures.ViewportLockCenter();
-    const specforge::SpectrumViewRenderFeedback wheel_over_lock =
+    const spectiary::SpectrumViewRenderFeedback wheel_over_lock =
         ui.RenderFrame(
             session,
             snapshot,
@@ -1155,7 +1155,7 @@ void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
         "Keep View hit rect should consume immersive x-axis wheel max");
 
     touchpad_gestures.QueuePanAt(lock_center, 40.0f, 30.0f);
-    const specforge::SpectrumViewRenderFeedback pan_over_lock =
+    const spectiary::SpectrumViewRenderFeedback pan_over_lock =
         ui.RenderFrame(
             session,
             snapshot,
@@ -1184,7 +1184,7 @@ void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
         "Keep View hit rect should consume immersive touchpad pan y max");
 
     touchpad_gestures.QueueZoomAt(lock_center, 2.0);
-    const specforge::SpectrumViewRenderFeedback pinch_over_lock =
+    const spectiary::SpectrumViewRenderFeedback pinch_over_lock =
         ui.RenderFrame(
             session,
             snapshot,
@@ -1216,12 +1216,12 @@ void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
 void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
+    spectiary::SpectrumViewSession session;
     QueuedTouchpadGestureSource touchpad_gestures;
-    const specforge::SpectrumSnapshotHandle first_snapshot =
+    const spectiary::SpectrumSnapshotHandle first_snapshot =
         MakeSnapshot({0.0, 50.0, 100.0}, {-10.0, 0.0, 10.0});
 
-    const specforge::SpectrumViewRenderFeedback initial =
+    const spectiary::SpectrumViewRenderFeedback initial =
         ui.RenderFrame(
             session,
             first_snapshot,
@@ -1236,17 +1236,17 @@ void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
         "automatic initial fit should not count as a user viewport mutation");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
-            specforge::SpectrumViewportRangeMode::Locked));
+        spectiary::SpectrumViewSessionCommand::SetViewportRangeMode(
+            spectiary::SpectrumViewportRangeMode::Locked));
     Require(
         session.View().viewport_range_mode ==
-            specforge::SpectrumViewportRangeMode::Locked,
+            spectiary::SpectrumViewportRangeMode::Locked,
         "viewport lock mode should be observable");
     const std::uint64_t locked_revision =
         session.ViewportMutationRevision();
 
     touchpad_gestures.QueueZoom(2.0);
-    const specforge::SpectrumViewRenderFeedback adjusted =
+    const spectiary::SpectrumViewRenderFeedback adjusted =
         ui.RenderFrame(
             session,
             first_snapshot,
@@ -1264,9 +1264,9 @@ void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
         "user viewport navigation should advance the mutation revision");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
-    const specforge::SpectrumViewRenderFeedback second =
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const spectiary::SpectrumViewRenderFeedback second =
         ui.RenderFrame(
             session,
             MakeSnapshot({1000.0, 1500.0, 2000.0}, {50.0, 75.0, 100.0}));
@@ -1279,9 +1279,9 @@ void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
     RequireNear(second.visible_limits->y_max, adjusted.visible_limits->y_max, "locked y max");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
-    const specforge::SpectrumViewRenderFeedback third =
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const spectiary::SpectrumViewRenderFeedback third =
         ui.RenderFrame(
             session,
             MakeSnapshot({3000.0, 3500.0, 4000.0}, {-200.0, 0.0, 200.0}));
@@ -1294,12 +1294,12 @@ void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
     RequireNear(third.visible_limits->y_max, adjusted.visible_limits->y_max, "stable locked y max");
 
     session.Submit(
-        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
-            specforge::SpectrumViewportRangeMode::Automatic));
+        spectiary::SpectrumViewSessionCommand::SetViewportRangeMode(
+            spectiary::SpectrumViewportRangeMode::Automatic));
     session.Submit(
-        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
-            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
-    const specforge::SpectrumViewRenderFeedback unlocked =
+        spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+            spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const spectiary::SpectrumViewRenderFeedback unlocked =
         ui.RenderFrame(
             session,
             MakeSnapshot({5000.0, 5500.0, 6000.0}, {500.0, 600.0, 700.0}));
@@ -1314,11 +1314,11 @@ void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
 void TestSmoothingCommandsOwnCacheInvalidation()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    spectiary::SpectrumViewSession session;
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({1.0, 2.0, 3.0, 4.0, 5.0}, {2.0, 4.0, 3.0, 5.0, 1.0});
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowMedianSmoothed(true));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetMedianKernelSize(4));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetShowMedianSmoothed(true));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetMedianKernelSize(4));
 
     Require(
         session.View().smoothing_parameters.median_kernel_size == 5,
@@ -1331,7 +1331,7 @@ void TestSmoothingCommandsOwnCacheInvalidation()
         session.RetainHeavySnapshotResources().size() == 2,
         "render should populate smoothing resources");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SetMedianKernelSize(9));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetMedianKernelSize(9));
     Require(
         session.RetainHeavySnapshotResources().empty(),
         "changing the median kernel should clear smoothing resources");
@@ -1343,19 +1343,19 @@ void TestSmoothingCommandsOwnCacheInvalidation()
         session.RetainHeavySnapshotResources().size() == 2,
         "render should rebuild smoothing resources");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
     Require(
         ui.RenderFrame(session, snapshot).plot_submitted,
         "gaussian and median smoothing should render together");
-    const std::vector<specforge::SpectrumValueVector> both_smoothing_resources =
+    const std::vector<spectiary::SpectrumValueVector> both_smoothing_resources =
         session.RetainHeavySnapshotResources();
     Require(
         both_smoothing_resources.size() == 3,
         "simultaneous smoothing should retain one source and both smoothed curves");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SetGaussianSigma(4.0));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetGaussianSigma(4.0));
     Require(ui.RenderFrame(session, snapshot).plot_submitted, "gaussian smoothing should rebuild");
-    const std::vector<specforge::SpectrumValueVector> gaussian_changed_resources =
+    const std::vector<spectiary::SpectrumValueVector> gaussian_changed_resources =
         session.RetainHeavySnapshotResources();
     Require(
         gaussian_changed_resources.size() == 3 &&
@@ -1363,9 +1363,9 @@ void TestSmoothingCommandsOwnCacheInvalidation()
             gaussian_changed_resources[2] == both_smoothing_resources[2],
         "changing sigma should rebuild only the gaussian smoothing cache");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::SetMedianKernelSize(11));
+    session.Submit(spectiary::SpectrumViewSessionCommand::SetMedianKernelSize(11));
     Require(ui.RenderFrame(session, snapshot).plot_submitted, "median smoothing should rebuild");
-    const std::vector<specforge::SpectrumValueVector> median_changed_resources =
+    const std::vector<spectiary::SpectrumValueVector> median_changed_resources =
         session.RetainHeavySnapshotResources();
     Require(
         median_changed_resources.size() == 3 &&
@@ -1373,8 +1373,8 @@ void TestSmoothingCommandsOwnCacheInvalidation()
             median_changed_resources[2] != gaussian_changed_resources[2],
         "changing kernel size should rebuild only the median smoothing cache");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::ResetSmoothing());
-    const specforge::SpectrumViewSessionView reset = session.View();
+    session.Submit(spectiary::SpectrumViewSessionCommand::ResetSmoothing());
+    const spectiary::SpectrumViewSessionView reset = session.View();
     Require(
         reset.show_raw_curve && !reset.show_gaussian_smoothed &&
             !reset.show_median_smoothed,
@@ -1387,21 +1387,21 @@ void TestSmoothingCommandsOwnCacheInvalidation()
 void TestRenderFeedbackTracksPanLifecycle()
 {
     ScopedPlotUi ui;
-    specforge::SpectrumViewSession session;
-    const specforge::SpectrumSnapshotHandle snapshot =
+    spectiary::SpectrumViewSession session;
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({1.0, 2.0, 3.0}, {2.0, 4.0, 3.0});
 
     Require(!ui.RenderFrame(session, snapshot).pan_active, "plot pan should be inactive initially");
     Require(
         !ui.RenderFrame(session, snapshot, ImVec2(400.0f, 300.0f), true).pan_active,
         "mouse press without movement should not start a pan");
-    const specforge::SpectrumViewRenderFeedback dragging =
+    const spectiary::SpectrumViewRenderFeedback dragging =
         ui.RenderFrame(session, snapshot, ImVec2(430.0f, 300.0f), true);
     Require(
         dragging.pan_active && session.PlotPanActive(),
         "render feedback should expose an active plot pan");
 
-    const specforge::SpectrumViewRenderFeedback released =
+    const spectiary::SpectrumViewRenderFeedback released =
         ui.RenderFrame(session, snapshot, ImVec2(430.0f, 300.0f), false);
     Require(
         !released.pan_active && !session.PlotPanActive(),
@@ -1423,12 +1423,12 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
     }
 
     ScopedPlotUi ui;
-    specforge::SourceCollectionSession source_session(
+    spectiary::SourceCollectionSession source_session(
         {},
         {},
         {},
         {});
-    specforge::SpectrumViewSession presentation;
+    spectiary::SpectrumViewSession presentation;
     ConfigureGaussianSmoothing(presentation);
 
     auto destroyed_promise =
@@ -1436,7 +1436,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
             std::promise<std::thread::id>>();
     std::future<std::thread::id> destroyed =
         destroyed_promise->get_future();
-    specforge::SpectrumValueVector old_y_values(
+    spectiary::SpectrumValueVector old_y_values(
         new const std::vector<double>{
             2.0,
             4.0,
@@ -1447,7 +1447,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
             destroyed_promise->set_value(
                 std::this_thread::get_id());
         });
-    specforge::SpectrumSnapshotHandle old_snapshot =
+    spectiary::SpectrumSnapshotHandle old_snapshot =
         MakeSnapshot(
             {1.0, 2.0, 3.0},
             old_y_values);
@@ -1463,14 +1463,14 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
             .size() == 2,
         "binding regression requires both heavy smoothing resources");
     presentation.Submit(
-        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
-            specforge::SpectrumViewportRangeMode::Locked));
+        spectiary::SpectrumViewSessionCommand::SetViewportRangeMode(
+            spectiary::SpectrumViewportRangeMode::Locked));
     old_snapshot.reset();
     old_y_values.reset();
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    spectiary::SourceCollectionLoadDependencies dependencies;
 
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
@@ -1479,14 +1479,14 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
                 source,
                 index);
         };
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
-    specforge::SourceCollectionActivationTransaction
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionActivationTransaction
         activation(
             source_session,
-            specforge::
+            spectiary::
                 MakeSourceCollectionLoadQueueForTesting(
                     std::move(dependencies)));
-    specforge::
+    spectiary::
         BindSourceCollectionActivationPresentationLifecycle(
             activation,
             presentation);
@@ -1500,7 +1500,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
     while (std::chrono::steady_clock::now() <
            deadline) {
         (void)activation.Drain(false);
-        const specforge::SpectrumSnapshotHandle current =
+        const spectiary::SpectrumSnapshotHandle current =
             source_session.CurrentSampleSnapshot();
         activated =
             current && current->source.path == path &&
@@ -1527,7 +1527,7 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
         "snapshot activation should reset the bound presentation view");
     Require(
         presentation.View().viewport_range_mode ==
-            specforge::SpectrumViewportRangeMode::Automatic,
+            spectiary::SpectrumViewportRangeMode::Automatic,
         "activating a different source collection should unlock the viewport");
     Require(
         retired,

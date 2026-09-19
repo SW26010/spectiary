@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleLabelingSourceState {
     std::size_t sample_count = 0;
@@ -123,4 +123,4 @@ SampleLabelingStateCoordinationDirectories(
     const SampleLabelingTask& candidate,
     std::string_view source_identity);
 
-}  // namespace specforge
+}  // namespace spectiary

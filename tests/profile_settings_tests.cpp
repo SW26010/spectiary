@@ -25,7 +25,7 @@ public:
     TemporaryDirectory()
     {
         path_ = std::filesystem::temp_directory_path() /
-                ("specforge-profile-settings-tests-" + std::to_string(std::rand()));
+                ("spectiary-profile-settings-tests-" + std::to_string(std::rand()));
         std::filesystem::create_directories(path_);
     }
 
@@ -103,22 +103,22 @@ void TestMissingSettingsUseDefaultDirectory()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path default_directory = temporary.path() / "default-logs";
-    const specforge::ProfileSettingsLoadResult loaded =
-        specforge::LoadProfileSettings(specforge::RuntimePaths{},
+    const spectiary::ProfileSettingsLoadResult loaded =
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{},
             temporary.path() / "missing.json");
-    const specforge::ProfileSettings& settings =
+    const spectiary::ProfileSettings& settings =
         loaded.settings;
     Require(
         loaded.warning.empty(),
         "missing profile settings should be a healthy default");
-    const specforge::ProfileOutputDirectoryResolution resolution =
-        specforge::ResolveProfileOutputDirectory(settings, default_directory, std::nullopt);
+    const spectiary::ProfileOutputDirectoryResolution resolution =
+        spectiary::ResolveProfileOutputDirectory(settings, default_directory, std::nullopt);
 
     Require(
         resolution.directory == default_directory,
         "missing settings should retain the storage-profile default directory");
     Require(
-        resolution.source == specforge::ProfileOutputDirectorySource::Default,
+        resolution.source == spectiary::ProfileOutputDirectorySource::Default,
         "missing settings should identify the default source");
 }
 
@@ -128,24 +128,24 @@ void TestCustomDirectoryRoundTrips()
     const std::filesystem::path settings_path = temporary.path() / "profile-settings.json";
     const std::filesystem::path custom_directory =
         temporary.path() / L"\u81EA\u5B9A\u4E49 profile";
-    const specforge::ProfileSettings expected{.output_directory = custom_directory};
+    const spectiary::ProfileSettings expected{.output_directory = custom_directory};
     std::string error;
 
     Require(
-        specforge::SaveProfileSettings(specforge::RuntimePaths{}, settings_path, expected, &error),
+        spectiary::SaveProfileSettings(spectiary::RuntimePaths{}, settings_path, expected, &error),
         "custom profile output directory should save");
     Require(error.empty(), "successful settings save should not report an error");
     const std::string stable_output =
         ReadFile(settings_path);
     Require(
-        specforge::SaveProfileSettings(specforge::RuntimePaths{},
+        spectiary::SaveProfileSettings(spectiary::RuntimePaths{},
             settings_path,
             expected,
             &error) &&
             ReadFile(settings_path) == stable_output,
         "profile settings output should be byte-stable");
     Require(
-        specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path).settings ==
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{}, settings_path).settings ==
             expected,
         "custom profile output directory should round-trip as Unicode");
 }
@@ -159,7 +159,7 @@ void TestLegacyCompactSettingsRemainReadable()
         settings_path,
         R"({"format_kind":"spectiary.profile_settings","schema_version":1,"output_directory":{"path_kind":"absolute","path":"C:/legacy/profiles"}})");
     Require(
-        specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path)
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{}, settings_path)
                 .settings.output_directory ==
             std::optional<std::filesystem::path>{
                 "C:/legacy/profiles"},
@@ -171,37 +171,37 @@ void TestResetToDefaultRoundTrips()
     TemporaryDirectory temporary;
     const std::filesystem::path settings_path = temporary.path() / "profile-settings.json";
     Require(
-        specforge::SaveProfileSettings(specforge::RuntimePaths{},
+        spectiary::SaveProfileSettings(spectiary::RuntimePaths{},
             settings_path,
             {.output_directory = temporary.path() / "custom"}),
         "custom settings fixture should save");
     Require(
-        specforge::SaveProfileSettings(specforge::RuntimePaths{}, settings_path, {}),
+        spectiary::SaveProfileSettings(spectiary::RuntimePaths{}, settings_path, {}),
         "reset profile settings should save explicitly");
 
-    const specforge::ProfileSettings loaded =
-        specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path).settings;
+    const spectiary::ProfileSettings loaded =
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{}, settings_path).settings;
     Require(!loaded.output_directory, "reset settings should restore the default directory");
 }
 
 void TestEnvironmentOverrideWins()
 {
-    const specforge::ProfileSettings settings{
-        .output_directory = "C:/SpecForge/user-profile-directory",
+    const spectiary::ProfileSettings settings{
+        .output_directory = "C:/Spectiary/user-profile-directory",
     };
     const std::filesystem::path environment_directory =
-        "C:/SpecForge/environment-profile-directory";
-    const specforge::ProfileOutputDirectoryResolution resolution =
-        specforge::ResolveProfileOutputDirectory(
+        "C:/Spectiary/environment-profile-directory";
+    const spectiary::ProfileOutputDirectoryResolution resolution =
+        spectiary::ResolveProfileOutputDirectory(
             settings,
-            "C:/SpecForge/default-profile-directory",
+            "C:/Spectiary/default-profile-directory",
             environment_directory);
 
     Require(
         resolution.directory == environment_directory,
         "environment override should outrank the saved user setting");
     Require(
-        resolution.source == specforge::ProfileOutputDirectorySource::Environment,
+        resolution.source == spectiary::ProfileOutputDirectorySource::Environment,
         "environment override should be identified for the settings UI");
 }
 
@@ -210,11 +210,11 @@ void TestUnicodeEnvironmentOverrideRoundTrips()
     const std::filesystem::path expected =
         L"C:\\\u6570\u636E\\\u65E5\u5FD7";
     ScopedWideEnvironmentVariable profile_directory(
-        L"SPECFORGE_PROFILE_DIR",
+        L"SPECTIARY_PROFILE_DIR",
         expected.c_str());
 
     const std::optional<std::filesystem::path> actual =
-        specforge::ProfileOutputDirectoryEnvironmentOverride();
+        spectiary::ProfileOutputDirectoryEnvironmentOverride();
     Require(
         actual && *actual == expected,
         "Unicode environment override should round-trip without code-page conversion");
@@ -229,8 +229,8 @@ void TestMalformedSettingsAreIgnored()
         stream << R"({"format_kind":"spectiary.profile_settings","schema_version":1,"output_directory":42})";
     }
 
-    const specforge::ProfileSettingsLoadResult loaded =
-        specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path);
+    const spectiary::ProfileSettingsLoadResult loaded =
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{}, settings_path);
     Require(
         !loaded.settings.output_directory,
         "malformed output directory should fall back safely");
@@ -245,8 +245,8 @@ void TestCorruptSettingsAreIgnored()
     const std::filesystem::path settings_path =
         temporary.path() / "profile-settings.json";
     WriteFile(settings_path, "{ invalid json");
-    const specforge::ProfileSettingsLoadResult loaded =
-        specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path);
+    const spectiary::ProfileSettingsLoadResult loaded =
+        spectiary::LoadProfileSettings(spectiary::RuntimePaths{}, settings_path);
     Require(
         !loaded.settings.output_directory,
         "corrupt profile settings should fall back safely");

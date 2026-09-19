@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr UINT32 kDisplayConfigQueryFlags =
     QDC_ONLY_ACTIVE_PATHS |
@@ -59,4 +59,4 @@ struct Win32DisplayRefreshState {
     HWND hwnd,
     Win32DisplayRefreshState& state) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

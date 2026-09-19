@@ -14,7 +14,7 @@
 #include <stdexcept>
 
 namespace {
-using namespace specforge;
+using namespace spectiary;
 namespace fs = std::filesystem;
 
 void Require(bool value, const char* message)
@@ -321,7 +321,7 @@ void TestConsumersKeepInjectedContext(const fs::path& root)
 
 int main()
 {
-    const auto root = fs::temp_directory_path() / ("specforge-storage-context-" + std::to_string(GetCurrentProcessId()));
+    const auto root = fs::temp_directory_path() / ("spectiary-storage-context-" + std::to_string(GetCurrentProcessId()));
     try {
         fs::create_directories(root);
         TestStorageContext(root);

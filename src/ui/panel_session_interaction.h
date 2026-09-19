@@ -7,7 +7,7 @@
 #include <functional>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 class SourceCollectionActivationTransaction;
 
@@ -57,4 +57,4 @@ private:
     SourceCollectionSessionAction pending_action_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

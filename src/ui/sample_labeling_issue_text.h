@@ -5,7 +5,7 @@
 
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 // Keep the stable UI id and localized display text in the desktop UI module.
 // Session transitions carry the semantic issue enum and do not include this
@@ -25,13 +25,13 @@ SampleLabelingIssueTextFor(
     case Issue::EditLeaseUnavailable:
         return {
             UiTextId::LabelingEditLeaseUnavailable,
-            "This labeling target is already being edited by another SpecForge instance.",
-            "此标注目标正在由另一个 SpecForge 实例编辑。"};
+            "This labeling target is already being edited by another Spectiary instance.",
+            "此标注目标正在由另一个 Spectiary 实例编辑。"};
     case Issue::EditLeaseFailed:
         return {
             UiTextId::LabelingEditLeaseFailed,
-            "SpecForge could not secure this labeling target for editing.",
-            "SpecForge 无法取得此标注目标的编辑租约。"};
+            "Spectiary could not secure this labeling target for editing.",
+            "Spectiary 无法取得此标注目标的编辑租约。"};
     case Issue::EditTargetChanged:
         return {
             UiTextId::LabelingEditTargetChanged,
@@ -50,8 +50,8 @@ SampleLabelingIssueTextFor(
     case Issue::OutputMigrationOwnerSwitchFailed:
         return {
             UiTextId::LabelingMigrationOwnerSwitchFailed,
-            "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
-            "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"};
+            "The ASDF document was created, but Spectiary could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
+            "ASDF 文档已创建，但 Spectiary 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"};
     case Issue::LabelValuesExportInvalidPath:
         return {
             UiTextId::LabelValuesExportInvalidPath,
@@ -86,4 +86,4 @@ SampleLabelingIssueTextForValue(int issue_value) noexcept
             issue_value));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

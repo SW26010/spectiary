@@ -12,7 +12,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kStateFormatKind =
@@ -220,4 +220,4 @@ bool SaveSpectrumViewportState(
         error_message);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -19,27 +19,27 @@
 #include <thread>
 #include <utility>
 
-#ifndef SPECFORGE_EXPECTED_VERSION
-#error "SPECFORGE_EXPECTED_VERSION must be provided by the build configuration."
+#ifndef SPECTIARY_EXPECTED_VERSION
+#error "SPECTIARY_EXPECTED_VERSION must be provided by the build configuration."
 #endif
 
-#ifndef SPECFORGE_EXPECTED_SOURCE_MODE
-#error "SPECFORGE_EXPECTED_SOURCE_MODE must be provided by the build configuration."
+#ifndef SPECTIARY_EXPECTED_SOURCE_MODE
+#error "SPECTIARY_EXPECTED_SOURCE_MODE must be provided by the build configuration."
 #endif
 
-#ifndef SPECFORGE_EXPECTED_CONFIGURATION
-#error "SPECFORGE_EXPECTED_CONFIGURATION must be provided by the build configuration."
+#ifndef SPECTIARY_EXPECTED_CONFIGURATION
+#error "SPECTIARY_EXPECTED_CONFIGURATION must be provided by the build configuration."
 #endif
 
-#ifndef SPECFORGE_EXPECTED_ARCHITECTURE
-#error "SPECFORGE_EXPECTED_ARCHITECTURE must be provided by the build configuration."
+#ifndef SPECTIARY_EXPECTED_ARCHITECTURE
+#error "SPECTIARY_EXPECTED_ARCHITECTURE must be provided by the build configuration."
 #endif
 
-#ifndef SPECFORGE_EXPECTED_SOURCE_REVISION
-#error "SPECFORGE_EXPECTED_SOURCE_REVISION must be provided by the build configuration."
+#ifndef SPECTIARY_EXPECTED_SOURCE_REVISION
+#error "SPECTIARY_EXPECTED_SOURCE_REVISION must be provided by the build configuration."
 #endif
 
-namespace specforge {
+namespace spectiary {
 
 struct SettingsPanelUiTestAccess {
     static void Close(SettingsPanelUi& panel) { panel.open_ = false; }
@@ -145,7 +145,7 @@ struct SettingsPanelUiTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -205,9 +205,9 @@ private:
     std::string clipboard_text_;
 };
 
-specforge::SettingsPanelUi MakePanel()
+spectiary::SettingsPanelUi MakePanel()
 {
-    return specforge::SettingsPanelUi({
+    return spectiary::SettingsPanelUi({
         .version = "test",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -220,9 +220,9 @@ specforge::SettingsPanelUi MakePanel()
     });
 }
 
-specforge::ApplicationSettingsView MakeSettingsView(
-    specforge::UiLanguage language =
-        specforge::UiLanguage::English)
+spectiary::ApplicationSettingsView MakeSettingsView(
+    spectiary::UiLanguage language =
+        spectiary::UiLanguage::English)
 {
     return {
         .language = language,
@@ -231,7 +231,7 @@ specforge::ApplicationSettingsView MakeSettingsView(
     };
 }
 
-void RenderSettingsFrame(specforge::SettingsPanelUi& panel)
+void RenderSettingsFrame(spectiary::SettingsPanelUi& panel)
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
@@ -241,19 +241,19 @@ void RenderSettingsFrame(specforge::SettingsPanelUi& panel)
     ImGui::EndFrame();
 }
 
-specforge::BuildMetadataReadResult MakeArtifactMetadata(
+spectiary::BuildMetadataReadResult MakeArtifactMetadata(
     std::string sha256)
 {
-    specforge::BuildMetadata metadata;
-    metadata.finalized_artifact = specforge::FinalizedArtifactMetadata{
+    spectiary::BuildMetadata metadata;
+    metadata.finalized_artifact = spectiary::FinalizedArtifactMetadata{
         .completed_at_utc = "2026-08-05T09:21:32Z",
-        .artifact = specforge::BuildArtifactMetadata{
+        .artifact = spectiary::BuildArtifactMetadata{
             .file = "Spectiary.exe",
             .sha256 = std::move(sha256),
         },
     };
     return {
-        .status = specforge::BuildMetadataStatus::Available,
+        .status = spectiary::BuildMetadataStatus::Available,
         .metadata = std::move(metadata),
     };
 }
@@ -263,19 +263,19 @@ specforge::BuildMetadataReadResult MakeArtifactMetadata(
 
 
 struct LegalDocumentUiFixture {
-    specforge::LegalDocument document;
+    spectiary::LegalDocument document;
     const char* entry_label;
     const char* content_child_id;
 };
 
 constexpr LegalDocumentUiFixture kLegalDocumentUiFixtures[] = {
     {
-        specforge::LegalDocument::ThirdPartyNotices,
+        spectiary::LegalDocument::ThirdPartyNotices,
         "Third-Party Notices###OpenThirdPartyNotices",
         "##ThirdPartyNoticesContent",
     },
     {
-        specforge::LegalDocument::DataSources,
+        spectiary::LegalDocument::DataSources,
         "Data Sources###OpenDataSources",
         "##DataSourcesContent",
     },
@@ -304,7 +304,7 @@ struct LegalRenderObservation {
 };
 
 LegalRenderObservation RenderLegalFrame(
-    specforge::SettingsPanelUi& panel,
+    spectiary::SettingsPanelUi& panel,
     const LegalDocumentUiFixture& fixture,
     ImVec2 display_size = ImVec2(700.0f, 500.0f))
 {
@@ -312,7 +312,7 @@ LegalRenderObservation RenderLegalFrame(
     io.DeltaTime = 1.0f / 60.0f;
     io.DisplaySize = display_size;
     ImGui::NewFrame();
-    specforge::ApplicationSettingsView settings =
+    spectiary::ApplicationSettingsView settings =
         MakeSettingsView();
     settings.ui_scale_percentage = 150;
     panel.Render(settings);
@@ -403,7 +403,7 @@ LegalRenderObservation RenderLegalFrame(
 }
 
 ImVec2 FindLegalEntryPosition(
-    specforge::SettingsPanelUi& panel,
+    spectiary::SettingsPanelUi& panel,
     const LegalDocumentUiFixture& fixture)
 {
     LegalRenderObservation observation =
@@ -453,7 +453,7 @@ ImVec2 FindLegalEntryPosition(
 }
 
 ImVec2 FindLegalCopyPosition(
-    specforge::SettingsPanelUi& panel,
+    spectiary::SettingsPanelUi& panel,
     const LegalDocumentUiFixture& fixture)
 {
     LegalRenderObservation observation =
@@ -502,7 +502,7 @@ ImVec2 FindLegalCopyPosition(
 }
 
 LegalRenderObservation ClickLegalPosition(
-    specforge::SettingsPanelUi& panel,
+    spectiary::SettingsPanelUi& panel,
     const LegalDocumentUiFixture& fixture,
     ImVec2 position)
 {
@@ -520,32 +520,32 @@ LegalRenderObservation ClickLegalPosition(
 
 void TestDefaultEnvironmentDescribesThisBuild()
 {
-    const specforge::SettingsPanelEnvironment environment =
-        specforge::SettingsPanelEnvironmentForStartup(
-            specforge::DefaultSpecForgeStartup());
+    const spectiary::SettingsPanelEnvironment environment =
+        spectiary::SettingsPanelEnvironmentForStartup(
+            spectiary::DefaultSpectiaryStartup());
 
     Require(
-        environment.version == SPECFORGE_EXPECTED_VERSION,
+        environment.version == SPECTIARY_EXPECTED_VERSION,
         "settings should expose the CMake project version");
     Require(
         !environment.distribution.empty(),
         "settings should expose the distribution");
     Require(
-        environment.configuration == SPECFORGE_EXPECTED_CONFIGURATION,
+        environment.configuration == SPECTIARY_EXPECTED_CONFIGURATION,
         "settings should expose the actual build configuration");
     Require(
-        environment.target_architecture == SPECFORGE_EXPECTED_ARCHITECTURE,
+        environment.target_architecture == SPECTIARY_EXPECTED_ARCHITECTURE,
         "settings should expose the target architecture");
     Require(
         !environment.executable_path.empty(),
         "settings should expose the current executable path");
     Require(
         environment.build_source.mode ==
-            SPECFORGE_EXPECTED_SOURCE_MODE,
+            SPECTIARY_EXPECTED_SOURCE_MODE,
         "settings should expose the configured build source mode");
     Require(
         environment.build_source.revision ==
-            SPECFORGE_EXPECTED_SOURCE_REVISION,
+            SPECTIARY_EXPECTED_SOURCE_REVISION,
         "settings should expose the configured build source revision");
     Require(
         !environment.data_directory.empty(),
@@ -554,7 +554,7 @@ void TestDefaultEnvironmentDescribesThisBuild()
 
 void TestWorkingTreeBuildSourcePresentation()
 {
-    const specforge::SettingsPanelEnvironment environment = {
+    const spectiary::SettingsPanelEnvironment environment = {
         .version = "test-version",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -567,18 +567,18 @@ void TestWorkingTreeBuildSourcePresentation()
     };
 
     Require(
-        specforge::FormatBuildSourceForAbout(
+        spectiary::FormatBuildSourceForAbout(
             environment.build_source) ==
             "Source: Working tree",
         "working-tree About text should identify the working tree");
 
     const std::string diagnostics =
-        specforge::FormatDiagnosticInformation(
+        spectiary::FormatDiagnosticInformation(
             environment,
             "Data/logs");
     Require(
         diagnostics ==
-            "SpecForge test-version\n"
+            "Spectiary test-version\n"
             "Distribution: Portable\n"
             "Source mode: working_tree\n"
             "Graphics: Direct3D 11 / SDR\n"
@@ -592,7 +592,7 @@ void TestHeadBuildSourcePresentation()
 {
     constexpr const char kRevision[] =
         "0123456789abcdef0123456789abcdef01234567";
-    const specforge::SettingsPanelEnvironment environment = {
+    const spectiary::SettingsPanelEnvironment environment = {
         .version = "test-version",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -605,26 +605,26 @@ void TestHeadBuildSourcePresentation()
     };
 
     Require(
-        specforge::FormatBuildSourceForAbout(
+        spectiary::FormatBuildSourceForAbout(
             environment.build_source) ==
             "Source: 0123456789abcdef0123456789abcdef01234567",
         "HEAD About text should show the full Git revision without a "
         "relative HEAD label");
     Require(
-        specforge::FormatBuildSourceForAbout(
+        spectiary::FormatBuildSourceForAbout(
             environment.build_source,
-            specforge::UiLanguage::SimplifiedChinese) ==
+            spectiary::UiLanguage::SimplifiedChinese) ==
             "源码：0123456789abcdef0123456789abcdef01234567",
         "Chinese HEAD About text should show the full Git revision without "
         "a relative HEAD label");
 
     const std::string diagnostics =
-        specforge::FormatDiagnosticInformation(
+        spectiary::FormatDiagnosticInformation(
             environment,
             "Data/logs");
     Require(
         diagnostics ==
-            "SpecForge test-version\n"
+            "Spectiary test-version\n"
             "Distribution: Portable\n"
             "Source mode: head\n"
             "Source revision: "
@@ -637,7 +637,7 @@ void TestHeadBuildSourcePresentation()
 
 void TestChineseBuildAndDiagnosticsPresentation()
 {
-    const specforge::SettingsPanelEnvironment environment = {
+    const spectiary::SettingsPanelEnvironment environment = {
         .version = "test-version",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -650,46 +650,46 @@ void TestChineseBuildAndDiagnosticsPresentation()
     };
 
     Require(
-        specforge::FormatBuildSourceForAbout(
+        spectiary::FormatBuildSourceForAbout(
             environment.build_source,
-            specforge::UiLanguage::
+            spectiary::UiLanguage::
                 SimplifiedChinese) ==
             "源码：工作树",
         "Chinese About source text should be exact");
     Require(
-        specforge::FormatProfileOutputDirectoryStatus(
-            specforge::ApplicationSettingsStatusKind::
+        spectiary::FormatProfileOutputDirectoryStatus(
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError,
-            specforge::UiLanguage::
+            spectiary::UiLanguage::
                 SimplifiedChinese) ==
             "无法保存性能分析输出目录。",
         "Chinese profile persistence status should be exact");
     Require(
-        specforge::FormatApplicationSettingsStatusReason(
-            specforge::ApplicationSettingsStatusReason::
+        spectiary::FormatApplicationSettingsStatusReason(
+            spectiary::ApplicationSettingsStatusReason::
                 SavedValueUnreadable,
-            specforge::UiLanguage::
+            spectiary::UiLanguage::
                 SimplifiedChinese) ==
             "已保存的值无效或无法读取。",
         "Chinese settings failure reason should be exact");
     Require(
-        specforge::FormatApplicationSettingsStatusReason(
-            specforge::ApplicationSettingsStatusReason::
+        spectiary::FormatApplicationSettingsStatusReason(
+            spectiary::ApplicationSettingsStatusReason::
                 SettingsWriteFailed,
-            specforge::UiLanguage::
+            spectiary::UiLanguage::
                 SimplifiedChinese) ==
             "无法写入设置文件。",
         "Chinese settings persistence reason should be exact");
 
     const std::string diagnostics =
-        specforge::FormatDiagnosticInformation(
+        spectiary::FormatDiagnosticInformation(
             environment,
             "Data/logs",
-            specforge::UiLanguage::
+            spectiary::UiLanguage::
                 SimplifiedChinese);
     Require(
         diagnostics ==
-            "SpecForge test-version\n"
+            "Spectiary test-version\n"
             "分发方式：Portable\n"
             "源码模式：working_tree\n"
             "图形：Direct3D 11 / SDR\n"
@@ -704,7 +704,7 @@ void TestArtifactIdentityVerification()
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-settings-artifact-identity";
+        "spectiary-settings-artifact-identity";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
@@ -716,66 +716,66 @@ void TestArtifactIdentityVerification()
         stream << "abc";
     }
 
-    const specforge::ArtifactIdentityResult available =
-        specforge::VerifyExecutableArtifactIdentity(
+    const spectiary::ArtifactIdentityResult available =
+        spectiary::VerifyExecutableArtifactIdentity(
             executable_path,
             MakeArtifactMetadata(std::string(kAbcSha256)));
     Require(
         available.status ==
-                specforge::ArtifactIdentityStatus::Available &&
+                spectiary::ArtifactIdentityStatus::Available &&
             available.completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
             available.executable_sha256 == kAbcSha256,
         "matching executable and metadata digests should be available");
 
     const std::string mismatched_sha256(64, '0');
-    const specforge::ArtifactIdentityResult mismatch =
-        specforge::VerifyExecutableArtifactIdentity(
+    const spectiary::ArtifactIdentityResult mismatch =
+        spectiary::VerifyExecutableArtifactIdentity(
             executable_path,
             MakeArtifactMetadata(mismatched_sha256));
     Require(
         mismatch.status ==
-                specforge::ArtifactIdentityStatus::Mismatch &&
+                spectiary::ArtifactIdentityStatus::Mismatch &&
             mismatch.completed_at_utc.empty() &&
             mismatch.executable_sha256 == kAbcSha256,
         "different executable and metadata digests should reject metadata "
         "without exposing an unverified completion time");
 
-    const specforge::ArtifactIdentityResult unavailable =
-        specforge::VerifyExecutableArtifactIdentity(
+    const spectiary::ArtifactIdentityResult unavailable =
+        spectiary::VerifyExecutableArtifactIdentity(
             root / "missing.exe",
             MakeArtifactMetadata(std::string(kAbcSha256)));
     Require(
         unavailable.status ==
-                specforge::ArtifactIdentityStatus::Unavailable &&
+                spectiary::ArtifactIdentityStatus::Unavailable &&
             unavailable.completed_at_utc.empty() &&
             unavailable.executable_sha256.empty(),
         "an unreadable executable should make identity unavailable without "
         "exposing an unverified completion time");
 
-    const specforge::ArtifactIdentityResult missing_metadata =
-        specforge::VerifyExecutableArtifactIdentity(
+    const spectiary::ArtifactIdentityResult missing_metadata =
+        spectiary::VerifyExecutableArtifactIdentity(
             executable_path,
             {});
     Require(
         missing_metadata.status ==
-                specforge::ArtifactIdentityStatus::Unavailable &&
+                spectiary::ArtifactIdentityStatus::Unavailable &&
             missing_metadata.completed_at_utc.empty() &&
             missing_metadata.executable_sha256 == kAbcSha256,
         "missing metadata should hide metadata fields while retaining the "
         "running executable digest");
 
-    specforge::BuildMetadataReadResult malformed_metadata =
+    spectiary::BuildMetadataReadResult malformed_metadata =
         MakeArtifactMetadata(std::string(kAbcSha256));
     malformed_metadata.metadata->finalized_artifact->artifact.sha256 =
         "not-a-sha256";
-    const specforge::ArtifactIdentityResult malformed =
-        specforge::VerifyExecutableArtifactIdentity(
+    const spectiary::ArtifactIdentityResult malformed =
+        spectiary::VerifyExecutableArtifactIdentity(
             executable_path,
             malformed_metadata);
     Require(
         malformed.status ==
-                specforge::ArtifactIdentityStatus::Unavailable &&
+                spectiary::ArtifactIdentityStatus::Unavailable &&
             malformed.completed_at_utc.empty() &&
             malformed.executable_sha256 == kAbcSha256,
         "malformed metadata should hide metadata fields while retaining the "
@@ -789,13 +789,13 @@ void TestAboutArtifactPresentationMatrix()
     constexpr std::string_view kAbcSha256 =
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-    const specforge::ArtifactIdentityResult matching_identity = {
-        .status = specforge::ArtifactIdentityStatus::Available,
+    const spectiary::ArtifactIdentityResult matching_identity = {
+        .status = spectiary::ArtifactIdentityStatus::Available,
         .completed_at_utc = "2026-08-05T09:21:32Z",
         .executable_sha256 = std::string(kAbcSha256),
     };
-    const specforge::AboutArtifactPresentation matching =
-        specforge::AboutArtifactPresentationFor(
+    const spectiary::AboutArtifactPresentation matching =
+        spectiary::AboutArtifactPresentationFor(
             matching_identity,
             MakeArtifactMetadata(std::string(kAbcSha256)));
     Require(
@@ -806,12 +806,12 @@ void TestAboutArtifactPresentationMatrix()
             !matching.show_third_party_fallback,
         "matching metadata should expose the executable hash and trusted metadata fields");
 
-    const specforge::ArtifactIdentityResult missing_identity = {
-        .status = specforge::ArtifactIdentityStatus::Unavailable,
+    const spectiary::ArtifactIdentityResult missing_identity = {
+        .status = spectiary::ArtifactIdentityStatus::Unavailable,
         .executable_sha256 = std::string(kAbcSha256),
     };
-    const specforge::AboutArtifactPresentation missing =
-        specforge::AboutArtifactPresentationFor(
+    const spectiary::AboutArtifactPresentation missing =
+        spectiary::AboutArtifactPresentationFor(
             missing_identity,
             {});
     Require(
@@ -822,16 +822,16 @@ void TestAboutArtifactPresentationMatrix()
             missing.show_third_party_fallback,
         "missing metadata should retain the executable hash and static component fallback without status text");
 
-    specforge::BuildMetadataReadResult malformed_metadata =
+    spectiary::BuildMetadataReadResult malformed_metadata =
         MakeArtifactMetadata(std::string(kAbcSha256));
     malformed_metadata.metadata->finalized_artifact->artifact.sha256 =
         "not-a-sha256";
-    const specforge::ArtifactIdentityResult malformed_identity = {
-        .status = specforge::ArtifactIdentityStatus::Unavailable,
+    const spectiary::ArtifactIdentityResult malformed_identity = {
+        .status = spectiary::ArtifactIdentityStatus::Unavailable,
         .executable_sha256 = std::string(kAbcSha256),
     };
-    const specforge::AboutArtifactPresentation malformed =
-        specforge::AboutArtifactPresentationFor(
+    const spectiary::AboutArtifactPresentation malformed =
+        spectiary::AboutArtifactPresentationFor(
             malformed_identity,
             malformed_metadata);
     Require(
@@ -842,12 +842,12 @@ void TestAboutArtifactPresentationMatrix()
             malformed.show_third_party_fallback,
         "malformed metadata should omit metadata-derived and verification UI while retaining static component information");
 
-    const specforge::ArtifactIdentityResult mismatch_identity = {
-        .status = specforge::ArtifactIdentityStatus::Mismatch,
+    const spectiary::ArtifactIdentityResult mismatch_identity = {
+        .status = spectiary::ArtifactIdentityStatus::Mismatch,
         .executable_sha256 = std::string(kAbcSha256),
     };
-    const specforge::AboutArtifactPresentation mismatch =
-        specforge::AboutArtifactPresentationFor(
+    const spectiary::AboutArtifactPresentation mismatch =
+        spectiary::AboutArtifactPresentationFor(
             mismatch_identity,
             MakeArtifactMetadata(std::string(64, '0')));
     Require(
@@ -859,25 +859,25 @@ void TestAboutArtifactPresentationMatrix()
         "mismatched metadata should present like unavailable metadata without a mismatch or recorded-hash row");
 
     Require(
-        specforge::UiText(
-            specforge::UiLanguage::English,
-            specforge::UiTextId::DearImGuiComponentFallback) ==
+        spectiary::UiText(
+            spectiary::UiLanguage::English,
+            spectiary::UiTextId::DearImGuiComponentFallback) ==
             "Dear ImGui (docking / Win32 / DirectX 11) - MIT License" &&
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::ImPlotComponentFallback) ==
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::ImPlotComponentFallback) ==
             "ImPlot - MIT License" &&
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::CfitsioComponentFallback) ==
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::CfitsioComponentFallback) ==
             "CFITSIO - NASA License" &&
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::YamlCppComponentFallback) ==
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::YamlCppComponentFallback) ==
             "yaml-cpp - MIT License" &&
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::ZlibComponentFallback) ==
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::ZlibComponentFallback) ==
             "zlib - zlib License",
         "untrusted metadata should retain static component and license information");
 
@@ -899,14 +899,14 @@ void TestAboutArtifactPresentationMatrix()
     };
     for (std::size_t text_index = 0;
          text_index < static_cast<std::size_t>(
-             specforge::UiTextId::Count);
+             spectiary::UiTextId::Count);
          ++text_index) {
-        const auto text_id = static_cast<specforge::UiTextId>(text_index);
-        const std::string_view english = specforge::UiText(
-            specforge::UiLanguage::English,
+        const auto text_id = static_cast<spectiary::UiTextId>(text_index);
+        const std::string_view english = spectiary::UiText(
+            spectiary::UiLanguage::English,
             text_id);
-        const std::string_view simplified_chinese = specforge::UiText(
-            specforge::UiLanguage::SimplifiedChinese,
+        const std::string_view simplified_chinese = spectiary::UiText(
+            spectiary::UiLanguage::SimplifiedChinese,
             text_id);
         for (const std::string_view forbidden : kForbiddenAboutText) {
             Require(
@@ -923,7 +923,7 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-settings-artifact-identity-metadata-gate";
+        "spectiary-settings-artifact-identity-metadata-gate";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
@@ -935,7 +935,7 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
         stream << "abc";
     }
 
-    specforge::SettingsPanelUi panel({
+    spectiary::SettingsPanelUi panel({
         .version = "test",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -949,12 +949,12 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
         .data_directory = "Data",
     });
     panel.Open();
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::About);
+        spectiary::SettingsSection::About);
     RenderSettingsFrame(panel);
-    const specforge::ArtifactIdentityResult first_frame =
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+    const spectiary::ArtifactIdentityResult first_frame =
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel);
     Require(
         first_frame.executable_sha256 == kAbcSha256,
@@ -964,11 +964,11 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
         RenderSettingsFrame(panel);
-        const specforge::ArtifactIdentityResult identity =
-            specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+        const spectiary::ArtifactIdentityResult identity =
+            spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
                 panel);
         if (identity.status ==
-            specforge::ArtifactIdentityStatus::Unavailable) {
+            spectiary::ArtifactIdentityStatus::Unavailable) {
             metadata_unavailable = true;
             Require(
                 identity.executable_sha256 == kAbcSha256,
@@ -987,12 +987,12 @@ void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
     }
     std::this_thread::sleep_for(std::chrono::milliseconds{350});
     RenderSettingsFrame(panel);
-    const specforge::ArtifactIdentityResult after_metadata_retry_window =
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+    const spectiary::ArtifactIdentityResult after_metadata_retry_window =
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel);
     Require(
         after_metadata_retry_window.status ==
-                specforge::ArtifactIdentityStatus::Unavailable &&
+                spectiary::ArtifactIdentityStatus::Unavailable &&
             after_metadata_retry_window.executable_sha256 == kAbcSha256,
         "metadata-only rejection should not trigger periodic executable rehashing");
 
@@ -1006,7 +1006,7 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-settings-artifact-identity-demand";
+        "spectiary-settings-artifact-identity-demand";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
@@ -1018,7 +1018,7 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         stream << "abc";
     }
 
-    specforge::SettingsPanelUi panel({
+    spectiary::SettingsPanelUi panel({
         .version = "test",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -1036,24 +1036,24 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
 
     RenderSettingsFrame(panel);
     Require(
-        !specforge::SettingsPanelUiTestAccess::
+        !spectiary::SettingsPanelUiTestAccess::
             ArtifactIdentityEvaluated(panel),
         "non-About rendering should not hash the executable");
 
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::About);
+        spectiary::SettingsSection::About);
     RenderSettingsFrame(panel);
     Require(
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             ArtifactIdentityEvaluated(panel),
         "About rendering should evaluate artifact identity on demand");
     Require(
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
-            panel) == specforge::ArtifactIdentityStatus::Pending,
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
+            panel) == spectiary::ArtifactIdentityStatus::Pending,
         "the first About frame should publish pending identity verification");
     Require(
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel)
                 .executable_sha256 == kAbcSha256,
         "the first About frame should expose the running executable hash");
@@ -1062,9 +1062,9 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
         RenderSettingsFrame(panel);
-        if (specforge::SettingsPanelUiTestAccess::
+        if (spectiary::SettingsPanelUiTestAccess::
                 ArtifactIdentityStatusForTest(panel) ==
-            specforge::ArtifactIdentityStatus::Available) {
+            spectiary::ArtifactIdentityStatus::Available) {
             identity_available = true;
             break;
         }
@@ -1073,8 +1073,8 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         identity_available,
         "background identity verification should eventually complete");
 
-    const specforge::ArtifactIdentityResult identity =
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+    const spectiary::ArtifactIdentityResult identity =
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel);
     Require(
         identity.executable_sha256 == kAbcSha256 &&
@@ -1082,12 +1082,12 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         "background identity verification should publish the verified completion time");
 
     RenderSettingsFrame(panel);
-    const specforge::ArtifactIdentityResult identity_after_next_frame =
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+    const spectiary::ArtifactIdentityResult identity_after_next_frame =
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel);
     Require(
         identity_after_next_frame.status ==
-                specforge::ArtifactIdentityStatus::Available &&
+                spectiary::ArtifactIdentityStatus::Available &&
             identity_after_next_frame.completed_at_utc ==
                 identity.completed_at_utc &&
             identity_after_next_frame.executable_sha256 ==
@@ -1104,14 +1104,14 @@ void TestArtifactIdentityRetriesAfterHashFailure()
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-settings-artifact-identity-retry";
+        "spectiary-settings-artifact-identity-retry";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path executable_path =
         root / "Spectiary.exe";
 
-    specforge::SettingsPanelUi panel({
+    spectiary::SettingsPanelUi panel({
         .version = "test",
         .distribution = "Portable",
         .configuration = "Debug",
@@ -1126,22 +1126,22 @@ void TestArtifactIdentityRetriesAfterHashFailure()
         .data_directory = "Data",
     });
     panel.Open();
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::About);
+        spectiary::SettingsSection::About);
     RenderSettingsFrame(panel);
     Require(
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
-            panel) == specforge::ArtifactIdentityStatus::Pending,
+        spectiary::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
+            panel) == spectiary::ArtifactIdentityStatus::Pending,
         "a failed identity check should begin in the pending state");
 
     bool identity_unavailable = false;
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
         RenderSettingsFrame(panel);
-        if (specforge::SettingsPanelUiTestAccess::
+        if (spectiary::SettingsPanelUiTestAccess::
                 ArtifactIdentityStatusForTest(panel) ==
-            specforge::ArtifactIdentityStatus::Unavailable) {
+            spectiary::ArtifactIdentityStatus::Unavailable) {
             identity_unavailable = true;
             break;
         }
@@ -1160,9 +1160,9 @@ void TestArtifactIdentityRetriesAfterHashFailure()
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
         RenderSettingsFrame(panel);
-        if (specforge::SettingsPanelUiTestAccess::
+        if (spectiary::SettingsPanelUiTestAccess::
                 ArtifactIdentityStatusForTest(panel) ==
-            specforge::ArtifactIdentityStatus::Available) {
+            spectiary::ArtifactIdentityStatus::Available) {
             identity_available = true;
             break;
         }
@@ -1176,7 +1176,7 @@ void TestArtifactIdentityRetriesAfterHashFailure()
 
 void TestOpenIsIdempotent()
 {
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
 
     Require(!panel.open(), "settings should start closed");
     panel.Open();
@@ -1199,13 +1199,13 @@ void TestDetachedPlatformWindowFocusUsesBackendCallback()
 
     ImGuiViewport detached_viewport;
     detached_viewport.ID =
-        ImHashStr("SpecForgeSettingsFocusViewport");
+        ImHashStr("SpectiarySettingsFocusViewport");
     detached_viewport.PlatformWindowCreated = true;
 
     focused_settings_platform_viewport = nullptr;
     ImGui::GetPlatformIO().Platform_SetWindowFocus =
         RecordSettingsPlatformFocus;
-    specforge::SettingsPanelUiTestAccess::
+    spectiary::SettingsPanelUiTestAccess::
         RequestPlatformWindowFocus(detached_viewport);
     Require(
         focused_settings_platform_viewport ==
@@ -1215,73 +1215,73 @@ void TestDetachedPlatformWindowFocusUsesBackendCallback()
 
 void TestClosedToOpenClearsTransientFeedback()
 {
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
 
     panel.Open();
-    specforge::SettingsPanelUiTestAccess::SetTransientFeedback(
+    spectiary::SettingsPanelUiTestAccess::SetTransientFeedback(
         panel,
         "old feedback",
         true);
     panel.Open();
     Require(
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             TransientFeedback(panel) == "old feedback",
         "refocusing an open panel should preserve current feedback");
 
-    specforge::SettingsPanelUiTestAccess::Close(panel);
+    spectiary::SettingsPanelUiTestAccess::Close(panel);
     panel.Open();
     Require(
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             TransientFeedback(panel).empty(),
         "reopening a closed panel should clear stale feedback");
     Require(
-        !specforge::SettingsPanelUiTestAccess::
+        !spectiary::SettingsPanelUiTestAccess::
             ActionFailed(panel),
         "reopening a closed panel should clear stale failure state");
 }
 
 void TestWarnedFallbacksRemainDirectlyRepairable()
 {
-    specforge::ApplicationSettingsView settings =
+    spectiary::ApplicationSettingsView settings =
         MakeSettingsView();
     settings.statuses[static_cast<std::size_t>(
-        specforge::ApplicationSetting::Language)] = {
+        spectiary::ApplicationSetting::Language)] = {
         .kind =
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 LoadWarning,
-        .setting = specforge::ApplicationSetting::Language,
+        .setting = spectiary::ApplicationSetting::Language,
     };
     settings.statuses[static_cast<std::size_t>(
-        specforge::ApplicationSetting::
+        spectiary::ApplicationSetting::
             ProfileOutputDirectory)] = {
         .kind =
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 LoadWarning,
         .setting =
-            specforge::ApplicationSetting::
+            spectiary::ApplicationSetting::
                 ProfileOutputDirectory,
     };
 
     Require(
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             ShouldSubmitLanguageSelection(
                 settings,
-                specforge::UiLanguage::English),
+                spectiary::UiLanguage::English),
         "the selected warned language fallback should remain directly selectable for repair");
     Require(
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             CanRestoreProfileOutputDirectory(settings),
         "the warned default profile fallback should keep Restore Default enabled");
     Require(
-        specforge::FormatProfileOutputDirectoryStatus(
-            specforge::ApplicationSettingsStatusKind::
+        spectiary::FormatProfileOutputDirectoryStatus(
+            spectiary::ApplicationSettingsStatusKind::
                 LoadWarning)
                 .find("could not be loaded") !=
             std::string_view::npos,
         "profile load warnings should describe fallback loading rather than an update failure");
     Require(
-        specforge::FormatProfileOutputDirectoryStatus(
-            specforge::ApplicationSettingsStatusKind::
+        spectiary::FormatProfileOutputDirectoryStatus(
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError)
                 .find("could not be saved") !=
             std::string_view::npos,
@@ -1290,19 +1290,19 @@ void TestWarnedFallbacksRemainDirectlyRepairable()
 
 void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
 {
-    const std::span<const specforge::AppearanceThemeOption> options =
-        specforge::AppearanceThemeOptions();
+    const std::span<const spectiary::AppearanceThemeOption> options =
+        spectiary::AppearanceThemeOptions();
     const std::array expected_text_ids = {
-        specforge::UiTextId::FollowSystemTheme,
-        specforge::UiTextId::DarkTheme,
-        specforge::UiTextId::LightTheme,
+        spectiary::UiTextId::FollowSystemTheme,
+        spectiary::UiTextId::DarkTheme,
+        spectiary::UiTextId::LightTheme,
     };
     const std::array expected_selections = {
-        specforge::ThemeSelection::FollowSystem(),
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInDarkThemeId()),
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInLightThemeId()),
+        spectiary::ThemeSelection::FollowSystem(),
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInDarkThemeId()),
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInLightThemeId()),
     };
     Require(
         options.size() == expected_selections.size(),
@@ -1312,10 +1312,10 @@ void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
          index < expected_selections.size();
          ++index) {
         const std::optional<int> mapped_index =
-            specforge::AppearanceThemeOptionIndex(
+            spectiary::AppearanceThemeOptionIndex(
                 expected_selections[index]);
-        const std::optional<specforge::ThemeSelection> mapped_selection =
-            specforge::AppearanceThemeSelectionAt(
+        const std::optional<spectiary::ThemeSelection> mapped_selection =
+            spectiary::AppearanceThemeSelectionAt(
                 static_cast<int>(index));
         Require(
             options[index].text_id == expected_text_ids[index] &&
@@ -1327,12 +1327,12 @@ void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
     }
 
     Require(
-        !specforge::AppearanceThemeSelectionAt(-1) &&
-            !specforge::AppearanceThemeSelectionAt(
+        !spectiary::AppearanceThemeSelectionAt(-1) &&
+            !spectiary::AppearanceThemeSelectionAt(
                 static_cast<int>(options.size())) &&
-            !specforge::AppearanceThemeOptionIndex(
-                specforge::ThemeSelection::Explicit(
-                    specforge::ThemeId(
+            !spectiary::AppearanceThemeOptionIndex(
+                spectiary::ThemeSelection::Explicit(
+                    spectiary::ThemeId(
                         "spectiary.theme.synthetic"))),
         "appearance theme mapping should reject indexes and identities outside the option table");
 }
@@ -1345,10 +1345,10 @@ void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
 void TestLanguageRenderKeepsStableImGuiIds()
 {
     ScopedImGuiContext imgui;
-    specforge::SettingsPanelUi panel = MakePanel();
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::Language);
+        spectiary::SettingsSection::Language);
     panel.Open();
 
     ImGuiIO& io = ImGui::GetIO();
@@ -1356,7 +1356,7 @@ void TestLanguageRenderKeepsStableImGuiIds()
     io.DisplaySize = ImVec2(1280.0f, 720.0f);
     ImGui::NewFrame();
     panel.Render(
-        MakeSettingsView(specforge::UiLanguage::English));
+        MakeSettingsView(spectiary::UiLanguage::English));
     ImGuiWindow* english_window =
         ImGui::FindWindowByName(
             "Settings###SettingsV1");
@@ -1369,7 +1369,7 @@ void TestLanguageRenderKeepsStableImGuiIds()
     ImGui::NewFrame();
     panel.Render(
         MakeSettingsView(
-            specforge::UiLanguage::SimplifiedChinese));
+            spectiary::UiLanguage::SimplifiedChinese));
     ImGuiWindow* chinese_window =
         ImGui::FindWindowByName(
             "设置###SettingsV1");
@@ -1386,13 +1386,13 @@ void TestLanguageRenderKeepsStableImGuiIds()
                 "语言###SettingsLanguage"),
         "localized Language labels should retain one ImGui ID");
     const std::string appearance_english =
-        specforge::SettingsPanelUiTestAccess::SectionLabel(
-            specforge::SettingsSection::Appearance,
-            specforge::UiLanguage::English);
+        spectiary::SettingsPanelUiTestAccess::SectionLabel(
+            spectiary::SettingsSection::Appearance,
+            spectiary::UiLanguage::English);
     const std::string appearance_chinese =
-        specforge::SettingsPanelUiTestAccess::SectionLabel(
-            specforge::SettingsSection::Appearance,
-            specforge::UiLanguage::SimplifiedChinese);
+        spectiary::SettingsPanelUiTestAccess::SectionLabel(
+            spectiary::SettingsSection::Appearance,
+            spectiary::UiLanguage::SimplifiedChinese);
     Require(
         appearance_english ==
                 "Appearance###SettingsAppearance" &&
@@ -1404,13 +1404,13 @@ void TestLanguageRenderKeepsStableImGuiIds()
             ImHashStr(appearance_chinese.c_str()),
         "localized Appearance labels should retain one ImGui ID");
     const std::string data_and_recovery_english =
-        specforge::SettingsPanelUiTestAccess::SectionLabel(
-            specforge::SettingsSection::DataAndRecovery,
-            specforge::UiLanguage::English);
+        spectiary::SettingsPanelUiTestAccess::SectionLabel(
+            spectiary::SettingsSection::DataAndRecovery,
+            spectiary::UiLanguage::English);
     constexpr std::string_view kVisibleDataAndRecovery =
         "Data & Recovery";
     const float visible_width =
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             VisibleLabelWidth(data_and_recovery_english);
     Require(
         visible_width ==
@@ -1427,24 +1427,24 @@ void TestLanguageRenderKeepsStableImGuiIds()
                 .x,
         "navigation width should exclude the stable ID suffix");
     constexpr std::array kRemainingSections = {
-        specforge::SettingsSection::General,
-        specforge::SettingsSection::Input,
-        specforge::SettingsSection::DataAndRecovery,
-        specforge::SettingsSection::Diagnostics,
-        specforge::SettingsSection::About,
+        spectiary::SettingsSection::General,
+        spectiary::SettingsSection::Input,
+        spectiary::SettingsSection::DataAndRecovery,
+        spectiary::SettingsSection::Diagnostics,
+        spectiary::SettingsSection::About,
     };
-    for (const specforge::SettingsSection section :
+    for (const spectiary::SettingsSection section :
          kRemainingSections) {
         const std::string english =
-            specforge::SettingsPanelUiTestAccess::
+            spectiary::SettingsPanelUiTestAccess::
                 SectionLabel(
                     section,
-                    specforge::UiLanguage::English);
+                    spectiary::UiLanguage::English);
         const std::string chinese =
-            specforge::SettingsPanelUiTestAccess::
+            spectiary::SettingsPanelUiTestAccess::
                 SectionLabel(
                     section,
-                    specforge::UiLanguage::
+                    spectiary::UiLanguage::
                         SimplifiedChinese);
         Require(
             ImHashStr(english.c_str()) ==
@@ -1453,13 +1453,13 @@ void TestLanguageRenderKeepsStableImGuiIds()
     }
 
     const std::string theme_english =
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             AppearanceThemeLabel(
-                specforge::UiLanguage::English);
+                spectiary::UiLanguage::English);
     const std::string theme_chinese =
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             AppearanceThemeLabel(
-                specforge::UiLanguage::SimplifiedChinese);
+                spectiary::UiLanguage::SimplifiedChinese);
     Require(
         theme_english ==
                 "Theme###AppearanceTheme" &&
@@ -1472,13 +1472,13 @@ void TestLanguageRenderKeepsStableImGuiIds()
         "localized theme controls should retain one ImGui ID");
 
     const std::string accent_english =
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             AppearanceAccentColorLabel(
-                specforge::UiLanguage::English);
+                spectiary::UiLanguage::English);
     const std::string accent_chinese =
-        specforge::SettingsPanelUiTestAccess::
+        spectiary::SettingsPanelUiTestAccess::
             AppearanceAccentColorLabel(
-                specforge::UiLanguage::SimplifiedChinese);
+                spectiary::UiLanguage::SimplifiedChinese);
     Require(
         accent_english ==
                 "Accent color###"
@@ -1534,20 +1534,20 @@ void TestLanguageRenderKeepsStableImGuiIds()
 void TestRenderSmoke()
 {
     ScopedImGuiContext imgui;
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
     panel.Open();
 
-    constexpr specforge::SettingsSection sections[] = {
-        specforge::SettingsSection::General,
-        specforge::SettingsSection::Appearance,
-        specforge::SettingsSection::Language,
-        specforge::SettingsSection::Input,
-        specforge::SettingsSection::DataAndRecovery,
-        specforge::SettingsSection::Diagnostics,
-        specforge::SettingsSection::About,
+    constexpr spectiary::SettingsSection sections[] = {
+        spectiary::SettingsSection::General,
+        spectiary::SettingsSection::Appearance,
+        spectiary::SettingsSection::Language,
+        spectiary::SettingsSection::Input,
+        spectiary::SettingsSection::DataAndRecovery,
+        spectiary::SettingsSection::Diagnostics,
+        spectiary::SettingsSection::About,
     };
-    for (const specforge::SettingsSection section : sections) {
-        specforge::SettingsPanelUiTestAccess::SelectSection(
+    for (const spectiary::SettingsSection section : sections) {
+        spectiary::SettingsPanelUiTestAccess::SelectSection(
             panel,
             section);
         ImGuiIO& io = ImGui::GetIO();
@@ -1627,10 +1627,10 @@ void TestSettingsViewportStableAcrossOpeningFrames()
 void TestSettingsWindowMinimumSizeTracksUiScale()
 {
     ScopedImGuiContext imgui;
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
     panel.Open();
 
-    specforge::ApplicationSettingsView settings =
+    spectiary::ApplicationSettingsView settings =
         MakeSettingsView();
     settings.ui_scale_percentage = 150;
 
@@ -1652,10 +1652,10 @@ void TestSettingsWindowMinimumSizeTracksUiScale()
 void TestSettingsWindowConstraintsFollowCurrentViewport()
 {
     ScopedImGuiContext imgui;
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
     panel.Open();
 
-    specforge::ApplicationSettingsView settings =
+    spectiary::ApplicationSettingsView settings =
         MakeSettingsView();
     settings.ui_scale_percentage = 150;
 
@@ -1675,7 +1675,7 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
 
     ImGuiViewportP secondary_viewport;
     secondary_viewport.ID =
-        ImHashStr("SpecForgeSettingsSecondaryViewport");
+        ImHashStr("SpectiarySettingsSecondaryViewport");
     secondary_viewport.Pos =
         ImVec2(2000.0f, 100.0f);
     secondary_viewport.Size =
@@ -1690,7 +1690,7 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
     ImGui::NewFrame();
     GImGui->Viewports.push_back(
         &secondary_viewport);
-    specforge::SettingsPanelUiTestAccess::SetViewportId(
+    spectiary::SettingsPanelUiTestAccess::SetViewportId(
         panel,
         secondary_viewport.ID);
     panel.Render(settings);
@@ -1707,7 +1707,7 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
 void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
 {
     ScopedImGuiContext imgui;
-    specforge::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUi panel = MakePanel();
     panel.Open();
 
     ImGuiPlatformMonitor monitor;
@@ -1732,7 +1732,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
 
     ImGuiViewportP detached_viewport;
     detached_viewport.ID =
-        ImHashStr("SpecForgeSettingsDetachedViewport");
+        ImHashStr("SpectiarySettingsDetachedViewport");
     detached_viewport.Pos = ImVec2(200.0f, 100.0f);
     detached_viewport.Size = ImVec2(1000.0f, 700.0f);
     detached_viewport.WorkPos = detached_viewport.Pos;
@@ -1742,7 +1742,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
 
     ImGui::NewFrame();
     GImGui->Viewports.push_back(&detached_viewport);
-    specforge::SettingsPanelUiTestAccess::SetViewportId(
+    spectiary::SettingsPanelUiTestAccess::SetViewportId(
         panel,
         detached_viewport.ID);
     ImGui::SetWindowSize(
@@ -1756,7 +1756,7 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
     constexpr ImVec2 enlarged_size(1200.0f, 800.0f);
     ImGui::NewFrame();
     GImGui->Viewports.push_back(&detached_viewport);
-    specforge::SettingsPanelUiTestAccess::SetViewportId(
+    spectiary::SettingsPanelUiTestAccess::SetViewportId(
         panel,
         detached_viewport.ID);
     ImGui::SetWindowSize(
@@ -1790,8 +1790,8 @@ void TestSettingsDetachedConstraintsFollowClosestMonitor()
     monitors[1].WorkPos = ImVec2(1920.0f, 0.0f);
     monitors[1].WorkSize = ImVec2(1280.0f, 680.0f);
 
-    const specforge::PlatformWorkArea area =
-        specforge::ResolvePlatformWorkArea(
+    const spectiary::PlatformWorkArea area =
+        spectiary::ResolvePlatformWorkArea(
             detached_viewport,
             std::span<const ImGuiPlatformMonitor>(monitors));
 
@@ -1810,10 +1810,10 @@ void TestEmbeddedLegalDocumentInlineDisclosures()
     ScopedImGuiContext imgui;
     ImGui::GetStyle().FontScaleMain = 1.5f;
 
-    specforge::SettingsPanelUi panel = MakePanel();
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUi panel = MakePanel();
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::About);
+        spectiary::SettingsSection::About);
     panel.Open();
 
     LegalRenderObservation observation =
@@ -1879,12 +1879,12 @@ void TestEmbeddedLegalDocumentInlineDisclosures()
     const ImVec2 copy_position =
         FindLegalCopyPosition(panel, third_party);
     constexpr char kClipboardSentinel[] =
-        "SpecForge Legal copy button sentinel";
+        "Spectiary Legal copy button sentinel";
     ImGui::SetClipboardText(kClipboardSentinel);
     observation = ClickLegalPosition(panel, third_party, copy_position);
     Require(
         imgui.clipboard_text() ==
-            specforge::EmbeddedLegalDocumentContent(
+            spectiary::EmbeddedLegalDocumentContent(
                 third_party.document) &&
             observation.open_disclosure_count == 1,
         "Copy Document should copy complete legal content without collapsing the disclosure");
@@ -1930,7 +1930,7 @@ void TestEmbeddedLegalDocumentInlineDisclosures()
         observation.open_disclosure_count == 1,
         "the legal disclosure should be expandable again after auto-collapse");
 
-    specforge::SettingsPanelUiTestAccess::Close(panel);
+    spectiary::SettingsPanelUiTestAccess::Close(panel);
     (void)RenderLegalFrame(panel, third_party);
     panel.Open();
     observation = RenderLegalFrame(panel, third_party);
@@ -1968,17 +1968,17 @@ void TestEmbeddedLegalDocumentInlineDisclosures()
     Require(
         observation.open_disclosure_count == 0 &&
             !observation.document_content_found &&
-            specforge::SettingsPanelUiTestAccess::SelectedSection(panel) ==
-                specforge::SettingsSection::About,
+            spectiary::SettingsPanelUiTestAccess::SelectedSection(panel) ==
+                spectiary::SettingsSection::About,
         "a click inside Settings but outside the disclosure should collapse it");
 
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::Diagnostics);
+        spectiary::SettingsSection::Diagnostics);
     (void)RenderLegalFrame(panel, third_party);
-    specforge::SettingsPanelUiTestAccess::SelectSection(
+    spectiary::SettingsPanelUiTestAccess::SelectSection(
         panel,
-        specforge::SettingsSection::About);
+        spectiary::SettingsSection::About);
     observation = RenderLegalFrame(panel, third_party);
     Require(
         observation.open_disclosure_count == 0 &&

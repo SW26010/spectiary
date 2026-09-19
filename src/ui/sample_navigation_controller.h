@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct NavigationTargetResolutionReport;
 struct PreparedSampleWorkflowState;
@@ -270,4 +270,4 @@ private:
     bool state_cache_loaded_ = false;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

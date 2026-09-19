@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] inline std::filesystem::path
 Win32FullPath(const std::filesystem::path& path)
@@ -301,4 +301,4 @@ MarkWin32HandleForDeletion(HANDLE handle)
         : HRESULT_FROM_WIN32(GetLastError());
 }
 
-}  // namespace specforge
+}  // namespace spectiary

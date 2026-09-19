@@ -38,7 +38,7 @@ Expected terminal state:
 
 ## Sequence B: labeling and application-rendered capture
 
-The runner first asks the built `specforge_automation_state_isolation_tests`
+The runner first asks the built `spectiary_automation_state_isolation_tests`
 fixture helper to create an internal-draft labeling seed from the same source
 collection. The seed is read-only input and is never written by the GUI.
 
@@ -86,7 +86,7 @@ verify exit before continuing. Fixture deletion is constrained to the runner's o
 directory below the system temporary root and uses a finite retry budget.
 
 When launched through `scripts/run-automation-ci.ps1`, CTest inherits
-`SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS`, so the sample artifacts are placed
+`SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS`, so the sample artifacts are placed
 under that invocation's run-scoped `automation-samples` directory. Without the
 override, local CTest uses the build tree's default path. CTest writes the two
 sequence logs and a bounded JSON summary under a unique
@@ -119,8 +119,8 @@ bounded lock interval and then fails with a capacity diagnostic instead of
 creating an unaccounted-for fourth child.
 
 The system TEMP side uses the separate namespace
-`specforge-automation-samples-<32-hex>`. Every run writes
-`.specforge-automation-samples-ownership.json` with a run owner lease,
+`spectiary-automation-samples-<32-hex>`. Every run writes
+`.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json` with a run owner lease,
 `heartbeat_utc`, helper/launcher/GUI PIDs, their executable paths, and exact
 `owner_start_ticks` process identities. The manifest also records every
 `launch_pending` role/token before a child start; an incomplete manifest or
@@ -147,11 +147,11 @@ The JSON summary records `temporary_run_root` as `removed` or
 `temporary_root_retention_count`, so success and failure reports state
 whether the current TEMP root was actually deleted.
 
-The sample runner is single-process and reuses `SpecForgeAutomation.exe`, the
+The sample runner is single-process and reuses `SpectiaryAutomation.exe`, the
 existing human command protocol, and the production state seams from the
-`specforge_automation_launcher` and
-`specforge_automation_state_isolation_tests` targets. The separate
-`specforge_multi_instance_labeling_smoke_tests` test remains the only
+`spectiary_automation_launcher` and
+`spectiary_automation_state_isolation_tests` targets. The separate
+`spectiary_multi_instance_labeling_smoke_tests` test remains the only
 two-process coordination fixture; this sample does not introduce another GUI
 runner or state model, so Issue #3 can land before or after this work without
 maintenance drift between competing lifecycle implementations.

@@ -1,4 +1,4 @@
-# SpecForge public spectral line catalog.
+# Spectiary public spectral line catalog.
 # Schema version: 1
 # Units: Angstrom
 # Coordinate frame: rest
@@ -14,7 +14,7 @@ c_ii_3922	C II	line	C II	3921.792			3922	atll_v3_00b5	Atomic Line List vacuum wa
 ca_ii_k	Ca II K	line	Ca II	3934.777			3935	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 ca_ii_h	Ca II H	line	Ca II	3969.591			3970	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 c_ii_4076_multiplet	C II 4076 multiplet	band	C II		4075.631	4075.991	4076	atll_v3_00b5	Atomic Line List vacuum components 4075.631, 4075.694, and 4075.991 A combined as one low-resolution multiplet marker; not for wavelength calibration.
-sr_ii_4078	Sr II	line	Sr II	4078.9			4078	specforge_curated_approximate	Approximate visual marker; not for wavelength calibration.
+sr_ii_4078	Sr II	line	Sr II	4078.9			4078	spectiary_curated_approximate	Approximate visual marker; not for wavelength calibration.
 h_delta	Hδ	line	Balmer	4102.892			4103	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
 cn_4216	CN	line	CN	4216.000			4216	carbon_star_requirements	Approximate molecular feature marker.
 ca_i_4228	Ca I	line	Ca I	4227.918			4228	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.

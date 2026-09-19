@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct AutomationShellState {
     bool idle = true;
@@ -103,4 +103,4 @@ void CompleteAutomationProfileStopTerminal(
     const std::filesystem::path& path,
     std::uint64_t dropped_events);
 
-}  // namespace specforge
+}  // namespace spectiary

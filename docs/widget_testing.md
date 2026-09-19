@@ -8,7 +8,7 @@ required.
 
 ## Run
 
-The `ninja-msvc-debug` preset enables `SPECFORGE_BUILD_WIDGET_TESTS`. From the
+The `ninja-msvc-debug` preset enables `SPECTIARY_BUILD_WIDGET_TESTS`. From the
 repository checkout, run configure and build as separate commands (in Codex,
 use sandbox escalation for both wrapper invocations):
 
@@ -40,7 +40,7 @@ harness or its instrumented ImGui library; neither is installed or packaged.
 `tests/widget/CMakeLists.txt` rebuilds the **existing MIT Dear ImGui version**
 with `IMGUI_ENABLE_TEST_ENGINE` to expose its native item hooks. This macro's
 name does not imply adoption of Dear ImGui Test Engine: the hook callbacks are
-small SpecForge implementations, and no Test Engine source or dependency is
+small Spectiary implementations, and no Test Engine source or dependency is
 used. Do not enable vcpkg's `test-engine` feature.
 
 The upstream docking archive has the same version and SHA-512 as the vcpkg port.
@@ -48,8 +48,8 @@ The initial configure needs network access to that archive; subsequent builds
 reuse CMake's `_deps` cache. An installed version mismatch fails configuration
 so dependency upgrades require reviewing the source pin and internal hook API
 together. The instrumented static library precedes the ordinary UI dependency
-in each opted-in test executable's link order. `specforge_widget_harness` owns
-the implementation once; `specforge_add_widget_suite` creates additional panel
+in each opted-in test executable's link order. `spectiary_widget_harness` owns
+the implementation once; `spectiary_add_widget_suite` creates additional panel
 suites with the same link ordering. Existing mixed suites prepend the harness
 only when the option is enabled. Production executables continue using
 the vcpkg library.

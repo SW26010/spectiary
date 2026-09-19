@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-namespace specforge {
+namespace spectiary {
 
 bool IsValidUiScalePercentage(int percentage) noexcept
 {
@@ -93,4 +93,4 @@ void ApplyUiScaleToImGuiStyle(
     style.FontScaleDpi = scales.system;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -4,7 +4,7 @@
 #include "domain/stable_sha256.h"
 #include "domain/utf8.h"
 
-#include "specforge/specforge_build_identity.h"
+#include "spectiary/spectiary_build_identity.h"
 
 #include <yaml-cpp/yaml.h>
 #include <zlib.h>
@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleLabelingAsdfDurableBase::State {
     std::vector<unsigned char> encoded_metadata;
@@ -1323,7 +1323,7 @@ struct ProfilePreflight {
             parsed.document.schema_version !=
                 kSampleLabelingDocumentSchemaVersion) {
             Fail(SampleLabelingAsdfErrorKind::UnsupportedProfile,
-                "unsupported SpecForge sample-labeling schema identity or "
+                "unsupported Spectiary sample-labeling schema identity or "
                 "version");
         }
         ParseBuildSource(root,
@@ -1851,7 +1851,7 @@ void ValidateDocumentBusinessSemantics(
         ValidateSampleLabelingDocumentFailFast(document);
     if (!validation.valid()) {
         Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-            "SpecForge sample-labeling semantic validation failed");
+            "Spectiary sample-labeling semantic validation failed");
     }
 }
 
@@ -2226,7 +2226,7 @@ void EmitMetadata(std::ostream& metadata,
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
              << "asdf_library: !core/software-1.0.0 {name: Spectiary, version: "
-             << build_info::kSpecForgeVersion << "}\n"
+             << build_info::kSpectiaryVersion << "}\n"
              << "spectiary_build:\n  source_mode: ";
     WriteQuotedYaml(metadata, build_source.source_mode);
     if (build_source.source_revision) {
@@ -2574,7 +2574,7 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
     library.SetTag("tag:stsci.edu:asdf/core/software-1.0.0");
     SetYamlString(library, "name", "Spectiary");
     SetYamlString(
-        library, "version", build_info::kSpecForgeVersion);
+        library, "version", build_info::kSpectiaryVersion);
     const SampleLabelingDocumentBuildSource build_source =
         CurrentSampleLabelingDocumentBuildSource();
     YAML::Node build = MapNodeOrNew(root, "spectiary_build");
@@ -3459,4 +3459,4 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

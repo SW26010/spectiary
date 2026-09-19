@@ -1,8 +1,8 @@
-# SpecForge 工程环境
+# Spectiary 工程环境
 
 ## 当前提交范围
 
-仓库当前是 native shell + 多格式真实数据 loader。`specforge_native` 是 Win32 + DirectX 11 executable target，
+仓库当前是 native shell + 多格式真实数据 loader。`spectiary_native` 是 Win32 + DirectX 11 executable target，
 用于初始化 Dear ImGui docking、ImPlot、dock host、主图、文件区、信息/标签区、谱线区、状态栏和可选 JSONL profile sink。
 状态栏中的 `ms/frame` 与 `FPS` 使用 ImGui `io.DeltaTime` 的最近有效应用/UI 帧时序样本（FPS 由该样本计算），并在首帧或 idle/minimized 间隔时保留最近有效样本；它不是显示器刷新率、合成器扫描输出率或各 viewport 的 `Present` FPS。空闲时不为刷新该数字强制出帧。
 默认启动仍有 small synthetic fixture 用于 smoke test；命令行源路径和 Files 面板 `Add file...` 支持通过 domain snapshot loader 打开 source。
@@ -54,7 +54,7 @@ $env:VCPKG_ROOT
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
-DirectX 11 来自 Windows SDK；`specforge_renderer` 封装 DX11/DXGI presentation，`specforge_native` 负责 Win32/DWM shell。
+DirectX 11 来自 Windows SDK；`spectiary_renderer` 封装 DX11/DXGI presentation，`spectiary_native` 负责 Win32/DWM shell。
 FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
 `x64-windows`，允许 vcpkg 依赖以 DLL 形式存在；当前正式 Release preset
 统一继承 `x64-windows-static`，因此 CFITSIO 链入 `Spectiary.exe`，Portable
@@ -74,7 +74,7 @@ JSON 浮点语法合法，但整数 schema 字段显式检查类型和范围。
 
 ## SDR 色彩与 presentation 契约
 
-SpecForge 的主窗口和 Dear ImGui detached viewport 统一输出 sRGB/Rec.709 SDR：交换链使用
+Spectiary 的主窗口和 Dear ImGui detached viewport 统一输出 sRGB/Rec.709 SDR：交换链使用
 `DXGI_FORMAT_R8G8B8A8_UNORM`、双缓冲 `DXGI_SWAP_EFFECT_FLIP_DISCARD`，并通过
 `IDXGISwapChain3::SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)` 显式向 Windows 声明内容色彩空间。
 初始化和 resize 都必须验证该色彩空间可用于 present；不能静默退回未标记或旧式 blt-model 交换链。
@@ -87,7 +87,7 @@ alpha blending 全部改为 linear-light pipeline 的情况下，把 render-targ
 并不能替代交换链色彩空间声明。HDR 或 Windows 自动色彩管理启用时，广色域映射由系统完成；Advanced Color 未启用时，
 应用仍遵循 Windows 传统 sRGB SDR 行为，不自行承担显示器 ICC 转换。
 
-Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。SpecForge 不通过 Z-order
+Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。Spectiary 不通过 Z-order
 枚举恢复“完全遮挡”检测，而是让可见窗口在没有消息和维护任务时停止出帧，并用原生 Win32 message wait 保留最后一次
 presentation。鼠标、键盘、窗口和 ImGui viewport 消息各请求一帧；本地状态保存使用 `steady_clock` deadline 独立唤醒，
 不依赖刷新率推进。Direct Manipulation 使用 `MANUALUPDATE`：在 compositor-clock 路径中，内部 queued update message
@@ -115,7 +115,7 @@ dispatch，同号消息在其他窗口仍按普通 invalidation 处理。专用 
 顺序测试覆盖。
 
 实验性按需画面捕获默认关闭。仅在启动进程前精确设置
-`SPECFORGE_FRAME_CAPTURE=1` 时，`Settings > Diagnostics` 才显示
+`SPECTIARY_FRAME_CAPTURE=1` 时，`Settings > Diagnostics` 才显示
 `Capture Next Main Frame`。请求会通过现有 `RenderWakeScheduler` 安排一个正常事件驱动帧，并只捕获请求帧之后
 下一次成功绘制的主 application viewport；detached viewport、桌面拼接和历史最后帧不在首版范围内。捕获点位于
 主 viewport 的 ImGui/DX11 draw 完成之后、`Present` 之前，按请求创建 D3D11 staging texture，完成 GPU→CPU
@@ -129,7 +129,7 @@ readback 后用 Windows Imaging Component 写入 PNG。普通运行和未请求�
 
 ## UI 文本编码与字体
 
-SpecForge 的 UI 字符串边界是 UTF-8。业务状态、JSON cache、sample name、label name、annotation display name 和
+Spectiary 的 UI 字符串边界是 UTF-8。业务状态、JSON cache、sample name、label name、annotation display name 和
 ImGui widget buffer 都应继续使用 UTF-8 `std::string`；不要为了 Windows 输入把这些字段改成本地 ANSI code page 或在
 业务层传播 `std::wstring`。
 
@@ -238,7 +238,7 @@ workspace 外缓存。这两个 Ninja preset 的 configure 都会调用 vcpkg，
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure -TimeoutSec 180
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_source_collection_session_tests -TimeoutSec 60 -Explain
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target spectiary_source_collection_session_tests -TimeoutSec 60 -Explain
 ```
 
 如果看到类似 `This shell cannot kill job-assigned process trees with taskkill /T /F` 的 preflight 错误，
@@ -268,7 +268,7 @@ build/ninja-msvc-release-static/Spectiary.exe
 普通构建输出的 `spectiary_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
 panel 显示状态、profile 设置和默认日志分别写入 `%LOCALAPPDATA%\Spectiary` 下按 `config/`、`state/`、`logs/` 分工的文件或目录。
 Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，并可选择 profile 输出目录。
-设置 `SPECFORGE_PROFILE=1` 则从启动阶段自动录制；`SPECFORGE_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
+设置 `SPECTIARY_PROFILE=1` 则从启动阶段自动录制；`SPECTIARY_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
 录制器使用有界异步写入，单次 5 分钟或 100 MiB 自动停止；分析前检查
 `profile_recorder_summary.dropped_events == 0`。`scripts/analyze-profile.ps1` 默认强制检查 summary 位于日志
 末尾、停止原因有效且没有丢事件；旧格式日志只有显式传入 `-AllowLegacyIncompleteRecording` 才可继续分析。
@@ -301,7 +301,7 @@ HEAD 脚本先解析并冻结完整 `HEAD` object ID，再用 `git archive` 将�
 timeout 和 preflight 形态。
 
 Working-tree 默认输出位于 `dist\Spectiary-portable`，包名来自 identity 契约中的
-`artifact_basename`；HEAD 入口目前仍默认输出到 `dist\head\SpecForge-portable`。
+`artifact_basename`；HEAD 入口目前仍默认输出到 `dist\head\Spectiary-portable`。
 各自的 ZIP 和 `.sha256` 位于对应的 `dist\` 或 `dist\head\` 目录，HEAD
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
@@ -316,11 +316,11 @@ EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
 curl/bzip2 runtime DLL；
 Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 
-第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`specforge_native` 完成最终链接后，
+第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`spectiary_native` 完成最终链接后，
 CMake 的 post-build finalizer tool 读取实际 `Spectiary.exe`，计算 SHA-256 和 UTC 完成时间，
 并原子发布 schema 6 `spectiary_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
 `deployment` 与顶层 `application_id` 是独立维度。普通 build 输出不含 deployment，因此运行身份为 Standalone，
-数据目录为 `%LOCALAPPDATA%\Spectiary`。leaf 由 `config/project_identity.json` 显式定义；旧 `SpecForge` 目录仅用于有界迁移，见 ADR 0015。
+数据目录为 `%LOCALAPPDATA%\Spectiary`。leaf 由 `config/project_identity.json` 显式定义；旧 `Spectiary` 目录仅用于有界迁移，见 ADR 0015。
 
 `build` 中的构建环境字段为 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
 `target_architecture` 和 `windows_sdk_version`，另有严格的 `completed_at_utc`；这些值来自实际配置
@@ -344,7 +344,7 @@ metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 
 
 同一组 CMake build-source 变量还生成
 按实际配置生成的
-`build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
+`build\<preset>\generated\<configuration>\spectiary\spectiary_build_identity.h`
 并编译进 EXE。该身份包含产品版本、configuration、目标架构和构建来源，不包含 distribution 或
 storage profile。About 以这些 EXE 内字段为 build provenance 权威；它消费现有启动预检从 EXE 同目录
 metadata 读取并验证后形成的快照，覆盖受支持的 schema 6，而不是在 About 中重新读取文件；

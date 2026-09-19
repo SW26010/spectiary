@@ -23,7 +23,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 struct D3D11CompositionSwapChainTestAccess {
     static bool Released(const D3D11CompositionSwapChain& chain) {
         for (const auto& buffer : chain.buffers_) {
@@ -49,7 +49,7 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-constexpr const wchar_t* kSwapChainTestWindowClass = L"SpecForge.SdrSwapChain.TestWindow";
+constexpr const wchar_t* kSwapChainTestWindowClass = L"Spectiary.SdrSwapChain.TestWindow";
 
 void Require(bool condition, std::string_view message);
 
@@ -73,7 +73,7 @@ public:
         hwnd_ = CreateWindowExW(
             extended_style,
             kSwapChainTestWindowClass,
-            L"SpecForge SDR swap-chain integration test",
+            L"Spectiary SDR swap-chain integration test",
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -113,7 +113,7 @@ public:
     {
         path_ =
             std::filesystem::temp_directory_path() /
-            (L"SpecForge-frame-capture-test-" +
+            (L"Spectiary-frame-capture-test-" +
              std::to_wstring(GetCurrentProcessId()) +
              L"-" +
              std::to_wstring(GetTickCount64()));
@@ -258,7 +258,7 @@ CaptureTemporaryArtifacts(
         const std::wstring name =
             entry->path().filename().wstring();
         if (name.starts_with(
-                L".specforge-capture-") &&
+                L".spectiary-capture-") &&
             name.ends_with(L".tmp")) {
             artifacts.push_back(entry->path());
         }
@@ -508,13 +508,13 @@ public:
 
     [[nodiscard]] bool renderer_initialized() const noexcept { return renderer_initialized_; }
     [[nodiscard]] bool has_viewport_swap_chain() const noexcept { return viewport_.RendererUserData != nullptr; }
-    [[nodiscard]] specforge::D3D11RendererError TakeLastError() noexcept { return renderer_.TakeLastError(); }
-    [[nodiscard]] std::vector<specforge::D3D11ViewportPresentationUpdate>
+    [[nodiscard]] spectiary::D3D11RendererError TakeLastError() noexcept { return renderer_.TakeLastError(); }
+    [[nodiscard]] std::vector<spectiary::D3D11ViewportPresentationUpdate>
     TakePresentationUpdates() noexcept
     {
         return renderer_.TakePresentationUpdates();
     }
-    [[nodiscard]] std::vector<specforge::D3D11ViewportPresentCompletion>
+    [[nodiscard]] std::vector<spectiary::D3D11ViewportPresentCompletion>
     TakePresentCompletions() noexcept
     {
         return renderer_.TakePresentCompletions();
@@ -556,7 +556,7 @@ public:
 private:
     ImGuiContext* previous_context_ = nullptr;
     ImGuiContext* context_ = nullptr;
-    specforge::D3D11ImGuiViewportRenderer renderer_;
+    spectiary::D3D11ImGuiViewportRenderer renderer_;
     ImGuiViewport viewport_;
     ImDrawData draw_data_;
     ViewportCleanupObservation* cleanup_observation_ = nullptr;
@@ -566,8 +566,8 @@ private:
 
 void TestSdrSwapChainUsesModernSrgbPresentationContract()
 {
-    const DXGI_SWAP_CHAIN_DESC1 desc = specforge::MakeSdrSwapChainDesc(1280, 720);
-    const DXGI_SWAP_CHAIN_DESC1 tearing_desc = specforge::MakeSdrSwapChainDesc(1280, 720, true);
+    const DXGI_SWAP_CHAIN_DESC1 desc = spectiary::MakeSdrSwapChainDesc(1280, 720);
+    const DXGI_SWAP_CHAIN_DESC1 tearing_desc = spectiary::MakeSdrSwapChainDesc(1280, 720, true);
 
     Require(desc.Width == 1280 && desc.Height == 720, "requested dimensions should be preserved");
     Require(desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM, "SDR presentation should use 8-bit RGBA UNORM");
@@ -582,44 +582,44 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
         tearing_desc.Flags == DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
         "a capable system should opt the flip-model chain into variable-refresh presentation");
     Require(
-        specforge::kSdrSwapChainColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        spectiary::kSdrSwapChainColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
         "content color space should be explicitly tagged as sRGB/Rec.709 SDR");
     Require(
-        specforge::D3D11PresentSyncInterval(
-            specforge::D3D11PresentMode::DisplayVSync,
+        spectiary::D3D11PresentSyncInterval(
+            spectiary::D3D11PresentMode::DisplayVSync,
             true) == 1,
         "normal event-driven presentation should remain display-vsync synchronized");
     Require(
-        specforge::D3D11PresentSyncInterval(
-            specforge::D3D11PresentMode::CompositorClock,
+        spectiary::D3D11PresentSyncInterval(
+            spectiary::D3D11PresentMode::CompositorClock,
             true) == 0,
         "compositor-clock-paced presentation should not wait again on virtualized DXGI vblank");
     Require(
-        specforge::D3D11PresentSyncInterval(
-            specforge::D3D11PresentMode::CompositorClock,
+        spectiary::D3D11PresentSyncInterval(
+            spectiary::D3D11PresentMode::CompositorClock,
             false) == 1,
         "compositor-clock DXGI fallback should preserve tear-free vsync when tearing is unsupported");
     Require(
-        specforge::D3D11PresentSyncInterval(
-            specforge::D3D11PresentMode::Immediate,
+        spectiary::D3D11PresentSyncInterval(
+            spectiary::D3D11PresentMode::Immediate,
             false) == 0 &&
-            specforge::D3D11PresentSyncInterval(
-                specforge::D3D11PresentMode::Immediate,
+            spectiary::D3D11PresentSyncInterval(
+                spectiary::D3D11PresentMode::Immediate,
                 true) == 0,
         "uncapped presentation should submit without waiting for DXGI vblank");
     Require(
-        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::DisplayVSync, true) == 0,
+        spectiary::D3D11PresentFlags(spectiary::D3D11PresentMode::DisplayVSync, true) == 0,
         "normal presentation should retain synchronized, tear-free semantics");
     Require(
-        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, false) == 0,
+        spectiary::D3D11PresentFlags(spectiary::D3D11PresentMode::CompositorClock, false) == 0,
         "compositor-clock presentation should fall back cleanly without tearing support");
     Require(
-        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, true) ==
+        spectiary::D3D11PresentFlags(spectiary::D3D11PresentMode::CompositorClock, true) ==
             DXGI_PRESENT_ALLOW_TEARING,
         "boosted presentation should opt into variable-refresh delivery when supported");
     Require(
-        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::Immediate, false) == 0 &&
-            specforge::D3D11PresentFlags(specforge::D3D11PresentMode::Immediate, true) ==
+        spectiary::D3D11PresentFlags(spectiary::D3D11PresentMode::Immediate, false) == 0 &&
+            spectiary::D3D11PresentFlags(spectiary::D3D11PresentMode::Immediate, true) ==
                 DXGI_PRESENT_ALLOW_TEARING,
         "uncapped presentation should use tearing only when the adapter supports it");
 }
@@ -627,26 +627,26 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
 void TestDisplayRefreshDurationPolicy()
 {
     Require(
-        specforge::PreferredPresentDuration(120, 1) == 83'333,
+        spectiary::PreferredPresentDuration(120, 1) == 83'333,
         "120 Hz should request an 8.3333 ms presentation duration");
     Require(
-        specforge::PreferredPresentDuration(60, 1) == 166'667,
+        spectiary::PreferredPresentDuration(60, 1) == 166'667,
         "60 Hz should request a 16.6667 ms presentation duration");
     Require(
-        specforge::PreferredPresentDuration(0, 1) == 0 &&
-            specforge::PreferredPresentDuration(120, 0) == 0,
+        spectiary::PreferredPresentDuration(0, 1) == 0 &&
+            spectiary::PreferredPresentDuration(120, 0) == 0,
         "invalid refresh rationals should not create a duration request");
     Require(
-        specforge::PreferredPresentTolerance(83'333) == 1'000,
+        spectiary::PreferredPresentTolerance(83'333) == 1'000,
         "high refresh durations should retain a practical minimum tolerance");
     Require(
-        specforge::PreferredPresentTolerance(166'667) == 1'667,
+        spectiary::PreferredPresentTolerance(166'667) == 1'667,
         "longer durations should use the one-percent tolerance policy");
 }
 
 void TestWindowPresentationLifecycleAndDeterministicFallback()
 {
-    namespace trace = specforge::presentation_trace;
+    namespace trace = spectiary::presentation_trace;
     std::vector<trace::Event> trace_events;
     trace_events.reserve(256);
     trace::context = &trace_events;
@@ -665,7 +665,7 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         "the presentation adapter test should create a BGRA-capable D3D11 device");
     ComPtr<IDXGIFactory2> factory = GetTestFactory(device.Get());
 
-    specforge::D3D11WindowPresentation presentation;
+    spectiary::D3D11WindowPresentation presentation;
     Require(
         SUCCEEDED(presentation.Initialize(
             factory.Get(),
@@ -676,18 +676,18 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
             240)),
         "the per-window presentation adapter should initialize composition or its DXGI fallback");
     Require(
-        presentation.backend() != specforge::D3D11PresentationBackend::None,
+        presentation.backend() != spectiary::D3D11PresentationBackend::None,
         "successful initialization should select a concrete presentation backend");
-    const specforge::D3D11PresentationTransition initial_transition =
+    const spectiary::D3D11PresentationTransition initial_transition =
         presentation.TakeTransition();
     Require(
         initial_transition.previous_backend ==
-                specforge::D3D11PresentationBackend::None &&
+                spectiary::D3D11PresentationBackend::None &&
             initial_transition.current_backend ==
                 presentation.backend(),
         "initialization should expose the selected backend as a transition");
     if (presentation.backend() ==
-        specforge::D3D11PresentationBackend::Dxgi) {
+        spectiary::D3D11PresentationBackend::Dxgi) {
         Require(
             FAILED(initial_transition.reason) &&
                 !initial_transition.operation.empty(),
@@ -695,7 +695,7 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
     } else {
         Require(
             presentation.backend() ==
-                    specforge::D3D11PresentationBackend::Composition &&
+                    spectiary::D3D11PresentationBackend::Composition &&
                 SUCCEEDED(initial_transition.reason),
             "successful Composition initialization should be observable");
     }
@@ -705,19 +705,19 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         SUCCEEDED(presentation.BeginFrame(clear_color)),
         "the selected backend should acquire and bind a render target");
     Require(
-        SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::DisplayVSync)),
+        SUCCEEDED(presentation.Present(spectiary::D3D11PresentMode::DisplayVSync)),
         "the selected backend should submit an ordinary tear-free frame");
     Require(
         SUCCEEDED(presentation.Resize(640, 360)),
         "the selected backend should rebuild its buffers on resize");
     Require(
         SUCCEEDED(presentation.BeginFrame(clear_color)) &&
-            SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::CompositorClock)),
+            SUCCEEDED(presentation.Present(spectiary::D3D11PresentMode::CompositorClock)),
         "the selected backend should present after resize under compositor pacing");
     Require(
         SUCCEEDED(presentation.RefreshTarget()),
         "the selected backend should refresh its per-monitor duration policy");
-    const bool composition_selected = presentation.backend() == specforge::D3D11PresentationBackend::Composition;
+    const bool composition_selected = presentation.backend() == spectiary::D3D11PresentationBackend::Composition;
     (void)presentation.TakeCompositionFeedback();
     presentation.Shutdown();
 
@@ -769,28 +769,28 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
             window.hwnd(),
             320,
             240,
-            specforge::D3D11CompositionPolicy::Disabled)),
+            spectiary::D3D11CompositionPolicy::Disabled)),
         "the adapter should retain a deterministic DXGI fallback path");
     Require(
-        presentation.backend() == specforge::D3D11PresentationBackend::Dxgi,
+        presentation.backend() == spectiary::D3D11PresentationBackend::Dxgi,
         "disabling composition should select DXGI explicitly");
-    const specforge::D3D11PresentationTransition fallback_transition =
+    const spectiary::D3D11PresentationTransition fallback_transition =
         presentation.TakeTransition();
     Require(
         fallback_transition.current_backend ==
-                specforge::D3D11PresentationBackend::Dxgi &&
+                spectiary::D3D11PresentationBackend::Dxgi &&
             fallback_transition.operation ==
                 "composition disabled by presentation options",
         "the deterministic fallback should remain observable");
     Require(
         SUCCEEDED(presentation.BeginFrame(clear_color)) &&
-            SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::Immediate)),
+            SUCCEEDED(presentation.Present(spectiary::D3D11PresentMode::Immediate)),
         "the deterministic DXGI fallback should render and present");
 }
 
 void TestIncrementalBufferPlanAndFailure()
 {
-    using namespace specforge;
+    using namespace spectiary;
     std::array<IncrementalBufferSlot, 3> slots{{{320,240,1},{320,240,2},{320,240,3}}};
     Require(BufferPixelBytes(~0U, ~0U) == 0 && BufferPixelBytes(0, 1) == 0,
         "invalid and overflowing dimensions must fail before allocation");
@@ -863,7 +863,7 @@ void TestIncrementalBufferPlanAndFailure()
 
 void TestIncrementalBufferRepeatedLifetimes()
 {
-    using namespace specforge;
+    using namespace spectiary;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     Require(SUCCEEDED(CreateTestDevice(device, context)), "repeated resize requires D3D11");
@@ -946,26 +946,26 @@ void TestIncrementalBufferRepeatedLifetimes()
 void TestCreationTimeNoRedirectionCompatibility()
 {
     // Isolated HWND experiment only: production HWND creation is unchanged.
-    for (auto policy : {specforge::D3D11CompositionPolicy::Prefer, specforge::D3D11CompositionPolicy::Disabled}) {
+    for (auto policy : {spectiary::D3D11CompositionPolicy::Prefer, spectiary::D3D11CompositionPolicy::Disabled}) {
         SwapChainTestWindow window(WS_EX_NOREDIRECTIONBITMAP);
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11DeviceContext> context;
         Require(SUCCEEDED(CreateTestDevice(device, context)), "creation-time experiment requires D3D11");
         auto factory = GetTestFactory(device.Get());
-        specforge::D3D11WindowPresentation presentation;
+        spectiary::D3D11WindowPresentation presentation;
         Require(SUCCEEDED(presentation.Initialize(factory.Get(), device.Get(), context.Get(), window.hwnd(), 320, 240, policy)),
             "creation-time no-redirection HWND should support presentation initialization");
         std::printf("[redirection probe] backend=%s policy=%s\n",
-            specforge::D3D11PresentationBackendName(presentation.backend()),
-            policy == specforge::D3D11CompositionPolicy::Prefer ? "prefer" : "disabled");
-        if (policy == specforge::D3D11CompositionPolicy::Disabled)
-            Require(presentation.backend() == specforge::D3D11PresentationBackend::Dxgi, "probe must exercise deterministic DXGI");
+            spectiary::D3D11PresentationBackendName(presentation.backend()),
+            policy == spectiary::D3D11CompositionPolicy::Prefer ? "prefer" : "disabled");
+        if (policy == spectiary::D3D11CompositionPolicy::Disabled)
+            Require(presentation.backend() == spectiary::D3D11PresentationBackend::Dxgi, "probe must exercise deterministic DXGI");
         constexpr float color[4] = {0.08f, 0.09f, 0.1f, 1.0f};
         for (UINT size : {360U, 400U, 320U}) {
             Require(SetWindowPos(window.hwnd(), nullptr, 0, 0, size, 240,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "probe native resize must succeed");
             Require(SUCCEEDED(presentation.Resize(size, 240)) && SUCCEEDED(presentation.BeginFrame(color)) &&
-                SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::DisplayVSync)),
+                SUCCEEDED(presentation.Present(spectiary::D3D11PresentMode::DisplayVSync)),
                 "probe must resize, acquire and present with its creation-time style");
             Require((GetWindowLongPtrW(window.hwnd(), GWL_EXSTYLE) & WS_EX_NOREDIRECTIONBITMAP) != 0,
                 "creation-time experiment bit must persist through resize and Present");
@@ -976,7 +976,7 @@ void TestCreationTimeNoRedirectionCompatibility()
 
 void TestInvalidArgumentsPreserveDiagnosticStage()
 {
-    specforge::D3D11SdrSwapChain swap_chain;
+    spectiary::D3D11SdrSwapChain swap_chain;
     const HRESULT result = swap_chain.Initialize(nullptr, nullptr, nullptr);
 
     Require(result == E_INVALIDARG, "invalid initialization arguments should return E_INVALIDARG");
@@ -993,16 +993,16 @@ void TestRealSwapChainInitializationColorSpaceAndResize()
     Require(SUCCEEDED(CreateTestDevice(device, context)), "the integration test should create a D3D11 device");
 
     ComPtr<IDXGIFactory2> factory = GetTestFactory(device.Get());
-    const bool tearing_supported = specforge::DxgiFactorySupportsTearing(factory.Get());
+    const bool tearing_supported = spectiary::DxgiFactorySupportsTearing(factory.Get());
 
-    specforge::D3D11SdrSwapChain swap_chain;
+    spectiary::D3D11SdrSwapChain swap_chain;
     Require(
         SUCCEEDED(swap_chain.Initialize(factory.Get(), device.Get(), window.hwnd(), 320, 240)),
         "a real SDR flip-model swap chain should initialize");
 
     DXGI_COLOR_SPACE_TYPE color_space = DXGI_COLOR_SPACE_CUSTOM;
     Require(
-        swap_chain.GetConfiguredColorSpace(color_space) && color_space == specforge::kSdrSwapChainColorSpace,
+        swap_chain.GetConfiguredColorSpace(color_space) && color_space == spectiary::kSdrSwapChainColorSpace,
         "a real swap chain should record the explicit P709 SDR color space");
 
     constexpr float clear_color[4] = {0.08f, 0.09f, 0.10f, 1.0f};
@@ -1024,23 +1024,23 @@ void TestRealSwapChainInitializationColorSpaceAndResize()
         resized_desc.BufferDesc.Width == 640 && resized_desc.BufferDesc.Height == 360,
         "resize should update the swap-chain dimensions");
     Require(
-        swap_chain.GetConfiguredColorSpace(color_space) && color_space == specforge::kSdrSwapChainColorSpace,
+        swap_chain.GetConfiguredColorSpace(color_space) && color_space == spectiary::kSdrSwapChainColorSpace,
         "resize should reapply the explicit P709 SDR color space");
 }
 
 void TestRendererDebugLayerRequestFallsBackAndReportsAvailability()
 {
     SwapChainTestWindow window;
-    specforge::D3D11Renderer renderer;
+    spectiary::D3D11Renderer renderer;
     Require(
         SUCCEEDED(renderer.Initialize(
             window.hwnd(),
-            specforge::D3D11CompositionPolicy::Disabled,
+            spectiary::D3D11CompositionPolicy::Disabled,
             true)),
         "requesting live-object diagnostics should fall back to the ordinary device when Graphics Tools are unavailable");
     renderer.Shutdown();
 
-    const specforge::D3D11LiveObjectReport& report =
+    const spectiary::D3D11LiveObjectReport& report =
         renderer.live_object_report();
     Require(
         report.requested,
@@ -1059,11 +1059,11 @@ void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
 {
     SwapChainTestWindow window;
     TemporaryDirectory temporary;
-    specforge::D3D11Renderer renderer;
+    spectiary::D3D11Renderer renderer;
     Require(
         SUCCEEDED(renderer.Initialize(
             window.hwnd(),
-            specforge::D3D11CompositionPolicy::
+            spectiary::D3D11CompositionPolicy::
                 Disabled)),
         "the frame-capture test should initialize the DXGI renderer");
 
@@ -1289,7 +1289,7 @@ void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
 
     Require(
         SUCCEEDED(renderer.Present(
-            specforge::D3D11PresentMode::
+            spectiary::D3D11PresentMode::
                 Immediate)),
         "the captured frame should remain presentable");
     const std::filesystem::path after_present =
@@ -1305,20 +1305,20 @@ void TestRendererCapturesDefaultCompositionFrameWhenSelected()
 {
     SwapChainTestWindow window;
     TemporaryDirectory temporary;
-    specforge::D3D11Renderer renderer;
+    spectiary::D3D11Renderer renderer;
     Require(
         SUCCEEDED(renderer.Initialize(window.hwnd())),
         "the default renderer should initialize");
-    const specforge::D3D11PresentationTransition transition =
+    const spectiary::D3D11PresentationTransition transition =
         renderer.TakePresentationTransition();
     Require(
         transition.previous_backend ==
-                specforge::D3D11PresentationBackend::None &&
+                spectiary::D3D11PresentationBackend::None &&
             transition.current_backend ==
                 renderer.presentation_backend(),
         "default renderer initialization should expose the selected backend as a transition");
     if (renderer.presentation_backend() ==
-        specforge::D3D11PresentationBackend::Dxgi) {
+        spectiary::D3D11PresentationBackend::Dxgi) {
         Require(
             FAILED(transition.reason) &&
                 !transition.operation.empty(),
@@ -1333,7 +1333,7 @@ void TestRendererCapturesDefaultCompositionFrameWhenSelected()
     }
     Require(
         renderer.presentation_backend() ==
-            specforge::D3D11PresentationBackend::
+            spectiary::D3D11PresentationBackend::
                 Composition &&
             SUCCEEDED(transition.reason),
         "successful Composition initialization should be observable");
@@ -1366,7 +1366,7 @@ void TestRendererCapturesDefaultCompositionFrameWhenSelected()
 
 void TestImGuiViewportSwapChainLifecycle()
 {
-    namespace trace = specforge::presentation_trace;
+    namespace trace = spectiary::presentation_trace;
     std::vector<trace::Event> events;
     events.reserve(256);
     trace::context = &events;
@@ -1391,26 +1391,26 @@ void TestImGuiViewportSwapChainLifecycle()
     fixture.CreateViewport();
     Require(fixture.has_viewport_swap_chain(), "detaching should create a viewport swap chain");
     Require(SUCCEEDED(fixture.TakeLastError().result), "viewport creation should not record a DXGI error");
-    const std::vector<specforge::D3D11ViewportPresentationUpdate>
+    const std::vector<spectiary::D3D11ViewportPresentationUpdate>
         initial_updates = fixture.TakePresentationUpdates();
     Require(
         initial_updates.size() == 1 &&
             initial_updates[0].viewport_id == 73 &&
             initial_updates[0].backend !=
-                specforge::D3D11PresentationBackend::None &&
+                spectiary::D3D11PresentationBackend::None &&
             initial_updates[0].transition.current_backend ==
                 initial_updates[0].backend,
         "viewport creation should report its selected presentation backend");
     const bool composition_selected =
         initial_updates[0].backend ==
-        specforge::D3D11PresentationBackend::Composition;
+        spectiary::D3D11PresentationBackend::Composition;
 
     fixture.ResizeViewport(ImVec2(640.0f, 360.0f));
     Require(SUCCEEDED(fixture.TakeLastError().result), "detached viewport resize should succeed");
 
     fixture.PresentViewport();
     Require(SUCCEEDED(fixture.TakeLastError().result), "detached viewport present should succeed");
-    const std::vector<specforge::D3D11ViewportPresentCompletion> ordinary_presentations =
+    const std::vector<spectiary::D3D11ViewportPresentCompletion> ordinary_presentations =
         fixture.TakePresentCompletions();
     Require(
         (composition_selected
@@ -1428,7 +1428,7 @@ void TestImGuiViewportSwapChainLifecycle()
     Require(
         SUCCEEDED(fixture.TakeLastError().result),
         "detached viewport compositor-clock present should use supported DXGI flags");
-    const std::vector<specforge::D3D11ViewportPresentCompletion>
+    const std::vector<spectiary::D3D11ViewportPresentCompletion>
         paced_presentations = fixture.TakePresentCompletions();
     Require(
         (composition_selected
@@ -1468,7 +1468,7 @@ void TestImGuiViewportSwapChainLifecycle()
         if (event.name == "presentation_buffer_replace") {
             Require(event.result_valid && event.result == S_OK &&
                 event.new_width == 640 && event.new_height == 360 &&
-                event.logical_bytes <= specforge::kIncrementalBufferBudget,
+                event.logical_bytes <= spectiary::kIncrementalBufferBudget,
                 "production replacement must use the requested dimensions within budget");
             ++replacements;
         }
@@ -1508,7 +1508,7 @@ void TestImGuiViewportSwapChainLifecycle()
 
 void TestPlatformTelemetryForwardsAndRestoresCallbacks()
 {
-    namespace trace = specforge::presentation_trace;
+    namespace trace = spectiary::presentation_trace;
     struct State {
         bool recording = true;
         int positions = 0, sizes = 0;
@@ -1545,7 +1545,7 @@ void TestPlatformTelemetryForwardsAndRestoresCallbacks()
     };
     io.Platform_SetWindowPos = position_callback;
     io.Platform_SetWindowSize = size_callback;
-    specforge::D3D11ImGuiViewportRenderer renderer;
+    spectiary::D3D11ImGuiViewportRenderer renderer;
     Require(renderer.Initialize(factory.Get(), device.Get(), context.Get()), "trace wrapper should initialize");
     ImGuiViewport viewport;
     struct ClearViewportUserData {

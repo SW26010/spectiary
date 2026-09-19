@@ -82,7 +82,7 @@ function Start-InteractiveLauncher {
         $stderrTask = $process.StandardError.ReadToEndAsync()
         while ($true) {
             $line = Read-LauncherLine -Process $process
-            if ($line -match '^SpecForge PID: ([0-9]+)$') {
+            if ($line -match '^Spectiary PID: ([0-9]+)$') {
                 $guiProcessId = [int]$Matches[1]
             }
             if ($line -eq (
@@ -93,7 +93,7 @@ function Start-InteractiveLauncher {
         }
         Assert-True `
             -Condition ($guiProcessId -gt 0) `
-            -Message 'Launcher did not report the owned SpecForge PID.'
+            -Message 'Launcher did not report the owned Spectiary PID.'
         return [pscustomobject]@{
             Process = $process
             StderrTask = $stderrTask
@@ -269,7 +269,7 @@ function Send-WindowPeerCommand {
     return Read-LauncherLine -Process $Process
 }
 
-if ($null -eq ('SpecForgeViewportOwnershipNative' -as [type])) {
+if ($null -eq ('SpectiaryViewportOwnershipNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -277,7 +277,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class SpecForgeViewportOwnershipNative
+public static class SpectiaryViewportOwnershipNative
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect
@@ -628,7 +628,7 @@ function Wait-ForOwnershipWindows {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
         $windows = @(
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 WindowsForProcess([uint32]$GuiProcessId)
         )
         $main = @(
@@ -654,7 +654,7 @@ function Wait-ForOwnershipWindows {
         Start-Sleep -Milliseconds 25
     }
     $diagnostic = @(
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowsForProcess([uint32]$GuiProcessId) |
             ForEach-Object {
                 (Format-Handle -Handle $_.Handle) +
@@ -662,7 +662,7 @@ function Wait-ForOwnershipWindows {
             }
     ) -join '; '
     throw (
-        'Expected exactly one SpecForge main HWND and ' +
+        'Expected exactly one Spectiary main HWND and ' +
         "$ExpectedSecondaryCount detached ImGui viewport HWNDs. " +
         "Observed: $diagnostic")
 }
@@ -682,9 +682,9 @@ function Assert-SameViewportWindows {
     foreach ($secondaryHandle in $SecondaryHandles) {
         Assert-True `
             -Condition (
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                     IsWindow($secondaryHandle) -and
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                     WindowProcessId($secondaryHandle) -eq
                         [uint32]$GuiProcessId) `
             -Message (
@@ -742,17 +742,17 @@ function Assert-Win32WindowPolicy {
     )
 
     $mainOwner =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowOwner($MainHandle)
     $mainExtendedStyle =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowExtendedStyle($MainHandle)
     Assert-True `
         -Condition (
             $mainOwner -eq [IntPtr]::Zero -and
-            -not [SpecForgeViewportOwnershipNative]::
+            -not [SpectiaryViewportOwnershipNative]::
                 WindowIsToolWindow($MainHandle) -and
-            -not [SpecForgeViewportOwnershipNative]::
+            -not [SpectiaryViewportOwnershipNative]::
                 WindowIsTopMost($MainHandle)) `
         -Message (
             "$Phase expected main HWND " +
@@ -764,19 +764,19 @@ function Assert-Win32WindowPolicy {
 
     foreach ($secondaryHandle in $SecondaryHandles) {
         $owner =
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 WindowOwner($secondaryHandle)
         $extendedStyle =
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 WindowExtendedStyle($secondaryHandle)
         Assert-True `
             -Condition (
                 $owner -eq $MainHandle -and
-                [SpecForgeViewportOwnershipNative]::
+                [SpectiaryViewportOwnershipNative]::
                     WindowIsToolWindow($secondaryHandle) -and
-                -not [SpecForgeViewportOwnershipNative]::
+                -not [SpectiaryViewportOwnershipNative]::
                     WindowIsAppWindow($secondaryHandle) -and
-                -not [SpecForgeViewportOwnershipNative]::
+                -not [SpectiaryViewportOwnershipNative]::
                     WindowIsTopMost($secondaryHandle)) `
             -Message (
                 "$Phase expected detached HWND " +
@@ -802,7 +802,7 @@ function Assert-WindowTitleBarTheme {
 
     foreach ($handle in $Handles) {
         $actual =
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 WindowUsesImmersiveDarkMode($handle)
         Assert-True `
             -Condition ($actual -eq $ExpectedDark) `
@@ -828,9 +828,9 @@ function Wait-WindowTitleBarTheme {
     do {
         $matches = $true
         foreach ($handle in $Handles) {
-            if (-not [SpecForgeViewportOwnershipNative]::
+            if (-not [SpectiaryViewportOwnershipNative]::
                     IsWindow($handle) -or
-                [SpecForgeViewportOwnershipNative]::
+                [SpectiaryViewportOwnershipNative]::
                     WindowUsesImmersiveDarkMode($handle) -ne
                         $ExpectedDark) {
                 $matches = $false
@@ -1025,7 +1025,7 @@ function Assert-OwnershipGroupZOrder {
     )
 
     $visibleWindows = @(
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             VisibleWindowsInZOrder()
     )
     $indices = @{}
@@ -1055,7 +1055,7 @@ function Assert-OwnershipGroupZOrder {
             $missingKeys.Count -eq 0 -and
             $indices.ContainsKey($peerKey)) `
         -Message (
-            'Restored z-order did not contain every SpecForge HWND and the ' +
+            'Restored z-order did not contain every Spectiary HWND and the ' +
             'peer HWND. Missing: ' + ($missingKeys -join ', ') + '.')
 
     $groupIndices = @(
@@ -1086,7 +1086,7 @@ function Assert-OwnershipGroupZOrder {
             [int]$indices[$peerKey] -gt
                 $maximumGroupIndex) `
         -Message (
-            'Restored SpecForge HWNDs must form one contiguous non-topmost ' +
+            'Restored Spectiary HWNDs must form one contiguous non-topmost ' +
             'ownership group above the peer window. Group indexes: ' +
             ($groupIndices -join ', ') +
             "; peer index: $($indices[$peerKey]).")
@@ -1259,7 +1259,7 @@ $resolvedArtifactsDirectory =
     [System.IO.Path]::GetFullPath($ArtifactsDirectory)
 $fixtureParent = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-viewport-ownership-' +
+    ('spectiary-viewport-ownership-' +
      [Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory(
     $fixtureParent) | Out-Null
@@ -1273,7 +1273,7 @@ $followDarkCapturePath =
 $followLightCapturePath =
     Join-Path $stateRoot 'artifacts\theme-follow-system-light.png'
 $systemThemeFixturePath =
-    Join-Path $stateRoot '.specforge-system-theme-test.txt'
+    Join-Path $stateRoot '.system-theme-test.txt'
 $invalidStateRoot = Join-Path $fixtureParent 'invalid-state'
 $invalidSeed = Join-Path $fixtureParent 'malformed-layout.ini'
 $launcherProcess = $null
@@ -1349,10 +1349,10 @@ try {
         -SecondaryHandles $secondaryHandles `
         -Phase 'Initial detached viewport creation'
     $mainClient =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             ClientRectangleOnScreen($mainHandle)
     $secondaryRect =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowRectangle($secondaryHandle)
     Assert-True `
         -Condition (
@@ -1372,7 +1372,7 @@ try {
         [Math]::Floor(
             ($mainClient.Height -
              $secondaryRect.Height) / 2)
-    [SpecForgeViewportOwnershipNative]::
+    [SpectiaryViewportOwnershipNative]::
         MoveWindowNoActivate(
             $secondaryHandle,
             $insideX,
@@ -1403,7 +1403,7 @@ try {
         -SecondaryHandles $secondaryHandles `
         -Phase 'Moving the detached viewport inside the main client area'
     $insideRect =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowRectangle($secondaryHandle)
     Assert-True `
         -Condition (
@@ -1417,9 +1417,9 @@ try {
             -MainClient $mainClient `
             -SecondaryRect $insideRect `
             -VirtualScreen (
-                [SpecForgeViewportOwnershipNative]::
+                [SpectiaryViewportOwnershipNative]::
                     VirtualScreenRectangle())
-    [SpecForgeViewportOwnershipNative]::
+    [SpectiaryViewportOwnershipNative]::
         MoveWindowNoActivate(
             $secondaryHandle,
             [int]$outside.X,
@@ -1449,7 +1449,7 @@ try {
         -SecondaryHandles $secondaryHandles `
         -Phase 'Moving the detached viewport outside the main client area'
     $outsideRect =
-        [SpecForgeViewportOwnershipNative]::
+        [SpectiaryViewportOwnershipNative]::
             WindowRectangle($secondaryHandle)
     Assert-True `
         -Condition (
@@ -1465,14 +1465,14 @@ try {
     $peerHandle = [IntPtr]$peer.Handle
     Assert-True `
         -Condition (
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 WindowOwner($peerHandle) -eq
                     [IntPtr]::Zero -and
-            -not [SpecForgeViewportOwnershipNative]::
+            -not [SpectiaryViewportOwnershipNative]::
                 WindowIsTopMost($peerHandle)) `
         -Message 'The Win32 test peer must be an ordinary unowned non-topmost window.'
 
-    [void][SpecForgeViewportOwnershipNative]::
+    [void][SpectiaryViewportOwnershipNative]::
         ShowWindowAsync($mainHandle, 7)
     $minimizeDeadline =
         [DateTime]::UtcNow.AddSeconds(10)
@@ -1480,11 +1480,11 @@ try {
         $visibleSecondaryHandles = @(
             $secondaryHandles |
                 Where-Object {
-                    [SpecForgeViewportOwnershipNative]::
+                    [SpectiaryViewportOwnershipNative]::
                         IsWindowVisible($_)
                 }
         )
-        if ([SpecForgeViewportOwnershipNative]::
+        if ([SpectiaryViewportOwnershipNative]::
                 IsIconic($mainHandle) -and
             $visibleSecondaryHandles.Count -eq 0) {
             break
@@ -1494,13 +1494,13 @@ try {
     $destroyedWhileMinimized = @(
         $secondaryHandles |
             Where-Object {
-                -not [SpecForgeViewportOwnershipNative]::
+                -not [SpectiaryViewportOwnershipNative]::
                     IsWindow($_)
             }
     )
     Assert-True `
         -Condition (
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 IsIconic($mainHandle) -and
             $visibleSecondaryHandles.Count -eq 0 -and
             $destroyedWhileMinimized.Count -eq 0) `
@@ -1522,12 +1522,12 @@ try {
                 'activated ' +
                 (Format-Handle -Handle $peerHandle) +
                 ' true') -and
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 GetForegroundWindow() -eq
                     $peerHandle) `
         -Message (
             'The independent Win32 peer must become the foreground window ' +
-            "while SpecForge is minimized. Peer response: $peerActivation")
+            "while Spectiary is minimized. Peer response: $peerActivation")
 
     $mainActivation =
         Send-WindowPeerCommand `
@@ -1541,14 +1541,14 @@ try {
         $hiddenSecondaryHandles = @(
             $secondaryHandles |
                 Where-Object {
-                    -not [SpecForgeViewportOwnershipNative]::
+                    -not [SpectiaryViewportOwnershipNative]::
                         IsWindowVisible($_)
                 }
         )
-        if (-not [SpecForgeViewportOwnershipNative]::
+        if (-not [SpectiaryViewportOwnershipNative]::
                 IsIconic($mainHandle) -and
             $hiddenSecondaryHandles.Count -eq 0 -and
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 GetForegroundWindow() -eq
                     $mainHandle) {
             break
@@ -1561,14 +1561,14 @@ try {
                 'activated ' +
                 (Format-Handle -Handle $mainHandle) +
                 ' true') -and
-            -not [SpecForgeViewportOwnershipNative]::
+            -not [SpectiaryViewportOwnershipNative]::
                 IsIconic($mainHandle) -and
             $hiddenSecondaryHandles.Count -eq 0 -and
-            [SpecForgeViewportOwnershipNative]::
+            [SpectiaryViewportOwnershipNative]::
                 GetForegroundWindow() -eq
                     $mainHandle) `
         -Message (
-            'The foreground peer must restore and activate the SpecForge ' +
+            'The foreground peer must restore and activate the Spectiary ' +
             'ownership group without leaving a detached viewport hidden. ' +
             "Peer response: $mainActivation")
 
@@ -1720,7 +1720,7 @@ try {
         $systemThemeFixturePath,
         'builtin.theme.dark',
         [System.Text.UTF8Encoding]::new($false))
-    [SpecForgeViewportOwnershipNative]::
+    [SpectiaryViewportOwnershipNative]::
         PostThemeChanged($mainHandle)
     Wait-WindowTitleBarTheme `
         -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
@@ -1772,7 +1772,7 @@ try {
         $systemThemeFixturePath,
         'builtin.theme.light',
         [System.Text.UTF8Encoding]::new($false))
-    [SpecForgeViewportOwnershipNative]::
+    [SpectiaryViewportOwnershipNative]::
         PostThemeChanged($mainHandle)
     Wait-WindowTitleBarTheme `
         -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
@@ -1806,7 +1806,7 @@ try {
         $systemThemeFixturePath,
         'builtin.theme.dark',
         [System.Text.UTF8Encoding]::new($false))
-    [SpecForgeViewportOwnershipNative]::
+    [SpectiaryViewportOwnershipNative]::
         PostThemeChanged($mainHandle)
     Wait-WindowTitleBarTheme `
         -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `

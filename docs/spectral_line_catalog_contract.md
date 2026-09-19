@@ -2,7 +2,7 @@
 
 ## Purpose
 
-SpecForge keeps public spectral reference markers in a versioned config file:
+Spectiary keeps public spectral reference markers in a versioned config file:
 
 ```text
 config/spectral_lines.public.tsv
@@ -73,7 +73,7 @@ contract.
 The built-in catalog's third-party attribution and transformation record lives
 in the repository at `legal/DATA_SOURCES.txt`, is embedded in the executable,
 and is available from About as Data Sources. An approximate marker may use a
-SpecForge-owned derivation handle, but its note must state that it is approximate
+Spectiary-owned derivation handle, but its note must state that it is approximate
 and must not imply laboratory or calibration precision. Removing an external
 attribution requires replacing both the value and its provenance; changing only
 `source_ref` is not sufficient.

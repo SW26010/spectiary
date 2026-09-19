@@ -1,10 +1,10 @@
 #pragma once
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleNavigationDirection {
     Previous,
     Next,
 };
 
-}  // namespace specforge
+}  // namespace spectiary

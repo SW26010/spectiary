@@ -4,8 +4,8 @@
 
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] std::optional<ThemeId> ReadWindowsSystemTheme();
 
-}  // namespace specforge
+}  // namespace spectiary

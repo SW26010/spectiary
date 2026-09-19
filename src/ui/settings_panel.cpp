@@ -2,10 +2,10 @@
 
 #include "app/embedded_legal_documents.h"
 #include "app/runtime_paths.h"
-#include "app/specforge_metadata_validation.h"
+#include "app/spectiary_metadata_validation.h"
 #include "platform/file_sha256.h"
 #include "ui/profile_recording_ui_state.h"
-#include "specforge/specforge_build_identity.h"
+#include "spectiary/spectiary_build_identity.h"
 #include "ui/theme.h"
 #include "ui/ui_scale_settings.h"
 
@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 std::span<const AppearanceThemeOption>
 AppearanceThemeOptions() noexcept
@@ -417,11 +417,11 @@ struct SettingsPanelUi::ArtifactIdentityComputation {
 };
 
 SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
-    const SpecForgeStartup& startup)
+    const SpectiaryStartup& startup)
 {
     const RuntimePaths& paths = startup.runtime_paths();
     return {
-        .version = build_info::kSpecForgeVersion,
+        .version = build_info::kSpectiaryVersion,
         .distribution =
             DistributionName(paths.distribution),
         .configuration = build_info::kBuildConfiguration,
@@ -604,7 +604,7 @@ std::string FormatDiagnosticInformation(
 {
     std::string diagnostics;
     diagnostics.reserve(320);
-    diagnostics += "SpecForge ";
+    diagnostics += "Spectiary ";
     diagnostics += environment.version;
     diagnostics += "\n";
     AppendLabeledValue(
@@ -1033,7 +1033,7 @@ SettingsPanelUi::TakeApplicationSettingsIntent()
 
 void SettingsPanelUi::RenderNavigation(UiLanguage language)
 {
-    ImGui::TextDisabled("SPECFORGE");
+    ImGui::TextDisabled("SPECTIARY");
     ImGui::Spacing();
     for (const SettingsSection section : kSettingsSections) {
         const bool selected = selected_section_ == section;
@@ -2066,7 +2066,7 @@ void SettingsPanelUi::RenderAbout(
         UiText(language, UiTextId::About),
         UiText(language, UiTextId::AboutPageDescription));
 
-    ImGui::TextUnformatted("SpecForge");
+    ImGui::TextUnformatted("Spectiary");
     const std::string_view tagline = UiText(
         language,
         UiTextId::ProductTagline);
@@ -2480,4 +2480,4 @@ void SettingsPanelUi::CopyDiagnosticInformation(
         UiTextId::DiagnosticInformationCopied);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

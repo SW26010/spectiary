@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct PlotPixelRect {
     float left = 0.0f;
@@ -84,4 +84,4 @@ struct PlotViewLimits {
     PlotViewLimits& limits,
     const PlotTouchpadGestureBatch& gestures);
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleFilterValueOption {
     std::string key;
@@ -81,4 +81,4 @@ private:
     const SampleLabelingTask& task,
     const std::function<void()>& cancellation_checkpoint);
 
-}  // namespace specforge
+}  // namespace spectiary

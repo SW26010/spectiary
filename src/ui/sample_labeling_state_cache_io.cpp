@@ -30,9 +30,10 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
+// Historical schema-4 monolith: migration reader only, never a current writer.
 constexpr const char* kStateFormatKind = "specforge.sample_labeling_tasks.cache";
 constexpr int kStateSchemaVersion = 4;
 
@@ -655,7 +656,7 @@ ParsedTask ParseTask(
                         cancellation_checkpoint();
                     }
                     const nlohmann::json& value = (*values)[index];
-                    if (!specforge::JsonIsInt64(value) ||
+                    if (!spectiary::JsonIsInt64(value) ||
                         value.get<std::int64_t>() < std::numeric_limits<int>::min() ||
                         value.get<std::int64_t>() > std::numeric_limits<int>::max()) {
                         all_ints = false;
@@ -1874,4 +1875,4 @@ bool HasSampleLabelingOutputPathConflict(
     return false;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

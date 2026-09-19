@@ -5,7 +5,7 @@
 #include <new>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr double kInterruptTimeUnitsPerSecond = 10'000'000.0;
@@ -267,4 +267,4 @@ HRESULT QueryWin32DisplayRefreshState(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

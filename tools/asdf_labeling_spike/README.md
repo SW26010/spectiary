@@ -1,11 +1,11 @@
-# SpecForge sample-labeling schema 2.0.0 ASDF spike
+# Spectiary sample-labeling schema 2.0.0 ASDF spike
 
 This directory contains the reproducible experiments for GitHub issue #77. It
 is deliberately separate from the production labeling persistence path. The
 approved semantic model remains owned by issue #74.
 
 The reference oracle is Python `asdf` 5.3.1 with `asdf-standard` 1.5.0. The
-documents use SpecForge sample-labeling schema `2.0.0`, ASDF file format
+documents use Spectiary sample-labeling schema `2.0.0`, ASDF file format
 `1.0.0`, and ASDF Standard `1.5.0`; these are three separate version axes. For
 ad-hoc experiments, install the pinned environment into an ignored build
 directory:
@@ -15,7 +15,7 @@ python -m pip install --target build/asdf-labeling-spike-python -r tools/asdf_la
 $env:PYTHONPATH = (Resolve-Path build/asdf-labeling-spike-python).Path
 ```
 
-The checked profile is the canonical SpecForge sample-labeling schema `2.0.0`
+The checked profile is the canonical Spectiary sample-labeling schema `2.0.0`
 document: task IDs are
 lowercase UUID v4 values; task timestamps use fixed millisecond UTC text; task
 origin, optional description, and optional authors (including email) round-trip through the Python
@@ -68,15 +68,15 @@ the compressed read/write/rewrite matrix:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
   -Configure -Preset ninja-msvc-debug-asdf-labeling-spike
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
-  -Preset ninja-msvc-debug-asdf-labeling-spike -Target specforge_asdf_labeling_spike_native
+  -Preset ninja-msvc-debug-asdf-labeling-spike -Target spectiary_asdf_labeling_spike_native
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
   -Configure
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
-  -Target specforge_sample_labeling_asdf_codec_tests
+  -Target spectiary_sample_labeling_asdf_codec_tests
 python tools/asdf_labeling_spike/asdf_spike.py interoperability `
   --fixtures tests/fixtures/asdf_labeling `
-  --native build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/specforge_asdf_labeling_spike_native.exe `
-  --production-native build/ninja-msvc-debug/specforge_sample_labeling_asdf_codec_tests.exe `
+  --native build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/spectiary_asdf_labeling_spike_native.exe `
+  --production-native build/ninja-msvc-debug/spectiary_sample_labeling_asdf_codec_tests.exe `
   --output build/asdf-labeling-spike-results/interoperability.json
 ```
 
@@ -90,9 +90,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-deb
   -Configure -Preset ninja-msvc-debug-asdf-labeling-spike
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
   -Preset ninja-msvc-debug-asdf-labeling-spike `
-  -Target specforge_asdf_labeling_interoperability_targets
+  -Target spectiary_asdf_labeling_interoperability_targets
 ctest --test-dir build/ninja-msvc-debug-asdf-labeling-spike `
-  -R '^specforge_asdf_labeling_interoperability$' --output-on-failure
+  -R '^spectiary_asdf_labeling_interoperability$' --output-on-failure
 ```
 
 The matrix proves Python zlib writer -> native reader, native level-6 zlib
@@ -110,11 +110,11 @@ encoded Unicode roster block is byte-for-byte unchanged while the values block
 is replaced. A differential duplicate-key case confirms that official ASDF
 selects the last value while the production reader/rewrite rejects the
 ambiguous document before creating output. The native CLI also exposes the
-historical raw-block experiment directly for an already validated SpecForge
+historical raw-block experiment directly for an already validated Spectiary
 sample-labeling schema `2.0.0` input document:
 
 ```powershell
-build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/specforge_asdf_labeling_spike_native.exe `
+build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/spectiary_asdf_labeling_spike_native.exe `
   rewrite-value input.asdf output.asdf 0 1
 ```
 

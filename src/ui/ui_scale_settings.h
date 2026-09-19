@@ -2,7 +2,7 @@
 
 struct ImGuiStyle;
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr int kDefaultUiScalePercentage = 100;
 inline constexpr int kMinimumUiScalePercentage = 80;
@@ -23,4 +23,4 @@ void ApplyUiScaleToImGuiStyle(
     const ImGuiStyle& base_style,
     const UiScaleFactors& scales) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

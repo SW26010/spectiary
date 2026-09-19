@@ -15,10 +15,10 @@ string(REPLACE "\n" "\\n\"\n    \"" catalog_content "${catalog_content}")
 
 file(WRITE "${OUTPUT}" "#pragma once
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr const char kEmbeddedPublicSpectralLineCatalog[] =
     \"${catalog_content}\";
 
-}  // namespace specforge
+}  // namespace spectiary
 ")

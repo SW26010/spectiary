@@ -2,14 +2,14 @@
 
 #include "domain/spectrum_loader.h"
 
-namespace specforge {
+namespace spectiary {
 struct SourceCollectionFolderListing;
 }
 
 #include <cstddef>
 #include <filesystem>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 
 SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathImpl(
     const std::filesystem::path& path,
@@ -29,4 +29,4 @@ SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
     const SourceCollectionFolderListing& listing,
     const SpectrumLoadCancellationCheck& cancellation_requested);
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

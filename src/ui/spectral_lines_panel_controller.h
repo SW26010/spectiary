@@ -17,7 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class SpectralLinesPanelController;
 
@@ -286,4 +286,4 @@ private:
     bool explicit_task_delta_pending_ = false;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

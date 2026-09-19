@@ -13,10 +13,10 @@ Add-Type -AssemblyName System.Drawing
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 if (-not $Source) {
-    $Source = Join-Path $repoRoot 'resources\branding\specforge.svg'
+    $Source = Join-Path $repoRoot 'resources\branding\spectiary.svg'
 }
 if (-not $Output) {
-    $Output = Join-Path $repoRoot 'resources\branding\specforge.ico'
+    $Output = Join-Path $repoRoot 'resources\branding\spectiary.ico'
 }
 
 $resolvedSource = (Resolve-Path -LiteralPath $Source).Path
@@ -50,7 +50,7 @@ if ($null -eq $root -or
     $null -eq $background -or
     $null -eq $clipRect -or
     $null -eq $strokeGroup) {
-    throw 'The SpecForge SVG does not match the supported icon structure.'
+    throw 'The Spectiary SVG does not match the supported icon structure.'
 }
 
 $invariantCulture =
@@ -202,7 +202,7 @@ function New-IconPngFrame {
             [StringSplitOptions]::RemoveEmptyEntries) |
             ForEach-Object { Convert-SvgNumber $_ })
     if ($viewBox.Count -ne 4 -or $viewBox[2] -ne $viewBox[3]) {
-        throw 'The SpecForge SVG viewBox must be square.'
+        throw 'The Spectiary SVG viewBox must be square.'
     }
 
     $renderSize = $Size * $Supersample

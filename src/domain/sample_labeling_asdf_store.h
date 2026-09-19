@@ -13,7 +13,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleLabelingAsdfStoreErrorKind {
     None,
@@ -144,7 +144,7 @@ OpenSampleLabelingAsdfDocumentStore(
     const SampleLabelingAsdfReadCheckpoint& checkpoint = {}) noexcept;
 
 // Publishes a new full-document generation. If path already contains a readable
-// SpecForge sample-labeling schema 2.0.0 document, this operation first obtains
+// Spectiary sample-labeling schema 2.0.0 document, this operation first obtains
 // its durable base and preserves forward-compatible unknown metadata. An
 // existing document that cannot provide such a base is rejected instead of
 // being silently replaced.
@@ -251,4 +251,4 @@ RewriteDocumentAndReopenWithCheckpoints(
 
 }  // namespace sample_labeling_asdf_store_test_seam
 
-}  // namespace specforge
+}  // namespace spectiary

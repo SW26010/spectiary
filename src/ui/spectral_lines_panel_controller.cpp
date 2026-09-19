@@ -13,7 +13,7 @@
 #include <thread>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -659,7 +659,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return Rejected("The user group could not be added without violating grouping view invariants.");
         }
         const bool changed = copy
-                                 ? specforge::CopyMarkerReference(
+                                 ? spectiary::CopyMarkerReference(
                                        *view,
                                        catalog_identity_,
                                        intent.marker_id_,
@@ -772,7 +772,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         }
         const bool copy = intent.kind_ == CatalogUserStateIntent::Kind::CopyMarkerReference;
         const bool changed = copy
-                                 ? specforge::CopyMarkerReference(
+                                 ? spectiary::CopyMarkerReference(
                                        *view,
                                        catalog_identity_,
                                        intent.marker_id_,
@@ -791,7 +791,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
 
     case CatalogUserStateIntent::Kind::RemoveMarkerReference: {
         GroupingView* view = FindUserGroupingView(intent.view_id_);
-        if (view == nullptr || !specforge::RemoveMarkerReferenceFromGroup(
+        if (view == nullptr || !spectiary::RemoveMarkerReferenceFromGroup(
                                    *view,
                                    catalog_identity_,
                                    intent.marker_id_,
@@ -1357,4 +1357,4 @@ void SpectralLinesPanelController::RequestGroupingViewSelection()
     grouping_view_selection_requested_ = true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

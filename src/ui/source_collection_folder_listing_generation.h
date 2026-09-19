@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace specforge {
+namespace spectiary {
 
 // Immutable folder listing plus the observation boundary under which it was
 // enumerated. The listing is a cache; the generation decides whether it is
@@ -23,4 +23,4 @@ struct SourceCollectionFolderListingGeneration {
 using SourceCollectionFolderListingGenerationHandle =
     std::shared_ptr<const SourceCollectionFolderListingGeneration>;
 
-}  // namespace specforge
+}  // namespace spectiary

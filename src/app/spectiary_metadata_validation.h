@@ -1,13 +1,13 @@
 #pragma once
 
-#include "app/specforge_metadata.h"
+#include "app/spectiary_metadata.h"
 
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 
-namespace specforge::metadata_validation {
+namespace spectiary::metadata_validation {
 
 [[nodiscard]] bool IsRequiredMetadataString(std::string_view value);
 [[nodiscard]] bool IsDottedNumericVersion(
@@ -29,4 +29,4 @@ namespace specforge::metadata_validation {
     const BuildMetadata& metadata,
     std::string* error_message = nullptr);
 
-}  // namespace specforge::metadata_validation
+}  // namespace spectiary::metadata_validation

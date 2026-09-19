@@ -1,6 +1,6 @@
 #include "domain/utf8.h"
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 [[nodiscard]] bool IsUnicodeWhitespace(std::uint32_t codepoint) noexcept
@@ -120,4 +120,4 @@ Utf8Scalar DecodeValidUtf8Scalar(
     return scalar;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

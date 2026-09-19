@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void Checkpoint(const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
@@ -1118,4 +1118,4 @@ std::optional<std::string> LoadSourceCollectionNpySampleName(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

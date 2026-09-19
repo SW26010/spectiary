@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct ProfileSinkTestAccess {
     static bool StartDefaultWithNameFactory(
@@ -67,7 +67,7 @@ struct ProfileSinkTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -143,7 +143,7 @@ public:
     {
         const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
         path_ = std::filesystem::temp_directory_path() /
-                ("specforge_profile_sink_tests_" + std::to_string(nonce));
+                ("spectiary_profile_sink_tests_" + std::to_string(nonce));
         std::filesystem::create_directories(path_);
     }
 
@@ -169,9 +169,9 @@ std::string ReadTextFile(const std::filesystem::path& path)
     return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
 }
 
-specforge::ProfileSink::Limits GenerousLimits()
+spectiary::ProfileSink::Limits GenerousLimits()
 {
-    specforge::ProfileSink::Limits limits;
+    spectiary::ProfileSink::Limits limits;
     limits.max_queue_bytes = 1024 * 1024;
     limits.max_file_bytes = 1024 * 1024;
     limits.max_duration = 1h;
@@ -182,21 +182,21 @@ void TestStopDrainsEventsAndWritesSummary()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path path = temporary.path() / "profile.jsonl";
-    specforge::ProfileSink sink(path, GenerousLimits());
+    spectiary::ProfileSink sink(path, GenerousLimits());
     Require(sink.is_open(), "an explicit writable path should start recording");
 
     sink.WriteEvent(
         "event\"name",
         {
-            specforge::ProfileSink::Field::String("text", "line 1\nline 2"),
-            specforge::ProfileSink::Field::Number("finite", "1.25"),
-            specforge::ProfileSink::Field::Number("invalid", "nan"),
+            spectiary::ProfileSink::Field::String("text", "line 1\nline 2"),
+            spectiary::ProfileSink::Field::Number("finite", "1.25"),
+            spectiary::ProfileSink::Field::Number("invalid", "nan"),
         });
     sink.Stop();
 
     Require(!sink.is_open(), "Stop should stop accepting profile events");
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::Explicit,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::Explicit,
         "an ordinary Stop should retain an explicit stop reason");
     const std::string text = ReadTextFile(path);
     Require(text.find("\"event\":\"event\\\"name\"") != std::string::npos, "event names should be escaped");
@@ -213,7 +213,7 @@ void TestConcurrentDefaultStartsUseDistinctPaths()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path existing_path =
-        temporary.path() / "specforge-profile-same-time.jsonl";
+        temporary.path() / "spectiary-profile-same-time.jsonl";
     {
         std::ofstream existing(existing_path, std::ios::binary);
         existing << "{\"event\":\"preexisting\"}\n";
@@ -234,9 +234,9 @@ void TestConcurrentDefaultStartsUseDistinctPaths()
 
     for (std::size_t index = 0; index < kWorkerCount; ++index) {
         workers.emplace_back([&, index]() {
-            specforge::ProfileSink sink;
+            spectiary::ProfileSink sink;
             const bool started =
-                specforge::ProfileSinkTestAccess::
+                spectiary::ProfileSinkTestAccess::
                     StartDefaultWithNameFactory(
                         sink,
                         temporary.path(),
@@ -253,7 +253,7 @@ void TestConcurrentDefaultStartsUseDistinctPaths()
             if (started) {
                 if (!sink.WriteEvent(
                         "concurrent_owner",
-                        {specforge::ProfileSink::Field::Number(
+                        {spectiary::ProfileSink::Field::Number(
                             "worker",
                             std::to_string(index))})) {
                     results[index].error =
@@ -299,7 +299,7 @@ void TestExplicitCollisionAndInterruptedRestartAreSafe()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path interrupted_path =
-        temporary.path() / "specforge-profile-restart.jsonl";
+        temporary.path() / "spectiary-profile-restart.jsonl";
     {
         std::ofstream partial(interrupted_path, std::ios::binary);
         partial << "{\"event\":\"partial\"}\n";
@@ -309,7 +309,7 @@ void TestExplicitCollisionAndInterruptedRestartAreSafe()
         before.find("profile_recorder_summary") == std::string::npos,
         "the interrupted fixture must not look like a completed recording");
 
-    specforge::ProfileSink explicit_sink(
+    spectiary::ProfileSink explicit_sink(
         interrupted_path,
         GenerousLimits());
     Require(
@@ -318,9 +318,9 @@ void TestExplicitCollisionAndInterruptedRestartAreSafe()
             ReadTextFile(interrupted_path) == before,
         "an explicit existing output path must fail without truncating the interrupted file");
 
-    specforge::ProfileSink restarted;
+    spectiary::ProfileSink restarted;
     Require(
-        specforge::ProfileSinkTestAccess::
+        spectiary::ProfileSinkTestAccess::
             StartDefaultWithNameFactory(
                 restarted,
                 temporary.path(),
@@ -330,7 +330,7 @@ void TestExplicitCollisionAndInterruptedRestartAreSafe()
                 }),
         "a default recording should restart beside an interrupted output");
     const std::filesystem::path expected_restart_path =
-        temporary.path() / "specforge-profile-restart-2.jsonl";
+        temporary.path() / "spectiary-profile-restart-2.jsonl";
     Require(
         restarted.path() == expected_restart_path &&
             ReadTextFile(interrupted_path) == before,
@@ -347,9 +347,9 @@ void TestDefaultRecordingSupportsUnicodeOutputDirectory()
     TemporaryDirectory temporary;
     const std::filesystem::path unicode_directory =
         temporary.path() / L"诊断录制-输出";
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     Require(
-        specforge::ProfileSinkTestAccess::
+        spectiary::ProfileSinkTestAccess::
             StartDefaultWithNameFactory(
                 sink,
                 unicode_directory,
@@ -370,9 +370,9 @@ void TestDefaultRecordingSupportsUnicodeOutputDirectory()
 void TestQueueLimitDropsInsteadOfGrowingWithoutBound()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits = GenerousLimits();
+    spectiary::ProfileSink::Limits limits = GenerousLimits();
     limits.max_queue_bytes = 1;
-    specforge::ProfileSink sink(temporary.path() / "bounded.jsonl", limits);
+    spectiary::ProfileSink sink(temporary.path() / "bounded.jsonl", limits);
 
     Require(!sink.WriteEvent("too_large_for_queue"), "an event outside the queue budget should report rejection");
     Require(sink.is_open(), "queue pressure should not stop the recording session");
@@ -386,15 +386,15 @@ void TestQueueLimitDropsInsteadOfGrowingWithoutBound()
 void TestNormalCapacityDoesNotDropOnWriterContention()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits;
+    spectiary::ProfileSink::Limits limits;
     limits.max_duration = 1h;
-    specforge::ProfileSink sink(temporary.path() / "normal-capacity.jsonl", limits);
+    spectiary::ProfileSink sink(temporary.path() / "normal-capacity.jsonl", limits);
 
     constexpr int kEventCount = 30000;
     for (int index = 0; index < kEventCount; ++index) {
         (void)sink.WriteEvent(
             "normal_capacity_event",
-            {specforge::ProfileSink::Field::Number("index", std::to_string(index))});
+            {spectiary::ProfileSink::Field::Number("index", std::to_string(index))});
     }
     sink.Stop();
 
@@ -406,9 +406,9 @@ void TestNormalCapacityDoesNotDropOnWriterContention()
 void TestFileLimitStopsRecording()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits = GenerousLimits();
+    spectiary::ProfileSink::Limits limits = GenerousLimits();
     limits.max_file_bytes = 1;
-    specforge::ProfileSink sink(temporary.path() / "size-limited.jsonl", limits);
+    spectiary::ProfileSink sink(temporary.path() / "size-limited.jsonl", limits);
 
     bool boundary_event_retained = false;
     for (int attempt = 0; attempt < 100 && sink.is_open(); ++attempt) {
@@ -420,20 +420,20 @@ void TestFileLimitStopsRecording()
         boundary_event_retained,
         "the event that crosses the file limit should remain in the bounded final-frame tail");
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::FileSizeLimit,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::FileSizeLimit,
         "the recorder should expose that its file limit was reached");
     sink.Stop();
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::FileSizeLimit,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::FileSizeLimit,
         "joining a limited recorder should preserve the original stop reason");
 }
 
 void TestDurationLimitStopsAnIdleRecording()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits = GenerousLimits();
+    spectiary::ProfileSink::Limits limits = GenerousLimits();
     limits.max_duration = 20ms;
-    specforge::ProfileSink sink(temporary.path() / "duration-limited.jsonl", limits);
+    spectiary::ProfileSink sink(temporary.path() / "duration-limited.jsonl", limits);
 
     const auto deadline = std::chrono::steady_clock::now() + 1s;
     while (sink.is_open() && std::chrono::steady_clock::now() < deadline) {
@@ -441,7 +441,7 @@ void TestDurationLimitStopsAnIdleRecording()
     }
     Require(!sink.is_open(), "the duration budget should stop an idle recording without another producer event");
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::DurationLimit,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::DurationLimit,
         "an idle timeout should expose the duration-limit reason");
     sink.Stop();
 }
@@ -449,11 +449,11 @@ void TestDurationLimitStopsAnIdleRecording()
 void TestZeroDurationDelegatesToExternalLifetime()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits =
+    spectiary::ProfileSink::Limits limits =
         GenerousLimits();
     limits.max_duration =
         std::chrono::steady_clock::duration::zero();
-    specforge::ProfileSink sink(
+    spectiary::ProfileSink sink(
         temporary.path() / "externally-bounded.jsonl",
         limits);
 
@@ -465,7 +465,7 @@ void TestZeroDurationDelegatesToExternalLifetime()
     sink.Stop();
     Require(
         sink.stop_reason() ==
-            specforge::ProfileSink::StopReason::Explicit,
+            spectiary::ProfileSink::StopReason::Explicit,
         "external shutdown should retain the explicit stop reason");
 }
 
@@ -474,7 +474,7 @@ void TestStoppedSinkCanStartASecondSession()
     TemporaryDirectory temporary;
     const std::filesystem::path first_path = temporary.path() / "first.jsonl";
     const std::filesystem::path second_path = temporary.path() / "second.jsonl";
-    specforge::ProfileSink sink(first_path, GenerousLimits());
+    spectiary::ProfileSink sink(first_path, GenerousLimits());
     sink.WriteEvent("first_session");
     sink.Stop();
 
@@ -489,7 +489,7 @@ void TestStoppedSinkCanStartASecondSession()
 void TestBackgroundStopCanBeFinalizedWithoutBlockingTheRequest()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink sink(temporary.path() / "background-stop.jsonl", GenerousLimits());
+    spectiary::ProfileSink sink(temporary.path() / "background-stop.jsonl", GenerousLimits());
     sink.WriteEvent("queued_before_stop");
 
     sink.RequestStop();
@@ -510,7 +510,7 @@ void TestFrameFinalizationKeepsSameFrameTailBeforeSummary()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path path = temporary.path() / "same-frame-tail.jsonl";
-    specforge::ProfileSink sink(path, GenerousLimits());
+    spectiary::ProfileSink sink(path, GenerousLimits());
     Require(sink.WriteEvent("before_stop"), "the recording should accept its initial event");
 
     sink.BeginFrame();
@@ -523,7 +523,7 @@ void TestFrameFinalizationKeepsSameFrameTailBeforeSummary()
     Require(
         sink.is_frame_recording_active(),
         "one atomic admission snapshot should retain the final frame");
-    const specforge::ProfileSink::LifecycleSnapshot
+    const spectiary::ProfileSink::LifecycleSnapshot
         finalizing = sink.lifecycle_snapshot();
     Require(
         !finalizing.open && finalizing.stopping &&
@@ -554,9 +554,9 @@ void TestFrameFinalizationKeepsSameFrameTailBeforeSummary()
 void TestInFlightDurationStopNotifiesStateChange()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits = GenerousLimits();
+    spectiary::ProfileSink::Limits limits = GenerousLimits();
     limits.max_duration = 20ms;
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     std::atomic<int> notifications = 0;
     sink.SetStateChangeCallback([&notifications]() { notifications.fetch_add(1, std::memory_order_relaxed); });
     Require(
@@ -569,7 +569,7 @@ void TestInFlightDurationStopNotifiesStateChange()
            std::chrono::steady_clock::now() < transition_deadline) {
         std::this_thread::sleep_for(1ms);
     }
-    const specforge::ProfileSink::LifecycleSnapshot
+    const spectiary::ProfileSink::LifecycleSnapshot
         automatic_limit = sink.lifecycle_snapshot();
     Require(
         notifications.load(std::memory_order_relaxed) >= 1 &&
@@ -595,15 +595,15 @@ void TestInFlightDurationStopNotifiesStateChange()
 
 void TestLifecycleObservationDoesNotTearDuringAutomaticStop()
 {
-    specforge::ProfileSink::Limits limits =
+    spectiary::ProfileSink::Limits limits =
         GenerousLimits();
     limits.max_duration = 20ms;
     limits.max_queue_bytes = 8;
     std::atomic<bool> transition_entered = false;
     std::atomic<bool> release_transition = false;
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     Require(
-        specforge::ProfileSinkTestAccess::
+        spectiary::ProfileSinkTestAccess::
             StartWithOutputStreamFactory(
                 sink,
                 "controlled-lifecycle-transition.jsonl",
@@ -648,7 +648,7 @@ void TestLifecycleObservationDoesNotTearDuringAutomaticStop()
             "the writer should reach the controlled stop transition");
     }
 
-    specforge::ProfileSink::LifecycleSnapshot
+    spectiary::ProfileSink::LifecycleSnapshot
         observed_state;
     std::atomic<bool> observation_complete = false;
     std::thread observer([&]() {
@@ -673,7 +673,7 @@ void TestLifecycleObservationDoesNotTearDuringAutomaticStop()
             !observed_state.open &&
             observed_state.stopping &&
             observed_state.stop_reason ==
-                specforge::ProfileSink::StopReason::
+                spectiary::ProfileSink::StopReason::
                     DurationLimit &&
             observed_state.dropped_events == 1,
         "one lifecycle observation must not publish recording together with a terminal automatic-stop reason");
@@ -683,9 +683,9 @@ void TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path path = temporary.path() / "idle-duration-seals.jsonl";
-    specforge::ProfileSink::Limits limits = GenerousLimits();
+    spectiary::ProfileSink::Limits limits = GenerousLimits();
     limits.max_duration = 20ms;
-    specforge::ProfileSink sink(path, limits);
+    spectiary::ProfileSink sink(path, limits);
 
     const auto deadline = std::chrono::steady_clock::now() + 1s;
     while (!sink.TryFinalizeStop() && std::chrono::steady_clock::now() < deadline) {
@@ -696,7 +696,7 @@ void TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame()
         !sink.is_stopping(),
         "an automatic duration limit with no render frame in progress must seal and drain itself");
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::DurationLimit,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::DurationLimit,
         "the self-sealed idle recording should retain the duration-limit reason");
     Require(
         ReadTextFile(path).find("profile_recorder_summary") != std::string::npos,
@@ -706,9 +706,9 @@ void TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame()
 void TestRequestStopDoesNotWaitForSlowFinalFlush()
 {
     const auto flush_state = std::make_shared<BlockingFlushState>();
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     Require(
-        specforge::ProfileSinkTestAccess::StartWithOutputStreamFactory(
+        spectiary::ProfileSinkTestAccess::StartWithOutputStreamFactory(
             sink,
             "injected-slow-final-flush.jsonl",
             GenerousLimits(),
@@ -750,9 +750,9 @@ void TestRequestStopDoesNotWaitForSlowFinalFlush()
 
 void TestWriteFailureStatusIsNeverReportedAsSaved()
 {
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     Require(
-        specforge::ProfileSinkTestAccess::StartWithOutputStreamFactory(
+        spectiary::ProfileSinkTestAccess::StartWithOutputStreamFactory(
             sink,
             "injected-final-flush-failure.jsonl",
             GenerousLimits(),
@@ -762,29 +762,29 @@ void TestWriteFailureStatusIsNeverReportedAsSaved()
     sink.Stop();
 
     Require(
-        sink.stop_reason() == specforge::ProfileSink::StopReason::WriteFailure,
+        sink.stop_reason() == spectiary::ProfileSink::StopReason::WriteFailure,
         "a failed final flush should become the recorder stop reason");
-    const specforge::ProfileRecordingStatus status =
-        specforge::DescribeProfileRecordingStop(
+    const spectiary::ProfileRecordingStatus status =
+        spectiary::DescribeProfileRecordingStop(
             sink.stop_reason(),
             sink.dropped_event_count(),
             sink.error_message());
     Require(
         status.kind ==
-            specforge::ProfileRecordingStatusKind::Failed,
+            spectiary::ProfileRecordingStatusKind::Failed,
         "a final write failure should produce a language-independent failure status");
     Require(
         status.detail == sink.error_message(),
         "the status should retain the writer detail for diagnostics");
 
-    const specforge::ProfileRecordingStatus duration_status =
-        specforge::DescribeProfileRecordingStop(
-            specforge::ProfileSink::StopReason::DurationLimit,
+    const spectiary::ProfileRecordingStatus duration_status =
+        spectiary::DescribeProfileRecordingStop(
+            spectiary::ProfileSink::StopReason::DurationLimit,
             3,
             {});
     Require(
         duration_status.kind ==
-                specforge::ProfileRecordingStatusKind::
+                spectiary::ProfileRecordingStatusKind::
                     SavedAfterDurationLimit &&
             duration_status.dropped_events == 3 &&
             duration_status.detail.empty(),
@@ -794,10 +794,10 @@ void TestWriteFailureStatusIsNeverReportedAsSaved()
 void TestRejectedRestartCanClearThePreviousStoppedOutcome()
 {
     TemporaryDirectory temporary;
-    specforge::ProfileSink::Limits limits =
+    spectiary::ProfileSink::Limits limits =
         GenerousLimits();
     limits.max_queue_bytes = 8;
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     Require(
         sink.Start(
             temporary.path() / "successful.jsonl",
@@ -811,7 +811,7 @@ void TestRejectedRestartCanClearThePreviousStoppedOutcome()
     Require(
         !sink.path().empty() &&
             sink.stop_reason() ==
-                specforge::ProfileSink::StopReason::Explicit &&
+                spectiary::ProfileSink::StopReason::Explicit &&
             sink.dropped_event_count() == 1,
         "the previous successful terminal should expose path, reason and dropped count");
 
@@ -819,7 +819,7 @@ void TestRejectedRestartCanClearThePreviousStoppedOutcome()
     Require(
         sink.path().empty() &&
             sink.stop_reason() ==
-                specforge::ProfileSink::StopReason::None &&
+                spectiary::ProfileSink::StopReason::None &&
             sink.dropped_event_count() == 0 &&
             sink.error_message().empty(),
         "a new rejected start attempt should not inherit the previous stopped outcome");
@@ -830,9 +830,9 @@ void TestWriterThreadStartFailureDiscardsOpenedOutput()
     TemporaryDirectory temporary;
     const std::filesystem::path output_path =
         temporary.path() / "writer-start-failure.jsonl";
-    specforge::ProfileSink sink;
+    spectiary::ProfileSink sink;
     const bool started =
-        specforge::ProfileSinkTestAccess::
+        spectiary::ProfileSinkTestAccess::
             StartWithOutputStreamFactory(
                 sink,
                 output_path,
@@ -873,7 +873,7 @@ void TestInvalidPreparedOutputsAreDiscarded()
     const auto require_discarded =
         [&](std::string_view name,
             std::filesystem::path sink_path,
-            specforge::ProfileSink::Limits limits,
+            spectiary::ProfileSink::Limits limits,
             bool mark_stream_bad) {
             const std::filesystem::path opened_path =
                 temporary.path() /
@@ -893,7 +893,7 @@ void TestInvalidPreparedOutputsAreDiscarded()
                 stream->setstate(std::ios::badbit);
             }
             int discard_count = 0;
-            specforge::ProfileSink sink;
+            spectiary::ProfileSink sink;
             const bool started = sink.StartPrepared(
                 std::move(sink_path),
                 limits,
@@ -919,7 +919,7 @@ void TestInvalidPreparedOutputsAreDiscarded()
         {},
         GenerousLimits(),
         false);
-    specforge::ProfileSink::Limits invalid_limits =
+    spectiary::ProfileSink::Limits invalid_limits =
         GenerousLimits();
     invalid_limits.max_queue_bytes = 0;
     require_discarded(

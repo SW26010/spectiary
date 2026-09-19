@@ -2,7 +2,7 @@
 
 #include "domain/stable_sha256.h"
 
-namespace specforge {
+namespace spectiary {
 
 bool IsLegacySourceCollectionIdentity(std::string_view value)
 {
@@ -26,4 +26,4 @@ std::string NormalizeLegacySourceCollectionFingerprint(std::string value, bool l
     return VersionedSha256Digest(value);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

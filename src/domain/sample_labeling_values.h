@@ -8,7 +8,7 @@
 #include <utility>
 #include <stdexcept>
 
-namespace specforge {
+namespace spectiary {
 
 // A cache overlay carries only accepted pending rows; absent rows are unknown.
 struct SampleLabelingSparseValues {
@@ -76,4 +76,4 @@ private:
     std::variant<std::vector<int>, SampleLabelingSparseValues> storage_;
 };
 
-} // namespace specforge
+} // namespace spectiary

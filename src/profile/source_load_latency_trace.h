@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 
@@ -90,4 +90,4 @@ bool WriteSourceLoadLatencyProfileEvent(
     ProfileSink& sink,
     const SourceLoadLatencyReport& report);
 
-}  // namespace specforge
+}  // namespace spectiary

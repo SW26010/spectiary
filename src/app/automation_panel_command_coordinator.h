@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class AutomationPanelCommandCoordinator {
 public:
@@ -109,4 +109,4 @@ private:
         mutation_chains_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

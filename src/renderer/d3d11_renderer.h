@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct D3D11LiveObjectReport {
     bool requested = false;
@@ -108,4 +108,4 @@ private:
     D3D11LiveObjectReport live_object_report_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

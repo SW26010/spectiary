@@ -15,7 +15,7 @@
 struct ImGuiViewport;
 struct ImVec2;
 
-namespace specforge {
+namespace spectiary {
 
 struct D3D11RendererError {
     HRESULT result = S_OK;
@@ -100,4 +100,4 @@ private:
     bool incremental_buffers_ = true;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

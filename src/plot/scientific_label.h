@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class ScientificLabelScript {
     Baseline,
@@ -60,4 +60,4 @@ void DrawScientificLabel(
     const ImVec2& top_left,
     ImU32 color);
 
-}  // namespace specforge
+}  // namespace spectiary

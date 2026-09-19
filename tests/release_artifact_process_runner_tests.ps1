@@ -89,7 +89,7 @@ $runnerPath = Join-Path $RepoRoot 'scripts\lib\bounded_process.ps1'
 
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    "specforge-bounded-process-tests-$PID-$([Guid]::NewGuid().ToString('N'))"
+    "spectiary-bounded-process-tests-$PID-$([Guid]::NewGuid().ToString('N'))"
 $cleanupStatus = 'passed'
 $ownedFixtureProcesses =
     [Collections.Generic.List[Diagnostics.Process]]::new()
@@ -200,7 +200,7 @@ throw "Unknown fixture mode '$Mode'."
 '@)
 
     $successOutput = @(
-        Invoke-SpecForgeBoundedValidationCase `
+        Invoke-SpectiaryBoundedValidationCase `
             -CaseId 'runner-success' `
             -Description 'Runner fast success' `
             -FilePath 'powershell.exe' `
@@ -224,7 +224,7 @@ throw "Unknown fixture mode '$Mode'."
     Assert-Contains $successOutput 'success stdout marker' 'Success case output'
 
     $emptyArgumentOutput = @(
-        Invoke-SpecForgeBoundedValidationCase `
+        Invoke-SpectiaryBoundedValidationCase `
             -CaseId 'runner-empty-argument' `
             -Description 'Runner preserves an empty argument' `
             -FilePath 'powershell.exe' `
@@ -255,7 +255,7 @@ throw "Unknown fixture mode '$Mode'."
         'Empty-argument case output'
 
     $failureOutput = @(
-        Invoke-SpecForgeBoundedValidationCase `
+        Invoke-SpectiaryBoundedValidationCase `
             -CaseId 'runner-expected-failure' `
             -Description 'Runner expected failure' `
             -FilePath 'powershell.exe' `
@@ -280,7 +280,7 @@ throw "Unknown fixture mode '$Mode'."
         'Expected-failure case log'
 
     $orphanOutput = @(
-        Invoke-SpecForgeBoundedValidationCase `
+        Invoke-SpectiaryBoundedValidationCase `
             -CaseId 'runner-normal-exit-orphan' `
             -Description 'Runner normal exit cleans a surviving descendant' `
             -FilePath 'powershell.exe' `
@@ -310,7 +310,7 @@ throw "Unknown fixture mode '$Mode'."
         -OwnedProcessHandles $ownedFixtureProcesses
 
     $immediateMarkerPath = Join-Path $testRoot 'immediate-target-started'
-    $immediateResult = Invoke-SpecForgeBoundedProcess `
+    $immediateResult = Invoke-SpectiaryBoundedProcess `
         -FilePath 'powershell.exe' `
         -Arguments @(
             '-NoProfile',
@@ -346,7 +346,7 @@ throw "Unknown fixture mode '$Mode'."
     $unexpectedSuccessOutput = @(
         & {
             try {
-                Invoke-SpecForgeBoundedValidationCase `
+                Invoke-SpectiaryBoundedValidationCase `
                     -CaseId 'runner-unexpected-success' `
                     -Description 'Runner negative case unexpectedly succeeds' `
                     -FilePath 'powershell.exe' `
@@ -381,7 +381,7 @@ throw "Unknown fixture mode '$Mode'."
     $semanticOutput = @(
         & {
             try {
-                Invoke-SpecForgeBoundedValidationCase `
+                Invoke-SpectiaryBoundedValidationCase `
                     -CaseId 'runner-wrong-reason' `
                     -Description 'Runner wrong failure reason' `
                     -FilePath 'powershell.exe' `
@@ -424,7 +424,7 @@ throw "Unknown fixture mode '$Mode'."
     $timeoutOutput = @(
         & {
             try {
-                Invoke-SpecForgeBoundedValidationCase `
+                Invoke-SpectiaryBoundedValidationCase `
                     -CaseId 'runner-timeout-tree' `
                     -Description 'Runner timeout tree' `
                     -FilePath 'powershell.exe' `

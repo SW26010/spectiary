@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::size_t kMaxJsonInputBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t kMaxJsonNestingDepth = 64U;
@@ -109,4 +109,4 @@ using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string
     std::string* error_message = nullptr,
     AtomicFileReplaceRetryPolicy replace_retry_policy = {});
 
-}  // namespace specforge
+}  // namespace spectiary

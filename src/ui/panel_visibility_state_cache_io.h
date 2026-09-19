@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct PanelVisibilityStateCacheLoadResult {
     PanelVisibilityState state;
@@ -24,4 +24,4 @@ LoadPanelVisibilityStateCache(
     const std::filesystem::path& path,
     const PanelVisibilityState& state);
 
-}  // namespace specforge
+}  // namespace spectiary

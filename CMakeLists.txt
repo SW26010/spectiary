@@ -1,28 +1,28 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.9.0 LANGUAGES CXX RC)
+project(Spectiary VERSION 0.9.0 LANGUAGES CXX RC)
 include("${CMAKE_SOURCE_DIR}/cmake/project_identity.cmake")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
+option(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
 option(
-    SPECFORGE_BUILD_ASDF_LABELING_SPIKE
+    SPECTIARY_BUILD_ASDF_LABELING_SPIKE
     "Build the ASDF labeling research spike."
     OFF
 )
 option(
-    SPECFORGE_BUILD_ASDF_LABELING_HARDENING
+    SPECTIARY_BUILD_ASDF_LABELING_HARDENING
     "Build explicit production ASDF labeling hardening tools."
     OFF
 )
-set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
-set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
-set(SPECFORGE_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
+set(SPECTIARY_BUILD_SOURCE_MODE "" CACHE STRING "Spectiary build source mode.")
+set_property(CACHE SPECTIARY_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
+set(SPECTIARY_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
 
-include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")
+include("${CMAKE_SOURCE_DIR}/cmake/spectiary_build_source.cmake")
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
@@ -31,212 +31,212 @@ find_package(yaml-cpp CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
-set(SPECFORGE_BUILD_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
-set(SPECFORGE_BUILD_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
-set(SPECFORGE_BUILD_CMAKE_VERSION "${CMAKE_VERSION}")
-set(SPECFORGE_BUILD_GENERATOR "${CMAKE_GENERATOR}")
+set(SPECTIARY_BUILD_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
+set(SPECTIARY_BUILD_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
+set(SPECTIARY_BUILD_CMAKE_VERSION "${CMAKE_VERSION}")
+set(SPECTIARY_BUILD_GENERATOR "${CMAKE_GENERATOR}")
 
-set(SPECFORGE_BUILD_TARGET_ARCHITECTURE
+set(SPECTIARY_BUILD_TARGET_ARCHITECTURE
     "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}"
 )
-if(NOT SPECFORGE_BUILD_TARGET_ARCHITECTURE)
-    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "${CMAKE_GENERATOR_PLATFORM}")
+if(NOT SPECTIARY_BUILD_TARGET_ARCHITECTURE)
+    set(SPECTIARY_BUILD_TARGET_ARCHITECTURE "${CMAKE_GENERATOR_PLATFORM}")
 endif()
 string(TOLOWER
-    "${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
-    SPECFORGE_BUILD_TARGET_ARCHITECTURE
+    "${SPECTIARY_BUILD_TARGET_ARCHITECTURE}"
+    SPECTIARY_BUILD_TARGET_ARCHITECTURE
 )
-if(SPECFORGE_BUILD_TARGET_ARCHITECTURE MATCHES "^(amd64|x64|x86_64)$")
-    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "amd64")
-elseif(SPECFORGE_BUILD_TARGET_ARCHITECTURE MATCHES "^(win32|i[3-6]86)$")
-    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "x86")
-elseif(SPECFORGE_BUILD_TARGET_ARCHITECTURE STREQUAL "aarch64")
-    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "arm64")
+if(SPECTIARY_BUILD_TARGET_ARCHITECTURE MATCHES "^(amd64|x64|x86_64)$")
+    set(SPECTIARY_BUILD_TARGET_ARCHITECTURE "amd64")
+elseif(SPECTIARY_BUILD_TARGET_ARCHITECTURE MATCHES "^(win32|i[3-6]86)$")
+    set(SPECTIARY_BUILD_TARGET_ARCHITECTURE "x86")
+elseif(SPECTIARY_BUILD_TARGET_ARCHITECTURE STREQUAL "aarch64")
+    set(SPECTIARY_BUILD_TARGET_ARCHITECTURE "arm64")
 endif()
 
-set(SPECFORGE_BUILD_WINDOWS_SDK_VERSION
+set(SPECTIARY_BUILD_WINDOWS_SDK_VERSION
     "${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}"
 )
-if(SPECFORGE_BUILD_WINDOWS_SDK_VERSION)
-    set(SPECFORGE_BUILD_WINDOWS_SDK_VERSION_JSON
-        "\"${SPECFORGE_BUILD_WINDOWS_SDK_VERSION}\""
+if(SPECTIARY_BUILD_WINDOWS_SDK_VERSION)
+    set(SPECTIARY_BUILD_WINDOWS_SDK_VERSION_JSON
+        "\"${SPECTIARY_BUILD_WINDOWS_SDK_VERSION}\""
     )
-    set(SPECFORGE_BUILD_WINDOWS_SDK_VERSION_DISPLAY
-        "${SPECFORGE_BUILD_WINDOWS_SDK_VERSION}"
+    set(SPECTIARY_BUILD_WINDOWS_SDK_VERSION_DISPLAY
+        "${SPECTIARY_BUILD_WINDOWS_SDK_VERSION}"
     )
 else()
-    set(SPECFORGE_BUILD_WINDOWS_SDK_VERSION_JSON "null")
-    set(SPECFORGE_BUILD_WINDOWS_SDK_VERSION_DISPLAY "unavailable")
+    set(SPECTIARY_BUILD_WINDOWS_SDK_VERSION_JSON "null")
+    set(SPECTIARY_BUILD_WINDOWS_SDK_VERSION_DISPLAY "unavailable")
 endif()
 
-foreach(specforge_toolchain_field IN ITEMS
-    SPECFORGE_BUILD_COMPILER_ID
-    SPECFORGE_BUILD_COMPILER_VERSION
-    SPECFORGE_BUILD_CMAKE_VERSION
-    SPECFORGE_BUILD_GENERATOR
-    SPECFORGE_BUILD_TARGET_ARCHITECTURE
+foreach(spectiary_toolchain_field IN ITEMS
+    SPECTIARY_BUILD_COMPILER_ID
+    SPECTIARY_BUILD_COMPILER_VERSION
+    SPECTIARY_BUILD_CMAKE_VERSION
+    SPECTIARY_BUILD_GENERATOR
+    SPECTIARY_BUILD_TARGET_ARCHITECTURE
 )
-    if("${${specforge_toolchain_field}}" STREQUAL "")
+    if("${${spectiary_toolchain_field}}" STREQUAL "")
         message(FATAL_ERROR
             "Could not resolve required build-toolchain metadata: "
-            "${specforge_toolchain_field}."
+            "${spectiary_toolchain_field}."
         )
     endif()
 endforeach()
 message(STATUS
     "Resolved build toolchain: "
-    "${SPECFORGE_BUILD_COMPILER_ID} "
-    "${SPECFORGE_BUILD_COMPILER_VERSION}, "
-    "CMake ${SPECFORGE_BUILD_CMAKE_VERSION}, "
-    "${SPECFORGE_BUILD_GENERATOR}, "
-    "${SPECFORGE_BUILD_TARGET_ARCHITECTURE}, "
-    "Windows SDK ${SPECFORGE_BUILD_WINDOWS_SDK_VERSION_DISPLAY}"
+    "${SPECTIARY_BUILD_COMPILER_ID} "
+    "${SPECTIARY_BUILD_COMPILER_VERSION}, "
+    "CMake ${SPECTIARY_BUILD_CMAKE_VERSION}, "
+    "${SPECTIARY_BUILD_GENERATOR}, "
+    "${SPECTIARY_BUILD_TARGET_ARCHITECTURE}, "
+    "Windows SDK ${SPECTIARY_BUILD_WINDOWS_SDK_VERSION_DISPLAY}"
 )
 
-set(SPECFORGE_MANIFEST_TEMPLATE
-    "${CMAKE_SOURCE_DIR}/src/platform/specforge.exe.manifest.in"
+set(SPECTIARY_MANIFEST_TEMPLATE
+    "${CMAKE_SOURCE_DIR}/src/platform/spectiary.exe.manifest.in"
 )
-set(SPECFORGE_MANIFEST
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge.exe.manifest"
+set(SPECTIARY_MANIFEST
+    "${CMAKE_BINARY_DIR}/generated/spectiary/spectiary.exe.manifest"
 )
-set(SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
-set(SPECFORGE_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
-set(SPECFORGE_LEGAL_DOCUMENTS
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+set(SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
+set(SPECTIARY_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
+set(SPECTIARY_LEGAL_DOCUMENTS
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "${CMAKE_SOURCE_DIR}/legal/DATA_SOURCES.txt"
 )
-set(SPECFORGE_WINDOWS_RESOURCES
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_resources.rc"
+set(SPECTIARY_WINDOWS_RESOURCES
+    "${CMAKE_BINARY_DIR}/generated/spectiary/spectiary_resources.rc"
 )
-set(SPECFORGE_RESOURCE_HEADER
-    "${CMAKE_SOURCE_DIR}/src/platform/specforge_resource.h"
+set(SPECTIARY_RESOURCE_HEADER
+    "${CMAKE_SOURCE_DIR}/src/platform/spectiary_resource.h"
 )
-set(SPECFORGE_APPLICATION_ICON
-    "${CMAKE_SOURCE_DIR}/resources/branding/specforge.ico"
+set(SPECTIARY_APPLICATION_ICON
+    "${CMAKE_SOURCE_DIR}/resources/branding/spectiary.ico"
 )
 
 include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
-specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
-specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
-specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)
-specforge_read_vcpkg_package_version(pthreads SPECFORGE_PTHREADS_VERSION)
-specforge_read_vcpkg_package_version(yaml-cpp SPECFORGE_YAML_CPP_VERSION)
-specforge_read_vcpkg_package_version(nlohmann-json SPECFORGE_NLOHMANN_JSON_VERSION)
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_read_vcpkg_package_version(imgui SPECTIARY_IMGUI_VERSION)
+spectiary_read_vcpkg_package_version(implot SPECTIARY_IMPLOT_VERSION)
+spectiary_read_vcpkg_package_version(cfitsio SPECTIARY_CFITSIO_VERSION)
+spectiary_read_vcpkg_package_version(pthreads SPECTIARY_PTHREADS_VERSION)
+spectiary_read_vcpkg_package_version(yaml-cpp SPECTIARY_YAML_CPP_VERSION)
+spectiary_read_vcpkg_package_version(nlohmann-json SPECTIARY_NLOHMANN_JSON_VERSION)
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "nlohmann/json"
-    "nlohmann/json ${SPECFORGE_NLOHMANN_JSON_VERSION}"
+    "nlohmann/json ${SPECTIARY_NLOHMANN_JSON_VERSION}"
 )
-specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_read_vcpkg_package_version(zlib SPECTIARY_ZLIB_VERSION)
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "Dear ImGui"
-    "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, including docking, Win32, and DirectX 11 backends"
+    "Dear ImGui ${SPECTIARY_IMGUI_VERSION}, including docking, Win32, and DirectX 11 backends"
 )
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "ImPlot"
-    "ImPlot ${SPECFORGE_IMPLOT_VERSION}"
+    "ImPlot ${SPECTIARY_IMPLOT_VERSION}"
 )
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "CFITSIO"
-    "CFITSIO ${SPECFORGE_CFITSIO_VERSION}"
+    "CFITSIO ${SPECTIARY_CFITSIO_VERSION}"
 )
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "PThreads4W"
-    "PThreads4W ${SPECFORGE_PTHREADS_VERSION}"
+    "PThreads4W ${SPECTIARY_PTHREADS_VERSION}"
 )
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "yaml-cpp"
-    "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}"
+    "yaml-cpp ${SPECTIARY_YAML_CPP_VERSION}"
 )
-specforge_require_notice_heading(
-    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+spectiary_require_notice_heading(
+    "${SPECTIARY_THIRD_PARTY_NOTICES}"
     "zlib"
-    "zlib ${SPECFORGE_ZLIB_VERSION}"
+    "zlib ${SPECTIARY_ZLIB_VERSION}"
 )
 message(STATUS
     "Resolved third-party versions: "
-    "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, "
-    "ImPlot ${SPECFORGE_IMPLOT_VERSION}, "
-    "CFITSIO ${SPECFORGE_CFITSIO_VERSION}, "
-    "PThreads4W ${SPECFORGE_PTHREADS_VERSION}, "
-    "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}, "
-    "zlib ${SPECFORGE_ZLIB_VERSION}"
+    "Dear ImGui ${SPECTIARY_IMGUI_VERSION}, "
+    "ImPlot ${SPECTIARY_IMPLOT_VERSION}, "
+    "CFITSIO ${SPECTIARY_CFITSIO_VERSION}, "
+    "PThreads4W ${SPECTIARY_PTHREADS_VERSION}, "
+    "yaml-cpp ${SPECTIARY_YAML_CPP_VERSION}, "
+    "zlib ${SPECTIARY_ZLIB_VERSION}"
 )
 
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/specforge")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/spectiary")
 configure_file(
-    "${SPECFORGE_MANIFEST_TEMPLATE}"
-    "${SPECFORGE_MANIFEST}"
+    "${SPECTIARY_MANIFEST_TEMPLATE}"
+    "${SPECTIARY_MANIFEST}"
     @ONLY
 )
 configure_file(
-    "${CMAKE_SOURCE_DIR}/src/platform/specforge_resources.rc.in"
-    "${SPECFORGE_WINDOWS_RESOURCES}"
+    "${CMAKE_SOURCE_DIR}/src/platform/spectiary_resources.rc.in"
+    "${SPECTIARY_WINDOWS_RESOURCES}"
     @ONLY
 )
 set_source_files_properties(
-    "${SPECFORGE_WINDOWS_RESOURCES}"
+    "${SPECTIARY_WINDOWS_RESOURCES}"
     PROPERTIES
         OBJECT_DEPENDS
-            "${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER};${SPECFORGE_APPLICATION_ICON}"
+            "${SPECTIARY_LEGAL_DOCUMENTS};${SPECTIARY_RESOURCE_HEADER};${SPECTIARY_APPLICATION_ICON}"
 )
 configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
+    "${CMAKE_SOURCE_DIR}/cmake/spectiary_build_identity.h.in"
+    "${CMAKE_BINARY_DIR}/generated/spectiary/spectiary_build_identity.h.in"
     @ONLY
 )
 file(GENERATE
     OUTPUT
-        "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/specforge/specforge_build_identity.h"
+        "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/spectiary/spectiary_build_identity.h"
     INPUT
-        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
+        "${CMAKE_BINARY_DIR}/generated/spectiary/spectiary_build_identity.h.in"
 )
-if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
-    set(SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER
-        "${CMAKE_BINARY_DIR}/generated/specforge/public_spectral_lines_embedded.h"
+if(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
+    set(SPECTIARY_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER
+        "${CMAKE_BINARY_DIR}/generated/spectiary/public_spectral_lines_embedded.h"
     )
     add_custom_command(
-        OUTPUT "${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated/specforge"
+        OUTPUT "${SPECTIARY_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated/spectiary"
         COMMAND
             "${CMAKE_COMMAND}"
-            "-DINPUT=${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
-            "-DOUTPUT=${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+            "-DINPUT=${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
+            "-DOUTPUT=${SPECTIARY_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
             -P "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
         DEPENDS
-            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
             "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
         VERBATIM
     )
     add_custom_target(
-        specforge_embedded_public_spectral_lines
-        DEPENDS "${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+        spectiary_embedded_public_spectral_lines
+        DEPENDS "${SPECTIARY_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
     )
 
-    add_library(specforge_embedded_resources INTERFACE)
-    target_include_directories(specforge_embedded_resources INTERFACE "${CMAKE_BINARY_DIR}/generated")
-    target_compile_definitions(specforge_embedded_resources INTERFACE SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+    add_library(spectiary_embedded_resources INTERFACE)
+    target_include_directories(spectiary_embedded_resources INTERFACE "${CMAKE_BINARY_DIR}/generated")
+    target_compile_definitions(spectiary_embedded_resources INTERFACE SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
 endif()
 
-function(specforge_use_embedded_resources target_name)
-    if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
-        target_link_libraries(${target_name} PRIVATE specforge_embedded_resources)
-        add_dependencies(${target_name} specforge_embedded_public_spectral_lines)
+function(spectiary_use_embedded_resources target_name)
+    if(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
+        target_link_libraries(${target_name} PRIVATE spectiary_embedded_resources)
+        add_dependencies(${target_name} spectiary_embedded_public_spectral_lines)
     endif()
 endfunction()
 
-function(specforge_use_runtime_paths target_name)
+function(spectiary_use_runtime_paths target_name)
     if(WIN32)
         target_link_libraries(${target_name} PRIVATE ole32 shell32)
     endif()
 endfunction()
 
-function(specforge_enable_warnings target_name)
+function(spectiary_enable_warnings target_name)
     if(MSVC)
         target_compile_options(${target_name} PRIVATE /EHsc /W4 /permissive- /utf-8)
     else()
@@ -244,7 +244,7 @@ function(specforge_enable_warnings target_name)
     endif()
 endfunction()
 
-function(specforge_configure_production_target target_name)
+function(spectiary_configure_production_target target_name)
     target_include_directories(${target_name} PUBLIC "${CMAKE_BINARY_DIR}/generated")
     target_include_directories(${target_name} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(${target_name} PRIVATE
@@ -253,10 +253,10 @@ function(specforge_configure_production_target target_name)
         _UNICODE
         WIN32_LEAN_AND_MEAN
     )
-    specforge_enable_warnings(${target_name})
+    spectiary_enable_warnings(${target_name})
 endfunction()
 
-add_library(specforge_core STATIC
+add_library(spectiary_core STATIC
     src/app/embedded_legal_documents.cpp
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
@@ -264,9 +264,9 @@ add_library(specforge_core STATIC
     src/app/pan_pacing.cpp
     src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
-    src/app/specforge_metadata.cpp
-    src/app/specforge_metadata_finalizer.cpp
-    src/app/specforge_metadata_validation.cpp
+    src/app/spectiary_metadata.cpp
+    src/app/spectiary_metadata_finalizer.cpp
+    src/app/spectiary_metadata_validation.cpp
     src/domain/canonical_timestamp.cpp
     src/domain/csv_record_codec.cpp
     src/domain/fits_file_reader.cpp
@@ -313,14 +313,14 @@ add_library(specforge_core STATIC
     src/profile/profile_sink.cpp
     src/profile/source_load_latency_trace.cpp
 )
-specforge_configure_production_target(specforge_core)
-target_include_directories(specforge_core PRIVATE
+spectiary_configure_production_target(spectiary_core)
+target_include_directories(spectiary_core PRIVATE
     "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
 )
-specforge_use_runtime_paths(specforge_core)
-specforge_use_embedded_resources(specforge_core)
-target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp CFITSIO::cfitsio ZLIB::ZLIB bcrypt)
-target_link_libraries(specforge_core PUBLIC nlohmann_json::nlohmann_json)
+spectiary_use_runtime_paths(spectiary_core)
+spectiary_use_embedded_resources(spectiary_core)
+target_link_libraries(spectiary_core PRIVATE yaml-cpp::yaml-cpp CFITSIO::cfitsio ZLIB::ZLIB bcrypt)
+target_link_libraries(spectiary_core PUBLIC nlohmann_json::nlohmann_json)
 if(MSVC)
     # Cancellation-stage tests resolve optimized and inlined source locations
     # at runtime, so retain line tables for the production code they exercise.
@@ -336,34 +336,34 @@ if(MSVC)
     )
 endif()
 
-add_library(specforge_imgui_layout STATIC
+add_library(spectiary_imgui_layout STATIC
     src/app/imgui_layout_persistence.cpp
 )
-specforge_configure_production_target(specforge_imgui_layout)
+spectiary_configure_production_target(spectiary_imgui_layout)
 target_link_libraries(
-    specforge_imgui_layout
+    spectiary_imgui_layout
     PUBLIC
-        specforge_core
+        spectiary_core
         imgui::imgui
 )
 
-add_library(specforge_automation STATIC
+add_library(spectiary_automation STATIC
     src/automation/automation_named_pipe.cpp
     src/automation/automation_protocol.cpp
     src/automation/automation_startup.cpp
     src/automation/automation_state.cpp
 )
-specforge_configure_production_target(specforge_automation)
-target_link_libraries(specforge_automation
+spectiary_configure_production_target(spectiary_automation)
+target_link_libraries(spectiary_automation
     PUBLIC
-        specforge_core
+        spectiary_core
     PRIVATE
         advapi32
         ntdll
         shell32
 )
 
-add_library(specforge_sessions STATIC
+add_library(spectiary_sessions STATIC
     src/ui/panel_visibility_state_cache_io.cpp
     src/ui/sample_annotation_labeling_rules.cpp
     src/ui/sample_labeling_controller.cpp
@@ -386,10 +386,10 @@ add_library(specforge_sessions STATIC
     src/ui/source_collection_session.cpp
     src/ui/spectral_lines_panel_controller.cpp
 )
-specforge_configure_production_target(specforge_sessions)
-target_link_libraries(specforge_sessions PUBLIC specforge_core)
+spectiary_configure_production_target(spectiary_sessions)
+target_link_libraries(spectiary_sessions PUBLIC spectiary_core)
 
-add_library(specforge_desktop_ui STATIC
+add_library(spectiary_desktop_ui STATIC
     src/app/application_settings.cpp
     src/app/initial_source.cpp
     src/app/native_window_title.cpp
@@ -420,20 +420,20 @@ add_library(specforge_desktop_ui STATIC
     src/ui/ui_scale_settings.cpp
     src/ui/ui_text.cpp
 )
-specforge_configure_production_target(specforge_desktop_ui)
-target_include_directories(specforge_desktop_ui BEFORE PRIVATE
+spectiary_configure_production_target(spectiary_desktop_ui)
+target_include_directories(spectiary_desktop_ui BEFORE PRIVATE
     "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
 )
-target_link_libraries(specforge_desktop_ui
+target_link_libraries(spectiary_desktop_ui
     PUBLIC
-        specforge_sessions
+        spectiary_sessions
         imgui::imgui
         implot::implot
     PRIVATE
         shell32
 )
 
-add_library(specforge_renderer STATIC
+add_library(spectiary_renderer STATIC
     src/renderer/d3d11_composition_swap_chain.cpp
     src/renderer/d3d11_frame_capture.cpp
     src/renderer/d3d11_imgui_viewport_renderer.cpp
@@ -442,8 +442,8 @@ add_library(specforge_renderer STATIC
     src/renderer/d3d11_window_presentation.cpp
     src/renderer/win32_display_refresh.cpp
 )
-specforge_configure_production_target(specforge_renderer)
-target_link_libraries(specforge_renderer
+spectiary_configure_production_target(spectiary_renderer)
+target_link_libraries(spectiary_renderer
     PRIVATE
         imgui::imgui
         dcomp
@@ -454,25 +454,25 @@ target_link_libraries(specforge_renderer
         windowscodecs
 )
 
-add_executable(specforge_native WIN32
+add_executable(spectiary_native WIN32
     src/app/automation_execution.cpp
     src/app/automation_panel_command_coordinator.cpp
     src/app/runtime_resource_workload.cpp
-    src/app/specforge_app.cpp
+    src/app/spectiary_app.cpp
     src/main.cpp
     src/platform/win32_application_icon.cpp
     src/platform/win32_system_theme.cpp
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
-    ${SPECFORGE_MANIFEST}
-    ${SPECFORGE_WINDOWS_RESOURCES}
+    ${SPECTIARY_MANIFEST}
+    ${SPECTIARY_WINDOWS_RESOURCES}
 )
-specforge_configure_production_target(specforge_native)
-target_link_libraries(specforge_native PRIVATE
-    specforge_automation
-    specforge_desktop_ui
-    specforge_imgui_layout
-    specforge_renderer
+spectiary_configure_production_target(spectiary_native)
+target_link_libraries(spectiary_native PRIVATE
+    spectiary_automation
+    spectiary_desktop_ui
+    spectiary_imgui_layout
+    spectiary_renderer
     advapi32
     dwmapi
     comctl32
@@ -482,7 +482,7 @@ target_link_libraries(specforge_native PRIVATE
 )
 if(MSVC)
     target_link_options(
-        specforge_native
+        spectiary_native
         PRIVATE
             /Brepro
             /INCREMENTAL:NO
@@ -490,173 +490,173 @@ if(MSVC)
     )
 endif()
 
-add_executable(specforge_metadata_finalizer_tool
-    src/app/specforge_metadata_finalizer_main.cpp
+add_executable(spectiary_metadata_finalizer_tool
+    src/app/spectiary_metadata_finalizer_main.cpp
 )
-specforge_configure_production_target(specforge_metadata_finalizer_tool)
-target_include_directories(specforge_metadata_finalizer_tool PRIVATE
+spectiary_configure_production_target(spectiary_metadata_finalizer_tool)
+target_include_directories(spectiary_metadata_finalizer_tool PRIVATE
     "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
 )
-target_link_libraries(specforge_metadata_finalizer_tool PRIVATE
-    specforge_core
+target_link_libraries(spectiary_metadata_finalizer_tool PRIVATE
+    spectiary_core
 )
-add_dependencies(specforge_native specforge_metadata_finalizer_tool)
+add_dependencies(spectiary_native spectiary_metadata_finalizer_tool)
 
-set_target_properties(specforge_native PROPERTIES
+set_target_properties(spectiary_native PROPERTIES
     OUTPUT_NAME "${PROJECT_artifact_basename}"
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
-add_custom_command(TARGET specforge_native PRE_LINK
+add_custom_command(TARGET spectiary_native PRE_LINK
     COMMAND "${CMAKE_COMMAND}" -E rm -f
-        "$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
-    COMMENT "Invalidating stale SpecForge metadata before linking"
+        "$<TARGET_FILE_DIR:spectiary_native>/${PROJECT_metadata_filename}"
+    COMMENT "Invalidating stale Spectiary metadata before linking"
     VERBATIM
 )
 
-if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
-    add_custom_command(TARGET specforge_native POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
+if(NOT SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
+    add_custom_command(TARGET spectiary_native POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_native>/config"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
-            "$<TARGET_FILE_DIR:specforge_native>/config/spectral_lines.public.tsv"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
+            "$<TARGET_FILE_DIR:spectiary_native>/config/spectral_lines.public.tsv"
     )
 endif()
 
-add_executable(specforge_automation_launcher
+add_executable(spectiary_automation_launcher
     src/automation/automation_launcher_main.cpp
 )
-specforge_configure_production_target(
-    specforge_automation_launcher
+spectiary_configure_production_target(
+    spectiary_automation_launcher
 )
 target_link_libraries(
-    specforge_automation_launcher
+    spectiary_automation_launcher
     PRIVATE
-        specforge_automation
-        specforge_imgui_layout
-        specforge_sessions
+        spectiary_automation
+        spectiary_imgui_layout
+        spectiary_sessions
         bcrypt
 )
 set_target_properties(
-    specforge_automation_launcher
+    spectiary_automation_launcher
     PROPERTIES
         OUTPUT_NAME "${PROJECT_artifact_basename}Automation"
         VS_DEBUGGER_WORKING_DIRECTORY
             "${CMAKE_SOURCE_DIR}"
 )
-add_executable(specforge_automation_launcher_timeout_fixture
+add_executable(spectiary_automation_launcher_timeout_fixture
     tests/automation_launcher_timeout_fixture.cpp
 )
-specforge_configure_production_target(
-    specforge_automation_launcher_timeout_fixture
+spectiary_configure_production_target(
+    spectiary_automation_launcher_timeout_fixture
 )
 target_link_libraries(
-    specforge_automation_launcher_timeout_fixture
+    spectiary_automation_launcher_timeout_fixture
     PRIVATE
-        specforge_automation
+        spectiary_automation
 )
-add_executable(specforge_win32_window_peer
+add_executable(spectiary_win32_window_peer
     tests/win32_window_peer_main.cpp
 )
-specforge_configure_production_target(
-    specforge_win32_window_peer
+spectiary_configure_production_target(
+    spectiary_win32_window_peer
 )
 target_link_libraries(
-    specforge_win32_window_peer
+    spectiary_win32_window_peer
     PRIVATE
         user32
 )
-add_custom_command(TARGET specforge_native POST_BUILD
+add_custom_command(TARGET spectiary_native POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf
-        "$<TARGET_FILE_DIR:specforge_native>/Legal"
+        "$<TARGET_FILE_DIR:spectiary_native>/Legal"
     COMMAND "${CMAKE_COMMAND}" -E rm -f
-        "$<TARGET_FILE_DIR:specforge_native>/EULA.txt"
-        "$<TARGET_FILE_DIR:specforge_native>/THIRD_PARTY_NOTICES.txt"
-        "$<TARGET_FILE_DIR:specforge_native>/DATA_SOURCES.txt"
+        "$<TARGET_FILE_DIR:spectiary_native>/EULA.txt"
+        "$<TARGET_FILE_DIR:spectiary_native>/THIRD_PARTY_NOTICES.txt"
+        "$<TARGET_FILE_DIR:spectiary_native>/DATA_SOURCES.txt"
     COMMENT "Removing obsolete executable-adjacent legal documents"
     VERBATIM
 )
-add_custom_command(TARGET specforge_native POST_BUILD
-    COMMAND "$<TARGET_FILE:specforge_metadata_finalizer_tool>"
-        "$<TARGET_FILE:specforge_native>"
-        "$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
+add_custom_command(TARGET spectiary_native POST_BUILD
+    COMMAND "$<TARGET_FILE:spectiary_metadata_finalizer_tool>"
+        "$<TARGET_FILE:spectiary_native>"
+        "$<TARGET_FILE_DIR:spectiary_native>/${PROJECT_metadata_filename}"
     COMMENT "Finalizing schema 6 Spectiary metadata"
     VERBATIM
 )
-set(SPECFORGE_METADATA_BYPRODUCT
+set(SPECTIARY_METADATA_BYPRODUCT
     "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${PROJECT_metadata_filename}")
-add_custom_target(specforge_metadata
+add_custom_target(spectiary_metadata
     COMMAND "${CMAKE_COMMAND}"
-        "-DSPECFORGE_EXECUTABLE=$<TARGET_FILE:specforge_native>"
-        "-DSPECFORGE_METADATA=$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
-        "-DSPECFORGE_FINALIZER=$<TARGET_FILE:specforge_metadata_finalizer_tool>"
-        -P "${CMAKE_SOURCE_DIR}/cmake/ensure_specforge_metadata.cmake"
-    DEPENDS specforge_native
-        specforge_metadata_finalizer_tool
-        "${CMAKE_SOURCE_DIR}/cmake/ensure_specforge_metadata.cmake"
+        "-DSPECTIARY_EXECUTABLE=$<TARGET_FILE:spectiary_native>"
+        "-DSPECTIARY_METADATA=$<TARGET_FILE_DIR:spectiary_native>/${PROJECT_metadata_filename}"
+        "-DSPECTIARY_FINALIZER=$<TARGET_FILE:spectiary_metadata_finalizer_tool>"
+        -P "${CMAKE_SOURCE_DIR}/cmake/ensure_spectiary_metadata.cmake"
+    DEPENDS spectiary_native
+        spectiary_metadata_finalizer_tool
+        "${CMAKE_SOURCE_DIR}/cmake/ensure_spectiary_metadata.cmake"
     BYPRODUCTS
-        "${SPECFORGE_METADATA_BYPRODUCT}"
-    COMMENT "Building and finalizing SpecForge metadata"
+        "${SPECTIARY_METADATA_BYPRODUCT}"
+    COMMENT "Building and finalizing Spectiary metadata"
     VERBATIM
 )
 
 enable_testing()
-option(SPECFORGE_BUILD_WIDGET_TESTS "Build the isolated ImGui widget regression harness" OFF)
+option(SPECTIARY_BUILD_WIDGET_TESTS "Build the isolated ImGui widget regression harness" OFF)
 
-function(specforge_set_test_tier test_name tier)
+function(spectiary_set_test_tier test_name tier)
     if(NOT tier STREQUAL "fast" AND NOT tier STREQUAL "extended")
         message(FATAL_ERROR "Unknown CTest tier '${tier}' for ${test_name}")
     endif()
     set_property(TEST "${test_name}" APPEND PROPERTY LABELS "${tier}")
 endfunction()
 
-if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
+if(SPECTIARY_BUILD_ASDF_LABELING_SPIKE)
     add_subdirectory(tools/asdf_labeling_spike)
 endif()
-if(SPECFORGE_BUILD_ASDF_LABELING_HARDENING)
+if(SPECTIARY_BUILD_ASDF_LABELING_HARDENING)
     add_subdirectory(tools/asdf_labeling_production_benchmark)
 endif()
 
-set(SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY
+set(SPECTIARY_PORTABLE_TEST_RUNTIME_DIRECTORY
     "${CMAKE_BINARY_DIR}/portable-tests/$<CONFIG>"
 )
-set(SPECFORGE_PORTABLE_TEST_METADATA
-    "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/${PROJECT_metadata_filename}"
+set(SPECTIARY_PORTABLE_TEST_METADATA
+    "${SPECTIARY_PORTABLE_TEST_RUNTIME_DIRECTORY}/${PROJECT_metadata_filename}"
 )
-add_custom_target(specforge_portable_test_metadata
+add_custom_target(spectiary_portable_test_metadata
     COMMAND "${CMAKE_COMMAND}" -E make_directory
-        "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
+        "${SPECTIARY_PORTABLE_TEST_RUNTIME_DIRECTORY}"
     COMMAND "${CMAKE_COMMAND}"
-        "-DINPUT=$<TARGET_FILE_DIR:specforge_native>/${PROJECT_metadata_filename}"
-        "-DOUTPUT=${SPECFORGE_PORTABLE_TEST_METADATA}"
+        "-DINPUT=$<TARGET_FILE_DIR:spectiary_native>/${PROJECT_metadata_filename}"
+        "-DOUTPUT=${SPECTIARY_PORTABLE_TEST_METADATA}"
         -P "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     DEPENDS
-        specforge_metadata
+        spectiary_metadata
         "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     COMMENT "Preparing schema 6 Portable runtime metadata for deterministic tests"
     VERBATIM
 )
 
-function(specforge_add_test target_name source_file production_target)
+function(spectiary_add_test target_name source_file production_target)
     add_executable(${target_name} ${source_file})
     target_link_libraries(${target_name} PRIVATE ${production_target})
-    specforge_enable_warnings(${target_name})
+    spectiary_enable_warnings(${target_name})
     add_test(NAME ${target_name} COMMAND ${target_name})
 endfunction()
 
-function(specforge_add_portable_only_test target_name source_file production_target)
+function(spectiary_add_portable_only_test target_name source_file production_target)
     add_executable(${target_name} ${source_file})
     target_link_libraries(${target_name} PRIVATE ${production_target})
-    specforge_enable_warnings(${target_name})
+    spectiary_enable_warnings(${target_name})
     set(portable_fixture_target
         "${target_name}_portable_fixture"
     )
     set(portable_executable
-        "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/$<TARGET_FILE_NAME:${target_name}>"
+        "${SPECTIARY_PORTABLE_TEST_RUNTIME_DIRECTORY}/$<TARGET_FILE_NAME:${target_name}>"
     )
     add_custom_target(${portable_fixture_target} ALL
         COMMAND "${CMAKE_COMMAND}" -E make_directory
-            "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
+            "${SPECTIARY_PORTABLE_TEST_RUNTIME_DIRECTORY}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_FILE:${target_name}>"
             "${portable_executable}"
@@ -666,7 +666,7 @@ function(specforge_add_portable_only_test target_name source_file production_tar
     )
     add_dependencies(
         ${portable_fixture_target}
-        specforge_portable_test_metadata
+        spectiary_portable_test_metadata
     )
     add_test(
         NAME "${target_name}"
@@ -681,126 +681,126 @@ function(specforge_add_portable_only_test target_name source_file production_tar
     )
 endfunction()
 
-specforge_add_test(
-    specforge_sdr_swap_chain_tests
+spectiary_add_test(
+    spectiary_sdr_swap_chain_tests
     tests/d3d11_sdr_swap_chain_tests.cpp
-    specforge_renderer
+    spectiary_renderer
 )
-target_link_libraries(specforge_sdr_swap_chain_tests PRIVATE imgui::imgui)
+target_link_libraries(spectiary_sdr_swap_chain_tests PRIVATE imgui::imgui)
 
-add_executable(specforge_win32_application_icon_tests
+add_executable(spectiary_win32_application_icon_tests
     tests/win32_application_icon_tests.cpp
     src/platform/win32_application_icon.cpp
     src/platform/win32_window.cpp
-    ${SPECFORGE_WINDOWS_RESOURCES}
+    ${SPECTIARY_WINDOWS_RESOURCES}
 )
-specforge_configure_production_target(
-    specforge_win32_application_icon_tests
+spectiary_configure_production_target(
+    spectiary_win32_application_icon_tests
 )
 target_link_libraries(
-    specforge_win32_application_icon_tests
+    spectiary_win32_application_icon_tests
     PRIVATE
         imgui::imgui
         imm32
 )
 add_test(
-    NAME specforge_win32_application_icon_tests
-    COMMAND specforge_win32_application_icon_tests
+    NAME spectiary_win32_application_icon_tests
+    COMMAND spectiary_win32_application_icon_tests
 )
 
-specforge_add_test(
-    specforge_local_user_state_tests
+spectiary_add_test(
+    spectiary_local_user_state_tests
     tests/local_user_state_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_labeling_persistence_owner_tests
+spectiary_add_test(
+    spectiary_sample_labeling_persistence_owner_tests
     tests/sample_labeling_persistence_owner_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_portable_only_test(
-    specforge_portable_runtime_state_tests
+spectiary_add_portable_only_test(
+    spectiary_portable_runtime_state_tests
     tests/portable_runtime_state_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_runtime_storage_context_tests
+spectiary_add_test(
+    spectiary_runtime_storage_context_tests
     tests/runtime_storage_context_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_render_wake_scheduler_tests
+spectiary_add_test(
+    spectiary_render_wake_scheduler_tests
     tests/render_wake_scheduler_tests.cpp
-    specforge_core
+    spectiary_core
 )
-target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
-specforge_add_test(
-    specforge_imgui_layout_persistence_tests
+target_link_libraries(spectiary_render_wake_scheduler_tests PRIVATE imgui::imgui)
+spectiary_add_test(
+    spectiary_imgui_layout_persistence_tests
     tests/imgui_layout_persistence_tests.cpp
-    specforge_imgui_layout
+    spectiary_imgui_layout
 )
 target_compile_definitions(
-    specforge_imgui_layout_persistence_tests
+    spectiary_imgui_layout_persistence_tests
     PRIVATE
-        SPECFORGE_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
+        SPECTIARY_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
 )
-specforge_add_test(
-    specforge_automation_control_tests
+spectiary_add_test(
+    spectiary_automation_control_tests
     tests/automation_control_tests.cpp
-    specforge_automation
+    spectiary_automation
 )
 target_link_libraries(
-    specforge_automation_control_tests
+    spectiary_automation_control_tests
     PRIVATE
         advapi32
-        specforge_desktop_ui
+        spectiary_desktop_ui
 )
 set_tests_properties(
-    specforge_automation_control_tests
+    spectiary_automation_control_tests
     PROPERTIES
         LABELS "automation;automation-headless;ci-headless;required"
 )
-specforge_add_test(
-    specforge_automation_panel_command_coordinator_tests
+spectiary_add_test(
+    spectiary_automation_panel_command_coordinator_tests
     tests/automation_panel_command_coordinator_tests.cpp
-    specforge_automation
+    spectiary_automation
 )
 target_sources(
-    specforge_automation_panel_command_coordinator_tests
+    spectiary_automation_panel_command_coordinator_tests
     PRIVATE
         src/app/automation_panel_command_coordinator.cpp
 )
 target_link_libraries(
-    specforge_automation_panel_command_coordinator_tests
+    spectiary_automation_panel_command_coordinator_tests
     PRIVATE
-        specforge_desktop_ui
+        spectiary_desktop_ui
 )
 set_tests_properties(
-    specforge_automation_panel_command_coordinator_tests
+    spectiary_automation_panel_command_coordinator_tests
     PROPERTIES
         LABELS "automation;automation-headless;ci-headless;required"
 )
-specforge_add_test(
-    specforge_automation_state_isolation_tests
+spectiary_add_test(
+    spectiary_automation_state_isolation_tests
     tests/automation_state_isolation_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
 target_link_libraries(
-    specforge_automation_state_isolation_tests
+    spectiary_automation_state_isolation_tests
     PRIVATE
         dwmapi
 )
 add_dependencies(
-    specforge_automation_state_isolation_tests
-    specforge_metadata
+    spectiary_automation_state_isolation_tests
+    spectiary_metadata
 )
 set_tests_properties(
-    specforge_automation_state_isolation_tests
+    spectiary_automation_state_isolation_tests
     PROPERTIES
         LABELS "automation;automation-headless;ci-headless;required"
 )
 add_test(
-    NAME specforge_automation_samples_contract_tests
+    NAME spectiary_automation_samples_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_samples_contract_tests.ps1"
         -FixtureDirectory
@@ -813,13 +813,13 @@ add_test(
             "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
 )
 set_tests_properties(
-    specforge_automation_samples_contract_tests
+    spectiary_automation_samples_contract_tests
     PROPERTIES
         LABELS "automation;automation-headless;ci-headless;required"
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_automation_ci_contract_tests
+    NAME spectiary_automation_ci_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_ci_contract_tests.ps1"
         -Workflow
@@ -830,13 +830,13 @@ add_test(
             "${CMAKE_SOURCE_DIR}/scripts/run-automation-ci.ps1"
 )
 set_tests_properties(
-    specforge_automation_ci_contract_tests
+    spectiary_automation_ci_contract_tests
     PROPERTIES
         LABELS "automation;automation-headless;ci-headless;required"
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_repository_verification_ci_contract_tests
+    NAME spectiary_repository_verification_ci_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File
             "${CMAKE_SOURCE_DIR}/tests/repository_verification_ci_contract_tests.ps1"
@@ -852,35 +852,35 @@ add_test(
             "${CMAKE_SOURCE_DIR}/tools/asdf_labeling_spike/CMakeLists.txt"
 )
 set_tests_properties(
-    specforge_repository_verification_ci_contract_tests
+    spectiary_repository_verification_ci_contract_tests
     PROPERTIES
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_release_artifact_process_runner_tests
+    NAME spectiary_release_artifact_process_runner_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File
             "${CMAKE_SOURCE_DIR}/tests/release_artifact_process_runner_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(
-    specforge_release_artifact_process_runner_tests
+    spectiary_release_artifact_process_runner_tests
     PROPERTIES
         LABELS "ci-headless;required"
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_automation_launcher_integration_tests
+    NAME spectiary_automation_launcher_integration_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_launcher_integration_tests.ps1"
-        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
-        -Executable "$<TARGET_FILE:specforge_native>"
-        -CleanupFixture "$<TARGET_FILE:specforge_automation_control_tests>"
-        -TimeoutFixture "$<TARGET_FILE:specforge_automation_launcher_timeout_fixture>"
-        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
+        -Launcher "$<TARGET_FILE:spectiary_automation_launcher>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
+        -CleanupFixture "$<TARGET_FILE:spectiary_automation_control_tests>"
+        -TimeoutFixture "$<TARGET_FILE:spectiary_automation_launcher_timeout_fixture>"
+        -StateFixture "$<TARGET_FILE:spectiary_automation_state_isolation_tests>"
 )
 set_tests_properties(
-    specforge_automation_launcher_integration_tests
+    spectiary_automation_launcher_integration_tests
     PROPERTIES
         RUN_SERIAL TRUE
         # This test includes the deterministic fake-GUI deadline fixtures as
@@ -890,38 +890,38 @@ set_tests_properties(
         LABELS "automation;real-gui"
 )
 add_test(
-    NAME specforge_imgui_viewport_ownership_integration_tests
+    NAME spectiary_imgui_viewport_ownership_integration_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/imgui_viewport_ownership_integration_tests.ps1"
-        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
-        -Executable "$<TARGET_FILE:specforge_native>"
-        -WindowPeer "$<TARGET_FILE:specforge_win32_window_peer>"
+        -Launcher "$<TARGET_FILE:spectiary_automation_launcher>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
+        -WindowPeer "$<TARGET_FILE:spectiary_win32_window_peer>"
         -LayoutSeed
             "${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
         -ArtifactsDirectory
             "${CMAKE_BINARY_DIR}/test-artifacts/theme-smoke"
 )
 set_tests_properties(
-    specforge_imgui_viewport_ownership_integration_tests
+    spectiary_imgui_viewport_ownership_integration_tests
     PROPERTIES
         RUN_SERIAL TRUE
         TIMEOUT 90
         LABELS "automation;gui-integration"
 )
 add_test(
-    NAME specforge_automation_samples_tests
+    NAME spectiary_automation_samples_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/automation_samples_tests.ps1"
-        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
-        -Executable "$<TARGET_FILE:specforge_native>"
-        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
+        -Launcher "$<TARGET_FILE:spectiary_automation_launcher>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
+        -StateFixture "$<TARGET_FILE:spectiary_automation_state_isolation_tests>"
         -FixtureDirectory
             "${CMAKE_SOURCE_DIR}/tests/fixtures/automation/samples"
         -ArtifactsDirectory
             "${CMAKE_BINARY_DIR}/test-artifacts/automation-samples"
 )
 set_tests_properties(
-    specforge_automation_samples_tests
+    spectiary_automation_samples_tests
     PROPERTIES
         RUN_SERIAL TRUE
         LABELS "automation;real-gui"
@@ -931,14 +931,14 @@ set_tests_properties(
         TIMEOUT 300
 )
 add_test(
-    NAME specforge_multi_instance_labeling_smoke_tests
+    NAME spectiary_multi_instance_labeling_smoke_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/multi_instance_labeling_smoke_tests.ps1"
-        -Executable "$<TARGET_FILE:specforge_native>"
-        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
+        -StateFixture "$<TARGET_FILE:spectiary_automation_state_isolation_tests>"
 )
 set_tests_properties(
-    specforge_multi_instance_labeling_smoke_tests
+    spectiary_multi_instance_labeling_smoke_tests
     PROPERTIES
         RUN_SERIAL TRUE
         # Runner main flow is capped at 180s; 30s shared GUI cleanup, two
@@ -948,191 +948,191 @@ set_tests_properties(
         LABELS "automation;real-gui"
 )
 
-specforge_add_test(
-    specforge_automation_execution_tests
+spectiary_add_test(
+    spectiary_automation_execution_tests
     tests/automation_execution_tests.cpp
-    specforge_automation
+    spectiary_automation
 )
-target_sources(specforge_automation_execution_tests PRIVATE src/app/automation_execution.cpp)
-target_link_libraries(specforge_automation_execution_tests PRIVATE specforge_desktop_ui)
-set_tests_properties(specforge_automation_execution_tests PROPERTIES
+target_sources(spectiary_automation_execution_tests PRIVATE src/app/automation_execution.cpp)
+target_link_libraries(spectiary_automation_execution_tests PRIVATE spectiary_desktop_ui)
+set_tests_properties(spectiary_automation_execution_tests PROPERTIES
     LABELS "automation;automation-headless;ci-headless;required")
 
-add_custom_target(specforge_automation_headless_targets)
+add_custom_target(spectiary_automation_headless_targets)
 add_dependencies(
-    specforge_automation_headless_targets
-    specforge_automation_control_tests
-    specforge_automation_execution_tests
-    specforge_automation_panel_command_coordinator_tests
-    specforge_automation_state_isolation_tests
+    spectiary_automation_headless_targets
+    spectiary_automation_control_tests
+    spectiary_automation_execution_tests
+    spectiary_automation_panel_command_coordinator_tests
+    spectiary_automation_state_isolation_tests
 )
 
-add_custom_target(specforge_automation_real_gui_targets)
+add_custom_target(spectiary_automation_real_gui_targets)
 add_dependencies(
-    specforge_automation_real_gui_targets
-    specforge_automation_launcher
-    specforge_native
-    specforge_automation_control_tests
-    specforge_automation_launcher_timeout_fixture
-    specforge_automation_state_isolation_tests
+    spectiary_automation_real_gui_targets
+    spectiary_automation_launcher
+    spectiary_native
+    spectiary_automation_control_tests
+    spectiary_automation_launcher_timeout_fixture
+    spectiary_automation_state_isolation_tests
 )
-specforge_add_test(
-    specforge_on_demand_frame_capture_tests
+spectiary_add_test(
+    spectiary_on_demand_frame_capture_tests
     tests/on_demand_frame_capture_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_profile_recording_ui_state_tests
+spectiary_add_test(
+    spectiary_profile_recording_ui_state_tests
     tests/profile_recording_ui_state_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_top_bar_status_layout_tests
+spectiary_add_test(
+    spectiary_top_bar_status_layout_tests
     tests/top_bar_status_layout_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_top_bar_status_hover_tests
+spectiary_add_test(
+    spectiary_top_bar_status_hover_tests
     tests/top_bar_status_hover_tests.cpp
-    specforge_core
+    spectiary_core
 )
-target_link_libraries(specforge_top_bar_status_hover_tests PRIVATE imgui::imgui)
-specforge_add_test(
-    specforge_profile_sink_tests
+target_link_libraries(spectiary_top_bar_status_hover_tests PRIVATE imgui::imgui)
+spectiary_add_test(
+    spectiary_profile_sink_tests
     tests/profile_sink_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_presentation_trace_tests
+spectiary_add_test(
+    spectiary_presentation_trace_tests
     tests/presentation_trace_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_profile_settings_tests
+spectiary_add_test(
+    spectiary_profile_settings_tests
     tests/profile_settings_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_navigation_latency_trace_tests
+spectiary_add_test(
+    spectiary_navigation_latency_trace_tests
     tests/navigation_latency_trace_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_source_load_latency_trace_tests
+spectiary_add_test(
+    spectiary_source_load_latency_trace_tests
     tests/source_load_latency_trace_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_metadata_tests
-    tests/specforge_metadata_tests.cpp
-    specforge_core
+spectiary_add_test(
+    spectiary_metadata_tests
+    tests/spectiary_metadata_tests.cpp
+    spectiary_core
 )
-target_compile_definitions(specforge_metadata_tests PRIVATE
-    SPECFORGE_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
-    SPECFORGE_EXPECTED_CFITSIO_VERSION="${SPECFORGE_CFITSIO_VERSION}"
+target_compile_definitions(spectiary_metadata_tests PRIVATE
+    SPECTIARY_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
+    SPECTIARY_EXPECTED_CFITSIO_VERSION="${SPECTIARY_CFITSIO_VERSION}"
 )
-specforge_add_test(
-    specforge_metadata_finalizer_tests
-    tests/specforge_metadata_finalizer_tests.cpp
-    specforge_core
+spectiary_add_test(
+    spectiary_metadata_finalizer_tests
+    tests/spectiary_metadata_finalizer_tests.cpp
+    spectiary_core
 )
-specforge_add_test(
-    specforge_atomic_file_tests
+spectiary_add_test(
+    spectiary_atomic_file_tests
     tests/atomic_file_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_embedded_legal_documents_tests
+spectiary_add_test(
+    spectiary_embedded_legal_documents_tests
     tests/embedded_legal_documents_tests.cpp
-    specforge_core
+    spectiary_core
 )
 target_sources(
-    specforge_embedded_legal_documents_tests
+    spectiary_embedded_legal_documents_tests
     PRIVATE
-        ${SPECFORGE_WINDOWS_RESOURCES}
+        ${SPECTIARY_WINDOWS_RESOURCES}
 )
 target_compile_definitions(
-    specforge_embedded_legal_documents_tests
+    spectiary_embedded_legal_documents_tests
     PRIVATE
-        SPECFORGE_LEGAL_SOURCE_DIRECTORY="${CMAKE_SOURCE_DIR}/legal"
+        SPECTIARY_LEGAL_SOURCE_DIRECTORY="${CMAKE_SOURCE_DIR}/legal"
 )
-specforge_add_test(
-    specforge_settings_panel_tests
+spectiary_add_test(
+    spectiary_settings_panel_tests
     tests/settings_panel_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
 target_sources(
-    specforge_settings_panel_tests
+    spectiary_settings_panel_tests
     PRIVATE
-        ${SPECFORGE_WINDOWS_RESOURCES}
+        ${SPECTIARY_WINDOWS_RESOURCES}
 )
-target_compile_definitions(specforge_settings_panel_tests PRIVATE
-    SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
-    SPECFORGE_EXPECTED_CONFIGURATION="$<CONFIG>"
-    SPECFORGE_EXPECTED_ARCHITECTURE="${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
-    SPECFORGE_EXPECTED_SOURCE_MODE="${SPECFORGE_BUILD_SOURCE_MODE}"
-    SPECFORGE_EXPECTED_SOURCE_REVISION="${SPECFORGE_BUILD_SOURCE_REVISION}"
+target_compile_definitions(spectiary_settings_panel_tests PRIVATE
+    SPECTIARY_EXPECTED_VERSION="${PROJECT_VERSION}"
+    SPECTIARY_EXPECTED_CONFIGURATION="$<CONFIG>"
+    SPECTIARY_EXPECTED_ARCHITECTURE="${SPECTIARY_BUILD_TARGET_ARCHITECTURE}"
+    SPECTIARY_EXPECTED_SOURCE_MODE="${SPECTIARY_BUILD_SOURCE_MODE}"
+    SPECTIARY_EXPECTED_SOURCE_REVISION="${SPECTIARY_BUILD_SOURCE_REVISION}"
 )
-target_link_libraries(specforge_settings_panel_tests PRIVATE dwmapi)
+target_link_libraries(spectiary_settings_panel_tests PRIVATE dwmapi)
 add_test(
-    NAME specforge_analyze_profile_tests
+    NAME spectiary_analyze_profile_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-profile.ps1"
 )
 add_test(
-    NAME specforge_analyze_navigation_profile_tests
+    NAME spectiary_analyze_navigation_profile_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_navigation_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-navigation-profile.ps1"
 )
 add_test(
-    NAME specforge_analyze_source_load_profile_tests
+    NAME spectiary_analyze_source_load_profile_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_source_load_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-source-load-profile.ps1"
 )
 add_test(
-    NAME specforge_build_ninja_msvc_debug_watchdog_tests
+    NAME spectiary_build_ninja_msvc_debug_watchdog_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/build_ninja_msvc_debug_watchdog_tests.ps1"
         -Wrapper "${CMAKE_SOURCE_DIR}/scripts/build-ninja-msvc-debug.ps1"
 )
 add_executable(
-    specforge_runtime_resource_workload_tests
+    spectiary_runtime_resource_workload_tests
     tests/runtime_resource_workload_tests.cpp
     src/app/runtime_resource_workload.cpp
 )
-specforge_configure_production_target(
-    specforge_runtime_resource_workload_tests
+spectiary_configure_production_target(
+    spectiary_runtime_resource_workload_tests
 )
 target_link_libraries(
-    specforge_runtime_resource_workload_tests
+    spectiary_runtime_resource_workload_tests
     PRIVATE
-        specforge_desktop_ui
+        spectiary_desktop_ui
         dwmapi
 )
 add_test(
-    NAME specforge_runtime_resource_workload_tests
-    COMMAND specforge_runtime_resource_workload_tests
+    NAME spectiary_runtime_resource_workload_tests
+    COMMAND spectiary_runtime_resource_workload_tests
 )
 add_test(
-    NAME specforge_runtime_resource_stability_runner_tests
+    NAME spectiary_runtime_resource_stability_runner_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/runtime_resource_stability_runner_tests.ps1"
         -Runner "${CMAKE_SOURCE_DIR}/scripts/test-runtime-resource-stability.ps1"
-        -Executable "$<TARGET_FILE:specforge_native>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
 )
 add_test(
-    NAME specforge_runtime_resource_stability
+    NAME spectiary_runtime_resource_stability
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/scripts/test-runtime-resource-stability.ps1"
-        -Executable "$<TARGET_FILE:specforge_native>"
+        -Executable "$<TARGET_FILE:spectiary_native>"
         -OutputDirectory "${CMAKE_BINARY_DIR}/runtime-resource-stability"
         -CTestIntegration
 )
 set_tests_properties(
-    specforge_runtime_resource_stability
+    spectiary_runtime_resource_stability
     PROPERTIES
         LABELS "resource-stability;periodic"
         RUN_SERIAL TRUE
@@ -1141,72 +1141,72 @@ set_tests_properties(
 )
 if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja")
     get_filename_component(
-        SPECFORGE_METADATA_BUILD_REGRESSION_PRESET
+        SPECTIARY_METADATA_BUILD_REGRESSION_PRESET
         "${CMAKE_BINARY_DIR}"
         NAME
     )
     add_test(
-        NAME specforge_metadata_build_regression_tests
+        NAME spectiary_metadata_build_regression_tests
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-            -File "${CMAKE_SOURCE_DIR}/tests/specforge_metadata_build_regression_tests.ps1"
+            -File "${CMAKE_SOURCE_DIR}/tests/spectiary_metadata_build_regression_tests.ps1"
             -CMakeCommand "${CMAKE_COMMAND}"
             -BuildDirectory "${CMAKE_BINARY_DIR}"
-            -BuiltExecutable "$<TARGET_FILE:specforge_native>"
-            -BuildTarget specforge_metadata
+            -BuiltExecutable "$<TARGET_FILE:spectiary_native>"
+            -BuildTarget spectiary_metadata
             -Configuration "$<CONFIG>"
             -BuildWrapper
                 "${CMAKE_SOURCE_DIR}/scripts/build-ninja-msvc-debug.ps1"
             -BuildPreset
-                "${SPECFORGE_METADATA_BUILD_REGRESSION_PRESET}"
+                "${SPECTIARY_METADATA_BUILD_REGRESSION_PRESET}"
             -BuildTimeoutSec 180
     )
 else()
     add_test(
-        NAME specforge_metadata_build_regression_tests
+        NAME spectiary_metadata_build_regression_tests
         COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-            -File "${CMAKE_SOURCE_DIR}/tests/specforge_metadata_build_regression_tests.ps1"
+            -File "${CMAKE_SOURCE_DIR}/tests/spectiary_metadata_build_regression_tests.ps1"
             -CMakeCommand "${CMAKE_COMMAND}"
             -BuildDirectory "${CMAKE_BINARY_DIR}"
-            -BuiltExecutable "$<TARGET_FILE:specforge_native>"
-            -BuildTarget specforge_metadata
+            -BuiltExecutable "$<TARGET_FILE:spectiary_native>"
+            -BuildTarget spectiary_metadata
             -Configuration "$<CONFIG>"
     )
 endif()
 set_tests_properties(
-    specforge_metadata_build_regression_tests
+    spectiary_metadata_build_regression_tests
     PROPERTIES
         LABELS "release;required"
         RUN_SERIAL TRUE
         TIMEOUT 900
 )
 add_test(
-    NAME specforge_release_artifacts_tests
+    NAME spectiary_release_artifacts_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/release_artifacts_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
-        -DearImGuiVersion "${SPECFORGE_IMGUI_VERSION}"
-        -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
-        -CfitsioVersion "${SPECFORGE_CFITSIO_VERSION}"
-        -PthreadsVersion "${SPECFORGE_PTHREADS_VERSION}"
-        -YamlCppVersion "${SPECFORGE_YAML_CPP_VERSION}"
-        -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
-        -BuiltExecutable "$<TARGET_FILE:specforge_native>"
-        -GeneratedManifest "${SPECFORGE_MANIFEST}"
+        -DearImGuiVersion "${SPECTIARY_IMGUI_VERSION}"
+        -ImPlotVersion "${SPECTIARY_IMPLOT_VERSION}"
+        -CfitsioVersion "${SPECTIARY_CFITSIO_VERSION}"
+        -PthreadsVersion "${SPECTIARY_PTHREADS_VERSION}"
+        -YamlCppVersion "${SPECTIARY_YAML_CPP_VERSION}"
+        -ZlibVersion "${SPECTIARY_ZLIB_VERSION}"
+        -BuiltExecutable "$<TARGET_FILE:spectiary_native>"
+        -GeneratedManifest "${SPECTIARY_MANIFEST}"
         -GeneratedBuildIdentity
-            "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/specforge/specforge_build_identity.h"
-        -SpecForgeVersion "${PROJECT_VERSION}"
+            "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/spectiary/spectiary_build_identity.h"
+        -SpectiaryVersion "${PROJECT_VERSION}"
         -Configuration "$<CONFIG>"
-        -SourceMode "${SPECFORGE_BUILD_SOURCE_MODE}"
-        -SourceRevision "${SPECFORGE_BUILD_SOURCE_REVISION}"
-        -CompilerId "${SPECFORGE_BUILD_COMPILER_ID}"
-        -CompilerVersion "${SPECFORGE_BUILD_COMPILER_VERSION}"
-        -CMakeVersion "${SPECFORGE_BUILD_CMAKE_VERSION}"
-        -Generator "${SPECFORGE_BUILD_GENERATOR}"
-        -TargetArchitecture "${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
-        -WindowsSdkVersion "${SPECFORGE_BUILD_WINDOWS_SDK_VERSION}"
+        -SourceMode "${SPECTIARY_BUILD_SOURCE_MODE}"
+        -SourceRevision "${SPECTIARY_BUILD_SOURCE_REVISION}"
+        -CompilerId "${SPECTIARY_BUILD_COMPILER_ID}"
+        -CompilerVersion "${SPECTIARY_BUILD_COMPILER_VERSION}"
+        -CMakeVersion "${SPECTIARY_BUILD_CMAKE_VERSION}"
+        -Generator "${SPECTIARY_BUILD_GENERATOR}"
+        -TargetArchitecture "${SPECTIARY_BUILD_TARGET_ARCHITECTURE}"
+        -WindowsSdkVersion "${SPECTIARY_BUILD_WINDOWS_SDK_VERSION}"
 )
 set_tests_properties(
-    specforge_release_artifacts_tests
+    spectiary_release_artifacts_tests
     PROPERTIES
         LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
@@ -1217,33 +1217,33 @@ set_tests_properties(
         TIMEOUT 600
 )
 add_test(
-    NAME specforge_portable_pe_contract_tests
+    NAME spectiary_portable_pe_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/portable_pe_contract_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
         -BuildDirectory "${CMAKE_BINARY_DIR}"
 )
 set_tests_properties(
-    specforge_portable_pe_contract_tests
+    spectiary_portable_pe_contract_tests
     PROPERTIES
         LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_release_workflow_structure_contract_tests
+    NAME spectiary_release_workflow_structure_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/release_workflow_structure_contract_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(
-    specforge_release_workflow_structure_contract_tests
+    spectiary_release_workflow_structure_contract_tests
     PROPERTIES
         LABELS "release;ci-headless;required"
         TIMEOUT 30
 )
 add_test(
-    NAME specforge_release_configured_build_contract_tests
+    NAME spectiary_release_configured_build_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/release_configured_build_contract_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
@@ -1253,26 +1253,26 @@ add_test(
             "${CMAKE_SOURCE_DIR}/build/ninja-msvc-release-static"
 )
 set_tests_properties(
-    specforge_release_configured_build_contract_tests
+    spectiary_release_configured_build_contract_tests
     PROPERTIES
         LABELS "release;ci-headless;required"
         RUN_SERIAL TRUE
         TIMEOUT 60
 )
 add_test(
-    NAME specforge_application_icon_tests
+    NAME spectiary_application_icon_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/application_icon_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
-        -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+        -BuiltExecutable "$<TARGET_FILE:spectiary_native>"
 )
 set_tests_properties(
-    specforge_application_icon_tests
+    spectiary_application_icon_tests
     PROPERTIES
         LABELS "release;required"
 )
 add_test(
-    NAME specforge_head_snapshot_build_tests
+    NAME spectiary_head_snapshot_build_tests
     COMMAND
         powershell
         -NoProfile
@@ -1281,423 +1281,423 @@ add_test(
         -RepoRoot "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 add_test(
-    NAME specforge_panel_session_render_architecture_tests
+    NAME spectiary_panel_session_render_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/panel_session_render_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 add_test(
-    NAME specforge_production_target_dependency_architecture_tests
+    NAME spectiary_production_target_dependency_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/production_target_dependency_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 add_test(
-    NAME specforge_imgui_viewport_policy_architecture_tests
+    NAME spectiary_imgui_viewport_policy_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/imgui_viewport_policy_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
-specforge_add_test(
-    specforge_win32_compositor_clock_tests
+spectiary_add_test(
+    spectiary_win32_compositor_clock_tests
     tests/win32_compositor_clock_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_win32_message_wait_tests
+spectiary_add_test(
+    spectiary_win32_message_wait_tests
     tests/win32_message_wait_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_win32_process_launcher_tests
+spectiary_add_test(
+    spectiary_win32_process_launcher_tests
     tests/win32_process_launcher_tests.cpp
-    specforge_core
+    spectiary_core
 )
 target_link_libraries(
-    specforge_win32_process_launcher_tests
+    spectiary_win32_process_launcher_tests
     PRIVATE
-        specforge_automation
-        specforge_desktop_ui
+        spectiary_automation
+        spectiary_desktop_ui
         dwmapi
         shell32
 )
 add_dependencies(
-    specforge_win32_process_launcher_tests
-    specforge_native
+    spectiary_win32_process_launcher_tests
+    spectiary_native
 )
-specforge_add_test(
-    specforge_loader_tests
+spectiary_add_test(
+    spectiary_loader_tests
     tests/spectrum_loader_tests.cpp
-    specforge_core
+    spectiary_core
 )
-target_link_libraries(specforge_loader_tests PRIVATE ZLIB::ZLIB)
+target_link_libraries(spectiary_loader_tests PRIVATE ZLIB::ZLIB)
 target_compile_definitions(
-    specforge_loader_tests
+    spectiary_loader_tests
     PRIVATE
-        SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-target_link_libraries(specforge_loader_tests PRIVATE dbghelp)
-specforge_add_test(
-    specforge_fits_file_reader_tests
+target_link_libraries(spectiary_loader_tests PRIVATE dbghelp)
+spectiary_add_test(
+    spectiary_fits_file_reader_tests
     tests/fits_file_reader_tests.cpp
-    specforge_core
+    spectiary_core
 )
 target_link_libraries(
-    specforge_fits_file_reader_tests
+    spectiary_fits_file_reader_tests
     PRIVATE
         CFITSIO::cfitsio
         dbghelp
         ZLIB::ZLIB
 )
 target_compile_definitions(
-    specforge_fits_file_reader_tests
+    spectiary_fits_file_reader_tests
     PRIVATE
-        SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(
-    specforge_loader_tests
-    specforge_fits_file_reader_tests
+    spectiary_loader_tests
+    spectiary_fits_file_reader_tests
     PROPERTIES
         LABELS "fits;release;ci-headless;required"
 )
 if(MSVC)
     target_link_options(
-        specforge_loader_tests
+        spectiary_loader_tests
         PRIVATE
             "$<$<CONFIG:Release>:/DEBUG:FULL>"
     )
     target_link_options(
-        specforge_fits_file_reader_tests
+        spectiary_fits_file_reader_tests
         PRIVATE
             "$<$<CONFIG:Release>:/DEBUG:FULL>"
     )
 endif()
-specforge_add_test(
-    specforge_source_open_resolution_tests
+spectiary_add_test(
+    spectiary_source_open_resolution_tests
     tests/source_open_resolution_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_sample_navigation_controller_tests
+spectiary_add_test(
+    spectiary_sample_navigation_controller_tests
     tests/sample_navigation_controller_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_navigation_sequence_tests
+spectiary_add_test(
+    spectiary_sample_navigation_sequence_tests
     tests/sample_navigation_sequence_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_workflow_shortcut_tests
+spectiary_add_test(
+    spectiary_sample_workflow_shortcut_tests
     tests/sample_workflow_shortcut_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_sample_labeling_filename_tests
+spectiary_add_test(
+    spectiary_sample_labeling_filename_tests
     tests/sample_labeling_filename_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
 set_tests_properties(
-    specforge_sample_labeling_filename_tests
+    spectiary_sample_labeling_filename_tests
     PROPERTIES
         LABELS "labeling;ci-headless;required"
 )
-specforge_add_test(
-    specforge_source_collection_panel_tests
+spectiary_add_test(
+    spectiary_source_collection_panel_tests
     tests/source_collection_panel_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_panel_session_interaction_tests
+spectiary_add_test(
+    spectiary_panel_session_interaction_tests
     tests/panel_session_interaction_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_sample_workflow_rules_tests
+spectiary_add_test(
+    spectiary_sample_workflow_rules_tests
     tests/sample_workflow_rules_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_name_autocomplete_tests
+spectiary_add_test(
+    spectiary_sample_name_autocomplete_tests
     tests/sample_name_autocomplete_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_labeling_filter_tests
+spectiary_add_test(
+    spectiary_sample_labeling_filter_tests
     tests/sample_labeling_filter_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_sample_label_export_tests
+spectiary_add_test(
+    spectiary_sample_label_export_tests
     tests/sample_label_export_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_sample_annotation_csv_tests
+spectiary_add_test(
+    spectiary_sample_annotation_csv_tests
     tests/sample_annotation_csv_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_csv_record_codec_tests
+spectiary_add_test(
+    spectiary_csv_record_codec_tests
     tests/csv_record_codec_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_labeling_primitives_tests
+spectiary_add_test(
+    spectiary_labeling_primitives_tests
     tests/labeling_primitives_tests.cpp
-    specforge_core
+    spectiary_core
 )
 set_tests_properties(
-    specforge_sample_label_export_tests
+    spectiary_sample_label_export_tests
     PROPERTIES
         LABELS "labeling;ci-headless;required"
 )
 set_tests_properties(
-    specforge_sample_annotation_csv_tests
+    spectiary_sample_annotation_csv_tests
     PROPERTIES
         LABELS "data;labeling;ci-headless;required"
 )
 set_tests_properties(
-    specforge_csv_record_codec_tests
+    spectiary_csv_record_codec_tests
     PROPERTIES
         LABELS "data;ci-headless;required"
 )
 set_tests_properties(
-    specforge_labeling_primitives_tests
+    spectiary_labeling_primitives_tests
     PROPERTIES
         LABELS "labeling;ci-headless;required"
 )
-specforge_add_test(
-    specforge_sample_labeling_document_tests
+spectiary_add_test(
+    spectiary_sample_labeling_document_tests
     tests/sample_labeling_document_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_sample_labeling_asdf_codec_tests
+spectiary_add_test(
+    spectiary_sample_labeling_asdf_codec_tests
     tests/sample_labeling_asdf_codec_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_sample_labeling_asdf_store_tests
+spectiary_add_test(
+    spectiary_sample_labeling_asdf_store_tests
     tests/sample_labeling_asdf_store_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_sample_labeling_asdf_store_property_tests
+spectiary_add_test(
+    spectiary_sample_labeling_asdf_store_property_tests
     tests/sample_labeling_asdf_store_property_tests.cpp
-    specforge_core
+    spectiary_core
 )
 add_executable(
-    specforge_sample_labeling_asdf_mutation_tests
+    spectiary_sample_labeling_asdf_mutation_tests
     tests/sample_labeling_asdf_mutation_tests.cpp
 )
 target_link_libraries(
-    specforge_sample_labeling_asdf_mutation_tests
+    spectiary_sample_labeling_asdf_mutation_tests
     PRIVATE
-        specforge_core
+        spectiary_core
         yaml-cpp::yaml-cpp
         ZLIB::ZLIB
 )
-specforge_enable_warnings(specforge_sample_labeling_asdf_mutation_tests)
+spectiary_enable_warnings(spectiary_sample_labeling_asdf_mutation_tests)
 add_test(
-    NAME specforge_sample_labeling_asdf_mutation_tests
+    NAME spectiary_sample_labeling_asdf_mutation_tests
     COMMAND
-        specforge_sample_labeling_asdf_mutation_tests
+        spectiary_sample_labeling_asdf_mutation_tests
         --seed 0x78c0de2026
         --case-count 73
         --max-input-bytes 1048576
 )
 target_compile_definitions(
-    specforge_sample_labeling_asdf_codec_tests
+    spectiary_sample_labeling_asdf_codec_tests
     PRIVATE
-        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
-        SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+        SPECTIARY_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+        SPECTIARY_EXPECTED_VERSION="${PROJECT_VERSION}"
 )
 target_compile_definitions(
-    specforge_sample_labeling_asdf_store_tests
+    spectiary_sample_labeling_asdf_store_tests
     PRIVATE
-        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+        SPECTIARY_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
 )
 target_compile_definitions(
-    specforge_sample_labeling_asdf_store_property_tests
+    spectiary_sample_labeling_asdf_store_property_tests
     PRIVATE
-        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+        SPECTIARY_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
 )
 target_compile_definitions(
-    specforge_sample_labeling_asdf_mutation_tests
+    spectiary_sample_labeling_asdf_mutation_tests
     PRIVATE
-        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+        SPECTIARY_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
 )
-if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
+if(SPECTIARY_BUILD_ASDF_LABELING_SPIKE)
     add_dependencies(
-        specforge_asdf_labeling_interoperability_targets
-        specforge_sample_labeling_asdf_codec_tests
+        spectiary_asdf_labeling_interoperability_targets
+        spectiary_sample_labeling_asdf_codec_tests
     )
 endif()
-specforge_add_test(
-    specforge_source_collection_session_tests
+spectiary_add_test(
+    spectiary_source_collection_session_tests
     tests/source_collection_session_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
 set_tests_properties(
-    specforge_sample_workflow_rules_tests
-    specforge_sample_labeling_document_tests
-    specforge_sample_labeling_asdf_codec_tests
-    specforge_sample_labeling_asdf_store_tests
-    specforge_sample_labeling_asdf_store_property_tests
-    specforge_sample_labeling_asdf_mutation_tests
-    specforge_sample_labeling_filter_tests
-    specforge_source_collection_session_tests
+    spectiary_sample_workflow_rules_tests
+    spectiary_sample_labeling_document_tests
+    spectiary_sample_labeling_asdf_codec_tests
+    spectiary_sample_labeling_asdf_store_tests
+    spectiary_sample_labeling_asdf_store_property_tests
+    spectiary_sample_labeling_asdf_mutation_tests
+    spectiary_sample_labeling_filter_tests
+    spectiary_source_collection_session_tests
     PROPERTIES
         LABELS "labeling;asdf-lifecycle;ci-headless;required"
 )
 set_tests_properties(
-    specforge_sample_labeling_asdf_store_property_tests
-    specforge_sample_labeling_asdf_mutation_tests
+    spectiary_sample_labeling_asdf_store_property_tests
+    spectiary_sample_labeling_asdf_mutation_tests
     PROPERTIES
         LABELS "labeling;asdf-lifecycle;asdf-hardening;ci-headless;required"
         TIMEOUT 120
 )
-specforge_add_test(
-    specforge_source_collection_load_queue_tests
+spectiary_add_test(
+    spectiary_source_collection_load_queue_tests
     tests/source_collection_load_queue_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_source_collection_preparation_tests
+spectiary_add_test(
+    spectiary_source_collection_preparation_tests
     tests/source_collection_preparation_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_source_collection_activation_transaction_tests
+spectiary_add_test(
+    spectiary_source_collection_activation_transaction_tests
     tests/source_collection_activation_transaction_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
-specforge_add_test(
-    specforge_shell_source_load_activation_tests
+spectiary_add_test(
+    spectiary_shell_source_load_activation_tests
     tests/shell_source_load_activation_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-target_link_libraries(specforge_shell_source_load_activation_tests PRIVATE dwmapi)
+target_link_libraries(spectiary_shell_source_load_activation_tests PRIVATE dwmapi)
 set_tests_properties(
-    specforge_shell_source_load_activation_tests
+    spectiary_shell_source_load_activation_tests
     PROPERTIES TIMEOUT 120
 )
-specforge_add_test(
-    specforge_spectrum_smoothing_tests
+spectiary_add_test(
+    spectiary_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_plot_touchpad_gesture_tests
+spectiary_add_test(
+    spectiary_plot_touchpad_gesture_tests
     tests/plot_touchpad_gesture_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_series_color_tests
+spectiary_add_test(
+    spectiary_series_color_tests
     tests/series_color_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_spectral_line_label_layout_tests
+spectiary_add_test(
+    spectiary_spectral_line_label_layout_tests
     tests/spectral_line_label_layout_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_scientific_label_tests
+spectiary_add_test(
+    spectiary_scientific_label_tests
     tests/scientific_label_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_application_settings_tests
+spectiary_add_test(
+    spectiary_application_settings_tests
     tests/application_settings_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_native_window_title_tests
+spectiary_add_test(
+    spectiary_native_window_title_tests
     tests/native_window_title_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
 target_compile_definitions(
-    specforge_native_window_title_tests
+    spectiary_native_window_title_tests
     PRIVATE
-        SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+        SPECTIARY_EXPECTED_VERSION="${PROJECT_VERSION}"
 )
-specforge_add_test(
-    specforge_ui_font_glyph_ranges_tests
+spectiary_add_test(
+    spectiary_ui_font_glyph_ranges_tests
     tests/ui_font_glyph_ranges_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_ui_text_tests
+spectiary_add_test(
+    spectiary_ui_text_tests
     tests/ui_text_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_ui_scale_settings_tests
+spectiary_add_test(
+    spectiary_ui_scale_settings_tests
     tests/ui_scale_settings_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_theme_tests
+spectiary_add_test(
+    spectiary_theme_tests
     tests/theme_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
 add_test(
-    NAME specforge_ui_scale_runtime_architecture_tests
+    NAME spectiary_ui_scale_runtime_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/ui_scale_runtime_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 add_test(
-    NAME specforge_native_window_title_architecture_tests
+    NAME spectiary_native_window_title_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/native_window_title_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
-specforge_add_test(
-    specforge_spectrum_view_session_tests
+spectiary_add_test(
+    spectiary_spectrum_view_session_tests
     tests/spectrum_view_session_tests.cpp
-    specforge_desktop_ui
+    spectiary_desktop_ui
 )
-specforge_add_test(
-    specforge_spectral_line_catalog_tests
+spectiary_add_test(
+    spectiary_spectral_line_catalog_tests
     tests/spectral_line_catalog_tests.cpp
-    specforge_core
+    spectiary_core
 )
 target_compile_definitions(
-    specforge_spectral_line_catalog_tests
-    PRIVATE SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    spectiary_spectral_line_catalog_tests
+    PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+if(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
     target_compile_definitions(
-        specforge_spectral_line_catalog_tests
-        PRIVATE SPECFORGE_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
+        spectiary_spectral_line_catalog_tests
+        PRIVATE SPECTIARY_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
     )
 endif()
 
-if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
-    add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config"
+if(NOT SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES)
+    add_custom_command(TARGET spectiary_spectral_line_catalog_tests POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:spectiary_spectral_line_catalog_tests>/config"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
-            "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
+            "${SPECTIARY_PUBLIC_SPECTRAL_LINES_TSV}"
+            "$<TARGET_FILE_DIR:spectiary_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
     )
 endif()
 
-specforge_add_test(
-    specforge_spectral_line_user_state_tests
+spectiary_add_test(
+    spectiary_spectral_line_user_state_tests
     tests/spectral_line_user_state_tests.cpp
-    specforge_core
+    spectiary_core
 )
-specforge_add_test(
-    specforge_spectral_lines_panel_controller_tests
+spectiary_add_test(
+    spectiary_spectral_lines_panel_controller_tests
     tests/spectral_lines_panel_controller_tests.cpp
-    specforge_sessions
+    spectiary_sessions
 )
 
 add_test(
-    NAME specforge_ctest_tier_contract_tests
+    NAME spectiary_ctest_tier_contract_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/ctest_tier_contract_tests.ps1"
         -BuildDirectory "${CMAKE_BINARY_DIR}"
@@ -1705,7 +1705,7 @@ add_test(
         -SourceDirectory "${CMAKE_SOURCE_DIR}"
 )
 set_tests_properties(
-    specforge_ctest_tier_contract_tests
+    spectiary_ctest_tier_contract_tests
     PROPERTIES
         TIMEOUT 30
 )
@@ -1714,135 +1714,135 @@ set_tests_properties(
 # belong to exactly one of these two explicit lists. The contract test validates
 # the configured CTest model so a new unclassified test fails visibly.
 add_test(
-    NAME specforge_presentation_profile_schema_tests
+    NAME spectiary_presentation_profile_schema_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/presentation_profile_schema_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-presentation-profile.ps1"
 )
 add_test(
-    NAME specforge_live_resize_resource_observation_tests
+    NAME spectiary_live_resize_resource_observation_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/live_resize_resource_observation_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
-set_tests_properties(specforge_live_resize_resource_observation_tests specforge_presentation_profile_schema_tests specforge_presentation_trace_tests
+set_tests_properties(spectiary_live_resize_resource_observation_tests spectiary_presentation_profile_schema_tests spectiary_presentation_trace_tests
     PROPERTIES TIMEOUT 15)
-set(SPECFORGE_FAST_TESTS
-    specforge_sample_labeling_persistence_owner_tests
-    specforge_live_resize_resource_observation_tests
-    specforge_presentation_trace_tests
-    specforge_presentation_profile_schema_tests
-    specforge_sdr_swap_chain_tests
-    specforge_win32_application_icon_tests
-    specforge_local_user_state_tests
-    specforge_runtime_storage_context_tests
-    specforge_portable_runtime_state_tests
-    specforge_render_wake_scheduler_tests
-    specforge_imgui_layout_persistence_tests
-    specforge_automation_control_tests
-    specforge_automation_execution_tests
-    specforge_automation_panel_command_coordinator_tests
-    specforge_automation_state_isolation_tests
-    specforge_automation_samples_contract_tests
-    specforge_automation_ci_contract_tests
-    specforge_repository_verification_ci_contract_tests
-    specforge_release_artifact_process_runner_tests
-    specforge_on_demand_frame_capture_tests
-    specforge_profile_recording_ui_state_tests
-    specforge_top_bar_status_layout_tests
-    specforge_top_bar_status_hover_tests
-    specforge_profile_sink_tests
-    specforge_profile_settings_tests
-    specforge_navigation_latency_trace_tests
-    specforge_source_load_latency_trace_tests
-    specforge_metadata_tests
-    specforge_metadata_finalizer_tests
-    specforge_atomic_file_tests
-    specforge_embedded_legal_documents_tests
-    specforge_build_ninja_msvc_debug_watchdog_tests
-    specforge_runtime_resource_workload_tests
-    specforge_runtime_resource_stability_runner_tests
-    specforge_panel_session_render_architecture_tests
-    specforge_production_target_dependency_architecture_tests
-    specforge_imgui_viewport_policy_architecture_tests
-    specforge_win32_compositor_clock_tests
-    specforge_win32_message_wait_tests
-    specforge_win32_process_launcher_tests
-    specforge_loader_tests
-    specforge_fits_file_reader_tests
-    specforge_source_open_resolution_tests
-    specforge_sample_navigation_controller_tests
-    specforge_sample_navigation_sequence_tests
-    specforge_sample_workflow_shortcut_tests
-    specforge_sample_labeling_filename_tests
-    specforge_source_collection_panel_tests
-    specforge_panel_session_interaction_tests
-    specforge_sample_workflow_rules_tests
-    specforge_sample_name_autocomplete_tests
-    specforge_sample_label_export_tests
-    specforge_sample_annotation_csv_tests
-    specforge_csv_record_codec_tests
-    specforge_labeling_primitives_tests
-    specforge_sample_labeling_document_tests
-    specforge_sample_labeling_asdf_codec_tests
-    specforge_sample_labeling_asdf_store_tests
-    specforge_sample_labeling_asdf_mutation_tests
-    specforge_source_collection_session_tests
-    specforge_source_collection_load_queue_tests
-    specforge_source_collection_preparation_tests
-    specforge_source_collection_activation_transaction_tests
-    specforge_spectrum_smoothing_tests
-    specforge_plot_touchpad_gesture_tests
-    specforge_series_color_tests
-    specforge_spectral_line_label_layout_tests
-    specforge_scientific_label_tests
-    specforge_application_settings_tests
-    specforge_native_window_title_tests
-    specforge_ui_font_glyph_ranges_tests
-    specforge_ui_text_tests
-    specforge_ui_scale_settings_tests
-    specforge_theme_tests
-    specforge_ui_scale_runtime_architecture_tests
-    specforge_native_window_title_architecture_tests
-    specforge_spectrum_view_session_tests
-    specforge_spectral_line_catalog_tests
-    specforge_spectral_line_user_state_tests
-    specforge_ctest_tier_contract_tests
+set(SPECTIARY_FAST_TESTS
+    spectiary_sample_labeling_persistence_owner_tests
+    spectiary_live_resize_resource_observation_tests
+    spectiary_presentation_trace_tests
+    spectiary_presentation_profile_schema_tests
+    spectiary_sdr_swap_chain_tests
+    spectiary_win32_application_icon_tests
+    spectiary_local_user_state_tests
+    spectiary_runtime_storage_context_tests
+    spectiary_portable_runtime_state_tests
+    spectiary_render_wake_scheduler_tests
+    spectiary_imgui_layout_persistence_tests
+    spectiary_automation_control_tests
+    spectiary_automation_execution_tests
+    spectiary_automation_panel_command_coordinator_tests
+    spectiary_automation_state_isolation_tests
+    spectiary_automation_samples_contract_tests
+    spectiary_automation_ci_contract_tests
+    spectiary_repository_verification_ci_contract_tests
+    spectiary_release_artifact_process_runner_tests
+    spectiary_on_demand_frame_capture_tests
+    spectiary_profile_recording_ui_state_tests
+    spectiary_top_bar_status_layout_tests
+    spectiary_top_bar_status_hover_tests
+    spectiary_profile_sink_tests
+    spectiary_profile_settings_tests
+    spectiary_navigation_latency_trace_tests
+    spectiary_source_load_latency_trace_tests
+    spectiary_metadata_tests
+    spectiary_metadata_finalizer_tests
+    spectiary_atomic_file_tests
+    spectiary_embedded_legal_documents_tests
+    spectiary_build_ninja_msvc_debug_watchdog_tests
+    spectiary_runtime_resource_workload_tests
+    spectiary_runtime_resource_stability_runner_tests
+    spectiary_panel_session_render_architecture_tests
+    spectiary_production_target_dependency_architecture_tests
+    spectiary_imgui_viewport_policy_architecture_tests
+    spectiary_win32_compositor_clock_tests
+    spectiary_win32_message_wait_tests
+    spectiary_win32_process_launcher_tests
+    spectiary_loader_tests
+    spectiary_fits_file_reader_tests
+    spectiary_source_open_resolution_tests
+    spectiary_sample_navigation_controller_tests
+    spectiary_sample_navigation_sequence_tests
+    spectiary_sample_workflow_shortcut_tests
+    spectiary_sample_labeling_filename_tests
+    spectiary_source_collection_panel_tests
+    spectiary_panel_session_interaction_tests
+    spectiary_sample_workflow_rules_tests
+    spectiary_sample_name_autocomplete_tests
+    spectiary_sample_label_export_tests
+    spectiary_sample_annotation_csv_tests
+    spectiary_csv_record_codec_tests
+    spectiary_labeling_primitives_tests
+    spectiary_sample_labeling_document_tests
+    spectiary_sample_labeling_asdf_codec_tests
+    spectiary_sample_labeling_asdf_store_tests
+    spectiary_sample_labeling_asdf_mutation_tests
+    spectiary_source_collection_session_tests
+    spectiary_source_collection_load_queue_tests
+    spectiary_source_collection_preparation_tests
+    spectiary_source_collection_activation_transaction_tests
+    spectiary_spectrum_smoothing_tests
+    spectiary_plot_touchpad_gesture_tests
+    spectiary_series_color_tests
+    spectiary_spectral_line_label_layout_tests
+    spectiary_scientific_label_tests
+    spectiary_application_settings_tests
+    spectiary_native_window_title_tests
+    spectiary_ui_font_glyph_ranges_tests
+    spectiary_ui_text_tests
+    spectiary_ui_scale_settings_tests
+    spectiary_theme_tests
+    spectiary_ui_scale_runtime_architecture_tests
+    spectiary_native_window_title_architecture_tests
+    spectiary_spectrum_view_session_tests
+    spectiary_spectral_line_catalog_tests
+    spectiary_spectral_line_user_state_tests
+    spectiary_ctest_tier_contract_tests
 )
-set(SPECFORGE_EXTENDED_TESTS
-    specforge_automation_launcher_integration_tests
-    specforge_imgui_viewport_ownership_integration_tests
-    specforge_automation_samples_tests
-    specforge_multi_instance_labeling_smoke_tests
-    specforge_runtime_resource_stability
-    specforge_metadata_build_regression_tests
-    specforge_release_artifacts_tests
-    specforge_portable_pe_contract_tests
-    specforge_release_workflow_structure_contract_tests
-    specforge_release_configured_build_contract_tests
-    specforge_application_icon_tests
-    specforge_head_snapshot_build_tests
-    specforge_settings_panel_tests
-    specforge_analyze_profile_tests
-    specforge_analyze_navigation_profile_tests
-    specforge_analyze_source_load_profile_tests
-    specforge_sample_labeling_filter_tests
-    specforge_sample_labeling_asdf_store_property_tests
-    specforge_shell_source_load_activation_tests
-    specforge_spectral_lines_panel_controller_tests
+set(SPECTIARY_EXTENDED_TESTS
+    spectiary_automation_launcher_integration_tests
+    spectiary_imgui_viewport_ownership_integration_tests
+    spectiary_automation_samples_tests
+    spectiary_multi_instance_labeling_smoke_tests
+    spectiary_runtime_resource_stability
+    spectiary_metadata_build_regression_tests
+    spectiary_release_artifacts_tests
+    spectiary_portable_pe_contract_tests
+    spectiary_release_workflow_structure_contract_tests
+    spectiary_release_configured_build_contract_tests
+    spectiary_application_icon_tests
+    spectiary_head_snapshot_build_tests
+    spectiary_settings_panel_tests
+    spectiary_analyze_profile_tests
+    spectiary_analyze_navigation_profile_tests
+    spectiary_analyze_source_load_profile_tests
+    spectiary_sample_labeling_filter_tests
+    spectiary_sample_labeling_asdf_store_property_tests
+    spectiary_shell_source_load_activation_tests
+    spectiary_spectral_lines_panel_controller_tests
 )
 set_property(
-    TEST ${SPECFORGE_FAST_TESTS}
+    TEST ${SPECTIARY_FAST_TESTS}
     APPEND PROPERTY LABELS fast
 )
 set_property(
-    TEST ${SPECFORGE_EXTENDED_TESTS}
+    TEST ${SPECTIARY_EXTENDED_TESTS}
     APPEND PROPERTY LABELS extended
 )
 
-if(SPECFORGE_BUILD_WIDGET_TESTS)
+if(SPECTIARY_BUILD_WIDGET_TESTS)
     add_subdirectory(tests/widget)
     include(cmake/redirection_experiment.cmake)
-    set_property(TEST specforge_sample_workflow_shortcut_tests specforge_shell_source_load_activation_tests
+    set_property(TEST spectiary_sample_workflow_shortcut_tests spectiary_shell_source_load_activation_tests
         APPEND PROPERTY LABELS widget)
 endif()

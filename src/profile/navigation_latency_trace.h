@@ -9,7 +9,7 @@
 #include <optional>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 
@@ -150,4 +150,4 @@ using NavigationLatencyTraceHandle = std::shared_ptr<NavigationLatencyTrace>;
     NavigationSnapshotCacheKind kind) noexcept;
 bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLatencyReport& report);
 
-}  // namespace specforge
+}  // namespace spectiary

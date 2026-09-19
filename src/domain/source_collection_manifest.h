@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionIdentity {
     std::string id;
@@ -190,4 +190,4 @@ void FinalizeSourceCollectionAnnotationContextFingerprint(
     std::size_t expected_count,
     std::size_t sample_index);
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -9,7 +9,7 @@
 #include <memory>
 #include <utility>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 namespace {
 
 bool IsFitsExtension(std::string_view extension)
@@ -426,4 +426,4 @@ SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(
     return snapshot;
 }
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

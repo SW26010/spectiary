@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 namespace metadata_contract {
 
@@ -46,7 +46,7 @@ enum class BuildMetadataStatus {
 struct BuildIdentity {
     std::string application_id = project_identity::kApplicationId;
     std::string product_name;
-    std::string specforge_version;
+    std::string spectiary_version;
     std::string configuration;
     std::string target_architecture;
     std::string source_mode;
@@ -82,7 +82,7 @@ struct BuildMetadataReadResult {
     std::optional<BuildMetadata> metadata;
 };
 
-struct SpecForgeMetadataReadResult {
+struct SpectiaryMetadataReadResult {
     DeploymentMetadata deployment;
     BuildMetadataReadResult build_metadata;
     std::filesystem::path metadata_path;
@@ -92,14 +92,14 @@ struct SpecForgeMetadataReadResult {
 [[nodiscard]] const char* DistributionName(Distribution distribution);
 [[nodiscard]] const char* StorageProfileName(StorageProfile profile);
 
-[[nodiscard]] SpecForgeMetadataReadResult ReadSpecForgeMetadata(
+[[nodiscard]] SpectiaryMetadataReadResult ReadSpectiaryMetadata(
     const std::filesystem::path& path,
     const BuildIdentity& expected_identity);
 
-[[nodiscard]] SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
+[[nodiscard]] SpectiaryMetadataReadResult ReadAdjacentSpectiaryMetadata(
     const std::filesystem::path& package_root,
     const BuildIdentity& expected_identity);
 
 [[nodiscard]] BuildIdentity CompiledBuildIdentity();
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::string_view kTemporarySampleLabelingTaskName = "Temporary labeling task";
 
@@ -46,4 +46,4 @@ struct SampleAnnotationLabelingActivationPlan {
 [[nodiscard]] SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
     const SampleAnnotationLabelingActivationRequest& request);
 
-}  // namespace specforge
+}  // namespace spectiary

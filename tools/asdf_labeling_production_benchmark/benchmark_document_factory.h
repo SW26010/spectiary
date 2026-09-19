@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <string_view>
 
-namespace specforge::asdf_labeling_benchmark {
+namespace spectiary::asdf_labeling_benchmark {
 
 enum class DatasetCase {
     SourceIndex,
@@ -36,4 +36,4 @@ void SeedForwardUnknownMetadata(const std::filesystem::path& path);
 [[nodiscard]] bool ContainsSeededForwardUnknownMetadata(
     const std::filesystem::path& path);
 
-}  // namespace specforge::asdf_labeling_benchmark
+}  // namespace spectiary::asdf_labeling_benchmark

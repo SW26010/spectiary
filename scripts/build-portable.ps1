@@ -108,7 +108,7 @@ function Get-RequiredMetadataObject {
     $property = $Metadata.PSObject.Properties[$PropertyName]
     if ($null -eq $property -or $null -eq $property.Value -or
         $property.Value -isnot [pscustomobject]) {
-        throw "SpecForge metadata is missing object '$PropertyName'."
+        throw "Spectiary metadata is missing object '$PropertyName'."
     }
     return $property.Value
 }
@@ -192,15 +192,15 @@ if (-not $PackageUnverifiedTestFixture) {
         $configureArguments = @(
             '--preset',
             $Preset,
-            "-DSPECFORGE_BUILD_SOURCE_MODE=$SourceMode",
-            "-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"
+            "-DSPECTIARY_BUILD_SOURCE_MODE=$SourceMode",
+            "-DSPECTIARY_BUILD_SOURCE_REVISION=$SourceRevision"
         )
         & cmake @configureArguments
         if ($LASTEXITCODE -ne 0) {
             throw "CMake configure failed for preset $Preset."
         }
 
-        & cmake --build --preset $Preset --config $Configuration --target specforge_metadata
+        & cmake --build --preset $Preset --config $Configuration --target spectiary_metadata
         if ($LASTEXITCODE -ne 0) {
             throw "CMake build failed for preset $Preset."
         }
@@ -222,7 +222,7 @@ if (-not $sourceExecutable) {
 $sourceExecutableDirectory = Split-Path -Parent $sourceExecutable
 $sourceMetadataPath = Join-Path $sourceExecutableDirectory $MetadataFileName
 if (-not (Test-Path -LiteralPath $sourceMetadataPath -PathType Leaf)) {
-    throw "SpecForge metadata was not found beside Spectiary.exe: $sourceMetadataPath"
+    throw "Spectiary metadata was not found beside Spectiary.exe: $sourceMetadataPath"
 }
 $buildExecutableHash = (
     Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
@@ -232,16 +232,16 @@ $schemaVersionProperty =
     $sourceMetadata.PSObject.Properties['schema_version']
 if ($null -eq $schemaVersionProperty -or
     $sourceMetadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
-    throw 'SpecForge metadata schema_version must be the integer 6.'
+    throw 'Spectiary metadata schema_version must be the integer 6.'
 }
 $schemaVersion = $schemaVersionProperty.Value
 if (($schemaVersion -isnot [int] -and
      $schemaVersion -isnot [long]) -or
     $schemaVersion -ne 6) {
-    throw 'SpecForge metadata schema_version must be the integer 6.'
+    throw 'Spectiary metadata schema_version must be the integer 6.'
 }
 if ($sourceMetadata.PSObject.Properties.Name -ccontains 'deployment') {
-    throw 'Build-output SpecForge metadata must not contain deployment; the packaging flow owns distribution identity.'
+    throw 'Build-output Spectiary metadata must not contain deployment; the packaging flow owns distribution identity.'
 }
 $productMetadata = Get-RequiredMetadataObject `
     -Metadata $sourceMetadata `
@@ -280,10 +280,10 @@ foreach ($propertyName in @(
         -PropertyName $propertyName)
 }
 if ($buildMetadata.cfitsio -cnotmatch '^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$') {
-    throw "SpecForge metadata has invalid cfitsio version '$($buildMetadata.cfitsio)'."
+    throw "Spectiary metadata has invalid cfitsio version '$($buildMetadata.cfitsio)'."
 }
 if ($buildMetadata.source_mode -cne $SourceMode) {
-    throw "SpecForge metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
+    throw "Spectiary metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
 }
 $sourceRevisionProperty =
     $buildMetadata.PSObject.Properties['source_revision']

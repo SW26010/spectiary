@@ -54,11 +54,11 @@ binds to the signed bytes.
 
 The production build has an explicit ordering contract:
 
-1. CMake builds `specforge_metadata_finalizer_tool` as a dependency of the
+1. CMake builds `spectiary_metadata_finalizer_tool` as a dependency of the
    native target.
 2. A pre-link command removes the executable-adjacent
    `spectiary_metadata.json`, invalidating any sidecar from an older EXE.
-3. `specforge_native` links the final `Spectiary.exe`.
+3. `spectiary_native` links the final `Spectiary.exe`.
 4. A future signing step signs the finished `Spectiary.exe`.
 5. A post-build command invokes the finalizer with the signed EXE and its
    adjacent `spectiary_metadata.json` path.
@@ -85,8 +85,8 @@ failure before replacement removes the metadata target and the temporary file.
 A failed finalizer makes the build fail rather than publishing metadata that the runtime
 would reject; a later native relink can recreate the sidecar.
 
-Finalization occurs after `specforge_native` links and its post-build commands
-run. The `specforge_metadata` target declares the executable-adjacent sidecar
+Finalization occurs after `spectiary_native` links and its post-build commands
+run. The `spectiary_metadata` target declares the executable-adjacent sidecar
 as a byproduct, depends on the native executable and finalizer tool, and runs a
 freshness check. It checks the canonical `application_id`, `schema_version` equal to 6,
 `build.completed_at_utc` is present and non-empty, `artifact.file` is exactly
@@ -145,8 +145,8 @@ The standalone verifier is also available for an existing package:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-portable.ps1 `
     -BuildExecutable <path-to-build-Spectiary.exe> `
-    -PackageRoot <path-to-SpecForge-portable> `
-    -ZipPath <path-to-SpecForge-portable.zip>
+    -PackageRoot <path-to-Spectiary-portable> `
+    -ZipPath <path-to-Spectiary-portable.zip>
 ```
 
 Changing the build EXE, packaged EXE, package metadata digest, or either ZIP

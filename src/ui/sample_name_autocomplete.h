@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleNameAutocompleteEvaluation {
     std::optional<std::size_t> exact_match;
@@ -24,4 +24,4 @@ struct SampleNameAutocompleteEvaluation {
     bool input_active,
     bool dropdown_interacting);
 
-}  // namespace specforge
+}  // namespace spectiary

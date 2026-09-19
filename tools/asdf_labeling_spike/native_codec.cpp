@@ -16,7 +16,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace specforge::asdf_labeling_spike {
+namespace spectiary::asdf_labeling_spike {
 namespace {
 
 constexpr std::string_view kFormatKind = "spectiary.sample_labeling";
@@ -634,7 +634,7 @@ void RequireNonWhitespaceUtf8(std::string_view value, std::string_view field)
 void ValidateDocument(const LabelingDocument& document)
 {
     if (document.format_kind != kFormatKind || document.schema_version != kSchemaVersion) {
-        throw CodecError("unsupported SpecForge labeling identity/version");
+        throw CodecError("unsupported Spectiary labeling identity/version");
     }
     const bool valid_head_revision = document.build_source_revision &&
         document.build_source_revision->size() == 40U &&
@@ -646,7 +646,7 @@ void ValidateDocument(const LabelingDocument& document)
         (document.build_source_mode == "working_tree" && document.build_source_revision) ||
         (document.build_source_mode != "head" &&
             document.build_source_mode != "working_tree")) {
-        throw CodecError("invalid SpecForge build source identity");
+        throw CodecError("invalid Spectiary build source identity");
     }
     if (document.sample_count > kMaximumSampleCount ||
         document.sample_count != document.values.size()) {
@@ -1024,7 +1024,7 @@ void RewriteLabelValuePreservingRosterBlock(
     if (!root || !root.IsMap() ||
         RequiredScalar<std::string>(root, "format_kind") != kFormatKind ||
         RequiredScalar<std::string>(root, "schema_version") != kSchemaVersion) {
-        throw CodecError("unsupported SpecForge labeling identity/version");
+        throw CodecError("unsupported Spectiary labeling identity/version");
     }
 
     const YAML::Node source = RequiredNode(root, "source_collection");
@@ -1432,4 +1432,4 @@ LabelingDocument NativeFixture()
     return document;
 }
 
-}  // namespace specforge::asdf_labeling_spike
+}  // namespace spectiary::asdf_labeling_spike

@@ -7,7 +7,7 @@
 
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr DXGI_FORMAT kSdrSwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 inline constexpr DXGI_COLOR_SPACE_TYPE kSdrSwapChainColorSpace =
@@ -64,4 +64,4 @@ private:
     std::string_view last_error_operation_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

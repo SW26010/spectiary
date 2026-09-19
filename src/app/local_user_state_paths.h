@@ -1,6 +1,6 @@
 #pragma once
 
-namespace specforge::local_user_state_paths {
+namespace spectiary::local_user_state_paths {
 
 inline constexpr char kProfileLogDirectory[] = "logs";
 inline constexpr char kFrameCaptureDirectory[] = "captures";
@@ -31,4 +31,4 @@ inline constexpr char kSampleWorkflowState[] =
 inline constexpr char kSpectralLineUserState[] =
     "spectral-line-grouping-views.json";
 
-}  // namespace specforge::local_user_state_paths
+}  // namespace spectiary::local_user_state_paths

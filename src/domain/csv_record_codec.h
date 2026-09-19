@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 using CsvRecord = std::vector<std::string>;
 
@@ -159,4 +159,4 @@ private:
     std::span<const CsvRecord> records,
     CsvRecordLimits limits = {});
 
-}  // namespace specforge
+}  // namespace spectiary

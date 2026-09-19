@@ -2,7 +2,7 @@
 
 #include "ui/shell_ui.h"
 
-namespace specforge {
+namespace spectiary {
 
 void OpenInitialSource(
     ShellUi& shell,
@@ -17,4 +17,4 @@ void OpenInitialSource(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

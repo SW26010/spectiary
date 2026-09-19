@@ -19,7 +19,7 @@
 
 #include <windows.h>
 
-namespace specforge {
+namespace spectiary {
 
 class SourceCollectionLoadQueue::Impl {
 public:
@@ -1033,4 +1033,4 @@ void SourceCollectionLoadQueue::RetireResource(BackgroundRetirementHandle resour
     impl_->RetireResource(std::move(resource));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

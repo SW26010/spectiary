@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct Utf8Scalar {
     std::uint32_t codepoint = 0;
@@ -26,4 +26,4 @@ struct Utf8Scalar {
     std::string_view text,
     std::size_t offset) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

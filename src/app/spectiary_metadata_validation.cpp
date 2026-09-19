@@ -1,10 +1,10 @@
-#include "app/specforge_metadata_validation.h"
+#include "app/spectiary_metadata_validation.h"
 
 #include <cctype>
 #include <string>
 #include <utility>
 
-namespace specforge::metadata_validation {
+namespace spectiary::metadata_validation {
 namespace {
 
 void SetError(std::string* error_message, std::string message)
@@ -177,7 +177,7 @@ bool ValidateSchema6BuildMetadata(
         return fail("application_id must equal the canonical founding identity");
     }
     if (!IsRequiredMetadataString(identity.product_name) ||
-        !IsRequiredMetadataString(identity.specforge_version) ||
+        !IsRequiredMetadataString(identity.spectiary_version) ||
         !IsRequiredMetadataString(identity.configuration) ||
         !IsRequiredMetadataString(identity.target_architecture) ||
         !IsRequiredMetadataString(identity.source_mode)) {
@@ -238,4 +238,4 @@ bool ValidateSchema6BuildMetadata(
     return true;
 }
 
-}  // namespace specforge::metadata_validation
+}  // namespace spectiary::metadata_validation

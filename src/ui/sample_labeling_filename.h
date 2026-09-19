@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleLabelingFilePurpose {
     CanonicalOutput,
@@ -17,4 +17,4 @@ enum class SampleLabelingFilePurpose {
     std::string_view task_name,
     SampleLabelingFilePurpose purpose);
 
-}  // namespace specforge
+}  // namespace spectiary

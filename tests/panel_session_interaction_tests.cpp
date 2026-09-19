@@ -18,20 +18,20 @@ void Require(bool condition, std::string_view message)
 
 void TestSubmissionRefreshesViewAndAggregatesActions()
 {
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     int view_reads = 0;
     int submissions = 0;
-    std::vector<std::optional<specforge::NavigationLatencyInputKind>>
+    std::vector<std::optional<spectiary::NavigationLatencyInputKind>>
         latency_kinds;
 
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&](
-            specforge::SourceCollectionSessionIntent,
-            std::optional<specforge::NavigationLatencyInputKind>
+            spectiary::SourceCollectionSessionIntent,
+            std::optional<spectiary::NavigationLatencyInputKind>
                 latency_kind) {
             ++submissions;
             latency_kinds.push_back(latency_kind);
-            specforge::SourceCollectionSessionResult result;
+            spectiary::SourceCollectionSessionResult result;
             if (submissions == 1) {
                 result.action.workflow_changed = true;
             } else {
@@ -39,7 +39,7 @@ void TestSubmissionRefreshesViewAndAggregatesActions()
             }
             return result;
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             ++view_reads;
             return view;
         });
@@ -49,9 +49,9 @@ void TestSubmissionRefreshesViewAndAggregatesActions()
         "the interaction should expose the current session view");
 
     const auto standard = interaction.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
-                specforge::SampleFilteringIntent::Clear()));
+                spectiary::SampleFilteringIntent::Clear()));
     Require(
         &standard.view.get() == &view && view_reads == 2,
         "a standard mutation should return a freshly read view");
@@ -60,26 +60,26 @@ void TestSubmissionRefreshesViewAndAggregatesActions()
         "a standard mutation should not request latency tracing");
 
     const auto next = interaction.SubmitNavigation(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::SampleNavigationRequest::Next())),
-        specforge::SampleNavigationRequestKind::Next);
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::SampleNavigationRequest::Next())),
+        spectiary::SampleNavigationRequestKind::Next);
     Require(
         &next.view.get() == &view && view_reads == 3,
         "a navigation mutation should return a freshly read view");
     Require(
         latency_kinds[1] ==
-            specforge::NavigationLatencyInputKind::UiNext,
+            spectiary::NavigationLatencyInputKind::UiNext,
         "next navigation should be classified centrally");
 
-    const specforge::SourceCollectionSessionAction action =
+    const spectiary::SourceCollectionSessionAction action =
         interaction.TakeAction();
     Require(
         action.workflow_changed &&
             action.navigation_inputs_changed,
         "all panel mutations should contribute to one action");
-    const specforge::SourceCollectionSessionAction cleared =
+    const spectiary::SourceCollectionSessionAction cleared =
         interaction.TakeAction();
     Require(
         !cleared.workflow_changed &&
@@ -89,39 +89,39 @@ void TestSubmissionRefreshesViewAndAggregatesActions()
 
 void TestNavigationClassifications()
 {
-    specforge::SourceCollectionSessionView view;
-    std::vector<std::optional<specforge::NavigationLatencyInputKind>>
+    spectiary::SourceCollectionSessionView view;
+    std::vector<std::optional<spectiary::NavigationLatencyInputKind>>
         latency_kinds;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&](
-            specforge::SourceCollectionSessionIntent,
-            std::optional<specforge::NavigationLatencyInputKind>
+            spectiary::SourceCollectionSessionIntent,
+            std::optional<spectiary::NavigationLatencyInputKind>
                 latency_kind) {
             latency_kinds.push_back(latency_kind);
-            return specforge::SourceCollectionSessionResult{};
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
 
     (void)interaction.SubmitNavigation(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::SampleNavigationRequest::Previous())),
-        specforge::SampleNavigationRequestKind::Previous);
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::SampleNavigationRequest::Previous())),
+        spectiary::SampleNavigationRequestKind::Previous);
     (void)interaction.SubmitAutoAdvance(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             ChangeActiveSampleWorkflow(
-                specforge::ActiveSampleWorkflowIntent::
+                spectiary::ActiveSampleWorkflowIntent::
                     ClearActiveLabelForCurrentSample()));
 
     Require(
         latency_kinds.size() == 2 &&
             latency_kinds[0] ==
-                specforge::NavigationLatencyInputKind::UiPrevious &&
+                spectiary::NavigationLatencyInputKind::UiPrevious &&
             latency_kinds[1] ==
-                specforge::NavigationLatencyInputKind::AutoAdvance,
+                spectiary::NavigationLatencyInputKind::AutoAdvance,
         "previous and auto-advance classifications should remain distinct");
 }
 

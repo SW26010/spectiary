@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleWorkflowShortcutKind {
     None,
@@ -70,4 +70,4 @@ struct SampleLabelShortcutSelection {
 // Label shortcuts are stored canonically as lowercase ASCII and displayed as keyboard legends.
 [[nodiscard]] std::string FormatSampleLabelShortcut(char shortcut);
 
-}  // namespace specforge
+}  // namespace spectiary

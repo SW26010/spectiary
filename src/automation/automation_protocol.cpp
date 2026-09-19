@@ -10,7 +10,7 @@
 #include <sstream>
 #include <type_traits>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kMaxRequestIdBytes = 64U;
@@ -1134,4 +1134,4 @@ std::string SerializeAutomationFailureResponse(
     return output.str();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

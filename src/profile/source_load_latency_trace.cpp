@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string NumberOrNull(std::int64_t value)
@@ -639,4 +639,4 @@ bool WriteSourceLoadLatencyProfileEvent(
     return accepted && summary_accepted;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

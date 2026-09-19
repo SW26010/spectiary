@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <system_error>
 
-namespace specforge {
+namespace spectiary {
 
 Win32MessageWaitWake WaitForWin32MessageOrDeadline(
     std::optional<std::chrono::steady_clock::time_point> deadline)
@@ -44,4 +44,4 @@ Win32MessageWaitWake WaitForWin32MessageOrDeadline(
     throw std::runtime_error("MsgWaitForMultipleObjectsEx returned an unexpected wake reason");
 }
 
-}  // namespace specforge
+}  // namespace spectiary

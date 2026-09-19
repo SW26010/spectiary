@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SourceCollectionResidentSnapshotOrigin {
     History,
@@ -32,4 +32,4 @@ struct SourceCollectionResidentSnapshot {
         SampleNavigationDirection::Next;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

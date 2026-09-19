@@ -7,7 +7,7 @@
 #include <memory>
 #include <stop_token>
 
-namespace specforge {
+namespace spectiary {
 
 using SourceCollectionWorkflowCacheProvider =
     std::function<
@@ -49,4 +49,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

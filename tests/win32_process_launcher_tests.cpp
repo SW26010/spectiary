@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct ShellUiTestAccess {
     static void Drain(ShellUi& shell)
@@ -31,14 +31,14 @@ struct ShellUiTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
 using namespace std::chrono_literals;
 
 constexpr wchar_t kChildMarkerEnvironment[] =
-    L"SPECFORGE_WIN32_PROCESS_LAUNCH_TEST_MARKER";
+    L"SPECTIARY_WIN32_PROCESS_LAUNCH_TEST_MARKER";
 
 void Require(bool condition, std::string_view message)
 {
@@ -73,7 +73,7 @@ std::optional<std::filesystem::path> EnvironmentPath(
 
 std::string PathText(const std::filesystem::path& path)
 {
-    return specforge::WideToUtf8(path.wstring());
+    return spectiary::WideToUtf8(path.wstring());
 }
 
 class TemporaryDirectory {
@@ -85,7 +85,7 @@ public:
                 .time_since_epoch()
                 .count();
         path_ = std::filesystem::temp_directory_path() /
-            (L"specforge-win32-process-launch-tests-" +
+            (L"spectiary-win32-process-launch-tests-" +
              std::to_wstring(GetCurrentProcessId()) +
              L"-启动 contract-" +
              std::to_wstring(suffix));
@@ -193,25 +193,25 @@ std::vector<std::wstring> ParseCommandLine(
 void TestWindowsArgumentQuotingRoundTrips()
 {
     Require(
-        specforge::QuoteWindowsCommandLineArgument(L"plain") ==
+        spectiary::QuoteWindowsCommandLineArgument(L"plain") ==
             L"plain",
         "plain Windows arguments should not be quoted unnecessarily");
     Require(
-        specforge::QuoteWindowsCommandLineArgument(L"file name.npy") ==
+        spectiary::QuoteWindowsCommandLineArgument(L"file name.npy") ==
             L"\"file name.npy\"",
         "arguments containing spaces should be quoted");
     Require(
-        specforge::QuoteWindowsCommandLineArgument(
+        spectiary::QuoteWindowsCommandLineArgument(
             L"folder with space\\") ==
             L"\"folder with space\\\\\"",
         "trailing backslashes should be doubled before a closing quote");
     Require(
-        specforge::QuoteWindowsCommandLineArgument(L"literal\"quote") ==
+        spectiary::QuoteWindowsCommandLineArgument(L"literal\"quote") ==
             L"\"literal\\\"quote\"",
         "embedded quotes should be escaped");
 
     const std::wstring executable =
-        L"C:\\Program Files\\SpecForge\\Spectiary.exe";
+        L"C:\\Program Files\\Spectiary\\Spectiary.exe";
     const std::vector<std::wstring> values = {
         L"",
         L"plain",
@@ -222,9 +222,9 @@ void TestWindowsArgumentQuotingRoundTrips()
     };
     for (const std::wstring& value : values) {
         const std::wstring command_line =
-            specforge::QuoteWindowsCommandLineArgument(executable) +
+            spectiary::QuoteWindowsCommandLineArgument(executable) +
             L" " +
-            specforge::QuoteWindowsCommandLineArgument(value);
+            spectiary::QuoteWindowsCommandLineArgument(value);
         const std::vector<std::wstring> parsed =
             ParseCommandLine(command_line);
         Require(
@@ -282,8 +282,8 @@ void TestLaunchCurrentExecutableWithSource(
         ScopedEnvironmentVariable marker(
             kChildMarkerEnvironment,
             marker_path);
-        const specforge::CurrentExecutableLaunchResult result =
-            specforge::LaunchCurrentExecutableWithSource(source_path);
+        const spectiary::CurrentExecutableLaunchResult result =
+            spectiary::LaunchCurrentExecutableWithSource(source_path);
         Require(
             result.succeeded(),
             result.diagnostic.empty()
@@ -291,7 +291,7 @@ void TestLaunchCurrentExecutableWithSource(
                 : result.diagnostic);
         Require(
             result.executable_path ==
-                specforge::CurrentExecutablePath(),
+                spectiary::CurrentExecutablePath(),
             "launch result should report the current executable path");
     }
 
@@ -346,11 +346,11 @@ void TestFileAndDirectorySources()
 
 void TestInvalidSourceIsStructured()
 {
-    const specforge::CurrentExecutableLaunchResult result =
-        specforge::LaunchCurrentExecutableWithSource({});
+    const spectiary::CurrentExecutableLaunchResult result =
+        spectiary::LaunchCurrentExecutableWithSource({});
     Require(
         result.failure ==
-            specforge::CurrentExecutableLaunchFailure::InvalidSourcePath,
+            spectiary::CurrentExecutableLaunchFailure::InvalidSourcePath,
         "an empty source should be rejected before process creation");
     Require(
         !result.succeeded() && !result.diagnostic.empty(),
@@ -364,13 +364,13 @@ void TestProcessCreationFailureIsStructured()
         temporary.path() / L"missing executable 不存在.exe";
     const std::filesystem::path source_path =
         temporary.path() / L"source file 文件.csv";
-    const specforge::CurrentExecutableLaunchResult result =
-        specforge::LaunchExecutableWithSource(
+    const spectiary::CurrentExecutableLaunchResult result =
+        spectiary::LaunchExecutableWithSource(
             executable_path,
             source_path);
     Require(
         result.failure ==
-            specforge::CurrentExecutableLaunchFailure::
+            spectiary::CurrentExecutableLaunchFailure::
                 ProcessCreationFailed,
         "CreateProcess failure should be typed");
     Require(
@@ -394,8 +394,8 @@ int RunChildIfRequested(int argc, wchar_t** argv)
         return 2;
     }
 
-    const specforge::SpecForgeCommandLine command_line =
-        specforge::ParseCurrentProcessSpecForgeCommandLine();
+    const spectiary::SpectiaryCommandLine command_line =
+        spectiary::ParseCurrentProcessSpectiaryCommandLine();
     if (!command_line.error_message.empty() ||
         !command_line.initial_source ||
         command_line.initial_source->wstring() != argv[1]) {
@@ -404,33 +404,33 @@ int RunChildIfRequested(int argc, wchar_t** argv)
 
     try {
         const std::filesystem::path production_executable =
-            specforge::CurrentExecutablePath().parent_path() /
+            spectiary::CurrentExecutablePath().parent_path() /
             L"Spectiary.exe";
         if (!std::filesystem::is_regular_file(
                 production_executable)) {
             return 4;
         }
 
-        specforge::RuntimePathInputs inputs =
-            specforge::CurrentProcessRuntimePathInputs(
+        spectiary::RuntimePathInputs inputs =
+            spectiary::CurrentProcessRuntimePathInputs(
                 production_executable);
         inputs.application_data_root_override =
             marker->parent_path() / L"startup loader state";
-        const specforge::SpecForgeStartup startup =
-            specforge::PrepareSpecForgeStartup(std::move(inputs));
-        specforge::ShellUi shell(startup);
-        specforge::OpenInitialSource(
+        const spectiary::SpectiaryStartup startup =
+            spectiary::PrepareSpectiaryStartup(std::move(inputs));
+        spectiary::ShellUi shell(startup);
+        spectiary::OpenInitialSource(
             shell,
             command_line.initial_source);
 
         const auto deadline =
             std::chrono::steady_clock::now() + 5s;
         while (std::chrono::steady_clock::now() < deadline) {
-            specforge::ShellUiTestAccess::Drain(shell);
-            const specforge::ShellRuntimeResourceObservation observation =
+            spectiary::ShellUiTestAccess::Drain(shell);
+            const spectiary::ShellRuntimeResourceObservation observation =
                 shell.runtime_resource_observation();
             if (observation.idle()) {
-                const specforge::SpectrumSnapshotHandle snapshot =
+                const spectiary::SpectrumSnapshotHandle snapshot =
                     shell.current_snapshot();
                 if (!snapshot ||
                     snapshot->source.path !=

@@ -7,7 +7,7 @@
 int main(int argc, char** argv)
 {
     const bool experiment = argc == 2 && std::strcmp(argv[1], "experiment") == 0;
-    SetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_NO_REDIRECTION_BITMAP", experiment ? L"1" : L"0");
+    SetEnvironmentVariableW(L"SPECTIARY_EXPERIMENT_NO_REDIRECTION_BITMAP", experiment ? L"1" : L"0");
     HWND main_window = CreateWindowExW(0, L"STATIC", L"redirection backend test",
         WS_OVERLAPPEDWINDOW, 0, 0, 320, 240, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!main_window) return 1;

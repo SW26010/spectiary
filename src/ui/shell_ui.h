@@ -29,7 +29,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 class PlotTouchpadGestureSource;
@@ -269,7 +269,7 @@ using ShellAutomationSourceOperation = std::function<ShellAutomationSourceOutcom
 class ShellUi {
 public:
     ShellUi(
-        const SpecForgeStartup& startup,
+        const SpectiaryStartup& startup,
         PlotTouchpadGestureSource* touchpad_gestures = nullptr,
         SampleLabelingStateCacheLoadPolicy
             labeling_state_cache_load_policy =
@@ -522,4 +522,4 @@ private:
         automation_panel_presentation_status_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

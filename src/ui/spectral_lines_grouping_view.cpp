@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kMarkerReferenceDragPayload = "MarkerReference";
@@ -1077,4 +1077,4 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

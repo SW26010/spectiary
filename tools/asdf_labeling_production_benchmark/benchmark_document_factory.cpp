@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge::asdf_labeling_benchmark {
+namespace spectiary::asdf_labeling_benchmark {
 namespace {
 
 constexpr std::string_view kForwardRootToken =
@@ -187,7 +187,7 @@ BenchmarkDocument MakeBenchmarkDocument(
     document.labeling.canonical_metadata.description =
         "Deterministic production-store benchmark input";
     document.labeling.canonical_metadata.authors = {
-        {.name = "SpecForge benchmark"},
+        {.name = "Spectiary benchmark"},
     };
     document.labeling.labels = {
         {0, "accepted", "a"},
@@ -254,4 +254,4 @@ bool ContainsSeededForwardUnknownMetadata(
         ContainsText(bytes, kForwardLabelToken);
 }
 
-}  // namespace specforge::asdf_labeling_benchmark
+}  // namespace spectiary::asdf_labeling_benchmark

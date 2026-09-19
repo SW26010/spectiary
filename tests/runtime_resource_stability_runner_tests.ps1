@@ -39,12 +39,12 @@ Assert-True `
         $soakTier.measured_cycles -eq 100) `
     -Message 'CTest tier resolution must default to skip and expose smoke/soak workloads explicitly.'
 
-if (-not ('SpecForge.RuntimeResourceTestNative' -as [type])) {
+if (-not ('Spectiary.RuntimeResourceTestNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-namespace SpecForge {
+namespace Spectiary {
     public static class RuntimeResourceTestNative {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool DeleteFile(string path);
@@ -189,7 +189,7 @@ $profile = [pscustomobject]@{
 
 $atomicReadRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-runtime-status-read-' + [Guid]::NewGuid().ToString('N'))
+    ('spectiary-runtime-status-read-' + [Guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($atomicReadRoot) | Out-Null
 $atomicReadTarget = Join-Path $atomicReadRoot 'status.json'
 try {
@@ -200,7 +200,7 @@ try {
         Open-WorkloadStatusReadStream -Path $atomicReadTarget
     try {
         $deleteSucceeded =
-            [SpecForge.RuntimeResourceTestNative]::DeleteFile(
+            [Spectiary.RuntimeResourceTestNative]::DeleteFile(
                 $atomicReadTarget)
         Assert-True `
             -Condition $deleteSucceeded `
@@ -539,7 +539,7 @@ finally {
 
 $startupFailureRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-runtime-startup-failure-' +
+    ('spectiary-runtime-startup-failure-' +
         [Guid]::NewGuid().ToString('N'))
 $startupStateDirectory =
     Join-Path $startupFailureRoot 'state'
@@ -553,12 +553,12 @@ try {
         '{}',
         [System.Text.UTF8Encoding]::new($false))
     $startupEnvironment = Set-TemporaryEnvironment -Values @{
-        SPECFORGE_RUNTIME_RESOURCE_WORKLOAD =
+        SPECTIARY_RUNTIME_RESOURCE_WORKLOAD =
             $startupConfiguration
-        SPECFORGE_RUNTIME_RESOURCE_STATE_DIR =
+        SPECTIARY_RUNTIME_RESOURCE_STATE_DIR =
             $startupStateDirectory
-        SPECFORGE_PROFILE = $null
-        SPECFORGE_PROFILE_DIR = $null
+        SPECTIARY_PROFILE = $null
+        SPECTIARY_PROFILE_DIR = $null
     }
     $startupProcess = $null
     try {
@@ -617,7 +617,7 @@ finally {
 
 $presentationGateRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-runtime-presentation-gate-' +
+    ('spectiary-runtime-presentation-gate-' +
         [Guid]::NewGuid().ToString('N'))
 $presentationGateState =
     Join-Path $presentationGateRoot 'state'
@@ -650,7 +650,7 @@ try {
         $utf8WithoutBom)
     $presentationGateConfigValue = [ordered]@{
         format_kind =
-            'specforge_runtime_resource_workload'
+            'spectiary_runtime_resource_workload'
         schema_version = 1
         status_path = $presentationGateStatus
         source_paths = @(
@@ -672,14 +672,14 @@ try {
         -Depth 6
     $presentationGateEnvironment =
         Set-TemporaryEnvironment -Values @{
-            SPECFORGE_RUNTIME_RESOURCE_WORKLOAD =
+            SPECTIARY_RUNTIME_RESOURCE_WORKLOAD =
                 $presentationGateConfiguration
-            SPECFORGE_RUNTIME_RESOURCE_STATE_DIR =
+            SPECTIARY_RUNTIME_RESOURCE_STATE_DIR =
                 $presentationGateState
-            SPECFORGE_PROFILE = '1'
-            SPECFORGE_PROFILE_DIR =
+            SPECTIARY_PROFILE = '1'
+            SPECTIARY_PROFILE_DIR =
                 $presentationGateProfile
-            SPECFORGE_PAN_PACING = $null
+            SPECTIARY_PAN_PACING = $null
         }
     $presentationGateProcess = $null
     try {
@@ -749,14 +749,14 @@ try {
         -Depth 6
     $initialStatusFailureEnvironment =
         Set-TemporaryEnvironment -Values @{
-            SPECFORGE_RUNTIME_RESOURCE_WORKLOAD =
+            SPECTIARY_RUNTIME_RESOURCE_WORKLOAD =
                 $initialStatusFailureConfiguration
-            SPECFORGE_RUNTIME_RESOURCE_STATE_DIR =
+            SPECTIARY_RUNTIME_RESOURCE_STATE_DIR =
                 $presentationGateState
-            SPECFORGE_PROFILE = '1'
-            SPECFORGE_PROFILE_DIR =
+            SPECTIARY_PROFILE = '1'
+            SPECTIARY_PROFILE_DIR =
                 $presentationGateProfile
-            SPECFORGE_PAN_PACING = $null
+            SPECTIARY_PAN_PACING = $null
         }
     $initialStatusFailureProcess = $null
     try {

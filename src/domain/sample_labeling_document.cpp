@@ -7,7 +7,7 @@
 #include "domain/utf8.h"
 #include "domain/uuid_v4.h"
 
-#include "specforge/specforge_build_identity.h"
+#include "spectiary/spectiary_build_identity.h"
 
 #include <algorithm>
 #include <numeric>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 SampleLabelingDocumentBuildSource
 CurrentSampleLabelingDocumentBuildSource()
@@ -701,4 +701,4 @@ ValidateSampleLabelingDocumentFailFast(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

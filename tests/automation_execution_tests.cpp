@@ -4,7 +4,7 @@
 #include <map>
 #include <stdexcept>
 
-using namespace specforge;
+using namespace spectiary;
 
 namespace {
 void Require(bool value, const char* message)

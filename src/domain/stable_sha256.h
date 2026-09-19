@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 class StableSha256 {
 public:
@@ -28,4 +28,4 @@ private:
 [[nodiscard]] std::string FinishVersionedSha256Digest(StableSha256& digest);
 [[nodiscard]] bool IsVersionedSha256Digest(std::string_view value);
 
-}  // namespace specforge
+}  // namespace spectiary

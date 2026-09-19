@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 
 class AutomationPanelMutationChain {
 public:
@@ -59,4 +59,4 @@ private:
     std::uint64_t accepted_frame_ = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 
@@ -39,4 +39,4 @@ bool WriteNavigationPrefetchProfileEvent(
     ProfileSink& sink,
     const NavigationPrefetchReport& report);
 
-}  // namespace specforge
+}  // namespace spectiary

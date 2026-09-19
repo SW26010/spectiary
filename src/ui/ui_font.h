@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr ImWchar kScientificGlyphRanges[] = {
     0x00a0, 0x00ff,  // Latin-1 supplement, including superscript 1, 2, and 3.
@@ -43,4 +43,4 @@ struct UiFontSelection {
 
 [[nodiscard]] UiFontSelection AddUiFonts(ImGuiIO& io);
 
-}  // namespace specforge
+}  // namespace spectiary

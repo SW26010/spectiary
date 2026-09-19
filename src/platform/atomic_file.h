@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct AtomicFileReplaceRetryPolicy {
     std::size_t maximum_attempts = 1;
@@ -45,4 +45,4 @@ using AtomicFileWriter = std::function<bool(std::ostream& stream, std::string& e
     const AtomicFileWriter& writer,
     std::string* error_message = nullptr);
 
-}  // namespace specforge
+}  // namespace spectiary

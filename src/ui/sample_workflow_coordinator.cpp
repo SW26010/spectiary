@@ -17,7 +17,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -3150,4 +3150,4 @@ bool SampleWorkflowCoordinator::LabelUndoHistoryMatchesActiveTask() const
            label_undo_history_->task_id == task->task_id;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

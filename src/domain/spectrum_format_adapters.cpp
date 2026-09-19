@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 namespace {
 
 constexpr std::size_t kLogLamGridColumns = 3909;
@@ -789,4 +789,4 @@ SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
     return LoadFolderSnapshot(path, spectrum_index, listing, cancellation_requested);
 }
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

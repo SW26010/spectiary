@@ -18,7 +18,7 @@ foreach ($requiredPath in @($headWrapperPath, $childBuilderFixturePath)) {
 
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    "specforge-head-snapshot-$PID-$([Guid]::NewGuid().ToString('N'))"
+    "spectiary-head-snapshot-$PID-$([Guid]::NewGuid().ToString('N'))"
 try {
     $fixtureScriptsRoot = Join-Path $testRoot 'scripts'
     New-Item -ItemType Directory -Path $fixtureScriptsRoot -Force | Out-Null
@@ -37,8 +37,8 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not initialize the HEAD snapshot Git fixture.'
     }
-    & git -C $testRoot config user.name 'SpecForge Tests'
-    & git -C $testRoot config user.email 'specforge-tests@example.invalid'
+    & git -C $testRoot config user.name 'Spectiary Tests'
+    & git -C $testRoot config user.email 'spectiary-tests@example.invalid'
     & git -C $testRoot add -- .
 
     $hostileHooksRoot = Join-Path $testRoot '.git\hostile-hooks'
@@ -48,7 +48,7 @@ try {
     New-Item -ItemType Directory -Path $emptyHooksRoot -Force | Out-Null
     @'
 #!/bin/sh
-printf invoked > "$SPECFORGE_HOOK_SENTINEL"
+printf invoked > "$SPECTIARY_HOOK_SENTINEL"
 exit 1
 '@ |
         Set-Content `
@@ -63,7 +63,7 @@ exit 1
         GIT_CONFIG_VALUE_1 = (Join-Path $testRoot 'missing-gpg-program.exe')
         GIT_CONFIG_KEY_2 = 'core.hooksPath'
         GIT_CONFIG_VALUE_2 = $hostileHooksRoot
-        SPECFORGE_HOOK_SENTINEL = $hookSentinelPath
+        SPECTIARY_HOOK_SENTINEL = $hookSentinelPath
     }
     $previousGitEnvironment = [ordered]@{}
     foreach ($entry in $injectedGitEnvironment.GetEnumerator()) {
@@ -102,7 +102,7 @@ exit 1
         -LiteralPath (Join-Path $testRoot 'untracked-sentinel.txt') `
         -Value 'untracked' `
         -Encoding ASCII
-    $workingPackageRoot = Join-Path $testRoot 'dist\SpecForge-portable'
+    $workingPackageRoot = Join-Path $testRoot 'dist\Spectiary-portable'
     New-Item -ItemType Directory -Path $workingPackageRoot -Force | Out-Null
     $workingPackageSentinel = Join-Path $workingPackageRoot 'preserve.txt'
     Set-Content -LiteralPath $workingPackageSentinel -Value 'preserve' -Encoding ASCII
@@ -111,7 +111,7 @@ exit 1
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File (Join-Path $fixtureScriptsRoot 'build-portable-from-head.ps1') `
-        -PackageName 'SpecForge-portable'
+        -PackageName 'Spectiary-portable'
     if ($LASTEXITCODE -ne 0) {
         throw "HEAD snapshot integration fixture failed with exit code $LASTEXITCODE."
     }
@@ -131,18 +131,18 @@ exit 1
         $invocation.configuration_was_bound -ne $false -or
         $invocation.preset -cne 'snapshot-owned-portable-preset' -or
         $invocation.configuration -cne 'SnapshotRelease' -or
-        $invocation.package_name -cne 'SpecForge-portable') {
+        $invocation.package_name -cne 'Spectiary-portable') {
         throw 'HEAD wrapper did not leave preset and configuration defaults to the snapshot-owned builder.'
     }
     $legacyMetadataPath = Join-Path `
         $testRoot `
-        'dist\head\SpecForge-portable\spectiary_build_metadata.json'
+        'dist\head\Spectiary-portable\spectiary_build_metadata.json'
     if (-not (Test-Path -LiteralPath $legacyMetadataPath -PathType Leaf) -or
         $invocation.child_schema_version -ne 3) {
         throw 'HEAD wrapper did not accept the child builder generation-owned legacy output.'
     }
     if (Test-Path -LiteralPath (
-        Join-Path $testRoot 'dist\head\SpecForge-portable\spectiary_metadata.json'
+        Join-Path $testRoot 'dist\head\Spectiary-portable\spectiary_metadata.json'
     )) {
         throw 'HEAD snapshot fixture unexpectedly produced current-generation metadata.'
     }

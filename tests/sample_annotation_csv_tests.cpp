@@ -59,10 +59,10 @@ private:
 
 void WriteCsv(
     const std::filesystem::path& path,
-    const std::vector<specforge::CsvRecord>& records)
+    const std::vector<spectiary::CsvRecord>& records)
 {
-    const specforge::CsvRecordWriteResult result =
-        specforge::WriteCsvRecordsAtomically(
+    const spectiary::CsvRecordWriteResult result =
+        spectiary::WriteCsvRecordsAtomically(
             path,
             records);
     Require(
@@ -73,11 +73,11 @@ void WriteCsv(
 }
 
 std::vector<std::string> TextValues(
-    const specforge::SampleAnnotationResult& annotation)
+    const spectiary::SampleAnnotationResult& annotation)
 {
     std::vector<std::string> values;
     values.reserve(annotation.values.size());
-    for (const specforge::SampleAnnotationValue& value :
+    for (const spectiary::SampleAnnotationValue& value :
          annotation.values) {
         const std::string* text =
             std::get_if<std::string>(&value.semantic);
@@ -89,17 +89,17 @@ std::vector<std::string> TextValues(
     return values;
 }
 
-std::optional<specforge::SampleAnnotationResult> LoadCsv(
+std::optional<spectiary::SampleAnnotationResult> LoadCsv(
     const std::filesystem::path& path,
     std::string_view source_kind,
     const std::vector<std::string>& sample_names,
     std::size_t sample_count,
     std::string* error)
 {
-    return specforge::test_support::LegacyFixtureIo{}.
+    return spectiary::test_support::LegacyFixtureIo{}.
         LoadForSource(
             path,
-            specforge::SampleAnnotationSourceCompatibility{
+            spectiary::SampleAnnotationSourceCompatibility{
                 .base_identity = "csv-test-source",
                 .source_kind = source_kind,
                 .source_name = "source",
@@ -110,16 +110,16 @@ std::optional<specforge::SampleAnnotationResult> LoadCsv(
             error);
 }
 
-std::optional<specforge::SampleAnnotationResult> LoadCsvCancelable(
+std::optional<spectiary::SampleAnnotationResult> LoadCsvCancelable(
     const std::filesystem::path& path,
     std::size_t sample_count,
-    const specforge::SampleAnnotationCancellationCheckpoint& checkpoint,
+    const spectiary::SampleAnnotationCancellationCheckpoint& checkpoint,
     std::string* error)
 {
-    return specforge::test_support::LegacyFixtureIo{}.
+    return spectiary::test_support::LegacyFixtureIo{}.
         LoadForSourceCancelable(
             path,
-            specforge::SampleAnnotationSourceCompatibility{
+            spectiary::SampleAnnotationSourceCompatibility{
                 .base_identity = "csv-test-source",
                 .source_kind = "npy",
                 .source_name = "source",
@@ -134,7 +134,7 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-named-sample-annotation-csv");
+            "spectiary-named-sample-annotation-csv");
     const std::filesystem::path path =
         directory / "labels.csv";
     WriteCsv(
@@ -152,7 +152,7 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
         "gamma",
     };
     std::string error;
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation = LoadCsv(
             path,
             "npy",
@@ -166,17 +166,17 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
             : error);
     Require(
         annotation->kind ==
-                specforge::SampleAnnotationKind::Text &&
+                spectiary::SampleAnnotationKind::Text &&
             annotation->dtype_name == "utf8" &&
             annotation->relationship ==
-                specforge::
+                spectiary::
                     SampleAnnotationWorkflowRelationship::
                         PlainAnnotation &&
             !annotation->label_metadata.has_value() &&
             annotation->labeling_document == nullptr,
         "CSV ingestion should create only a plain text annotation");
     const std::optional<std::string> artifact_digest =
-        specforge::ComputeFileSha256(path);
+        spectiary::ComputeFileSha256(path);
     Require(
         artifact_digest.has_value() &&
             annotation->artifact_provenance.has_value() &&
@@ -197,7 +197,7 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
 
     error.clear();
     Require(
-        !specforge::test_support::LegacyFixtureIo{}.
+        !spectiary::test_support::LegacyFixtureIo{}.
              Load(path, sample_names.size(), &error) &&
             error.find("source collection") !=
                 std::string::npos,
@@ -206,25 +206,25 @@ void TestNamedCsvMapsRowsToCanonicalRoster()
 
 void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
 {
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(
             "quality",
             "Quality",
             2);
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             task.label_set,
-            specforge::SampleLabelDefinition{
+            spectiary::SampleLabelDefinition{
                 5,
                 "selected",
                 's'}) &&
-            specforge::AssignSampleLabel(
+            spectiary::AssignSampleLabel(
                 task,
                 0,
                 5)
                 .accepted,
         "folder CSV round-trip fixture should assign a label");
-    const specforge::
+    const spectiary::
         SampleLabelingCanonicalSourceDescriptor source{
             .base_identity = "folder-source",
             .source_kind = "folder",
@@ -237,9 +237,9 @@ void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
             },
         };
     std::string error;
-    const std::optional<specforge::SampleLabelExportSnapshot>
-        snapshot = specforge::BuildSampleLabelExportSnapshot(
-            specforge::SampleLabelExportFormat::Csv,
+    const std::optional<spectiary::SampleLabelExportSnapshot>
+        snapshot = spectiary::BuildSampleLabelExportSnapshot(
+            spectiary::SampleLabelExportFormat::Csv,
             task,
             source,
             &error);
@@ -250,11 +250,11 @@ void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
             : error);
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-folder-sample-annotation-csv");
+            "spectiary-folder-sample-annotation-csv");
     const std::filesystem::path path =
         directory / "labels.csv";
     Require(
-        specforge::ExportSampleLabelSnapshot(
+        spectiary::ExportSampleLabelSnapshot(
             path,
             *snapshot,
             &error),
@@ -262,7 +262,7 @@ void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
             ? "folder CSV export should write"
             : error);
 
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation = LoadCsv(
             path,
             "folder",
@@ -281,7 +281,7 @@ void TestFolderExportReloadsWithoutCanonicalTaskProvenance()
                 "unlabeled",
             }) &&
             annotation->relationship ==
-                specforge::
+                spectiary::
                     SampleAnnotationWorkflowRelationship::
                         PlainAnnotation &&
             !annotation->label_metadata &&
@@ -293,24 +293,24 @@ void TestNpyLoadCapturesPortableArtifactProvenance()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-sample-annotation-npy-provenance");
+            "spectiary-sample-annotation-npy-provenance");
     const std::filesystem::path path =
         directory / "selected-labels.npy";
     const std::vector<int> values{1, 2, 3};
     std::string error;
     Require(
-        specforge::ExportLabelValuesToNpy(path, values, &error),
+        spectiary::ExportLabelValuesToNpy(path, values, &error),
         error.empty()
             ? "NPY provenance fixture should write"
             : error);
 
-    const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(
+    const std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(
             path,
             values.size(),
             &error);
     const std::optional<std::string> artifact_digest =
-        specforge::ComputeFileSha256(path);
+        spectiary::ComputeFileSha256(path);
     Require(
         annotation.has_value() &&
             artifact_digest.has_value() &&
@@ -330,19 +330,19 @@ void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-sample-annotation-npy-portable-provenance-name");
+            "spectiary-sample-annotation-npy-portable-provenance-name");
     const std::filesystem::path path =
         directory / "selected-labels.npy";
     const std::vector<int> values{1, 2, 3};
     std::string error;
     Require(
-        specforge::ExportLabelValuesToNpy(path, values, &error),
+        spectiary::ExportLabelValuesToNpy(path, values, &error),
         error.empty()
             ? "NPY portable provenance fixture should write"
             : error);
 
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(
             "portable-provenance-task",
             "initial",
             values.size());
@@ -358,14 +358,14 @@ void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
         task.task_name = nonportable_name;
         error.clear();
         Require(
-            specforge::test_support::LegacyFixtureIo{}.
+            spectiary::test_support::LegacyFixtureIo{}.
                 SaveLabelMetadata(path, task, nullptr, &error),
             error.empty()
                 ? "NPY nonportable sidecar fixture should write"
                 : error);
 
-        const std::optional<specforge::SampleAnnotationResult> annotation =
-            specforge::test_support::LegacyFixtureIo{}.
+        const std::optional<spectiary::SampleAnnotationResult> annotation =
+            spectiary::test_support::LegacyFixtureIo{}.
                 Load(path, values.size(), &error);
         Require(
             annotation.has_value(),
@@ -382,13 +382,13 @@ void TestNpySidecarTaskNameCannotLeakPathsIntoArtifactProvenance()
     task.task_name = "初始标签-😀.npy";
     error.clear();
     Require(
-        specforge::test_support::LegacyFixtureIo{}.
+        spectiary::test_support::LegacyFixtureIo{}.
             SaveLabelMetadata(path, task, nullptr, &error),
         error.empty()
             ? "NPY Unicode sidecar fixture should write"
             : error);
-    const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.
+    const std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.
             Load(path, values.size(), &error);
     Require(
         annotation.has_value() &&
@@ -402,7 +402,7 @@ void TestCsvProvenanceUsesTheParsedFileGeneration()
 {
     const std::filesystem::path root =
         FreshTestDirectory(
-            "specforge-sample-annotation-csv-generation");
+            "spectiary-sample-annotation-csv-generation");
     const std::filesystem::path generation_a = root / "generation-a";
     const std::filesystem::path generation_b = root / "generation-b";
     std::filesystem::create_directories(generation_a);
@@ -423,7 +423,7 @@ void TestCsvProvenanceUsesTheParsedFileGeneration()
             {"1", "Y"},
         });
     const std::optional<std::string> parsed_generation_digest =
-        specforge::ComputeFileSha256(generation_a / path);
+        spectiary::ComputeFileSha256(generation_a / path);
     Require(
         parsed_generation_digest.has_value(),
         "CSV generation fixture should hash");
@@ -431,7 +431,7 @@ void TestCsvProvenanceUsesTheParsedFileGeneration()
     std::size_t checkpoint_calls = 0;
     std::string error;
     ScopedCurrentPath current_path(generation_a);
-    const std::optional<specforge::SampleAnnotationResult> annotation =
+    const std::optional<spectiary::SampleAnnotationResult> annotation =
         LoadCsvCancelable(
             path,
             2,
@@ -467,7 +467,7 @@ void TestNpyProvenanceUsesTheParsedFileGeneration()
 {
     const std::filesystem::path root =
         FreshTestDirectory(
-            "specforge-sample-annotation-npy-generation");
+            "spectiary-sample-annotation-npy-generation");
     const std::filesystem::path generation_a = root / "generation-a";
     const std::filesystem::path generation_b = root / "generation-b";
     std::filesystem::create_directories(generation_a);
@@ -475,11 +475,11 @@ void TestNpyProvenanceUsesTheParsedFileGeneration()
     const std::filesystem::path path = "labels.npy";
     std::string error;
     Require(
-        specforge::ExportLabelValuesToNpy(
+        spectiary::ExportLabelValuesToNpy(
             generation_a / path,
             std::vector<int>{1, 2, 3},
             &error) &&
-            specforge::ExportLabelValuesToNpy(
+            spectiary::ExportLabelValuesToNpy(
                 generation_b / path,
                 std::vector<int>{9, 8, 7},
                 &error),
@@ -487,15 +487,15 @@ void TestNpyProvenanceUsesTheParsedFileGeneration()
             ? "NPY generation fixtures should write"
             : error);
     const std::optional<std::string> parsed_generation_digest =
-        specforge::ComputeFileSha256(generation_a / path);
+        spectiary::ComputeFileSha256(generation_a / path);
     Require(
         parsed_generation_digest.has_value(),
         "NPY generation fixture should hash");
 
     std::size_t checkpoint_calls = 0;
     ScopedCurrentPath current_path(generation_a);
-    const std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
+    const std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             3,
             [&]() {
@@ -516,11 +516,11 @@ void TestNpyProvenanceUsesTheParsedFileGeneration()
             : error);
     Require(
         annotation->values.size() == 3U &&
-            specforge::SampleAnnotationValueAsInt(
+            spectiary::SampleAnnotationValueAsInt(
                 annotation->values[0]) == 1 &&
-            specforge::SampleAnnotationValueAsInt(
+            spectiary::SampleAnnotationValueAsInt(
                 annotation->values[1]) == 2 &&
-            specforge::SampleAnnotationValueAsInt(
+            spectiary::SampleAnnotationValueAsInt(
                 annotation->values[2]) == 3,
         "NPY load should retain values from the parsed generation");
     Require(
@@ -535,7 +535,7 @@ void TestSourceIndexCsvMapsByCanonicalDecimalIdentity()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-source-index-sample-annotation-csv");
+            "spectiary-source-index-sample-annotation-csv");
     const std::filesystem::path path =
         directory / "labels.csv";
     WriteCsv(
@@ -548,7 +548,7 @@ void TestSourceIndexCsvMapsByCanonicalDecimalIdentity()
         });
 
     std::string error;
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation = LoadCsv(
             path,
             "npy",
@@ -570,7 +570,7 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-unlabeled-semantics-sample-annotation-csv");
+            "spectiary-unlabeled-semantics-sample-annotation-csv");
     const std::filesystem::path path =
         directory / "labels.csv";
     WriteCsv(
@@ -583,7 +583,7 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
         });
 
     std::string error;
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         annotation = LoadCsv(
             path,
             "npy",
@@ -607,25 +607,25 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
             !annotation->values[2].missing,
         "CSV ingestion should retain missing separately from decoded label text");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             *annotation,
             annotation->values[0]) == "Unlabeled" &&
-            specforge::FormatSampleAnnotationValue(
+            spectiary::FormatSampleAnnotationValue(
                 *annotation,
                 annotation->values[1]) == "unlabeled" &&
-            specforge::FormatSampleAnnotationValue(
+            spectiary::FormatSampleAnnotationValue(
                 *annotation,
                 annotation->values[2]) == "\\unlabeled",
         "CSV missing display must not expose wire escaping or merge with labeled text");
 
     const std::string missing_key =
-        specforge::SampleAnnotationValueKey(
+        spectiary::SampleAnnotationValueKey(
             annotation->values[0]);
     const std::string labeled_unlabeled_key =
-        specforge::SampleAnnotationValueKey(
+        spectiary::SampleAnnotationValueKey(
             annotation->values[1]);
     const std::string leading_backslash_key =
-        specforge::SampleAnnotationValueKey(
+        spectiary::SampleAnnotationValueKey(
             annotation->values[2]);
     Require(
         missing_key != labeled_unlabeled_key &&
@@ -633,8 +633,8 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
             labeled_unlabeled_key != leading_backslash_key,
         "CSV sentinel and escaped labels should retain distinct sample annotation keys");
 
-    const specforge::SampleFilterSource filter_source =
-        specforge::BuildAnnotationFilterSource(
+    const spectiary::SampleFilterSource filter_source =
+        spectiary::BuildAnnotationFilterSource(
             *annotation);
     const auto unlabeled_option = std::find_if(
         filter_source.options.begin(),
@@ -658,11 +658,11 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
                 labeled_unlabeled_option->key,
         "CSV missing and labeled text should produce distinct sample filter options");
 
-    specforge::SampleFilterController filter;
+    spectiary::SampleFilterController filter;
     filter.SetCondition(
         filter_source.id,
         {missing_key});
-    const specforge::SampleFilterEvaluation evaluation =
+    const spectiary::SampleFilterEvaluation evaluation =
         filter.Evaluate(
             {filter_source},
             3);
@@ -674,7 +674,7 @@ void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
 
 void RequireCsvRejected(
     const std::filesystem::path& path,
-    const std::vector<specforge::CsvRecord>& records,
+    const std::vector<spectiary::CsvRecord>& records,
     std::string_view source_kind,
     const std::vector<std::string>& sample_names,
     std::size_t sample_count,
@@ -698,7 +698,7 @@ void TestCsvIdentityContractRejectsInvalidMappings()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-invalid-sample-annotation-csv");
+            "spectiary-invalid-sample-annotation-csv");
     const std::vector<std::string> names{
         "alpha",
         "beta",

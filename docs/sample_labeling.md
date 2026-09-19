@@ -23,14 +23,14 @@ Use the terms from `CONTEXT.md`:
 - `Sample label result metadata`: portable metadata that explains a compact
   sample label result.
 - `Sample labeling draft`: an in-progress label result saved for recovery.
-- `Sample filtering`: user-authored sample subset selection. In SpecForge, this
+- `Sample filtering`: user-authored sample subset selection. In Spectiary, this
   word family should be qualified in new product and documentation language and
   must not refer to spectrum smoothing, valid-point selection, spectral-line
   search, or marker visibility.
 
 ## Staged Rollout
 
-Sample annotation and labeling is the next core product direction for SpecForge,
+Sample annotation and labeling is the next core product direction for Spectiary,
 but it should advance in this order:
 
 1. Sample navigation.
@@ -56,9 +56,9 @@ sample labeling task. String and floating-point annotation values may be shown
 directly as read-only annotation results.
 
 When existing integer annotation values are present but no mapping is available,
-SpecForge should show the stored values rather than guessing class names.
+Spectiary should show the stored values rather than guessing class names.
 
-For automatically loaded read-only annotations, SpecForge should infer the
+For automatically loaded read-only annotations, Spectiary should infer the
 annotation kind from dtype. Integer dtypes are categorical annotations and may be
 treated as sample-labeling results for display. String dtypes should default to
 plain read-only annotation display so companion name arrays or other text fields
@@ -92,7 +92,7 @@ dtypes, floating-point dtypes, and string or unicode dtypes.
 
 Every sample annotation result loaded for a source collection must have exactly
 one annotation value per spectrum sample. If the annotation result length does
-not match the source collection's spectrum count, SpecForge must not attach it
+not match the source collection's spectrum count, Spectiary must not attach it
 to that source collection.
 
 Manual/read-only annotation attachment accepts both the existing NPY forms and
@@ -108,7 +108,7 @@ views. Count-only attachment APIs do not accept ASDF because they cannot prove
 roster compatibility. Existing `.npy` and `.npy` plus `.sf-labels.json` reads
 remain unchanged. An attached standalone ASDF remains an external read-only
 result until the user explicitly confirms that it should be edited in place.
-Confirmation adopts that same document as a canonical local owner: SpecForge
+Confirmation adopts that same document as a canonical local owner: Spectiary
 uses the document's stable task id/name, labels, and values, never generates a
 replacement task identity, and never hands the path to the legacy NPY writer.
 Adoption first acquires the task-identity and canonical one-file output leases,
@@ -190,7 +190,7 @@ navigation behavior.
 
 ## Sample Windows
 
-SpecForge should separate sample navigation, sample filtering, sample annotation
+Spectiary should separate sample navigation, sample filtering, sample annotation
 inspection, and active manual labeling into distinct windows or surfaces.
 
 The visible sample navigation window should be named `Navigation`. In this
@@ -252,7 +252,7 @@ or deactivating it. Delete removes the local task record and its internal draft.
 It must not delete any artifact owned by the task's persisted format: neither a
 canonical ASDF document nor a legacy `.npy` result and its adjacent portable
 metadata sidecar. If the same output is still loaded as an annotation later,
-SpecForge should treat it according to the normal plain/external/local matching
+Spectiary should treat it according to the normal plain/external/local matching
 rules rather than silently resurrecting the deleted local task record. Delete
 should be disabled while the task has pending or failed output saves, matching
 close/deactivate.
@@ -492,7 +492,7 @@ and make it the active sample labeling task.
 
 Dragging a writable integer categorical legacy annotation from the sample
 annotation view converts it into a local task that keeps the annotation file as
-its output target. SpecForge must warn that edits will modify the original data
+its output target. Spectiary must warn that edits will modify the original data
 in place. The warning should say this is appropriate only when the user
 intentionally wants to edit that data or when the file represents an unfinished
 labeling task being restored, and it should recommend backing up the original
@@ -506,7 +506,7 @@ legacy NPY result obtains equivalent labeling evidence from its adjacent
 matching legacy sidecar by itself makes the output the current user's own task.
 Without a matching local task record for the active source and output path, the
 annotation is an external label result and still requires the in-place edit
-warning. With a matching local task record, SpecForge may restore or activate it
+warning. With a matching local task record, Spectiary may restore or activate it
 without that warning because the user has already established the output owner.
 
 The annotation view should distinguish loaded per-sample data by workflow
@@ -531,7 +531,7 @@ External label results should display the mapped label value from their
 canonical document or adjacent legacy metadata and be visibly marked as
 external. They may be dragged into `Labeling`, but doing so requires the
 in-place edit warning. If the user confirms a standalone canonical ASDF,
-SpecForge adopts its embedded stable task identity and exact document path as a
+Spectiary adopts its embedded stable task identity and exact document path as a
 `canonical_asdf` owner after a leased store reopen; a same-id/different-path or
 same-path/different-id local owner is a conflict and must not be resolved by
 inventing `-2` style identities. Legacy annotation promotion remains the
@@ -557,7 +557,7 @@ user's output, or relinking a source collection may prevent recognition until
 the user explicitly reconnects it.
 
 If a local record still exists but its format's required artifact set is
-missing, SpecForge should keep the task visible with a missing-output state
+missing, Spectiary should keep the task visible with a missing-output state
 rather than downgrading it to a plain annotation or silently deleting it. The
 missing state may appear in `Annotations`, and in `Labeling` when the missing
 task is restored as active local state. Manual relink selects a replacement
@@ -568,11 +568,11 @@ values. Legacy relink validates the NPY result plus adjacent
 confirmation, dtype, count, and label-code compatibility. Only after that
 validation does the local record adopt the new path.
 
-When the user imports or adds an annotation file, SpecForge may also use the
+When the user imports or adds an annotation file, Spectiary may also use the
 same validation rules to automatically reconnect a missing local labeling task
 if the canonical document, or the legacy result and adjacent metadata, matches
 that task record. Automatic relink is limited to the imported path and its
-format-declared artifacts; SpecForge should not scan the broader filesystem for
+format-declared artifacts; Spectiary should not scan the broader filesystem for
 moved label results.
 
 In-place conversion is limited to writable integer categorical annotation
@@ -587,7 +587,7 @@ labeling task rules and the existing annotation file is the selected output
 location. The converted task may expand its category set like any local task,
 but writing back to the original output target is limited by that file's
 writable format and integer dtype. If a new numeric code cannot be represented
-safely, SpecForge should require the user to choose a different output target
+safely, Spectiary should require the user to choose a different output target
 before saving.
 Activating an annotation as an existing local task must use the same identity
 validation as annotation relationship display. A canonical annotation must
@@ -598,7 +598,7 @@ A path-only match must not activate a local task or overwrite its output. If the
 same path is owned by a different local task, activation remains blocked and the
 annotation remains external.
 
-When a temporary task is started locally inside SpecForge, it does not need the
+When a temporary task is started locally inside Spectiary, it does not need the
 in-place edit warning. It starts without an external output target and remains a
 local recovery draft until the user selects `Save to...`. Selecting the output
 location requires an `.asdf` path and promotes it to a formal local labeling
@@ -625,7 +625,7 @@ remain distinct user-facing errors with low-level details confined to diagnostic
 
 The first implementation should not allow two local sample labeling task records
 for the same source collection to point at the same output path. If the user
-selects an output path already used by another local task record, SpecForge
+selects an output path already used by another local task record, Spectiary
 should report the conflict and offer low-risk choices such as activating the
 existing task or choosing a different output path. Output ownership transfer,
 task takeover, or automatic unbinding of the previous task is future work and
@@ -734,7 +734,7 @@ workflow commands; active items and popups keep input ownership.
 ## Persistence
 
 Sample labeling task records are user workflow configuration and should default
-to local user storage under the SpecForge application data directory. A task
+to local user storage under the Spectiary application data directory. A task
 record owns the stable task id, task name, label set, mapping choices, workflow
 settings, selected output path when one exists, internal autosave state, and an
 optional remembered labeling position for the one-time resume action. It does
@@ -744,7 +744,7 @@ The remembered labeling position belongs to the sample labeling task and stores
 only a sample index. It does not carry source identity, source path, sample name,
 or relink information; the containing task record supplies the source collection
 identity.
-Task records are scoped to a source collection. SpecForge may keep multiple
+Task records are scoped to a source collection. Spectiary may keep multiple
 source collections in its candidate/source list, but the activated source
 collection determines which task records and sample annotations are shown in the
 sample windows. Each source collection may retain multiple output-backed task
@@ -783,13 +783,13 @@ does not become the source name.
 
 Relink requires the source spectrum count to match the task record's spectrum
 count. If only the source name changed while the source fingerprint and spectrum
-count still match, SpecForge may relink automatically and notify the user. If the
+count still match, Spectiary may relink automatically and notify the user. If the
 source fingerprint changed while the source name and spectrum count still match,
-SpecForge should treat the loaded source as different by default and only relink
+Spectiary should treat the loaded source as different by default and only relink
 after explicit user confirmation. If both source name and source fingerprint
-changed while spectrum count still matches, SpecForge should also treat the
+changed while spectrum count still matches, Spectiary should also treat the
 loaded source as different by default and only relink after explicit user
-confirmation. After relink, SpecForge should update the task record to the new
+confirmation. After relink, Spectiary should update the task record to the new
 source collection identity so the user is not prompted for the same source change
 every time. Relink does not reinterpret remembered labeling positions by sample
 name, source path, or content matching. A remembered labeling position remains
@@ -817,7 +817,7 @@ Output leases and path conflict checks continue to use explicit owner format.
 
 The schema reader accepts syntactically valid future `origin.kind` tokens so an
 existing document can be opened and preserved forward-compatibly. A current
-SpecForge writer may create only `manual` or `annotation_promotion` origins.
+Spectiary writer may create only `manual` or `annotation_promotion` origins.
 Promotion provenance stores a portable annotation basename, never an absolute
 path or a name containing directory components.
 
@@ -839,10 +839,10 @@ interchangeably:
 | Task ID | The canonical identity of one labeling task. It is stored at `labeling_task.id`. | Immutable. A rename, Save As, export, or output relink does not create a new ID. |
 | Task name | User-authored UTF-8 display data stored at `labeling_task.name`. | Persistently editable. Changing it advances `modified_at` but does not change the task ID or any path. |
 | Output filename | The user-selected filesystem name of the canonical `.asdf` owner. | Independent of both task ID and task name. The dialog may suggest a sanitized filename from the task name, but the final name is not canonical metadata and later task renames do not rename it. |
-| SpecForge schema version | The semantic contract selected by the YAML `schema_version`. | Current writers emit exactly `2.0.0`; this is not an ASDF implementation version. |
-| SpecForge build source | Generation provenance stored in `spectiary_build`. | A current writer or rewrite stamps its own compiled build identity. `head` requires one full 40-character lowercase hexadecimal revision; `working_tree` requires `source_revision` to be absent. |
-| ASDF file-format version | The container framing version in `#ASDF 1.0.0`. | Independently versioned by ASDF. It does not mean SpecForge schema 1.0. |
-| ASDF Standard version | The tag/schema vocabulary declared by `#ASDF_STANDARD 1.5.0`. | Independently versioned by ASDF. The `!core/asdf-1.1.0` root tag is likewise an ASDF core tag, not the SpecForge schema version. |
+| Spectiary schema version | The semantic contract selected by the YAML `schema_version`. | Current writers emit exactly `2.0.0`; this is not an ASDF implementation version. |
+| Spectiary build source | Generation provenance stored in `spectiary_build`. | A current writer or rewrite stamps its own compiled build identity. `head` requires one full 40-character lowercase hexadecimal revision; `working_tree` requires `source_revision` to be absent. |
+| ASDF file-format version | The container framing version in `#ASDF 1.0.0`. | Independently versioned by ASDF. It does not mean Spectiary schema 1.0. |
+| ASDF Standard version | The tag/schema vocabulary declared by `#ASDF_STANDARD 1.5.0`. | Independently versioned by ASDF. The `!core/asdf-1.1.0` root tag is likewise an ASDF core tag, not the Spectiary schema version. |
 
 GitHub issue #82 is a bounded self-description patch incorporated into
 `schema_version: 2.0.0`. It does not introduce schema `2.1.0`.
@@ -862,7 +862,7 @@ resolved by generating another UUID, never by appending `-2`, `-copy`, or a
 similar non-UUID suffix.
 
 A task name must be valid UTF-8 and contain at least one code point that is not
-Unicode whitespace. SpecForge preserves the submitted text exactly: it does not
+Unicode whitespace. Spectiary preserves the submitted text exactly: it does not
 trim it and does not perform Unicode normalization. The task name is not a
 filename, source identity, annotation display-name override, or temporary-task
 status marker.
@@ -933,7 +933,7 @@ for editing them. An unset description and an empty author list are omitted,
 not materialized as `null` or `authors: []`. Each author contains a required
 non-whitespace UTF-8 `name`, an optional non-whitespace UTF-8 `identifier`, and
 an optional non-whitespace UTF-8 `email`. The email is portable user-supplied
-contact metadata: SpecForge does not apply RFC address parsing, DNS validation,
+contact metadata: Spectiary does not apply RFC address parsing, DNS validation,
 normalization, or case rewriting, and never infers it from Git, the operating
 system, or other machine-local state. Role, organization, and additional author
 ID fields are not part of schema 2.0.
@@ -949,7 +949,7 @@ the ASDF container:
 %TAG ! tag:stsci.edu:asdf/
 --- !core/asdf-1.1.0
 asdf_library: !core/software-1.0.0
-  name: SpecForge
+  name: Spectiary
   version: 0.8.0
 spectiary_build:
   source_mode: head
@@ -1031,7 +1031,7 @@ sentinel. Schema 2.0 has no `annotation.name`; the canonical task name lives
 only at `labeling_task.name`, while `origin.annotation.name` is provenance for
 the promoted input artifact and is not a second task name.
 
-`asdf_library` identifies the producer as `SpecForge` version `0.8.0`.
+`asdf_library` identifies the producer as `Spectiary` version `0.8.0`.
 `spectiary_build` records only the source state compiled into that producer:
 clean `head` builds include the complete revision, while `working_tree` builds
 omit `source_revision` entirely. The field is generation provenance rather
@@ -1045,7 +1045,7 @@ roster, annotation/descriptor, task, origin/annotation-origin, build-source,
 and label maps. Known build-source fields are replaced with the current
 binary's identity while unknown entries inside that map are retained.
 Label-local entries are matched by stable label code. This is deliberately not
-a general forward-compatibility promise: SpecForge does not preserve arbitrary
+a general forward-compatibility promise: Spectiary does not preserve arbitrary
 extra binary blocks, unknown sequence-item schemas, replaced known fields,
 metadata bytes/padding, or the old block index/trailer. Removed labels lose
 their label-local unknown fields, and the canonical `authors` sequence is
@@ -1054,7 +1054,7 @@ to preserve. Both full and values-only rewrites require the durable base to be
 the same source/roster/annotation/task identity; values-only rewrites may change
 only values and `modified_at` and reuse only the encoded roster block.
 
-SpecForge labeling schema `1.0.0` documents are unsupported and are not
+Spectiary labeling schema `1.0.0` documents are unsupported and are not
 migrated to `2.0.0`. Likewise, labeling state-cache schemas 1 through 3 are
 ignored rather than migrated; current state and checkpoint owners use independent schema-1 envelopes.
 These version boundaries are unrelated to the ASDF file-format `1.0.0` header.
@@ -1066,7 +1066,7 @@ pending/retry/save state, output path, and UI state remain local workflow data.
 The controller's in-memory view revision is not a canonical document revision.
 
 Format-specific details belong behind annotation I/O. Canonical sample-labeling
-documents use SpecForge schema `2.0.0`, serialized with ASDF file format `1.0.0`
+documents use Spectiary schema `2.0.0`, serialized with ASDF file format `1.0.0`
 and ASDF Standard `1.5.0`; this ASDF adapter is the writer for newly formalized
 tasks and the source-aware annotation/task-hydration adapter. New canonical
 owners require a user-selected `.asdf` path before direct canonical publication.
@@ -1126,7 +1126,7 @@ publication refreshes the open snapshot's durable base, so later value saves
 can repeat that path without reopening.
 
 Metadata mutations use the full-document rewrite. That path merges edited known
-SpecForge schema `2.0.0` fields into the validated generation and preserves
+Spectiary schema `2.0.0` fields into the validated generation and preserves
 forward-compatible unknown mapping entries; label-local unknown entries are
 associated by stable label code. A full rewrite of an existing path must obtain
 such a durable base and fail safely when it cannot, rather than reconstructing
@@ -1197,7 +1197,7 @@ state without parsing storage formats or reimplementing dtype, shape, or write
 capability rules.
 
 Sample label results are labeling output. They should be written to an explicit
-output location chosen by the user. SpecForge should recommend choosing an
+output location chosen by the user. Spectiary should recommend choosing an
 external output file, but should not require one before labeling starts. Output
 formats should be compact and practical for C++ streaming reads and writes;
 verbose JSON is appropriate for drafts and recovery metadata, not as the
@@ -1206,7 +1206,7 @@ New formal labeling tasks use canonical ASDF so source identity, task metadata,
 roster, and the one-dimensional label values share one atomic generation.
 Numeric tasks write stable label codes, and the sample label set owns the
 interpretation from numeric code to user-facing label. Unlabeled samples use
-`-1`; the SpecForge sample-labeling schema `2.0.0` value array is signed `int32`.
+`-1`; the Spectiary sample-labeling schema `2.0.0` value array is signed `int32`.
 Save and autosave continue to publish through the task's declared owner format.
 `Export Labels` writes the current task values in canonical source-roster order
 using the adjacent NPY/CSV UI selection without changing that owner. NPY sources
@@ -1220,7 +1220,7 @@ attached automatically, and NPY interchange export has no canonical
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 
-When a legacy NPY owner is written to its explicit output location, SpecForge
+When a legacy NPY owner is written to its explicit output location, Spectiary
 also writes portable sample label result metadata beside the compact `.npy`
 output. This metadata is a data-contract sidecar, not a copy of the local sample
 labeling task record. It includes a format kind, schema
@@ -1230,7 +1230,7 @@ source collection identity summary when available. The referenced result file
 should be stored as a path relative to the metadata file's directory, normally
 just the result file name, so the `.npy` plus metadata pair remains portable
 when moved together. The source collection identity summary should reuse the
-same source collection identity fields used by SpecForge's source/file
+same source collection identity fields used by Spectiary's source/file
 management flow, such as source name, source fingerprint, context fingerprint,
 and spectrum count. It must not store the label value array, pending values,
 local autosave draft, active task state, window visibility, sample-filter state, save
@@ -1246,11 +1246,11 @@ canonical ASDF owner, `autosaved to output` means the complete intended values
 or metadata generation was atomically replaced and, for metadata-changing
 writes, reopened successfully.
 
-When loading an existing numeric label result, SpecForge should use adjacent
+When loading an existing numeric label result, Spectiary should use adjacent
 sample label result metadata when it matches the label result file, value count,
-and dtype. If matching metadata is absent, SpecForge may still load and display
+and dtype. If matching metadata is absent, Spectiary may still load and display
 the raw numeric label values, but it should not invent label names or shortcuts.
-If adjacent metadata exists but does not match the label result, SpecForge
+If adjacent metadata exists but does not match the label result, Spectiary
 should warn and fall back to raw numeric label values instead of applying stale
 or unrelated mappings. The first implementation should not allow the user to
 force-bind mismatched metadata to a label result. The user may choose the correct
@@ -1306,7 +1306,7 @@ acknowledgement. Each recovery row exposes the source and task identity,
 recovery status, progress, and save state; recovery operations must not silently
 overwrite a formal labeling task.
 
-When the user starts or returns to an editable task, SpecForge should use the
+When the user starts or returns to an editable task, Spectiary should use the
 local task record to restore available internal autosave state. The restored
 state should clearly show that it came from internal autosave. The draft does
 not need a separate "clean-exit" or "crash-exit" marker.
@@ -1327,7 +1327,7 @@ upgrade it to a content hash when the extra cost is justified.
 
 The recovery path must not silently overwrite an explicit sample label result.
 Because a bare external label result path does not prove task ownership,
-SpecForge should not infer draft ownership from a label file path alone. Adjacent
+Spectiary should not infer draft ownership from a label file path alone. Adjacent
 sample label result metadata may carry a stable task id, but it only identifies a
 local task when it also matches a local task record for the active source
 collection and output path.

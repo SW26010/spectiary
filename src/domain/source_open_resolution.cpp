@@ -5,7 +5,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string PathText(const std::filesystem::path& path)
@@ -188,4 +188,4 @@ SourceOpenResolution ResolveSourceOpenRequest(
     return resolution;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

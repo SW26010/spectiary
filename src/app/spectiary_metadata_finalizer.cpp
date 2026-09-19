@@ -1,7 +1,7 @@
-#include "app/specforge_metadata_finalizer.h"
+#include "app/spectiary_metadata_finalizer.h"
 
 #include "app/local_user_state_json.h"
-#include "app/specforge_metadata_validation.h"
+#include "app/spectiary_metadata_validation.h"
 #include "platform/file_sha256.h"
 
 #include <chrono>
@@ -14,7 +14,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void SetError(std::string* error_message, std::string message)
@@ -122,7 +122,7 @@ std::optional<std::filesystem::path> NormalizePathForComparison(
 }
 
 bool ValidatePaths(
-    const SpecForgeMetadataFinalizerOptions& options,
+    const SpectiaryMetadataFinalizerOptions& options,
     std::string& error)
 {
     if (options.executable_path.empty()) {
@@ -274,7 +274,7 @@ bool WriteSchema6Metadata(
     WriteJsonString(stream, identity.product_name);
     stream << ",\n"
            << "    \"version\": ";
-    WriteJsonString(stream, identity.specforge_version);
+    WriteJsonString(stream, identity.spectiary_version);
     stream << "\n  },\n"
            << "  \"build\": {\n"
            << "    \"source_mode\": ";
@@ -350,7 +350,7 @@ void RemoveStaleMetadataTarget(
     std::filesystem::remove(metadata_path, remove_error);
     if (remove_error) {
         failure_message +=
-            "; could not remove stale SpecForge metadata target " +
+            "; could not remove stale Spectiary metadata target " +
             PathToUtf8(metadata_path) + ": " +
             remove_error.message();
     }
@@ -358,8 +358,8 @@ void RemoveStaleMetadataTarget(
 
 }  // namespace
 
-bool FinalizeSpecForgeMetadata(
-    const SpecForgeMetadataFinalizerOptions& options,
+bool FinalizeSpectiaryMetadata(
+    const SpectiaryMetadataFinalizerOptions& options,
     std::string* error_message)
 {
     if (error_message != nullptr) {
@@ -368,7 +368,7 @@ bool FinalizeSpecForgeMetadata(
 
     std::string error;
     if (!ValidatePaths(options, error)) {
-        SetError(error_message, "cannot finalize SpecForge metadata: " + error);
+        SetError(error_message, "cannot finalize Spectiary metadata: " + error);
         return false;
     }
 
@@ -394,16 +394,16 @@ bool FinalizeSpecForgeMetadata(
                     PathToUtf8(options.executable_path);
             }
             return fail_after_path_validation(
-                "cannot finalize SpecForge metadata: " + error);
+                "cannot finalize Spectiary metadata: " + error);
         }
         executable_sha256 = *digest;
     } catch (const std::exception& exception) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: executable hashing failed: " +
+            "cannot finalize Spectiary metadata: executable hashing failed: " +
                 std::string(exception.what()));
     } catch (...) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: executable hashing failed");
+            "cannot finalize Spectiary metadata: executable hashing failed");
     }
 
     std::chrono::system_clock::time_point now;
@@ -413,17 +413,17 @@ bool FinalizeSpecForgeMetadata(
             : std::chrono::system_clock::now();
     } catch (const std::exception& exception) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: UTC clock failed: " +
+            "cannot finalize Spectiary metadata: UTC clock failed: " +
                 std::string(exception.what()));
     } catch (...) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: UTC clock failed");
+            "cannot finalize Spectiary metadata: UTC clock failed");
     }
 
     std::string completed_at_utc;
     if (!FormatUtcTimestamp(now, completed_at_utc, error)) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: " + error);
+            "cannot finalize Spectiary metadata: " + error);
     }
 
     BuildMetadata finalized_build = options.configured_build_metadata;
@@ -440,11 +440,11 @@ bool FinalizeSpecForgeMetadata(
             finalized_build,
             &error)) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: " + error);
+            "cannot finalize Spectiary metadata: " + error);
     }
 
     AtomicFileWriteOptions write_options;
-    write_options.target_description = "SpecForge metadata";
+    write_options.target_description = "Spectiary metadata";
     write_options.replace_retry_policy = options.replace_retry_policy;
     write_options.before_replace = options.before_replace;
     try {
@@ -462,18 +462,18 @@ bool FinalizeSpecForgeMetadata(
                 &atomic_write_error)) {
             return fail_after_path_validation(
                 atomic_write_error.empty()
-                    ? "cannot finalize SpecForge metadata: atomic write failed"
+                    ? "cannot finalize Spectiary metadata: atomic write failed"
                     : std::move(atomic_write_error));
         }
     } catch (const std::exception& exception) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: atomic write failed: " +
+            "cannot finalize Spectiary metadata: atomic write failed: " +
                 std::string(exception.what()));
     } catch (...) {
         return fail_after_path_validation(
-            "cannot finalize SpecForge metadata: atomic write failed");
+            "cannot finalize Spectiary metadata: atomic write failed");
     }
     return true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

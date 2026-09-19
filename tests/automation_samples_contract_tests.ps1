@@ -77,12 +77,12 @@ foreach ($requiredText in @(
         'frame capture',
         'app quit',
         'Ownership and cleanup',
-        'specforge_multi_instance_labeling_smoke_tests',
-        'specforge_automation_launcher',
-        'specforge_automation_state_isolation_tests',
-        'specforge-automation-samples-<32-hex>',
+        'spectiary_multi_instance_labeling_smoke_tests',
+        'spectiary_automation_launcher',
+        'spectiary_automation_state_isolation_tests',
+        'spectiary-automation-samples-<32-hex>',
         'sample-run-<32-hex>',
-        '.specforge-automation-samples-ownership.json',
+        '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json',
         'temporary_run_root',
         'bounded TEMP retention',
         'owner lease',
@@ -129,7 +129,7 @@ foreach ($requiredText in @(
         'sample-artifact-capacity-diagnostic.json',
         'artifact capacity is exhausted',
         'No new run artifact directory was created',
-        'SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS',
+        'SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS',
         'Initialize-SampleRunLease',
         'Complete-SampleRunLease',
         'Get-SampleLeaseStatus',
@@ -155,7 +155,7 @@ foreach ($requiredText in @(
         'Write-SampleRunRootOwnershipManifest',
         'Test-SampleRunRootHasLiveOwnedProcess',
         'Stop-SampleRunRootOwnedProcesses',
-        '.specforge-automation-samples-ownership.json',
+        '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json',
         'sample-run-root-',
         'temporary_run_root',
         'temporary_root_retention_count',
@@ -187,10 +187,10 @@ Assert-True `
     -Message 'Automation sample runner must not introduce a competing process or multi-instance runner.'
 Assert-True `
     -Condition (
-        $cmakeText.Contains('NAME specforge_automation_launcher_integration_tests') -and
-        $cmakeText.Contains('NAME specforge_automation_samples_tests') -and
-        $cmakeText.Contains('<TARGET_FILE:specforge_automation_launcher>') -and
-        $cmakeText.Contains('<TARGET_FILE:specforge_automation_state_isolation_tests>')) `
+        $cmakeText.Contains('NAME spectiary_automation_launcher_integration_tests') -and
+        $cmakeText.Contains('NAME spectiary_automation_samples_tests') -and
+        $cmakeText.Contains('<TARGET_FILE:spectiary_automation_launcher>') -and
+        $cmakeText.Contains('<TARGET_FILE:spectiary_automation_state_isolation_tests>')) `
     -Message 'Automation samples must reuse the existing launcher and state-isolation targets.'
 
 Write-Host 'Automation sample fixture and command documentation contract passed.'

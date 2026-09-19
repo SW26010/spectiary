@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct ExclusiveFileLeaseAcquireResult;
 
@@ -50,4 +50,4 @@ struct ExclusiveFileLeaseAcquireResult {
 [[nodiscard]] ExclusiveFileLeaseAcquireResult TryAcquireExclusiveFileLease(
     const std::filesystem::path& path);
 
-}  // namespace specforge
+}  // namespace spectiary

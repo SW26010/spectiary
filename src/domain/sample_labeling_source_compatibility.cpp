@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace specforge {
+namespace spectiary {
 
 namespace {
 
@@ -144,4 +144,4 @@ CheckSampleLabelingSourceCompatibility(
     return std::nullopt;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

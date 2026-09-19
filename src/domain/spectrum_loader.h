@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <functional>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionFolderListing;
 
@@ -24,4 +24,4 @@ SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
     const SourceCollectionFolderListing& listing,
     const SpectrumLoadCancellationCheck& cancellation_requested);
 
-}  // namespace specforge
+}  // namespace spectiary

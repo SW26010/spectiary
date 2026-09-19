@@ -1,6 +1,6 @@
 # Domain docs
 
-SpecForge is a single-context repository.
+Spectiary is a single-context repository.
 
 Before exploring a domain change, read the relevant sections of the root
 `CONTEXT.md` and any applicable files under `docs/adr/`. Use the glossary terms

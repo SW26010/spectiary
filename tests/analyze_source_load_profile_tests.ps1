@@ -226,7 +226,7 @@ function Write-ProfileFixture {
 
 $temporaryDirectory = Join-Path (
     [System.IO.Path]::GetTempPath()) (
-    'specforge-source-load-analyzer-' + [guid]::NewGuid().ToString('N'))
+    'spectiary-source-load-analyzer-' + [guid]::NewGuid().ToString('N'))
 [void][System.IO.Directory]::CreateDirectory($temporaryDirectory)
 try {
     $validPath = Join-Path $temporaryDirectory 'valid.jsonl'

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge::asdf_labeling_spike {
+namespace spectiary::asdf_labeling_spike {
 
 inline constexpr std::int32_t kUnlabeled = -1;
 
@@ -72,4 +72,4 @@ void RewriteLabelValuePreservingRosterBlock(
 [[nodiscard]] std::string SemanticJson(const LabelingDocument& document);
 [[nodiscard]] LabelingDocument NativeFixture();
 
-}  // namespace specforge::asdf_labeling_spike
+}  // namespace spectiary::asdf_labeling_spike

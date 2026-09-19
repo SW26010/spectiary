@@ -114,15 +114,15 @@ std::vector<std::string> PrintfPlaceholderSignature(
 void TestEveryDisplayTextIsPresent()
 {
     constexpr std::size_t kLanguageCount =
-        static_cast<std::size_t>(specforge::UiLanguage::Count);
+        static_cast<std::size_t>(spectiary::UiLanguage::Count);
     constexpr std::size_t kTextCount =
-        static_cast<std::size_t>(specforge::UiTextId::Count);
+        static_cast<std::size_t>(spectiary::UiTextId::Count);
 
     for (std::size_t language_index = 0; language_index < kLanguageCount; ++language_index) {
-        const auto language = static_cast<specforge::UiLanguage>(language_index);
+        const auto language = static_cast<spectiary::UiLanguage>(language_index);
         for (std::size_t index = 0; index < kTextCount; ++index) {
-            const auto text_id = static_cast<specforge::UiTextId>(index);
-            Require(!specforge::UiText(language, text_id).empty(), "display text should not be empty");
+            const auto text_id = static_cast<spectiary::UiTextId>(index);
+            Require(!spectiary::UiText(language, text_id).empty(), "display text should not be empty");
         }
     }
 }
@@ -131,25 +131,25 @@ void TestLocalizedPrintfPlaceholderSignaturesMatch()
 {
     constexpr std::size_t kTextCount =
         static_cast<std::size_t>(
-            specforge::UiTextId::Count);
+            spectiary::UiTextId::Count);
     for (std::size_t index = 0;
          index < kTextCount;
          ++index) {
         const auto text_id =
-            static_cast<specforge::UiTextId>(
+            static_cast<spectiary::UiTextId>(
                 index);
         const std::vector<std::string>
             english_signature =
                 PrintfPlaceholderSignature(
-                    specforge::UiText(
-                        specforge::UiLanguage::
+                    spectiary::UiText(
+                        spectiary::UiLanguage::
                             English,
                         text_id));
         const std::vector<std::string>
             chinese_signature =
                 PrintfPlaceholderSignature(
-                    specforge::UiText(
-                        specforge::UiLanguage::
+                    spectiary::UiText(
+                        spectiary::UiLanguage::
                             SimplifiedChinese,
                         text_id));
         Require(
@@ -161,9 +161,9 @@ void TestLocalizedPrintfPlaceholderSignaturesMatch()
 
 void TestRepresentativeMappingsAreExact()
 {
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     Require(UiText(UiLanguage::English, UiTextId::Language) == "Language", "English language label");
     Require(UiText(UiLanguage::SimplifiedChinese, UiTextId::Language) == "语言", "Chinese language label");
@@ -230,22 +230,22 @@ void TestRepresentativeMappingsAreExact()
             "输出目录",
         "Chinese frame capture output label should be exact");
     Require(
-        specforge::SourceTypeDisplayText(
+        spectiary::SourceTypeDisplayText(
             UiLanguage::English,
             "folder") == "folder",
         "English folder source type should retain its semantic label");
     Require(
-        specforge::SourceTypeDisplayText(
+        spectiary::SourceTypeDisplayText(
             UiLanguage::SimplifiedChinese,
             "folder") == "文件夹",
         "Chinese folder source type should be localized");
     Require(
-        specforge::SourceTypeDisplayText(
+        spectiary::SourceTypeDisplayText(
             UiLanguage::SimplifiedChinese,
             "file") == "文件",
         "Chinese file source type should be localized");
     Require(
-        specforge::SourceTypeDisplayText(
+        spectiary::SourceTypeDisplayText(
             UiLanguage::SimplifiedChinese,
             "fits.gz") == "fits.gz",
         "scientific format names should remain unchanged");
@@ -253,10 +253,10 @@ void TestRepresentativeMappingsAreExact()
 
 void TestShellAndSettingsMappingsAreExact()
 {
-    using specforge::StableUiLabel;
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::StableUiLabel;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     Require(
         UiText(
@@ -293,7 +293,7 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::GeneralPageDescription) ==
-            "设置 SpecForge 的启动方式与本地工作区恢复行为。",
+            "设置 Spectiary 的启动方式与本地工作区恢复行为。",
         "General page should be localized");
     Require(
         UiText(
@@ -377,11 +377,11 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::English,
             UiTextId::CopyrightNotice) ==
-                "Copyright (c) 2026 SpecForge. All rights reserved." &&
+                "Copyright (c) 2026 Spectiary. All rights reserved." &&
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::CopyrightNotice) ==
-                "版权所有 (c) 2026 SpecForge。保留所有权利。",
+                "版权所有 (c) 2026 Spectiary。保留所有权利。",
         "pre-open-source ownership notice should be localized");
     Require(
         UiText(
@@ -397,7 +397,7 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::LocalStateWarningTitle) ==
-            "SpecForge - 本地状态警告",
+            "Spectiary - 本地状态警告",
         "native warning title should be localized");
 
     const std::string english = StableUiLabel(
@@ -418,9 +418,9 @@ void TestShellAndSettingsMappingsAreExact()
 
 void TestAppearanceMappingsAreExact()
 {
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     struct ExpectedText {
         UiTextId text_id;
@@ -502,10 +502,10 @@ void TestAppearanceMappingsAreExact()
 
 void TestSourceInspectionMappingsAreExact()
 {
-    using specforge::StableUiLabel;
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::StableUiLabel;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     struct ExpectedText {
         UiTextId text_id;
@@ -517,12 +517,12 @@ void TestSourceInspectionMappingsAreExact()
         ExpectedText{UiTextId::AddFolder, "Add folder...", "添加文件夹…"},
         ExpectedText{
             UiTextId::OpenSourceInNewInstance,
-            "Open in New SpecForge Instance",
-            "在新 SpecForge 实例打开"},
+            "Open in New Spectiary Instance",
+            "在新 Spectiary 实例打开"},
         ExpectedText{
             UiTextId::OpenSourceInNewInstanceFailed,
-            "Could not open the source in a new SpecForge instance.",
-            "无法在新的 SpecForge 实例中打开源。"},
+            "Could not open the source in a new Spectiary instance.",
+            "无法在新的 Spectiary 实例中打开源。"},
         ExpectedText{UiTextId::SourceSingular, "source", "个源"},
         ExpectedText{UiTextId::SourcesPlural, "sources", "个源"},
         ExpectedText{
@@ -710,17 +710,17 @@ void TestSourceInspectionMappingsAreExact()
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::RawSpectrum,
-            "SpecForgeRawSpectrum") ==
-            "原始曲线###SpecForgeRawSpectrum",
+            "RawSpectrum") ==
+            "原始曲线###RawSpectrum",
         "localized plot series should retain stable IDs");
 }
 
 void TestSampleWorkflowMappingsAreExact()
 {
-    using specforge::StableUiLabel;
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::StableUiLabel;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     struct ExpectedText {
         UiTextId text_id;
@@ -751,12 +751,12 @@ void TestSampleWorkflowMappingsAreExact()
             "无法保存标注输出。"},
         ExpectedText{
             UiTextId::LabelingEditLeaseUnavailable,
-            "This labeling target is already being edited by another SpecForge instance.",
-            "此标注目标正在由另一个 SpecForge 实例编辑。"},
+            "This labeling target is already being edited by another Spectiary instance.",
+            "此标注目标正在由另一个 Spectiary 实例编辑。"},
         ExpectedText{
             UiTextId::LabelingEditLeaseFailed,
-            "SpecForge could not secure this labeling target for editing.",
-            "SpecForge 无法取得此标注目标的编辑租约。"},
+            "Spectiary could not secure this labeling target for editing.",
+            "Spectiary 无法取得此标注目标的编辑租约。"},
         ExpectedText{
             UiTextId::LabelingEditTargetChanged,
             "This labeling task changed on disk and could not be activated from the stale view.",
@@ -767,8 +767,8 @@ void TestSampleWorkflowMappingsAreExact()
             "无法发布并重新打开迁移后的 ASDF 文档。旧所有者仍保持活动状态。"},
         ExpectedText{
             UiTextId::LabelingMigrationOwnerSwitchFailed,
-            "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
-            "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"},
+            "The ASDF document was created, but Spectiary could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
+            "ASDF 文档已创建，但 Spectiary 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"},
         ExpectedText{
             UiTextId::LabelValuesExportInvalidPath,
             "Choose a file with the extension required by the selected label export format.",
@@ -1047,10 +1047,10 @@ void TestSampleWorkflowMappingsAreExact()
 
 void TestSpectralLineMappingsAreExact()
 {
-    using specforge::StableUiLabel;
-    using specforge::UiLanguage;
-    using specforge::UiText;
-    using specforge::UiTextId;
+    using spectiary::StableUiLabel;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
+    using spectiary::UiTextId;
 
     struct ExpectedText {
         UiTextId text_id;
@@ -1271,11 +1271,11 @@ void TestSpectralLineMappingsAreExact()
 
 void TestGeneratedSpectralLineNamesUseExplicitMetadata()
 {
-    using specforge::GeneratedNameMetadata;
-    using specforge::GeneratedNameSource;
-    using specforge::LocalizedSpectralLineName;
-    using specforge::ResolveSpectralLineRenameSubmission;
-    using specforge::UiLanguage;
+    using spectiary::GeneratedNameMetadata;
+    using spectiary::GeneratedNameSource;
+    using spectiary::LocalizedSpectralLineName;
+    using spectiary::ResolveSpectralLineRenameSubmission;
+    using spectiary::UiLanguage;
 
     GeneratedNameMetadata default_view;
     default_view.source =
@@ -1404,18 +1404,18 @@ void TestGeneratedSpectralLineNamesUseExplicitMetadata()
 void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
 {
     const std::string english =
-        specforge::SpectralLineCatalogOptionLabel(
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::
+        spectiary::SpectralLineCatalogOptionLabel(
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::
                     PublicSpectralLineCatalog),
             "public-spectral-lines.v1");
     const std::string chinese =
-        specforge::SpectralLineCatalogOptionLabel(
-            specforge::UiText(
-                specforge::UiLanguage::
+        spectiary::SpectralLineCatalogOptionLabel(
+            spectiary::UiText(
+                spectiary::UiLanguage::
                     SimplifiedChinese,
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     PublicSpectralLineCatalog),
             "public-spectral-lines.v1");
 
@@ -1429,11 +1429,11 @@ void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
 
 void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
 {
-    using specforge::SampleAnnotationWorkflowRelationship;
-    using specforge::SampleLabelSaveMessageKind;
-    using specforge::SourceCollectionSourceState;
-    using specforge::UiLanguage;
-    using specforge::UiText;
+    using spectiary::SampleAnnotationWorkflowRelationship;
+    using spectiary::SampleLabelSaveMessageKind;
+    using spectiary::SourceCollectionSourceState;
+    using spectiary::UiLanguage;
+    using spectiary::UiText;
 
     Require(
         UiText(
@@ -1482,37 +1482,37 @@ void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
 void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
 {
     Require(
-        specforge::UiText(
-            specforge::UiLanguage::English,
-            specforge::LocalUserStateArea::
+        spectiary::UiText(
+            spectiary::UiLanguage::English,
+            spectiary::LocalUserStateArea::
                 SpectrumViewportState) ==
             "Spectrum viewport state" &&
-        specforge::UiText(
-            specforge::UiLanguage::
+        spectiary::UiText(
+            spectiary::UiLanguage::
                 SimplifiedChinese,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SpectrumViewportState) ==
             "光谱视口状态",
         "spectrum view persistence area should be localized");
-    Require(specforge::UiText(specforge::UiLanguage::English,
-                specforge::LocalUserStateArea::SpectrumPlotPreferences) == "Spectrum plot preferences" &&
-            specforge::UiText(specforge::UiLanguage::SimplifiedChinese,
-                specforge::LocalUserStateArea::SpectrumPlotPreferences) == "光谱曲线偏好",
+    Require(spectiary::UiText(spectiary::UiLanguage::English,
+                spectiary::LocalUserStateArea::SpectrumPlotPreferences) == "Spectrum plot preferences" &&
+            spectiary::UiText(spectiary::UiLanguage::SimplifiedChinese,
+                spectiary::LocalUserStateArea::SpectrumPlotPreferences) == "光谱曲线偏好",
         "plot preference persistence area should be distinct and localized");
-    specforge::LocalUserStateHealthMessage retrying{
+    spectiary::LocalUserStateHealthMessage retrying{
         .area =
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SourceSession,
         .kind =
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     SaveRetrying,
         .diagnostic_detail =
             "CreateFile: access denied",
     };
     const std::string chinese_retrying =
-        specforge::FormatLocalUserStateHealthMessage(
-            specforge::UiLanguage::
+        spectiary::FormatLocalUserStateHealthMessage(
+            spectiary::UiLanguage::
                 SimplifiedChinese,
             retrying);
     Require(
@@ -1527,20 +1527,20 @@ void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
                 std::string::npos,
         "Chinese persistence health must not leak application-authored English wrappers");
 
-    const specforge::LocalUserStateHealthMessage
+    const spectiary::LocalUserStateHealthMessage
         recovered{
             .area =
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleNavigation,
             .kind =
-                specforge::
+                spectiary::
                     LocalUserStateHealthMessageKind::
                         Recovered,
         };
     Require(
-        specforge::
+        spectiary::
                 FormatLocalUserStateHealthMessage(
-                    specforge::UiLanguage::
+                    spectiary::UiLanguage::
                         SimplifiedChinese,
                     recovered) ==
             "样本导航：状态已恢复",
@@ -1550,24 +1550,24 @@ void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
 void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
 {
     const std::array failures{
-        specforge::SourceCollectionLoadFailure{
+        spectiary::SourceCollectionLoadFailure{
             .source_path =
                 std::filesystem::path{
                     L"C:\\data\\sample.npy"},
             .error = {
                 .kind =
-                    specforge::
+                    spectiary::
                         SourceCollectionLoadErrorKind::
                             PreparedReuseTargetUnavailable,
             },
         },
-        specforge::SourceCollectionLoadFailure{
+        spectiary::SourceCollectionLoadFailure{
             .source_path =
                 std::filesystem::path{
                     L"C:\\data\\broken.csv"},
             .error = {
                 .kind =
-                    specforge::
+                    spectiary::
                         SourceCollectionLoadErrorKind::
                             BackgroundLoadingFailed,
                 .diagnostic_detail =
@@ -1576,9 +1576,9 @@ void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
         },
     };
     const std::string chinese =
-        specforge::
+        spectiary::
             FormatSourceCollectionLoadFailures(
-                specforge::UiLanguage::
+                spectiary::UiLanguage::
                     SimplifiedChinese,
                 failures);
     Require(
@@ -1600,18 +1600,18 @@ void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
 void TestInvalidLanguageFallsBackToEnglish()
 {
     constexpr std::array kInvalidLanguages = {
-        specforge::UiLanguage::Count,
-        static_cast<specforge::UiLanguage>(-1),
+        spectiary::UiLanguage::Count,
+        static_cast<spectiary::UiLanguage>(-1),
     };
     constexpr std::size_t kTextCount =
-        static_cast<std::size_t>(specforge::UiTextId::Count);
+        static_cast<std::size_t>(spectiary::UiTextId::Count);
 
-    for (const specforge::UiLanguage invalid_language : kInvalidLanguages) {
+    for (const spectiary::UiLanguage invalid_language : kInvalidLanguages) {
         for (std::size_t index = 0; index < kTextCount; ++index) {
-            const auto text_id = static_cast<specforge::UiTextId>(index);
+            const auto text_id = static_cast<spectiary::UiTextId>(index);
             Require(
-                specforge::UiText(invalid_language, text_id) ==
-                    specforge::UiText(specforge::UiLanguage::English, text_id),
+                spectiary::UiText(invalid_language, text_id) ==
+                    spectiary::UiText(spectiary::UiLanguage::English, text_id),
                 "invalid language should fall back to English");
         }
     }
@@ -1620,12 +1620,12 @@ void TestInvalidLanguageFallsBackToEnglish()
 void TestCountSentinelIsNotDisplayable()
 {
     Require(
-        specforge::UiText(specforge::UiLanguage::English, specforge::UiTextId::Count).empty(),
+        spectiary::UiText(spectiary::UiLanguage::English, spectiary::UiTextId::Count).empty(),
         "count sentinel should not be displayable");
     Require(
-        specforge::UiText(
-            specforge::UiLanguage::SimplifiedChinese,
-            specforge::UiTextId::Count)
+        spectiary::UiText(
+            spectiary::UiLanguage::SimplifiedChinese,
+            spectiary::UiTextId::Count)
             .empty(),
         "count sentinel should not be displayable in Chinese");
 }
@@ -1633,27 +1633,27 @@ void TestCountSentinelIsNotDisplayable()
 void TestLanguageSettingValuesAreStable()
 {
     Require(
-        specforge::UiLanguageSettingValue(
-            specforge::UiLanguage::English) == "en" &&
-            specforge::UiLanguageSettingValue(
-                specforge::UiLanguage::SimplifiedChinese) ==
+        spectiary::UiLanguageSettingValue(
+            spectiary::UiLanguage::English) == "en" &&
+            spectiary::UiLanguageSettingValue(
+                spectiary::UiLanguage::SimplifiedChinese) ==
                 "zh-Hans" &&
-            specforge::UiLanguageSettingValue(
-                specforge::UiLanguage::Count)
+            spectiary::UiLanguageSettingValue(
+                spectiary::UiLanguage::Count)
                 .empty(),
         "language identities should retain their stable setting values");
     Require(
-        specforge::ParseUiLanguageSettingValue("en") ==
-                specforge::UiLanguage::English &&
-            specforge::ParseUiLanguageSettingValue("zh-Hans") ==
-                specforge::UiLanguage::SimplifiedChinese &&
-            !specforge::ParseUiLanguageSettingValue("fr"),
+        spectiary::ParseUiLanguageSettingValue("en") ==
+                spectiary::UiLanguage::English &&
+            spectiary::ParseUiLanguageSettingValue("zh-Hans") ==
+                spectiary::UiLanguage::SimplifiedChinese &&
+            !spectiary::ParseUiLanguageSettingValue("fr"),
         "stable language setting values should parse without aliases");
 }
 
 void TestLabelingIssueDescriptorIsTheSingleMapping()
 {
-    using Issue = specforge::SampleLabelingOperationResult::Issue;
+    using Issue = spectiary::SampleLabelingOperationResult::Issue;
     constexpr std::array kIssues = {
         Issue::EditLeaseUnavailable,
         Issue::EditLeaseFailed,
@@ -1666,25 +1666,25 @@ void TestLabelingIssueDescriptorIsTheSingleMapping()
         Issue::LabelValuesExportFailed,
         Issue::UserFilePathRejected};
     for (const Issue issue : kIssues) {
-        const specforge::SampleLabelingIssueTextDescriptor descriptor =
-            specforge::SampleLabelingIssueTextFor(issue);
+        const spectiary::SampleLabelingIssueTextDescriptor descriptor =
+            spectiary::SampleLabelingIssueTextFor(issue);
         Require(
-            descriptor.text_id != specforge::UiTextId::Count &&
-                specforge::LabelingIssueTextId(
+            descriptor.text_id != spectiary::UiTextId::Count &&
+                spectiary::LabelingIssueTextId(
                     static_cast<int>(issue)) == descriptor.text_id,
             "labeling issue should resolve through the shared text descriptor");
         Require(
-            specforge::UiText(
-                specforge::UiLanguage::English,
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
                 descriptor.text_id) == descriptor.english &&
-                specforge::UiText(
-                    specforge::UiLanguage::SimplifiedChinese,
+                spectiary::UiText(
+                    spectiary::UiLanguage::SimplifiedChinese,
                     descriptor.text_id) == descriptor.simplified_chinese,
             "catalog entries should come from the shared labeling issue descriptor");
     }
     Require(
-        specforge::SampleLabelingIssueTextFor(Issue::None).text_id ==
-            specforge::UiTextId::Count,
+        spectiary::SampleLabelingIssueTextFor(Issue::None).text_id ==
+            spectiary::UiTextId::Count,
         "no labeling issue should not produce a display message");
 }
 

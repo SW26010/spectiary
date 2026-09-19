@@ -33,14 +33,14 @@
 
 namespace {
 
-using specforge::SpectrumAxisQuantity;
-using specforge::SpectrumDiagnosticCode;
-using specforge::SpectrumDiagnosticSeverity;
-using specforge::SpectrumSnapshotHandle;
-using specforge::SpectrumValueQuantity;
-using specforge::SampleAnnotationKind;
-using specforge::tests::CancellationStageProbe;
-using specforge::tests::SourceStage;
+using spectiary::SpectrumAxisQuantity;
+using spectiary::SpectrumDiagnosticCode;
+using spectiary::SpectrumDiagnosticSeverity;
+using spectiary::SpectrumSnapshotHandle;
+using spectiary::SpectrumValueQuantity;
+using spectiary::SampleAnnotationKind;
+using spectiary::tests::CancellationStageProbe;
+using spectiary::tests::SourceStage;
 
 constexpr double kSpeedOfLightKmPerSecond = 299792.458;
 
@@ -864,7 +864,7 @@ void TestReadsNpyV1V2V3Headers()
     for (const unsigned char major_version : std::array<unsigned char, 3>{1, 2, 3}) {
         const std::string bytes = NpyHeaderBytes(major_version, header_text);
         std::istringstream stream(bytes, std::ios::in | std::ios::binary);
-        const specforge::NpyHeader header = specforge::ReadNpyHeader(stream);
+        const spectiary::NpyHeader header = spectiary::ReadNpyHeader(stream);
 
         Require(header.descr == "<f8", "NPY header dtype should be preserved");
         Require(header.shape == std::vector<std::size_t>({2, 3}), "NPY header shape should be preserved");
@@ -885,11 +885,11 @@ void TestRejectsOversizedNpyV2V3Headers()
 
         bool rejected = false;
         try {
-            static_cast<void>(specforge::ReadNpyHeader(stream));
-        } catch (const specforge::NpyArrayError& error) {
+            static_cast<void>(spectiary::ReadNpyHeader(stream));
+        } catch (const spectiary::NpyArrayError& error) {
             rejected = true;
             Require(
-                error.kind() == specforge::NpyArrayErrorKind::InvalidShape,
+                error.kind() == spectiary::NpyArrayErrorKind::InvalidShape,
                 "oversized NPY header should use the invalid-shape error path");
             Require(
                 std::string_view(error.what()).find("1 MiB limit") != std::string_view::npos,
@@ -908,11 +908,11 @@ void TestRejectsNpyHeaderLongerThanRemainingInput()
 
         bool rejected = false;
         try {
-            static_cast<void>(specforge::ReadNpyHeader(stream));
-        } catch (const specforge::NpyArrayError& error) {
+            static_cast<void>(spectiary::ReadNpyHeader(stream));
+        } catch (const spectiary::NpyArrayError& error) {
             rejected = true;
             Require(
-                error.kind() == specforge::NpyArrayErrorKind::InvalidShape,
+                error.kind() == spectiary::NpyArrayErrorKind::InvalidShape,
                 "truncated NPY header should use the invalid-shape error path");
             Require(
                 std::string_view(error.what()) == "NPY header is truncated",
@@ -932,7 +932,7 @@ SpectrumDiagnosticCode FirstDiagnosticCode(const SpectrumSnapshotHandle& snapsho
 bool HasDiagnosticCode(const SpectrumSnapshotHandle& snapshot, SpectrumDiagnosticCode code)
 {
     Require(snapshot != nullptr, "expected a snapshot");
-    for (const specforge::SpectrumDiagnostic& diagnostic : snapshot->diagnostics) {
+    for (const spectiary::SpectrumDiagnostic& diagnostic : snapshot->diagnostics) {
         if (diagnostic.code == code) {
             return true;
         }
@@ -943,7 +943,7 @@ bool HasDiagnosticCode(const SpectrumSnapshotHandle& snapshot, SpectrumDiagnosti
 std::string_view MetadataValue(const SpectrumSnapshotHandle& snapshot, std::string_view key)
 {
     Require(snapshot != nullptr, "expected a snapshot");
-    for (const specforge::SpectrumMetadataEntry& entry : snapshot->source.metadata) {
+    for (const spectiary::SpectrumMetadataEntry& entry : snapshot->source.metadata) {
         if (entry.key == key) {
             return entry.value;
         }
@@ -952,10 +952,10 @@ std::string_view MetadataValue(const SpectrumSnapshotHandle& snapshot, std::stri
 }
 
 std::string_view DiagnosticMetadataValue(
-    const specforge::SpectrumDiagnostic& diagnostic,
+    const spectiary::SpectrumDiagnostic& diagnostic,
     std::string_view key)
 {
-    for (const specforge::SpectrumMetadataEntry& entry : diagnostic.metadata) {
+    for (const spectiary::SpectrumMetadataEntry& entry : diagnostic.metadata) {
         if (entry.key == key) {
             return entry.value;
         }
@@ -976,19 +976,19 @@ bool NearlyEqual(double left, double right, double tolerance)
 }
 
 void RequireEquivalentMetadataEntries(
-    const std::vector<specforge::SpectrumMetadataEntry>& expected,
-    const std::vector<specforge::SpectrumMetadataEntry>& actual,
+    const std::vector<spectiary::SpectrumMetadataEntry>& expected,
+    const std::vector<spectiary::SpectrumMetadataEntry>& actual,
     std::string_view excluded_key,
     std::string_view context)
 {
-    std::vector<const specforge::SpectrumMetadataEntry*> expected_entries;
-    std::vector<const specforge::SpectrumMetadataEntry*> actual_entries;
-    for (const specforge::SpectrumMetadataEntry& entry : expected) {
+    std::vector<const spectiary::SpectrumMetadataEntry*> expected_entries;
+    std::vector<const spectiary::SpectrumMetadataEntry*> actual_entries;
+    for (const spectiary::SpectrumMetadataEntry& entry : expected) {
         if (entry.key != excluded_key) {
             expected_entries.push_back(&entry);
         }
     }
-    for (const specforge::SpectrumMetadataEntry& entry : actual) {
+    for (const spectiary::SpectrumMetadataEntry& entry : actual) {
         if (entry.key != excluded_key) {
             actual_entries.push_back(&entry);
         }
@@ -1153,8 +1153,8 @@ std::optional<std::string> EnvironmentVariable(std::string_view name)
 
 void TestLoadsSelectedNpyRow()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_row_X.npy";
-    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "specforge_loader_row_name.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_row_X.npy";
+    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "spectiary_loader_row_name.npy";
     WriteNpy(
         path,
         "<f8",
@@ -1169,7 +1169,7 @@ void TestLoadsSelectedNpyRow()
         }));
     WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"alpha", "beta"}, 5));
 
-    const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle first = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(first->capabilities.can_plot_current_spectrum, "first row should be plottable");
     Require(first->collection.spectrum_count == 2, "row count should be preserved");
     Require(first->collection.current_index == 0, "first row index should be selected");
@@ -1184,7 +1184,7 @@ void TestLoadsSelectedNpyRow()
         HasDiagnosticCode(first, SpectrumDiagnosticCode::NonFiniteValuesFiltered),
         "filtered row should report non-finite filtering");
 
-    const SpectrumSnapshotHandle second = specforge::LoadSpectrumSnapshotFromPath(path, 1);
+    const SpectrumSnapshotHandle second = spectiary::LoadSpectrumSnapshotFromPath(path, 1);
     Require(second->capabilities.can_plot_current_spectrum, "second row should be plottable");
     Require(second->collection.current_index == 1, "second row index should be selected");
     Require(second->collection.can_move_previous, "second row should allow previous navigation");
@@ -1197,11 +1197,11 @@ void TestAssignsNpyAxisLabels()
     constexpr std::size_t kWavelengthGridColumns = 3909;
     const std::filesystem::path directory =
         std::filesystem::temp_directory_path() /
-        ("specforge_loader_axis_labels_" +
+        ("spectiary_loader_axis_labels_" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Require(std::filesystem::create_directory(directory), "could not create NPY axis-label fixture directory");
     const std::filesystem::path wavelength_path =
-        directory / "specforge_loader_axis_X.npy";
+        directory / "spectiary_loader_axis_X.npy";
     WriteNpy(
         wavelength_path,
         "<f8",
@@ -1209,7 +1209,7 @@ void TestAssignsNpyAxisLabels()
         BytesFor(std::vector<double>(kWavelengthGridColumns, 1.0)));
 
     const SpectrumSnapshotHandle wavelength =
-        specforge::LoadSpectrumSnapshotFromPath(wavelength_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(wavelength_path, 0);
     Require(wavelength->capabilities.can_plot_current_spectrum, "3909-column NPY should be plottable");
     Require(
         wavelength->axis.x_label == "Wavelength (Å)",
@@ -1217,25 +1217,25 @@ void TestAssignsNpyAxisLabels()
     Require(wavelength->axis.y_label == "Value", "X.npy should display the neutral value label");
 
     const std::array<std::filesystem::path, 3> flux_paths = {
-        directory / "specforge_loader_axis_flux.npy",
-        directory / "specforge_loader_axis-flux.npy",
+        directory / "spectiary_loader_axis_flux.npy",
+        directory / "spectiary_loader_axis-flux.npy",
         directory / "flux.npy",
     };
     for (const std::filesystem::path& flux_path : flux_paths) {
         WriteNpy(flux_path, "<f8", {1, 3}, BytesFor<double>({1.0, 2.0, 3.0}));
 
         const SpectrumSnapshotHandle flux =
-            specforge::LoadSpectrumSnapshotFromPath(flux_path, 0);
+            spectiary::LoadSpectrumSnapshotFromPath(flux_path, 0);
         Require(flux->axis.x_label == "Pixel Index", "short flux NPY should display pixel index");
         Require(flux->axis.y_label == "Flux", "recognized flux NPY name should display flux");
     }
 
     const std::filesystem::path value_path =
-        directory / "specforge_loader_axis.npy";
+        directory / "spectiary_loader_axis.npy";
     WriteNpy(value_path, "<f8", {1, 3}, BytesFor<double>({1.0, 2.0, 3.0}));
 
     const SpectrumSnapshotHandle value =
-        specforge::LoadSpectrumSnapshotFromPath(value_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(value_path, 0);
     Require(
         value->axis.y_quantity == SpectrumValueQuantity::Unknown,
         "plain NPY should not claim flux or normalization semantics");
@@ -1247,23 +1247,23 @@ void TestAssignsNpyAxisLabels()
 
 void TestLoadsNpySampleAnnotationContext()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_annotation_context.npy";
-    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "specforge_annotation_context_name.npy";
-    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "specforge_annotation_context_y.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_annotation_context.npy";
+    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "spectiary_annotation_context_name.npy";
+    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "spectiary_annotation_context_y.npy";
     WriteNpy(path, "<f8", {2, 3}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
     WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"alpha", "beta"}, 5));
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({7, -1}));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 1);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 1);
     Require(snapshot->current_spectrum.name == "beta", "plain NPY source should use same-prefix sample name");
-    const specforge::SourceCollectionIdentity identity = specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity = spectiary::BuildSourceCollectionIdentity(*snapshot);
     Require(
         identity.source_name == PathToUtf8(path.filename()),
         "sample collection identity should use the source filename as its display name");
     Require(
         identity.id.find(PathToUtf8(path.parent_path())) == std::string::npos,
         "sample collection identity id should not include the absolute source directory");
-    const specforge::SourceCollectionManifest context = specforge::LoadSourceCollectionManifest(*snapshot);
+    const spectiary::SourceCollectionManifest context = spectiary::LoadSourceCollectionManifest(*snapshot);
     Require(context.sample_names.size() == 2, "sample context should load companion sample names");
     Require(context.sample_names[0] == "alpha", "first sample name should be decoded");
     Require(context.sample_names[1] == "beta", "second sample name should be decoded");
@@ -1271,12 +1271,12 @@ void TestLoadsNpySampleAnnotationContext()
     Require(context.annotations[0].kind == SampleAnnotationKind::CategoricalInteger, "integer y should be categorical");
     Require(context.annotations[0].values.size() == 2, "annotation should carry one value per source sample");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             context.annotations[0],
             context.annotations[0].values[0]) == "7",
         "integer annotation should display raw code");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             context.annotations[0],
             context.annotations[0].values[1]) == "-1",
         "integer annotation should display unlabeled sentinel raw");
@@ -1284,41 +1284,41 @@ void TestLoadsNpySampleAnnotationContext()
 
 void TestLoadsReadOnlyAnnotationDtypes()
 {
-    const std::filesystem::path float_path = std::filesystem::temp_directory_path() / "specforge_annotation_float_X.npy";
+    const std::filesystem::path float_path = std::filesystem::temp_directory_path() / "spectiary_annotation_float_X.npy";
     const std::filesystem::path float_annotation_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_float_y.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_float_y.npy";
     WriteNpy(float_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(float_annotation_path, "<f4", {2}, BytesFor<float>({1.25F, -2.5F}));
 
-    const SpectrumSnapshotHandle float_snapshot = specforge::LoadSpectrumSnapshotFromPath(float_path, 0);
-    const specforge::SourceCollectionManifest float_context = specforge::LoadSourceCollectionManifest(*float_snapshot);
+    const SpectrumSnapshotHandle float_snapshot = spectiary::LoadSpectrumSnapshotFromPath(float_path, 0);
+    const spectiary::SourceCollectionManifest float_context = spectiary::LoadSourceCollectionManifest(*float_snapshot);
     Require(float_context.annotations.size() == 1, "float y annotation should be loaded");
     Require(
         float_context.annotations[0].kind == SampleAnnotationKind::ContinuousFloat,
         "floating-point y should be continuous");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             float_context.annotations[0],
             float_context.annotations[0].values[1]) == "-2.5",
         "float annotation should display raw value");
 
-    const std::filesystem::path string_path = std::filesystem::temp_directory_path() / "specforge_annotation_string_X.npy";
+    const std::filesystem::path string_path = std::filesystem::temp_directory_path() / "spectiary_annotation_string_X.npy";
     const std::filesystem::path string_annotation_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_string_y.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_string_y.npy";
     WriteNpy(string_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(string_annotation_path, "<U4", {2}, UnicodeNpyBytesFor({"good", "bad"}, 4));
 
-    const SpectrumSnapshotHandle string_snapshot = specforge::LoadSpectrumSnapshotFromPath(string_path, 0);
-    const specforge::SourceCollectionManifest string_context = specforge::LoadSourceCollectionManifest(*string_snapshot);
+    const SpectrumSnapshotHandle string_snapshot = spectiary::LoadSpectrumSnapshotFromPath(string_path, 0);
+    const spectiary::SourceCollectionManifest string_context = spectiary::LoadSourceCollectionManifest(*string_snapshot);
     Require(string_context.annotations.size() == 1, "string y annotation should be loaded");
     Require(string_context.annotations[0].kind == SampleAnnotationKind::Text, "string y should stay read-only text");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             string_context.annotations[0],
             string_context.annotations[0].values[0]) == "good",
         "string annotation should be decoded");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             string_context.annotations[0],
             string_context.annotations[0].values[1]) == "bad",
         "string annotation should be decoded");
@@ -1327,11 +1327,11 @@ void TestLoadsReadOnlyAnnotationDtypes()
 void TestAnnotationAdapterPreservesWideNumericSemantics()
 {
     const std::filesystem::path signed_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_i8.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_i8.npy";
     const std::filesystem::path unsigned_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_u8.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_u8.npy";
     const std::filesystem::path floating_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_f8.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_f8.npy";
 
     WriteNpy(
         signed_path,
@@ -1352,9 +1352,9 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     const double adjacent = std::nextafter(1.0, 2.0);
     WriteNpy(floating_path, "<f8", {2}, BytesFor<double>({1.0, adjacent}));
 
-    const specforge::test_support::LegacyFixtureIo adapter;
+    const spectiary::test_support::LegacyFixtureIo adapter;
     std::string error;
-    const std::optional<specforge::SampleAnnotationResult> signed_annotation =
+    const std::optional<spectiary::SampleAnnotationResult> signed_annotation =
         adapter.Load(signed_path, 2, &error);
     Require(signed_annotation.has_value(), error.empty() ? "int64 annotation should load" : error);
     Require(
@@ -1362,7 +1362,7 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
             std::numeric_limits<std::int64_t>::max(),
         "int64 annotation should preserve values above exact-double range");
 
-    const std::optional<specforge::SampleAnnotationResult> unsigned_annotation =
+    const std::optional<spectiary::SampleAnnotationResult> unsigned_annotation =
         adapter.Load(unsigned_path, 2, &error);
     Require(unsigned_annotation.has_value(), error.empty() ? "uint64 annotation should load" : error);
     Require(
@@ -1370,17 +1370,17 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
             std::numeric_limits<std::uint64_t>::max(),
         "uint64 annotation should preserve its full range");
 
-    const std::optional<specforge::SampleAnnotationResult> floating_annotation =
+    const std::optional<spectiary::SampleAnnotationResult> floating_annotation =
         adapter.Load(floating_path, 2, &error);
     Require(floating_annotation.has_value(), error.empty() ? "float64 annotation should load" : error);
     Require(
         std::get<double>(floating_annotation->values[1].semantic) == adjacent,
         "float64 annotation should retain the original adjacent value");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             *floating_annotation,
             floating_annotation->values[0]) !=
-            specforge::FormatSampleAnnotationValue(
+            spectiary::FormatSampleAnnotationValue(
                 *floating_annotation,
                 floating_annotation->values[1]),
         "adjacent float64 values should project to distinct round-trip text");
@@ -1391,12 +1391,12 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     std::filesystem::remove(floating_path, cleanup_error);
 }
 
-specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+spectiary::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
 {
     const auto timestamp =
-        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+        spectiary::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
     Require(timestamp.has_value(), "test canonical timestamp should parse");
-    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    spectiary::SampleLabelingTaskCanonicalMetadata metadata;
     metadata.created_at = *timestamp;
     metadata.modified_at = *timestamp;
     metadata.origin.kind = "manual";
@@ -1411,11 +1411,11 @@ void TestPreservesNonCanonicalNpySampleNamesForNavigation()
                                          names) {
         const std::filesystem::path path =
             std::filesystem::temp_directory_path() /
-            ("specforge_invalid_names_" + std::string(suffix) +
+            ("spectiary_invalid_names_" + std::string(suffix) +
              ".npy");
         const std::filesystem::path name_path =
             std::filesystem::temp_directory_path() /
-            ("specforge_invalid_names_" + std::string(suffix) +
+            ("spectiary_invalid_names_" + std::string(suffix) +
              "_name.npy");
         WriteNpy(
             path,
@@ -1429,9 +1429,9 @@ void TestPreservesNonCanonicalNpySampleNamesForNavigation()
             UnicodeNpyBytesFor(names, 8));
 
         SpectrumSnapshotHandle snapshot =
-            specforge::LoadSpectrumSnapshotFromPath(path, 0);
-        const specforge::SourceCollectionManifest manifest =
-            specforge::LoadSourceCollectionManifest(*snapshot);
+            spectiary::LoadSpectrumSnapshotFromPath(path, 0);
+        const spectiary::SourceCollectionManifest manifest =
+            spectiary::LoadSourceCollectionManifest(*snapshot);
         std::vector<std::string> expected_names;
         expected_names.reserve(names.size());
         for (const std::string_view name : names) {
@@ -1461,7 +1461,7 @@ void TestPreservesNonCanonicalNpySampleNamesForNavigation()
             values_preserved &&
                 manifest.diagnostics.size() == 1 &&
                 manifest.diagnostics.front().kind ==
-                    specforge::SourceCollectionManifestDiagnosticKind::
+                    spectiary::SourceCollectionManifestDiagnosticKind::
                         SampleNamesIgnored &&
                 manifest.diagnostics.front().path == name_path &&
                 manifest.diagnostics.front().detail.find("unique") !=
@@ -1476,16 +1476,16 @@ void TestPreservesNonCanonicalNpySampleNamesForNavigation()
     verify_preserved("duplicate", {"alpha", "alpha"});
 }
 
-specforge::SampleLabelingDocument MakeAnnotationAsdfDocument()
+spectiary::SampleLabelingDocument MakeAnnotationAsdfDocument()
 {
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = "source-base-v1";
     document.source.kind = "npy";
     document.source.name = "source_X.npy";
     document.source.fingerprint = "source-fingerprint-v1";
     document.source.sample_count = 3;
     document.source.roster.identity_kind =
-        std::string{specforge::kSampleLabelingDocumentExplicitNamesRoster};
+        std::string{spectiary::kSampleLabelingDocumentExplicitNamesRoster};
     document.source.roster.sample_names = {
         "sample-a",
         "sample-b",
@@ -1504,12 +1504,12 @@ specforge::SampleLabelingDocument MakeAnnotationAsdfDocument()
 
 void WriteAnnotationAsdf(
     const std::filesystem::path& path,
-    const specforge::SampleLabelingDocument& document)
+    const spectiary::SampleLabelingDocument& document)
 {
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     Require(stream.good(), "ASDF annotation fixture should open");
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(stream, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(stream, document);
     Require(
         write.succeeded(),
         write.error.message.empty()
@@ -1523,15 +1523,15 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
 {
     const std::filesystem::path explicit_path =
         std::filesystem::temp_directory_path() /
-        "specforge_annotation_adapter_explicit.asdf";
+        "spectiary_annotation_adapter_explicit.asdf";
     const std::filesystem::path source_index_path =
         std::filesystem::temp_directory_path() /
-        "specforge_annotation_adapter_source_index.asdf";
+        "spectiary_annotation_adapter_source_index.asdf";
     const std::filesystem::path npy_path =
         std::filesystem::temp_directory_path() /
-        "specforge_annotation_adapter_legacy.npy";
+        "spectiary_annotation_adapter_legacy.npy";
 
-    const specforge::SampleLabelingDocument explicit_document =
+    const spectiary::SampleLabelingDocument explicit_document =
         MakeAnnotationAsdfDocument();
     WriteAnnotationAsdf(explicit_path, explicit_document);
 
@@ -1540,7 +1540,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
         "sample-b",
         "sample-c",
     };
-    const specforge::SampleAnnotationSourceCompatibility compatible_source{
+    const spectiary::SampleAnnotationSourceCompatibility compatible_source{
         .base_identity = "source-base-v1",
         .source_name = "source_X.npy",
         .source_fingerprint = "source-fingerprint-v1",
@@ -1548,9 +1548,9 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
         .sample_names = sample_names,
     };
 
-    const specforge::test_support::LegacyFixtureIo adapter;
+    const spectiary::test_support::LegacyFixtureIo adapter;
     std::string error;
-    const std::optional<specforge::SampleAnnotationResult> loaded =
+    const std::optional<spectiary::SampleAnnotationResult> loaded =
         adapter.LoadForSource(explicit_path, compatible_source, &error);
     Require(
         loaded.has_value(),
@@ -1560,13 +1560,13 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             loaded->dtype_name == "int32" && loaded->values.size() == 3,
         "ASDF annotation should project its int32 values");
     Require(
-        specforge::SampleAnnotationValueAsInt(loaded->values[0]) == -1 &&
-            specforge::SampleAnnotationValueAsInt(loaded->values[1]) == 2 &&
-            specforge::SampleAnnotationValueAsInt(loaded->values[2]) == 7,
+        spectiary::SampleAnnotationValueAsInt(loaded->values[0]) == -1 &&
+            spectiary::SampleAnnotationValueAsInt(loaded->values[1]) == 2 &&
+            spectiary::SampleAnnotationValueAsInt(loaded->values[2]) == 7,
         "ASDF annotation values should be lossless");
     Require(
         loaded->relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     ExternalLabelResult &&
             !loaded->label_metadata.has_value(),
         "ASDF annotation should remain distinct from legacy sidecar metadata");
@@ -1588,10 +1588,10 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
                 sample_names,
         "ASDF canonical task, labels, source, roster, and labeling display name should remain available");
     Require(
-        specforge::FormatSampleAnnotationValue(
+        spectiary::FormatSampleAnnotationValue(
             *loaded,
             loaded->values[2]) == "rejected (7)" &&
-            specforge::FormatSampleAnnotationValue(
+            spectiary::FormatSampleAnnotationValue(
                 *loaded,
                 loaded->values[0]) == "Unlabeled (-1)",
         "ASDF canonical labels should project through annotation display semantics");
@@ -1607,17 +1607,17 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
         "sample-a",
         "sample-c",
     };
-    const specforge::SampleAnnotationSourceCompatibility reordered_source{
+    const spectiary::SampleAnnotationSourceCompatibility reordered_source{
         .base_identity = "source-base-v1",
         .source_name = "source_X.npy",
         .source_fingerprint = "source-fingerprint-v1",
         .sample_count = 3,
         .sample_names = reordered_names,
     };
-    specforge::SourceCollectionManifest rejected_manifest;
+    spectiary::SourceCollectionManifest rejected_manifest;
     std::string rejection_message;
     Require(
-        !specforge::IngestReadOnlySampleAnnotation(
+        !spectiary::IngestReadOnlySampleAnnotation(
             rejected_manifest,
             explicit_path,
             reordered_source,
@@ -1630,7 +1630,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
                 std::string::npos,
         "roster rejection should remain a structured annotation diagnostic");
 
-    const specforge::SampleAnnotationSourceCompatibility wrong_identity{
+    const spectiary::SampleAnnotationSourceCompatibility wrong_identity{
         .base_identity = "different-source-base",
         .source_name = "source_X.npy",
         .source_fingerprint = "source-fingerprint-v1",
@@ -1647,14 +1647,14 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             error.find("source identity") != std::string::npos,
         "ASDF base source identity mismatches must be rejected");
 
-    specforge::SampleLabelingDocument source_index_document =
+    spectiary::SampleLabelingDocument source_index_document =
         explicit_document;
     source_index_document.source.roster.identity_kind =
-        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+        std::string{spectiary::kSampleLabelingDocumentSourceIndexRoster};
     source_index_document.source.roster.sample_names.clear();
     WriteAnnotationAsdf(source_index_path, source_index_document);
     error.clear();
-    const std::optional<specforge::SampleAnnotationResult>
+    const std::optional<spectiary::SampleAnnotationResult>
         loaded_source_index = adapter.LoadForSource(
             source_index_path,
             compatible_source,
@@ -1664,7 +1664,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             loaded_source_index->labeling_document != nullptr &&
             loaded_source_index->labeling_document->source.roster
                     .identity_kind ==
-                specforge::kSampleLabelingDocumentSourceIndexRoster,
+                spectiary::kSampleLabelingDocumentSourceIndexRoster,
         error.empty()
             ? "source-index ASDF annotation should attach by base identity"
             : error);
@@ -1674,15 +1674,15 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
         "<i4",
         {3},
         BytesFor<std::int32_t>({-1, 2, 7}));
-    specforge::SampleLabelingTask legacy_task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask legacy_task =
+        spectiary::CreateSampleLabelingTask(
             "legacy-task",
             "Legacy task",
             3);
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             legacy_task.label_set,
-            specforge::SampleLabelDefinition{2, "accepted", 'a'}),
+            spectiary::SampleLabelDefinition{2, "accepted", 'a'}),
         "legacy sidecar fixture label should be valid");
     std::string metadata_error;
     Require(
@@ -1695,7 +1695,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             ? "legacy sidecar fixture should save"
             : metadata_error);
     error.clear();
-    const std::optional<specforge::SampleAnnotationResult> legacy_loaded =
+    const std::optional<spectiary::SampleAnnotationResult> legacy_loaded =
         adapter.LoadForSource(npy_path, compatible_source, &error);
     Require(
         legacy_loaded.has_value() &&
@@ -1707,15 +1707,15 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             : error);
 
     Require(
-        specforge::SampleAnnotationArtifactIdentities(
+        spectiary::SampleAnnotationArtifactIdentities(
             explicit_path,
-            specforge::SampleLabelingOutputArtifactFormat::
+            spectiary::SampleLabelingOutputArtifactFormat::
                 CanonicalAsdf,
             false)
                 .stable_path_keys.size() == 1 &&
-            specforge::SampleAnnotationArtifactIdentities(
+            spectiary::SampleAnnotationArtifactIdentities(
                 npy_path,
-                specforge::SampleLabelingOutputArtifactFormat::
+                spectiary::SampleLabelingOutputArtifactFormat::
                     LegacyNpyWithSidecar,
                 false)
                     .stable_path_keys.size() == 2,
@@ -1726,7 +1726,7 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
     std::filesystem::remove(source_index_path, cleanup_error);
     std::filesystem::remove(npy_path, cleanup_error);
     std::filesystem::remove(
-        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(npy_path),
+        spectiary::test_support::LegacyFixtureIo::MetadataPathForResult(npy_path),
         cleanup_error);
 }
 
@@ -1734,15 +1734,15 @@ void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
 {
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        "specforge_cancelable_annotation.asdf";
-    specforge::SampleLabelingDocument document =
+        "spectiary_cancelable_annotation.asdf";
+    spectiary::SampleLabelingDocument document =
         MakeAnnotationAsdfDocument();
     document.source.roster.identity_kind =
-        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+        std::string{spectiary::kSampleLabelingDocumentSourceIndexRoster};
     document.source.roster.sample_names.clear();
     WriteAnnotationAsdf(path, document);
 
-    const specforge::SampleAnnotationSourceCompatibility source{
+    const spectiary::SampleAnnotationSourceCompatibility source{
         .base_identity = document.source.base_identity,
         .source_name = document.source.name,
         .source_fingerprint = document.source.fingerprint,
@@ -1760,7 +1760,7 @@ void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::test_support::LegacyFixtureIo{}
+        (void)spectiary::test_support::LegacyFixtureIo{}
             .LoadForSourceCancelable(
                 path,
                 source,
@@ -1786,13 +1786,13 @@ void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
 void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
 {
     const std::filesystem::path shape_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_bad_shape.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_bad_shape.npy";
     const std::filesystem::path dtype_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_bad_dtype.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_adapter_bad_dtype.npy";
     WriteNpy(shape_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     WriteNpy(dtype_path, "<f8", {2}, BytesFor<double>({1.0, 2.0}));
 
-    const specforge::test_support::LegacyFixtureIo adapter;
+    const spectiary::test_support::LegacyFixtureIo adapter;
     std::string error;
     Require(
         !adapter.LoadLabelResult(shape_path, 3, {}, &error).has_value(),
@@ -1816,20 +1816,20 @@ void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
 
 void TestRejectsMismatchedSampleAnnotationLength()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_annotation_mismatch_X.npy";
-    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "specforge_annotation_mismatch_y.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_annotation_mismatch_X.npy";
+    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "spectiary_annotation_mismatch_y.npy";
     WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
     WriteNpy(annotation_path, "<i4", {1}, BytesFor<std::int32_t>({1}));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
-    const specforge::SourceCollectionManifest context = specforge::LoadSourceCollectionManifest(*snapshot);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
+    const spectiary::SourceCollectionManifest context = spectiary::LoadSourceCollectionManifest(*snapshot);
     Require(context.annotations.empty(), "mismatched annotation length must not attach to the source collection");
     Require(
         context.diagnostics.size() == 1,
         "mismatched annotation length should produce one structured diagnostic");
     Require(
         context.diagnostics.front().kind ==
-                specforge::
+                spectiary::
                     SourceCollectionManifestDiagnosticKind::
                         AnnotationIgnored &&
             context.diagnostics.front().path ==
@@ -1841,10 +1841,10 @@ void TestRejectsMismatchedSampleAnnotationLength()
 
 void TestRejectsAuxiliaryNpyArrays()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_label.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_label.npy";
     WriteNpy(path, "<f8", {1, 2}, BytesFor<double>({1.0, 2.0}));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "auxiliary arrays should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat,
@@ -1853,10 +1853,10 @@ void TestRejectsAuxiliaryNpyArrays()
 
 void TestClassifiesUnsupportedDtype()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_flux.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_flux.npy";
     WriteNpy(path, "<i4", {1, 3}, BytesFor<std::int32_t>({1, 2, 3}));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat,
         "integer NPY arrays should be unsupported, not invalid shape");
@@ -1864,16 +1864,16 @@ void TestClassifiesUnsupportedDtype()
 
 void TestClassifiesEmptyShape()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_empty_flux.npy";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_empty_flux.npy";
     WriteNpy(path, "<f8", {0, 3}, {});
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::EmptyData, "empty NPY shape should be empty data");
 }
 
 void TestLoadsCsvSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_wavelength_flux.csv";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_wavelength_flux.csv";
     {
         std::ofstream stream(path);
         Require(stream.good(), "could not open CSV test fixture for writing");
@@ -1881,7 +1881,7 @@ void TestLoadsCsvSpectrum()
         Require(stream.good(), "could not write CSV test fixture");
     }
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "CSV wavelength/flux should be plottable");
     Require(!snapshot->capabilities.has_domain_error, "loaded CSV should not be a domain error snapshot");
     Require(snapshot->current_spectrum.point_count == 2, "invalid CSV rows should be filtered");
@@ -1900,10 +1900,10 @@ void TestLoadsCsvSpectrum()
 
 void TestLoadsFitsScalarTableSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_sdss_table.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_sdss_table.fits";
     WriteFitsScalarTable(path);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "FITS scalar table should be plottable");
     Require(snapshot->current_spectrum.point_count == 2, "IVAR zero row should be filtered");
     Require(
@@ -1949,11 +1949,11 @@ void TestLoadsFitsScalarTableSpectrum()
 
 void TestLoadsFitsVectorTableSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_lamost_vector.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_lamost_vector.fits";
     WriteFitsVectorTable(path);
 
-    const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
-    const SpectrumSnapshotHandle second = specforge::LoadSpectrumSnapshotFromPathCancelable(path, 1, []() { return false; });
+    const SpectrumSnapshotHandle first = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle second = spectiary::LoadSpectrumSnapshotFromPathCancelable(path, 1, []() { return false; });
 
     Require(first->capabilities.can_plot_current_spectrum, "FITS vector table first row should be plottable");
     Require(first->current_spectrum.point_count == 2, "first-row ORMASK pixel should be filtered");
@@ -2014,10 +2014,10 @@ void TestLoadsFitsVectorTableSpectrum()
 
 void TestBlocksInvalidFitsRedshiftForRestFrameInput()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_invalid_redshift.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_invalid_redshift.fits";
     WriteFitsInvalidRedshiftTable(path);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "invalid-redshift FITS should still be plottable");
     Require(MetadataValue(snapshot, "redshift") == "-9999.0", "raw invalid FITS redshift should be visible");
     Require(MetadataValue(snapshot, "redshift_warning") == "64", "raw FITS ZWARNING should be visible");
@@ -2035,10 +2035,10 @@ void TestBlocksInvalidFitsRedshiftForRestFrameInput()
 
 void TestLoadsLimitedFitsImageSpectrum()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_limited_image.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_limited_image.fits";
     WriteFitsImage(path, true);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "limited FITS image should be plottable");
     Require(snapshot->current_spectrum.point_count == 2, "image IVAR and ORMASK rows should filter invalid pixels");
     Require(snapshot->current_spectrum.x_values->at(0) == 1000.0, "image wavelength should use COEFF0/COEFF1");
@@ -2057,10 +2057,10 @@ void TestLoadsLimitedFitsImageSpectrum()
 
 void TestRejectsFitsImageWcsFallback()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_wcs_image.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_wcs_image.fits";
     WriteFitsImage(path, false);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "CRVAL1/CD1_1-only FITS image should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::CatalogNotSpectrum,
@@ -2070,10 +2070,10 @@ void TestRejectsFitsImageWcsFallback()
 void TestPrefersRecognizedFitsTableOverImageHdu()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_table_before_image_fallback.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_table_before_image_fallback.fits";
     WriteFitsImageThenScalarTable(path);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(snapshot->capabilities.can_plot_current_spectrum, "mixed-HDU FITS should be plottable");
     Require(MetadataValue(snapshot, "hdu_type") == "bintable", "recognized table HDU should take priority over image HDU");
     Require(snapshot->current_spectrum.point_count == 2, "selected table HDU should expose both scalar rows");
@@ -2087,11 +2087,11 @@ void TestUndefinedOptionalFitsKeywordsAreAbsent()
 {
     const std::filesystem::path table_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_undefined_optional_table.fits";
+        "spectiary_loader_undefined_optional_table.fits";
     WriteFitsTableWithUndefinedOptionalKeywords(table_path);
 
     const SpectrumSnapshotHandle table_snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(table_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(table_path, 0);
     Require(
         table_snapshot->capabilities.can_plot_current_spectrum,
         "undefined optional table keywords should not prevent loading");
@@ -2105,11 +2105,11 @@ void TestUndefinedOptionalFitsKeywordsAreAbsent()
 
     const std::filesystem::path image_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_undefined_optional_image.fits";
+        "spectiary_loader_undefined_optional_image.fits";
     WriteFitsImageWithUndefinedCoefficients(image_path);
 
     const SpectrumSnapshotHandle image_snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(image_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(image_path, 0);
     RequireNonPlottableErrorSnapshot(
         image_snapshot,
         "image with undefined optional spectrum coefficients");
@@ -2130,7 +2130,7 @@ void TestRejectsTruncatedUnselectedFitsData()
                                            const std::filesystem::path& path,
                                            std::string_view context) {
         const SpectrumSnapshotHandle snapshot =
-            specforge::LoadSpectrumSnapshotFromPath(path, 0);
+            spectiary::LoadSpectrumSnapshotFromPath(path, 0);
         RequireNonPlottableErrorSnapshot(snapshot, context);
         Require(
             FirstDiagnosticCode(snapshot) ==
@@ -2141,7 +2141,7 @@ void TestRejectsTruncatedUnselectedFitsData()
 
     const std::filesystem::path table_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_truncated_unselected_table_row.fits";
+        "spectiary_loader_truncated_unselected_table_row.fits";
     WriteFitsVectorTableWithTruncatedLaterRow(table_path);
     require_invalid_shape(
         table_path,
@@ -2149,7 +2149,7 @@ void TestRejectsTruncatedUnselectedFitsData()
 
     const std::filesystem::path image_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_truncated_unselected_image_tail.fits";
+        "spectiary_loader_truncated_unselected_image_tail.fits";
     WriteFitsImageWithTruncatedUnselectedTail(image_path);
     require_invalid_shape(
         image_path,
@@ -2163,10 +2163,10 @@ void TestRejectsTruncatedUnselectedFitsData()
 
 void TestRejectsMalformedFitsTableWidth()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_bad_table_width.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_bad_table_width.fits";
     WriteMalformedFitsTableWidth(path);
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "malformed FITS table should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::InvalidShape,
@@ -2176,10 +2176,10 @@ void TestRejectsMalformedFitsTableWidth()
 void TestMalformedFitsInputsReturnErrorSnapshots()
 {
     const std::filesystem::path truncated_header =
-        std::filesystem::temp_directory_path() / "specforge_loader_truncated_header.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_truncated_header.fits";
     WriteTruncatedFitsHeader(truncated_header);
     const SpectrumSnapshotHandle truncated_header_snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(
+        spectiary::LoadSpectrumSnapshotFromPath(
             truncated_header,
             0);
     RequireNonPlottableErrorSnapshot(
@@ -2191,10 +2191,10 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "truncated FITS headers should map to invalid shape");
 
     const std::filesystem::path missing_image_data =
-        std::filesystem::temp_directory_path() / "specforge_loader_missing_image_data.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_missing_image_data.fits";
     WriteFitsHeaderWithMissingImageData(missing_image_data);
     const SpectrumSnapshotHandle missing_image_data_snapshot =
-        specforge::LoadSpectrumSnapshotFromPathCancelable(
+        spectiary::LoadSpectrumSnapshotFromPathCancelable(
             missing_image_data,
             0,
             []() { return false; });
@@ -2207,10 +2207,10 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "truncated FITS image data should map to invalid shape");
 
     const std::filesystem::path declared_data_mismatch =
-        std::filesystem::temp_directory_path() / "specforge_loader_declared_data_mismatch.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_declared_data_mismatch.fits";
     WriteFitsTableWithDeclaredDataMismatch(declared_data_mismatch);
     const SpectrumSnapshotHandle declared_data_mismatch_snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(
+        spectiary::LoadSpectrumSnapshotFromPath(
             declared_data_mismatch,
             0);
     RequireNonPlottableErrorSnapshot(
@@ -2222,10 +2222,10 @@ void TestMalformedFitsInputsReturnErrorSnapshots()
         "FITS declared data mismatches should map to invalid shape");
 
     const std::filesystem::path unsupported_columns =
-        std::filesystem::temp_directory_path() / "specforge_loader_unsupported_columns.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_unsupported_columns.fits";
     WriteFitsTableWithUnsupportedColumnLayout(unsupported_columns);
     const SpectrumSnapshotHandle unsupported_columns_snapshot =
-        specforge::LoadSpectrumSnapshotFromPathCancelable(
+        spectiary::LoadSpectrumSnapshotFromPathCancelable(
             unsupported_columns,
             0,
             []() { return false; });
@@ -2254,14 +2254,14 @@ void TestRejectsUnsupportedFitsStructures()
     for (const UnsupportedColumnCase& test_case : cases) {
         const std::filesystem::path path =
             std::filesystem::temp_directory_path() /
-            ("specforge_loader_unsupported_" +
+            ("spectiary_loader_unsupported_" +
              std::string(test_case.name) + ".fits");
         WriteFitsTableWithUnsupportedColumnType(
             path,
             test_case.tform,
             test_case.row_width);
         const SpectrumSnapshotHandle snapshot =
-            specforge::LoadSpectrumSnapshotFromPathCancelable(
+            spectiary::LoadSpectrumSnapshotFromPathCancelable(
                 path,
                 0,
                 []() { return false; });
@@ -2278,10 +2278,10 @@ void TestRejectsUnsupportedFitsStructures()
 
     const std::filesystem::path ascii_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_unsupported_ascii_table.fits";
+        "spectiary_loader_unsupported_ascii_table.fits";
     WriteAsciiFitsTable(ascii_path);
     const SpectrumSnapshotHandle ascii_snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(ascii_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(ascii_path, 0);
     RequireNonPlottableErrorSnapshot(
         ascii_snapshot,
         "ASCII FITS table");
@@ -2295,13 +2295,13 @@ void TestRejectsUnsupportedFitsStructures()
 
 void TestLoadsGzippedFitsSpectrum()
 {
-    const std::filesystem::path fits_path = std::filesystem::temp_directory_path() / "specforge_loader_gzip_source.fits";
-    const std::filesystem::path gzip_path = std::filesystem::temp_directory_path() / "specforge_loader_gzip_source.fits.gz";
+    const std::filesystem::path fits_path = std::filesystem::temp_directory_path() / "spectiary_loader_gzip_source.fits";
+    const std::filesystem::path gzip_path = std::filesystem::temp_directory_path() / "spectiary_loader_gzip_source.fits.gz";
     WriteFitsScalarTable(fits_path);
     WriteBytes(gzip_path, GzipBytes(ReadBytes(fits_path)));
 
-    const SpectrumSnapshotHandle uncompressed = specforge::LoadSpectrumSnapshotFromPath(fits_path, 0);
-    const SpectrumSnapshotHandle compressed = specforge::LoadSpectrumSnapshotFromPath(gzip_path, 0);
+    const SpectrumSnapshotHandle uncompressed = spectiary::LoadSpectrumSnapshotFromPath(fits_path, 0);
+    const SpectrumSnapshotHandle compressed = spectiary::LoadSpectrumSnapshotFromPath(gzip_path, 0);
     RequireEquivalentSpectrumSemantics(uncompressed, compressed, "compressed and uncompressed FITS");
     Require(MetadataValue(uncompressed, "format") == "fits", "uncompressed FITS should retain its format label");
     Require(MetadataValue(compressed, "format") == "fits.gz", "gzipped FITS should retain its format label");
@@ -2311,10 +2311,10 @@ void TestLoadsConcatenatedGzipMembers()
 {
     const std::filesystem::path fits_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_concatenated_gzip_source.fits";
+        "spectiary_loader_concatenated_gzip_source.fits";
     const std::filesystem::path gzip_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_concatenated_gzip_source.fits.gz";
+        "spectiary_loader_concatenated_gzip_source.fits.gz";
     WriteFitsScalarTable(fits_path);
     const std::vector<unsigned char> fits_bytes = ReadBytes(fits_path);
     const std::size_t split = fits_bytes.size() / 2U;
@@ -2334,9 +2334,9 @@ void TestLoadsConcatenatedGzipMembers()
     WriteBytes(gzip_path, compressed);
 
     const SpectrumSnapshotHandle uncompressed =
-        specforge::LoadSpectrumSnapshotFromPath(fits_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(fits_path, 0);
     const SpectrumSnapshotHandle concatenated =
-        specforge::LoadSpectrumSnapshotFromPath(gzip_path, 0);
+        spectiary::LoadSpectrumSnapshotFromPath(gzip_path, 0);
     RequireEquivalentSpectrumSemantics(
         uncompressed,
         concatenated,
@@ -2352,7 +2352,7 @@ void TestRejectsDataAfterValidGzipMember()
 {
     const std::filesystem::path fits_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_gzip_trailing_source.fits";
+        "spectiary_loader_gzip_trailing_source.fits";
     WriteFitsScalarTable(fits_path);
     const std::vector<unsigned char> valid_member =
         GzipBytes(ReadBytes(fits_path));
@@ -2365,7 +2365,7 @@ void TestRejectsDataAfterValidGzipMember()
         bytes.insert(bytes.end(), suffix.begin(), suffix.end());
         WriteBytes(path, bytes);
         const SpectrumSnapshotHandle snapshot =
-            specforge::LoadSpectrumSnapshotFromPath(path, 0);
+            spectiary::LoadSpectrumSnapshotFromPath(path, 0);
         RequireNonPlottableErrorSnapshot(snapshot, context);
         Require(
             FirstDiagnosticCode(snapshot) ==
@@ -2382,7 +2382,7 @@ void TestRejectsDataAfterValidGzipMember()
     broken_member.resize(broken_member.size() - 4U);
     const std::filesystem::path broken_member_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_broken_trailing_member.fits.gz";
+        "spectiary_loader_broken_trailing_member.fits.gz";
     require_open_failed(
         broken_member_path,
         broken_member,
@@ -2390,7 +2390,7 @@ void TestRejectsDataAfterValidGzipMember()
 
     const std::filesystem::path garbage_path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_trailing_gzip_garbage.fits.gz";
+        "spectiary_loader_trailing_gzip_garbage.fits.gz";
     require_open_failed(
         garbage_path,
         {'g', 'a', 'r', 'b', 'a', 'g', 'e'},
@@ -2407,7 +2407,7 @@ void TestRejectsDataAfterValidGzipMember()
 void TestLoadsFitsFromNonAsciiPath()
 {
     const std::filesystem::path directory =
-        std::filesystem::temp_directory_path() / std::filesystem::path(L"specforge_loader_\u5149\u8c31\u8def\u5f84");
+        std::filesystem::temp_directory_path() / std::filesystem::path(L"spectiary_loader_\u5149\u8c31\u8def\u5f84");
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     Require(!error, "could not create non-ASCII FITS fixture directory");
@@ -2415,7 +2415,7 @@ void TestLoadsFitsFromNonAsciiPath()
     WriteFitsScalarTable(path);
 
     const SpectrumSnapshotHandle snapshot =
-        specforge::LoadSpectrumSnapshotFromPathCancelable(path, 0, []() { return false; });
+        spectiary::LoadSpectrumSnapshotFromPathCancelable(path, 0, []() { return false; });
     Require(snapshot->capabilities.can_plot_current_spectrum, "FITS file at a non-ASCII path should be plottable");
     Require(snapshot->source.path == path, "FITS snapshot should preserve the native non-ASCII source path");
     Require(
@@ -2544,7 +2544,7 @@ void WriteLargeFitsMaskedVectorTable(
 void TestCancelableCsvLoadStopsInsideParsingAndSorting()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancelable.csv";
+        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable.csv";
     {
         std::ofstream stream(path);
         Require(stream.good(), "could not create cancelable CSV fixture");
@@ -2555,7 +2555,7 @@ void TestCancelableCsvLoadStopsInsideParsingAndSorting()
     }
 
     std::size_t cancellation_checks = 0;
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
         [&cancellation_checks]() { return ++cancellation_checks >= 8; });
@@ -2570,11 +2570,11 @@ void TestNpyTypedValueConversionPollsCancellation()
 {
     constexpr std::size_t kColumnCount = 262'144;
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancel_npy_conversion.npy";
+        std::filesystem::temp_directory_path() / "spectiary_loader_cancel_npy_conversion.npy";
     WriteNpy(path, "<f4", {1, kColumnCount}, BytesFor(std::vector<float>(kColumnCount, 1.0F)));
 
     std::size_t cancellation_checks = 0;
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
         [&cancellation_checks]() {
@@ -2596,7 +2596,7 @@ void TestNpyTypedValueConversionPollsCancellation()
 void TestFolderSortingPollsCancellation()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() /
-        ("specforge_loader_cancel_folder_sort_" +
+        ("spectiary_loader_cancel_folder_sort_" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::error_code error;
     Require(std::filesystem::create_directory(path), "could not create folder sort fixture");
@@ -2617,7 +2617,7 @@ void TestFolderSortingPollsCancellation()
     std::size_t processed_entries = 0;
     bool canceled_in_sort = false;
     try {
-        (void)specforge::ScanSourceCollectionFolder(
+        (void)spectiary::ScanSourceCollectionFolder(
             path,
             [&processed_entries](std::size_t processed) {
                 processed_entries = processed;
@@ -2638,7 +2638,7 @@ void TestFolderSortingPollsCancellation()
 void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancelable_annotation.npy";
+        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable_annotation.npy";
     constexpr std::size_t kValueCount = 600'000;
     WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
 
@@ -2653,7 +2653,7 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
+        (void)spectiary::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -2674,20 +2674,20 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
 void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancelable_annotation_metadata.npy";
+        std::filesystem::temp_directory_path() / "spectiary_loader_cancelable_annotation_metadata.npy";
     constexpr std::size_t kValueCount = 600'000;
     WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
 
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask("metadata-cancel", "Metadata cancel", kValueCount);
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask("metadata-cancel", "Metadata cancel", kValueCount);
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             task.label_set,
-            specforge::SampleLabelDefinition{7, "accepted", 'a'}),
+            spectiary::SampleLabelDefinition{7, "accepted", 'a'}),
         "metadata cancellation fixture label should be valid");
     std::string metadata_error;
     Require(
-        specforge::test_support::LegacyFixtureIo{}.SaveLabelMetadata(
+        spectiary::test_support::LegacyFixtureIo{}.SaveLabelMetadata(
             path,
             task,
             nullptr,
@@ -2712,7 +2712,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::test_support::LegacyFixtureIo{}.LoadCancelable(
+        (void)spectiary::test_support::LegacyFixtureIo{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -2731,25 +2731,25 @@ void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
     std::error_code error;
     std::filesystem::remove(path, error);
     std::filesystem::remove(
-        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(path),
+        spectiary::test_support::LegacyFixtureIo::MetadataPathForResult(path),
         error);
 }
 
 void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
 {
     const std::filesystem::path annotation_path =
-        std::filesystem::temp_directory_path() / "specforge_annotation_ingestion_warning.npy";
+        std::filesystem::temp_directory_path() / "spectiary_annotation_ingestion_warning.npy";
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     {
         std::ofstream metadata(
-            specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path),
+            spectiary::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path),
             std::ios::trunc);
         metadata << "{invalid-json";
     }
 
-    specforge::SourceCollectionManifest manifest;
+    spectiary::SourceCollectionManifest manifest;
     Require(
-        specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
+        spectiary::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
         "shared annotation ingestion should retain the usable value array");
     Require(manifest.annotations.size() == 1, "shared ingestion should append one annotation");
     Require(
@@ -2757,17 +2757,17 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
         "shared ingestion should preserve one structured metadata warning");
     Require(
         manifest.diagnostics.front().kind ==
-                specforge::
+                spectiary::
                     SourceCollectionManifestDiagnosticKind::
                         AnnotationMetadataIgnored &&
             manifest.diagnostics.front().path ==
-                specforge::test_support::LegacyFixtureIo::
+                spectiary::test_support::LegacyFixtureIo::
                     MetadataPathForResult(
                         annotation_path) &&
             !manifest.diagnostics.front().detail.empty(),
         "metadata diagnostics should preserve kind, path, and technical detail");
     Require(
-        specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
+        spectiary::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
         "re-ingesting the same annotation should update it");
     Require(manifest.annotations.size() == 1, "shared ingestion should not duplicate an existing annotation path");
 }
@@ -2776,18 +2776,18 @@ void TestCancelableFitsLoadStopsDuringLoglamTransform()
 {
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_cancel_loglam_transform.fits";
+        "spectiary_loader_cancel_loglam_transform.fits";
     WriteLargeFitsLoglamVectorTable(path, 50'000);
 
     const std::filesystem::path loader_source =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) /
         "src/domain/fits_spectrum_loader.cpp";
     CancellationStageProbe probe(SourceStage::Between(
         loader_source,
         "std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(",
         "if (uses_loglam) {",
         "loaded.y_values ="));
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
         [&probe]() { return probe.Poll(); });
@@ -2806,11 +2806,11 @@ void TestCancelableFitsLoadStopsDuringMaskFiltering()
 {
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        "specforge_loader_cancel_mask_filter.fits";
+        "spectiary_loader_cancel_mask_filter.fits";
     WriteLargeFitsMaskedVectorTable(path, 50'000);
 
     const std::filesystem::path support_source =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) /
         "src/domain/spectrum_loader_support.cpp";
     CancellationStageProbe probe(SourceStage::Between(
         support_source,
@@ -2818,7 +2818,7 @@ void TestCancelableFitsLoadStopsDuringMaskFiltering()
         "for (std::size_t index = 0; index < x_values.size(); ++index) {",
         "x_values = std::move(filtered_x);"));
     const SpectrumSnapshotHandle snapshot =
-        specforge::LoadSpectrumSnapshotFromPathCancelable(
+        spectiary::LoadSpectrumSnapshotFromPathCancelable(
             path,
             0,
             [&probe]() { return probe.Poll(); });
@@ -2837,18 +2837,18 @@ void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
 {
     constexpr std::size_t kTrailingHduCount = 96U;
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_loader_cancel_many_hdu_metadata.fits";
+        std::filesystem::temp_directory_path() / "spectiary_loader_cancel_many_hdu_metadata.fits";
     WriteFitsScalarTableWithTrailingEmptyHdus(path, kTrailingHduCount);
 
     const std::filesystem::path loader_source =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) /
         "src/domain/fits_spectrum_loader.cpp";
     CancellationStageProbe probe(SourceStage::Between(
         loader_source,
         "std::optional<FitsMetadataMatch> FirstFitsHeaderValue(",
         "for (const FitsHdu& hdu : hdus) {",
         "return std::nullopt;"));
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPathCancelable(
         path,
         0,
         [&probe]() { return probe.Poll(); });
@@ -2865,10 +2865,10 @@ void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
 
 void TestRejectsCorruptGzippedFits()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_corrupt.fits.gz";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_corrupt.fits.gz";
     WriteBytes(path, {'n', 'o', 't', '-', 'g', 'z', 'i', 'p'});
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "corrupt gzip FITS should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::OpenFailed,
@@ -2877,11 +2877,11 @@ void TestRejectsCorruptGzippedFits()
 
 void TestRejectsOversizedInflatedGzippedFits()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_inflated_too_large.fits.gz";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_inflated_too_large.fits.gz";
     constexpr std::size_t kPayloadSize = 64ULL * 1024ULL * 1024ULL + 1ULL;
     WriteBytes(path, GzipFitsImageWithPayload(kPayloadSize));
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "over-inflated gzip FITS should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat,
@@ -2890,7 +2890,7 @@ void TestRejectsOversizedInflatedGzippedFits()
 
 void TestRejectsOversizedFitsBeforeRead()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_large_catalog.fits";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_large_catalog.fits";
     {
         std::ofstream stream(path, std::ios::binary);
         Require(stream.good(), "could not open oversized FITS fixture");
@@ -2899,7 +2899,7 @@ void TestRejectsOversizedFitsBeforeRead()
         Require(stream.good(), "could not write oversized FITS fixture");
     }
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "oversized FITS should not be plottable");
     Require(
         FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat,
@@ -2910,7 +2910,7 @@ void TestRejectsOversizedFitsBeforeRead()
 
 void TestLoadsFolderCollectionWithWarnings()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_folder_source";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_folder_source";
     std::error_code error;
     std::filesystem::remove_all(path, error);
     Require(std::filesystem::create_directory(path), "could not create folder source test fixture");
@@ -2947,7 +2947,7 @@ void TestLoadsFolderCollectionWithWarnings()
         Require(stream.good(), "could not write ignored NPY folder fixture");
     }
 
-    const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle first = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(first->capabilities.can_plot_current_spectrum, "folder CSV/FITS collection should be plottable");
     Require(first->collection.spectrum_count == 3, "folder should count first-level CSV/FITS spectra only");
     Require(first->collection.current_index == 0, "folder should select first spectrum");
@@ -2957,7 +2957,7 @@ void TestLoadsFolderCollectionWithWarnings()
     const auto mixed_format_diagnostic = std::find_if(
         first->diagnostics.begin(),
         first->diagnostics.end(),
-        [](const specforge::SpectrumDiagnostic& diagnostic) {
+        [](const spectiary::SpectrumDiagnostic& diagnostic) {
             return diagnostic.code ==
                        SpectrumDiagnosticCode::UnsupportedFormat &&
                    diagnostic.message.find(
@@ -2976,7 +2976,7 @@ void TestLoadsFolderCollectionWithWarnings()
                 "fits_file_count") == "1",
         "mixed CSV/FITS diagnostic should retain both format counts");
 
-    const specforge::SourceCollectionFolderListing listing = specforge::ScanSourceCollectionFolder(path);
+    const spectiary::SourceCollectionFolderListing listing = spectiary::ScanSourceCollectionFolder(path);
     Require(
         listing.csv_count == 2 &&
             listing.fits_count == 1 &&
@@ -2988,9 +2988,9 @@ void TestLoadsFolderCollectionWithWarnings()
             return !sample.stat_fingerprint.empty();
         }),
         "folder scan should retain each spectrum file stat fingerprint");
-    const specforge::SourceCollectionContext context = specforge::LoadSourceCollectionContext(*first);
+    const spectiary::SourceCollectionContext context = spectiary::LoadSourceCollectionContext(*first);
     Require(
-        specforge::IsVersionedSha256Digest(context.identity.source_fingerprint),
+        spectiary::IsVersionedSha256Digest(context.identity.source_fingerprint),
         "folder source fingerprints should have a fixed-size versioned digest");
     std::vector<std::filesystem::path> legacy_fingerprint_paths;
     for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(path)) {
@@ -3015,12 +3015,12 @@ void TestLoadsFolderCollectionWithWarnings()
                               std::to_string(std::filesystem::last_write_time(sample_path).time_since_epoch().count());
     }
     Require(
-        context.identity.source_fingerprint == specforge::VersionedSha256Digest(legacy_fingerprint),
+        context.identity.source_fingerprint == spectiary::VersionedSha256Digest(legacy_fingerprint),
         "streamed folder fingerprints must preserve the exact legacy identity semantics");
     const std::string legacy_identity =
         "name=" + PathToUtf8(path.filename()) + "|fingerprint=" + legacy_fingerprint + "|count=3";
     Require(
-        context.identity.id == specforge::NormalizePersistedSourceCollectionIdentity(legacy_identity),
+        context.identity.id == spectiary::NormalizePersistedSourceCollectionIdentity(legacy_identity),
         "legacy folder cache identities should migrate to the same fixed-size key");
     Require(context.identity.id.size() == 74, "versioned SHA-256 identities should remain fixed-size");
     Require(context.manifest.sample_names.size() == 3, "source context should build folder sample names in the same pass");
@@ -3028,16 +3028,16 @@ void TestLoadsFolderCollectionWithWarnings()
     Require(context.manifest.sample_names[1] == "b.fits", "folder source context should include FITS sample names");
     Require(context.manifest.sample_names[2] == "C.CSV", "folder source context should retain uppercase CSV in stable order");
     Require(
-        specforge::BuildSourceCollectionIdentity(*first).id == context.identity.id,
+        spectiary::BuildSourceCollectionIdentity(*first).id == context.identity.id,
         "combined source context must preserve the existing folder identity format");
 
-    const SpectrumSnapshotHandle second = specforge::LoadSpectrumSnapshotFromPath(path, 1);
+    const SpectrumSnapshotHandle second = spectiary::LoadSpectrumSnapshotFromPath(path, 1);
     Require(second->capabilities.can_plot_current_spectrum, "folder second file should be plottable");
     Require(second->collection.current_index == 1, "folder should select second spectrum");
     Require(second->collection.can_move_previous, "folder should allow previous file navigation");
     Require(second->current_spectrum.point_count == 2, "folder FITS file should preserve selected file loader behavior");
 
-    const SpectrumSnapshotHandle third = specforge::LoadSpectrumSnapshotFromPath(path, 2);
+    const SpectrumSnapshotHandle third = spectiary::LoadSpectrumSnapshotFromPath(path, 2);
     Require(third->capabilities.can_plot_current_spectrum, "folder uppercase CSV should be plottable");
     Require(third->collection.current_index == 2, "folder should select the third spectrum by stable order");
 
@@ -3046,12 +3046,12 @@ void TestLoadsFolderCollectionWithWarnings()
 
 void TestEmptyFolderUsesDomainSnapshot()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_empty_folder_source";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_loader_empty_folder_source";
     std::error_code error;
     std::filesystem::remove_all(path, error);
     Require(std::filesystem::create_directory(path), "could not create empty folder source test fixture");
 
-    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
     Require(!snapshot->capabilities.can_plot_current_spectrum, "empty folder source should not be plottable");
     Require(snapshot->capabilities.has_domain_error, "empty folder source should be a domain error snapshot");
     Require(FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat, "empty folder should be unsupported");
@@ -3063,13 +3063,13 @@ void TestEmptyFolderUsesDomainSnapshot()
 
 void TestOptionalSampleDirectory()
 {
-    const std::optional<std::string> sample_directory = EnvironmentVariable("SPECFORGE_SAMPLE_DIR");
+    const std::optional<std::string> sample_directory = EnvironmentVariable("SPECTIARY_SAMPLE_DIR");
     if (!sample_directory) {
         return;
     }
 
     const std::filesystem::path root(*sample_directory);
-    Require(std::filesystem::exists(root), "SPECFORGE_SAMPLE_DIR does not exist");
+    Require(std::filesystem::exists(root), "SPECTIARY_SAMPLE_DIR does not exist");
 
     std::size_t checked_count = 0;
     for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root)) {
@@ -3086,7 +3086,7 @@ void TestOptionalSampleDirectory()
             continue;
         }
 
-        const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+        const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(path, 0);
         const std::string path_text = PathToUtf8(path);
         if (is_npy && IsAuxiliaryNpySample(path)) {
             Require(
@@ -3109,14 +3109,14 @@ void TestOptionalSampleDirectory()
             continue;
         }
 
-        const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(entry.path(), 0);
+        const SpectrumSnapshotHandle snapshot = spectiary::LoadSpectrumSnapshotFromPath(entry.path(), 0);
         const std::string path_text = PathToUtf8(entry.path());
         Require(snapshot->capabilities.can_plot_current_spectrum, "sample folder should be plottable: " + path_text);
         Require(snapshot->collection.spectrum_count > 0, "sample folder should expose a collection: " + path_text);
         ++checked_count;
     }
 
-    Require(checked_count > 0, "SPECFORGE_SAMPLE_DIR did not contain supported sample files");
+    Require(checked_count > 0, "SPECTIARY_SAMPLE_DIR did not contain supported sample files");
 }
 
 }  // namespace

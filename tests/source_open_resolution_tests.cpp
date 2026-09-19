@@ -28,7 +28,7 @@ public:
                 .time_since_epoch()
                 .count();
         path_ = std::filesystem::temp_directory_path() /
-            ("specforge-source-open-resolution-tests-" +
+            ("spectiary-source-open-resolution-tests-" +
              std::to_string(suffix));
         std::filesystem::create_directories(path_);
     }
@@ -81,21 +81,21 @@ std::string PathText(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
-specforge::SourceOpenResolution Resolve(
+spectiary::SourceOpenResolution Resolve(
     const std::filesystem::path& path,
-    specforge::SourceOpenOrigin origin =
-        specforge::SourceOpenOrigin::ExternalStartup,
+    spectiary::SourceOpenOrigin origin =
+        spectiary::SourceOpenOrigin::ExternalStartup,
     bool open_external_source_as_folder = true)
 {
-    const specforge::SourceOpenRequest request{
+    const spectiary::SourceOpenRequest request{
         .source_path = path,
         .origin = origin,
         .open_external_source_as_folder =
             open_external_source_as_folder,
     };
-    return specforge::ResolveSourceOpenRequest(
+    return spectiary::ResolveSourceOpenRequest(
         request,
-        specforge::ProbeSourceOpenRequest(request));
+        spectiary::ProbeSourceOpenRequest(request));
 }
 
 void TestSupportedFitsExtensionsExpandAndRetainPreferredMember()
@@ -111,11 +111,11 @@ void TestSupportedFitsExtensionsExpandAndRetainPreferredMember()
              std::string(suffix));
         WriteFixture(member);
 
-        const specforge::SourceOpenResolution resolution =
+        const spectiary::SourceOpenResolution resolution =
             Resolve(member);
         Require(
             resolution.kind ==
-                specforge::SourceOpenResolutionKind::Folder,
+                spectiary::SourceOpenResolutionKind::Folder,
             "supported FITS suffix should resolve to a folder source");
         Require(
             resolution.source_path == temporary.path(),
@@ -138,11 +138,11 @@ void TestSupportedCsvExtensionsExpandAndRetainPreferredMember()
              std::string(suffix));
         WriteFixture(member);
 
-        const specforge::SourceOpenResolution resolution =
+        const spectiary::SourceOpenResolution resolution =
             Resolve(member);
         Require(
             resolution.kind ==
-                specforge::SourceOpenResolutionKind::Folder &&
+                spectiary::SourceOpenResolutionKind::Folder &&
                 resolution.source_path == temporary.path() &&
                 resolution.preferred_member_path == member &&
                 !resolution.failed(),
@@ -157,10 +157,10 @@ void TestRelativeFitsUsesCurrentDirectoryAsParent()
     const std::filesystem::path relative_member = "selected.fits";
     WriteFixture(relative_member);
 
-    const specforge::SourceOpenResolution resolution =
+    const spectiary::SourceOpenResolution resolution =
         Resolve(relative_member);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Folder &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Folder &&
             resolution.source_path == temporary.path() &&
             resolution.preferred_member_path == relative_member,
         "relative FITS should use the current directory and retain its member path");
@@ -173,9 +173,9 @@ void TestNpyStaysDirect()
         temporary.path() / "selected.npy";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution = Resolve(member);
+    const spectiary::SourceOpenResolution resolution = Resolve(member);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "external NPY source should retain single-file semantics");
@@ -188,9 +188,9 @@ void TestTxtStaysDirect()
         temporary.path() / "selected.txt";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution = Resolve(member);
+    const spectiary::SourceOpenResolution resolution = Resolve(member);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "external TXT source should retain single-file semantics");
@@ -203,10 +203,10 @@ void TestDisabledCsvPreferenceStaysDirect()
         temporary.path() / "selected.CSV";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::ExternalStartup, false);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::ExternalStartup, false);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "disabled external CSV preference should retain single-file semantics");
@@ -219,10 +219,10 @@ void TestDisabledPreferenceStaysDirect()
         temporary.path() / "selected.fits";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::ExternalStartup, false);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::ExternalStartup, false);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "disabled external FITS preference should retain single-file semantics");
@@ -235,10 +235,10 @@ void TestInAppOriginStaysDirect()
         temporary.path() / "selected.fits";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::InApp);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::InApp);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "in-app FITS open should retain single-file semantics");
@@ -251,10 +251,10 @@ void TestAutomationOriginStaysDirect()
         temporary.path() / "selected.fits";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::Automation);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::Automation);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "automation FITS open should retain single-file semantics");
@@ -267,10 +267,10 @@ void TestInAppCsvOriginStaysDirect()
         temporary.path() / "selected.CSV";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::InApp);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::InApp);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "in-app CSV open should retain single-file semantics");
@@ -283,10 +283,10 @@ void TestAutomationCsvOriginStaysDirect()
         temporary.path() / "selected.CSV";
     WriteFixture(member);
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(member, specforge::SourceOpenOrigin::Automation);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(member, spectiary::SourceOpenOrigin::Automation);
     Require(
-        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+        resolution.kind == spectiary::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "automation CSV open should retain single-file semantics");
@@ -295,12 +295,12 @@ void TestAutomationCsvOriginStaysDirect()
 void TestEmptySourcePathFailsWithDiagnostic()
 {
     const std::filesystem::path empty_path;
-    const specforge::SourceOpenResolution resolution =
+    const spectiary::SourceOpenResolution resolution =
         Resolve(empty_path);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::EmptySourcePath &&
+                spectiary::SourceOpenResolutionFailure::EmptySourcePath &&
             !resolution.diagnostic.empty(),
         "empty source path should fail with a diagnostic");
 }
@@ -311,14 +311,14 @@ void TestMissingTargetFailsWithoutExpansion()
     const std::filesystem::path missing =
         temporary.path() / "missing.fits";
 
-    const specforge::SourceOpenResolution resolution = Resolve(missing);
+    const spectiary::SourceOpenResolution resolution = Resolve(missing);
     Require(
         resolution.failed() &&
-            resolution.kind == specforge::SourceOpenResolutionKind::Failed,
+            resolution.kind == spectiary::SourceOpenResolutionKind::Failed,
         "missing source should fail resolution");
     Require(
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::SourcePathUnavailable &&
+                spectiary::SourceOpenResolutionFailure::SourcePathUnavailable &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(missing)) !=
                 std::string::npos,
@@ -331,12 +331,12 @@ void TestMissingTargetWithDisabledPreferenceFailsDirectly()
     const std::filesystem::path missing =
         temporary.path() / "missing.fits";
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(missing, specforge::SourceOpenOrigin::ExternalStartup, false);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(missing, spectiary::SourceOpenOrigin::ExternalStartup, false);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::SourcePathUnavailable &&
+                spectiary::SourceOpenResolutionFailure::SourcePathUnavailable &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(missing)) !=
                 std::string::npos,
@@ -349,12 +349,12 @@ void TestMissingTargetWithInAppOriginFailsDirectly()
     const std::filesystem::path missing =
         temporary.path() / "missing.fits";
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(missing, specforge::SourceOpenOrigin::InApp);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(missing, spectiary::SourceOpenOrigin::InApp);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::SourcePathUnavailable &&
+                spectiary::SourceOpenResolutionFailure::SourcePathUnavailable &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(missing)) !=
                 std::string::npos,
@@ -367,12 +367,12 @@ void TestMissingTargetWithAutomationOriginFailsDirectly()
     const std::filesystem::path missing =
         temporary.path() / "missing.fits";
 
-    const specforge::SourceOpenResolution resolution =
-        Resolve(missing, specforge::SourceOpenOrigin::Automation);
+    const spectiary::SourceOpenResolution resolution =
+        Resolve(missing, spectiary::SourceOpenOrigin::Automation);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::SourcePathUnavailable &&
+                spectiary::SourceOpenResolutionFailure::SourcePathUnavailable &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(missing)) !=
                 std::string::npos,
@@ -388,11 +388,11 @@ void TestNonRegularFitsTargetFailsWithDiagnostic()
         std::filesystem::create_directory(member),
         "non-regular FITS fixture directory should be created");
 
-    const specforge::SourceOpenResolution resolution = Resolve(member);
+    const spectiary::SourceOpenResolution resolution = Resolve(member);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::SourcePathNotRegularFile &&
+                spectiary::SourceOpenResolutionFailure::SourcePathNotRegularFile &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(member)) !=
                 std::string::npos,
@@ -407,11 +407,11 @@ void TestMissingParentFailsWithDiagnostic()
     const std::filesystem::path missing =
         missing_parent / "selected.fits";
 
-    const specforge::SourceOpenResolution resolution = Resolve(missing);
+    const spectiary::SourceOpenResolution resolution = Resolve(missing);
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::ParentPathUnavailable &&
+                spectiary::SourceOpenResolutionFailure::ParentPathUnavailable &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(missing_parent)) !=
                 std::string::npos,
@@ -427,12 +427,12 @@ void TestInvalidParentFailsWithoutChoosingAnotherMember()
     const std::filesystem::path missing =
         parent_file / "member.fits";
 
-    const specforge::SourceOpenResolution resolution = Resolve(missing);
+    const spectiary::SourceOpenResolution resolution = Resolve(missing);
 
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::ParentPathNotDirectory &&
+                spectiary::SourceOpenResolutionFailure::ParentPathNotDirectory &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(parent_file)) !=
                 std::string::npos,
@@ -448,12 +448,12 @@ void TestInvalidCsvParentFailsWithoutChoosingAnotherMember()
     const std::filesystem::path missing =
         parent_file / "member.CSV";
 
-    const specforge::SourceOpenResolution resolution = Resolve(missing);
+    const spectiary::SourceOpenResolution resolution = Resolve(missing);
 
     Require(
         resolution.failed() &&
             resolution.failure ==
-                specforge::SourceOpenResolutionFailure::ParentPathNotDirectory &&
+                spectiary::SourceOpenResolutionFailure::ParentPathNotDirectory &&
             !resolution.preferred_member_path &&
             resolution.diagnostic.find(PathText(parent_file)) !=
                 std::string::npos,

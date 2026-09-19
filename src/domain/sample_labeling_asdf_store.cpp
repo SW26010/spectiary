@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using BeforeReplace =
@@ -898,4 +898,4 @@ RewriteDocumentAndReopenWithCheckpoints(
 
 }  // namespace sample_labeling_asdf_store_test_seam
 
-}  // namespace specforge
+}  // namespace spectiary

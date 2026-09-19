@@ -12,7 +12,7 @@ namespace {
 
 constexpr UINT kActivateWindowMessage = WM_APP + 1;
 constexpr wchar_t kWindowClassName[] =
-    L"SpecForgeWin32TestPeer";
+    L"SpectiaryWin32TestPeer";
 
 std::string FormatHandle(HWND window)
 {
@@ -121,7 +121,7 @@ int main()
     HWND window = CreateWindowExW(
         0,
         kWindowClassName,
-        L"SpecForge Win32 Test Peer",
+        L"Spectiary Win32 Test Peer",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,

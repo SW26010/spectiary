@@ -6,7 +6,7 @@
 #include <string>
 #include <system_error>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SourceOpenOrigin {
     InApp,
@@ -70,4 +70,4 @@ struct SourceOpenResolution {
     const SourceOpenRequest& request,
     const SourceOpenFilesystemProbe& probe);
 
-}  // namespace specforge
+}  // namespace spectiary

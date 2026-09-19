@@ -25,14 +25,14 @@ void RequireRows(
 void TestSourceOrderSequence()
 {
     const std::vector<std::string> names = {"alpha", "beta", "gamma"};
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 3;
     input.sample_names = names;
     input.current_source_row = 1;
     input.sample_name_query = "a";
 
-    const specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    const spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
 
     Require(!sequence.active, "source order without filters or sorting should not be active");
     Require(!sequence.empty, "source order sequence should not be empty");
@@ -56,7 +56,7 @@ void TestFilteredSequence()
 {
     const std::vector<std::string> names = {"alpha", "beta", "gamma", "beta"};
     const std::vector<bool> included = {false, true, false, true};
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 4;
     input.sample_names = names;
     input.filter_active = true;
@@ -64,8 +64,8 @@ void TestFilteredSequence()
     input.current_source_row = 1;
     input.sample_name_query = "a";
 
-    const specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    const spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
 
     Require(sequence.active, "filtering should create an active sequence");
     Require(!sequence.empty, "filtered sequence should not be empty when rows are included");
@@ -97,14 +97,14 @@ void TestFilteredSequence()
 void TestEmptySequence()
 {
     const std::vector<bool> included = {false, false, false};
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 3;
     input.filter_active = true;
     input.included_samples = &included;
     input.current_source_row = 1;
 
-    const specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    const spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
 
     Require(sequence.active, "empty filtered result should still be an active sequence");
     Require(sequence.empty, "sequence should expose empty state");
@@ -120,14 +120,14 @@ void TestEmptySequence()
 void TestCurrentRowExcluded()
 {
     const std::vector<bool> included = {false, true, true};
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 3;
     input.filter_active = true;
     input.included_samples = &included;
     input.current_source_row = 0;
 
-    const specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    const spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
 
     RequireRows(sequence.ordered_rows, {1, 2}, "filtered sequence should still expose included rows");
     Require(!sequence.current_source_row, "excluded current row should not remain current inside the sequence");
@@ -136,51 +136,51 @@ void TestCurrentRowExcluded()
 
 void TestSortingStableTieBreak()
 {
-    specforge::SampleNavigationSortChoice sort;
+    spectiary::SampleNavigationSortChoice sort;
     sort.active = true;
     sort.values = {
-        specforge::MakeSampleNavigationSortValue(2.0),
-        specforge::MakeSampleNavigationSortValue(1.0),
-        specforge::MakeSampleNavigationSortValue(1.0),
-        specforge::MakeSampleNavigationSortValue(3.0),
+        spectiary::MakeSampleNavigationSortValue(2.0),
+        spectiary::MakeSampleNavigationSortValue(1.0),
+        spectiary::MakeSampleNavigationSortValue(1.0),
+        spectiary::MakeSampleNavigationSortValue(3.0),
     };
 
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 4;
     input.sort_choice = &sort;
     input.current_source_row = 1;
 
-    specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
     Require(sequence.active, "sorting should create an active sequence");
     Require(!sequence.row_location_available, "row location should be unavailable when sorting changes order");
     RequireRows(sequence.ordered_rows, {1, 2, 0, 3}, "ascending sort should keep source order for equal values");
 
-    sort.direction = specforge::SampleNavigationSortDirection::Descending;
-    sequence = specforge::BuildSampleNavigationSequence(input);
+    sort.direction = spectiary::SampleNavigationSortDirection::Descending;
+    sequence = spectiary::BuildSampleNavigationSequence(input);
     RequireRows(sequence.ordered_rows, {3, 0, 1, 2}, "descending sort should keep source order for equal values");
 }
 
 void TestSortedTopologySupportsIndependentCursorProjections()
 {
-    specforge::SampleNavigationSortChoice sort;
+    spectiary::SampleNavigationSortChoice sort;
     sort.active = true;
     sort.values = {
-        specforge::MakeSampleNavigationSortValue(2.0),
-        specforge::MakeSampleNavigationSortValue(1.0),
-        specforge::MakeSampleNavigationSortValue(1.0),
-        specforge::MakeSampleNavigationSortValue(3.0),
+        spectiary::MakeSampleNavigationSortValue(2.0),
+        spectiary::MakeSampleNavigationSortValue(1.0),
+        spectiary::MakeSampleNavigationSortValue(1.0),
+        spectiary::MakeSampleNavigationSortValue(3.0),
     };
 
-    specforge::SampleNavigationSequenceInput input;
+    spectiary::SampleNavigationSequenceInput input;
     input.source_row_count = 4;
     input.sort_choice = &sort;
     input.current_source_row = std::nullopt;
-    const specforge::SampleNavigationSequence sequence =
-        specforge::BuildSampleNavigationSequence(input);
+    const spectiary::SampleNavigationSequence sequence =
+        spectiary::BuildSampleNavigationSequence(input);
 
-    const specforge::SampleNavigationSequenceProjection row_zero =
-        specforge::ProjectSampleNavigationSequence(sequence, 0);
+    const spectiary::SampleNavigationSequenceProjection row_zero =
+        spectiary::ProjectSampleNavigationSequence(sequence, 0);
     Require(
         row_zero.current_sequence_position && *row_zero.current_sequence_position == 2,
         "row 0 should project to its cached sorted position");
@@ -192,8 +192,8 @@ void TestSortedTopologySupportsIndependentCursorProjections()
         sequence.LabelAdvanceTarget(row_zero, {false, false, false, true}) == 3,
         "label eligibility should be evaluated against each projected cursor on demand");
 
-    const specforge::SampleNavigationSequenceProjection row_one =
-        specforge::ProjectSampleNavigationSequence(sequence, 1);
+    const spectiary::SampleNavigationSequenceProjection row_one =
+        spectiary::ProjectSampleNavigationSequence(sequence, 1);
     Require(
         row_one.current_sequence_position && *row_one.current_sequence_position == 0 &&
             row_one.previous_target && *row_one.previous_target == 1 &&

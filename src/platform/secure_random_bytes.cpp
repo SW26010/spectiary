@@ -5,7 +5,7 @@
 
 #include <limits>
 
-namespace specforge {
+namespace spectiary {
 
 bool FillSecureRandomBytes(std::span<std::uint8_t> destination) noexcept
 {
@@ -22,4 +22,4 @@ bool FillSecureRandomBytes(std::span<std::uint8_t> destination) noexcept
                BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -17,7 +17,7 @@ Set-StrictMode -Version 3.0
 $sampleRunnerDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $sampleRunnerDirectory '..\scripts\automation_process_guard.ps1')
 $sampleArtifactsOverride = [Environment]::GetEnvironmentVariable(
-    'SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS')
+    'SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS')
 if (-not [string]::IsNullOrWhiteSpace($sampleArtifactsOverride)) {
     $ArtifactsDirectory = $sampleArtifactsOverride
 }
@@ -883,7 +883,7 @@ function Add-LauncherOutputLine {
     )
 
     [void]$Lines.Add($Line)
-    $pidMatch = [regex]::Match($Line, '^SpecForge PID: ([0-9]+)\s*$')
+    $pidMatch = [regex]::Match($Line, '^Spectiary PID: ([0-9]+)\s*$')
     if (-not $pidMatch.Success) {
         return
     }
@@ -1556,7 +1556,7 @@ function Get-SampleArtifactParentLeaseStatus {
         }
         $leasePath = Join-Path `
             $parentItem.FullName `
-            '.specforge-automation-samples-artifact-lease.json'
+            '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-artifact-lease.json'
         $leaseStatus = Get-SampleLeaseStatus -LeasePath $leasePath
         return [pscustomobject]@{
             state = [string]$leaseStatus.state
@@ -1664,7 +1664,7 @@ function Enter-SampleArtifactCapacityLock {
 
     $lockPath = Join-Path `
         $ArtifactRoot `
-        '.specforge-automation-samples-capacity.lock'
+        '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-capacity.lock'
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         try {
@@ -1789,7 +1789,7 @@ function Prune-SampleArtifactRunDirectories {
     foreach ($candidate in $stale) {
         $leasePath = Join-Path `
             $candidate.FullName `
-            '.specforge-automation-samples-artifact-lease.json'
+            '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-artifact-lease.json'
         $leaseStatus = Get-SampleLeaseStatus -LeasePath $leasePath
         if ([string]$leaseStatus.state -notin @('stale', 'completed')) {
             [void]$diagnostics.Add(
@@ -1823,7 +1823,7 @@ function Remove-OwnedSampleTempDirectory {
         [System.IO.Path]::GetTempPath()).TrimEnd('\')
     $item = Get-Item -LiteralPath $resolved
     Assert-True -Condition ([string]::Equals($item.Parent.FullName.TrimEnd('\'), $tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) -Message "Refusing to remove a sample run root outside the system temp root: $resolved"
-    Assert-True -Condition ($item.Name -match '^specforge-automation-samples-[0-9a-f]{32}$') -Message "Refusing to remove an unrecognized sample run root: $resolved"
+    Assert-True -Condition ($item.Name -match '^spectiary-automation-samples-[0-9a-f]{32}$') -Message "Refusing to remove an unrecognized sample run root: $resolved"
     for ($attempt = 0; $attempt -lt $script:CleanupRetryCount; ++$attempt) {
         try {
             Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
@@ -1882,7 +1882,7 @@ function Write-SampleRunRootOwnershipManifest {
         processes = @($script:OwnedProcessIdentities)
     }
     Write-AtomicUtf8File `
-        -Path (Join-Path $RunRoot '.specforge-automation-samples-ownership.json') `
+        -Path (Join-Path $RunRoot '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json') `
         -Contents ($manifest | ConvertTo-Json -Depth 12)
 }
 
@@ -1938,7 +1938,7 @@ function Test-SampleRunRootHasLiveOwnedProcess {
         [switch]$CurrentRun
     )
 
-    $manifestPath = Join-Path $RunRoot '.specforge-automation-samples-ownership.json'
+    $manifestPath = Join-Path $RunRoot '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         # A missing manifest is ambiguous after a crash or forced CTest
         # termination. Never infer that an empty process list means safe
@@ -1995,7 +1995,7 @@ function Stop-SampleRunRootOwnedProcesses {
         [string]$RunRoot
     )
 
-    $manifestPath = Join-Path $RunRoot '.specforge-automation-samples-ownership.json'
+    $manifestPath = Join-Path $RunRoot '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-ownership.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         return @(
             "Ownership manifest is missing for $RunRoot; launch state is ambiguous and the root was retained.")
@@ -2202,9 +2202,9 @@ function Prune-SampleTempRunRoots {
     )
 
     $resolvedTempRoot = (Resolve-Path -LiteralPath $TempRoot).Path
-    $candidates = @(Get-ChildItem -LiteralPath $resolvedTempRoot -Directory -Filter 'specforge-automation-samples-*' -ErrorAction Stop)
+    $candidates = @(Get-ChildItem -LiteralPath $resolvedTempRoot -Directory -Filter 'spectiary-automation-samples-*' -ErrorAction Stop)
     foreach ($candidate in $candidates) {
-        Assert-True -Condition ($candidate.Name -match '^specforge-automation-samples-[0-9a-f]{32}$') -Message "Refusing to prune an unrecognized sample run root: $($candidate.FullName)"
+        Assert-True -Condition ($candidate.Name -match '^spectiary-automation-samples-[0-9a-f]{32}$') -Message "Refusing to prune an unrecognized sample run root: $($candidate.FullName)"
     }
     $diagnostics = [System.Collections.Generic.List[string]]::new()
     $stale = @($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip $script:FailureTempRetentionCount)
@@ -2591,7 +2591,7 @@ try {
         Get-ChildItem `
             -LiteralPath ([System.IO.Path]::GetTempPath()) `
             -Directory `
-            -Filter 'specforge-automation-samples-*' `
+            -Filter 'spectiary-automation-samples-*' `
             -ErrorAction Stop)
     if ($remainingTemporaryRoots.Count -ge $script:FailureTempRetentionCount) {
         throw (
@@ -2606,7 +2606,7 @@ try {
     New-Item -ItemType Directory -Path $resolvedRunArtifactsDirectory -Force | Out-Null
     $artifactLeasePath = Join-Path `
         $resolvedRunArtifactsDirectory `
-        '.specforge-automation-samples-artifact-lease.json'
+        '.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-samples-artifact-lease.json'
     Initialize-SampleRunLease `
         -RunId $runId `
         -ArtifactLeasePath $artifactLeasePath
@@ -2619,7 +2619,7 @@ finally {
 
 $runRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-automation-samples-' + [Guid]::NewGuid().ToString('N'))
+    ('spectiary-automation-samples-' + [Guid]::NewGuid().ToString('N'))
 $stateRootA = Join-Path $runRoot 'source-navigation-state'
 $stateRootB = Join-Path $runRoot 'label-capture-state'
 $seedPath = Join-Path $runRoot 'labeling-seed.json'

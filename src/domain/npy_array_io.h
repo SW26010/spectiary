@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class NpyArrayErrorKind {
     UnsupportedFormat,
@@ -80,4 +80,4 @@ std::vector<T> ReadNpyTypedValues(
     return values;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

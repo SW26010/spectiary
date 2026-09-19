@@ -11,8 +11,8 @@ further interactive evidence.
 Implemented as a default-off diagnostic after the
 [call-site review](../design/feedback-and-buffer-review.md).
 
-Only `specforge_redirection_experiment` reads
-`SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY=1`. The ordinary executable does not
+Only `spectiary_redirection_experiment` reads
+`SPECTIARY_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY=1`. The ordinary executable does not
 activate the option. The runtime emits `feedback_experiment.acquire_only`, and
 the runner records the requested state beside the executable hash.
 

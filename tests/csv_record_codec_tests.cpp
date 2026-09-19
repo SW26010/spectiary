@@ -22,18 +22,18 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-std::vector<specforge::CsvRecord> ReadAll(std::string_view input)
+std::vector<spectiary::CsvRecord> ReadAll(std::string_view input)
 {
     std::istringstream stream{std::string(input)};
-    specforge::BoundedCsvRecordReader reader(stream);
-    std::vector<specforge::CsvRecord> records;
+    spectiary::BoundedCsvRecordReader reader(stream);
+    std::vector<spectiary::CsvRecord> records;
     while (true) {
-        specforge::CsvRecordReadResult result = reader.ReadRecord();
-        if (result.status == specforge::CsvRecordReadStatus::End) {
+        spectiary::CsvRecordReadResult result = reader.ReadRecord();
+        if (result.status == spectiary::CsvRecordReadStatus::End) {
             return records;
         }
         Require(
-            result.status == specforge::CsvRecordReadStatus::Record,
+            result.status == spectiary::CsvRecordReadStatus::Record,
             result.error.message);
         records.push_back(std::move(result.record));
     }
@@ -94,7 +94,7 @@ private:
 
 void TestWriterAndReaderRoundTripLogicalRecords()
 {
-    const std::vector<specforge::CsvRecord> expected{
+    const std::vector<spectiary::CsvRecord> expected{
         {"sample", "label"},
         {"  untrimmed  ", "星系"},
         {"comma,value", "say \"hello\""},
@@ -103,8 +103,8 @@ void TestWriterAndReaderRoundTripLogicalRecords()
     };
 
     std::ostringstream output;
-    specforge::BoundedCsvRecordWriter writer(output);
-    for (const specforge::CsvRecord& record : expected) {
+    spectiary::BoundedCsvRecordWriter writer(output);
+    for (const spectiary::CsvRecord& record : expected) {
         Require(
             writer.WriteRecord(record).succeeded(),
             "CSV writer should accept valid UTF-8 records");
@@ -126,9 +126,9 @@ void TestWriterAndReaderRoundTripLogicalRecords()
 
 void TestReaderAcceptsLfAndCrLfWithoutTrimming()
 {
-    const std::vector<specforge::CsvRecord> records =
+    const std::vector<spectiary::CsvRecord> records =
         ReadAll("  alpha  , beta \n\"x\r\ny\",z\r\n\n");
-    const std::vector<specforge::CsvRecord> expected{
+    const std::vector<spectiary::CsvRecord> expected{
         {"  alpha  ", " beta "},
         {"x\r\ny", "z"},
         {""},
@@ -147,22 +147,22 @@ void TestMalformedQuotesAndLineEndingsAreControlledErrors()
     };
     for (const std::string& input : malformed_quotes) {
         std::istringstream stream(input);
-        specforge::BoundedCsvRecordReader reader(stream);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
-            result.status == specforge::CsvRecordReadStatus::Error &&
+            result.status == spectiary::CsvRecordReadStatus::Error &&
                 result.error.kind ==
-                    specforge::CsvRecordErrorKind::MalformedQuote,
+                    spectiary::CsvRecordErrorKind::MalformedQuote,
             "malformed quoting should return a controlled quote error");
     }
 
     std::istringstream stream("a,b\rc,d");
-    specforge::BoundedCsvRecordReader reader(stream);
-    const specforge::CsvRecordReadResult result = reader.ReadRecord();
+    spectiary::BoundedCsvRecordReader reader(stream);
+    const spectiary::CsvRecordReadResult result = reader.ReadRecord();
     Require(
-        result.status == specforge::CsvRecordReadStatus::Error &&
+        result.status == spectiary::CsvRecordReadStatus::Error &&
             result.error.kind ==
-                specforge::CsvRecordErrorKind::InvalidLineEnding,
+                spectiary::CsvRecordErrorKind::InvalidLineEnding,
         "bare CR should be rejected instead of splitting a record ambiguously");
 }
 
@@ -170,13 +170,13 @@ void TestFailbitExceptionsDoNotReclassifyCleanEof()
 {
     std::istringstream stream("a\n");
     stream.exceptions(std::ios::failbit | std::ios::badbit);
-    specforge::BoundedCsvRecordReader reader(stream);
+    spectiary::BoundedCsvRecordReader reader(stream);
     Require(
         reader.ReadRecord().has_record(),
         "reader should return the record before an exception-enabled EOF");
-    const specforge::CsvRecordReadResult end = reader.ReadRecord();
+    const spectiary::CsvRecordReadResult end = reader.ReadRecord();
     Require(
-        end.status == specforge::CsvRecordReadStatus::End,
+        end.status == spectiary::CsvRecordReadStatus::End,
         "clean EOF must remain End when failbit exceptions are enabled");
 }
 
@@ -189,7 +189,7 @@ void TestResourceLimitsDoNotConsumeTheFirstRejectedByte()
     };
     for (const LimitKind kind :
          {LimitKind::File, LimitKind::Record, LimitKind::Field}) {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         if (kind == LimitKind::File) {
             limits.maximum_file_bytes = 3;
         } else if (kind == LimitKind::Record) {
@@ -198,11 +198,11 @@ void TestResourceLimitsDoNotConsumeTheFirstRejectedByte()
             limits.maximum_field_bytes = 3;
         }
         std::istringstream stream("abcd");
-        specforge::BoundedCsvRecordReader reader(stream, limits);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream, limits);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
             "reader should report the selected byte limit");
         Require(
             reader.bytes_read() == 3 &&
@@ -211,14 +211,14 @@ void TestResourceLimitsDoNotConsumeTheFirstRejectedByte()
             "the first over-limit byte must remain unconsumed");
     }
 
-    specforge::CsvRecordLimits field_count_limits;
+    spectiary::CsvRecordLimits field_count_limits;
     field_count_limits.maximum_fields_per_record = 1;
     std::istringstream stream("a,b");
-    specforge::BoundedCsvRecordReader reader(stream, field_count_limits);
-    const specforge::CsvRecordReadResult result = reader.ReadRecord();
+    spectiary::BoundedCsvRecordReader reader(stream, field_count_limits);
+    const spectiary::CsvRecordReadResult result = reader.ReadRecord();
     Require(
         result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded &&
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded &&
             reader.bytes_read() == 1 &&
             result.error.byte_offset == 1 &&
             stream.peek() == ',',
@@ -229,17 +229,17 @@ void TestBinaryFileRoundTripPreservesPhysicalAndEmbeddedNewlines()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-csv-binary-file-round-trip";
+        "spectiary-csv-binary-file-round-trip";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     const std::filesystem::path path = root / "record.csv";
-    const std::vector<specforge::CsvRecord> expected{
+    const std::vector<spectiary::CsvRecord> expected{
         {"line one\r\nline two"},
         {"line one\nline two"},
     };
     Require(
-        specforge::WriteCsvRecordsAtomically(path, expected).succeeded(),
+        spectiary::WriteCsvRecordsAtomically(path, expected).succeeded(),
         "path-level CSV writer should open its temporary file in binary mode");
     Require(
         ReadFile(path) ==
@@ -247,15 +247,15 @@ void TestBinaryFileRoundTripPreservesPhysicalAndEmbeddedNewlines()
             "\"line one\nline two\"\r\n",
         "binary CSV output should preserve field bytes and canonical CRLF");
 
-    specforge::BoundedCsvFileReader reader(path);
-    for (const specforge::CsvRecord& record : expected) {
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+    spectiary::BoundedCsvFileReader reader(path);
+    for (const spectiary::CsvRecord& record : expected) {
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.has_record() && result.record == record,
             "path-level CSV reader should preserve embedded newline bytes");
     }
     Require(
-        reader.ReadRecord().status == specforge::CsvRecordReadStatus::End,
+        reader.ReadRecord().status == spectiary::CsvRecordReadStatus::End,
         "path-level CSV reader should reach clean EOF");
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -264,58 +264,58 @@ void TestUtf8AndEveryByteLimitAreEnforced()
 {
     {
         std::istringstream stream(std::string("\xc3\x28\n", 3));
-        specforge::BoundedCsvRecordReader reader(stream);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
-            result.status == specforge::CsvRecordReadStatus::Error &&
+            result.status == spectiary::CsvRecordReadStatus::Error &&
                 result.error.kind ==
-                    specforge::CsvRecordErrorKind::InvalidUtf8,
+                    spectiary::CsvRecordErrorKind::InvalidUtf8,
             "reader should reject malformed UTF-8");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_field_bytes = 3;
         std::istringstream stream("four\n");
-        specforge::BoundedCsvRecordReader reader(stream, limits);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream, limits);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
             "reader should enforce the decoded field-byte limit");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_record_bytes = 4;
         std::istringstream stream("a,b\r\n");
-        specforge::BoundedCsvRecordReader reader(stream, limits);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream, limits);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
             "reader should include CRLF in the record-byte limit");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_file_bytes = 4;
         std::istringstream stream("a\nb\nc\n");
-        specforge::BoundedCsvRecordReader reader(stream, limits);
+        spectiary::BoundedCsvRecordReader reader(stream, limits);
         Require(reader.ReadRecord().has_record(), "first bounded record should fit");
         Require(reader.ReadRecord().has_record(), "second bounded record should fit");
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
             "reader should enforce the cumulative file-byte limit");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_fields_per_record = 1;
         std::istringstream stream("a,b\n");
-        specforge::BoundedCsvRecordReader reader(stream, limits);
-        const specforge::CsvRecordReadResult result = reader.ReadRecord();
+        spectiary::BoundedCsvRecordReader reader(stream, limits);
+        const spectiary::CsvRecordReadResult result = reader.ReadRecord();
         Require(
             result.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
             "reader should bound empty-field amplification");
     }
 }
@@ -324,31 +324,31 @@ void TestWriterRejectsInvalidUtf8BeforeWritingRecord()
 {
     for (const std::string text : {"", "ASCII", "\xc2\xa2\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
         std::ostringstream output;
-        specforge::BoundedCsvRecordWriter writer(output);
-        Require(writer.WriteRecord(specforge::CsvRecord{text}).succeeded(), "valid UTF-8 should serialize");
+        spectiary::BoundedCsvRecordWriter writer(output);
+        Require(writer.WriteRecord(spectiary::CsvRecord{text}).succeeded(), "valid UTF-8 should serialize");
         std::istringstream input(output.str());
-        specforge::BoundedCsvRecordReader reader(input);
+        spectiary::BoundedCsvRecordReader reader(input);
         const auto result = reader.ReadRecord();
-        Require(result.has_record() && result.record == specforge::CsvRecord{text},
+        Require(result.has_record() && result.record == spectiary::CsvRecord{text},
                 "empty, ASCII and multibyte fields should round-trip");
     }
     for (const std::string text : {"\xc3", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
         std::ostringstream output;
-        specforge::BoundedCsvRecordWriter writer(output);
-        Require(writer.WriteRecord(specforge::CsvRecord{text}).error.kind == specforge::CsvRecordErrorKind::InvalidUtf8 && output.str().empty(),
+        spectiary::BoundedCsvRecordWriter writer(output);
+        Require(writer.WriteRecord(spectiary::CsvRecord{text}).error.kind == spectiary::CsvRecordErrorKind::InvalidUtf8 && output.str().empty(),
                 "invalid Unicode sequences should fail before CSV output");
         std::istringstream input(text + "\n");
-        specforge::BoundedCsvRecordReader reader(input);
-        Require(reader.ReadRecord().error.kind == specforge::CsvRecordErrorKind::InvalidUtf8,
+        spectiary::BoundedCsvRecordReader reader(input);
+        Require(reader.ReadRecord().error.kind == spectiary::CsvRecordErrorKind::InvalidUtf8,
                 "CSV input should reject truncated, overlong, surrogate and out-of-range sequences");
     }
     std::ostringstream output;
-    specforge::BoundedCsvRecordWriter writer(output);
-    const specforge::CsvRecord record{std::string("\xc3\x28", 2)};
-    const specforge::CsvRecordWriteResult result = writer.WriteRecord(record);
+    spectiary::BoundedCsvRecordWriter writer(output);
+    const spectiary::CsvRecord record{std::string("\xc3\x28", 2)};
+    const spectiary::CsvRecordWriteResult result = writer.WriteRecord(record);
     Require(
         !result.succeeded() &&
-            result.error.kind == specforge::CsvRecordErrorKind::InvalidUtf8 &&
+            result.error.kind == spectiary::CsvRecordErrorKind::InvalidUtf8 &&
             output.str().empty(),
         "writer should reject malformed UTF-8 before emitting a record");
 }
@@ -358,12 +358,12 @@ void TestShortWriteReportsConfirmedPartialByteOffset()
     ShortWriteBuffer buffer(3);
     std::ostream output(&buffer);
     output.exceptions(std::ios::badbit);
-    specforge::BoundedCsvRecordWriter writer(output);
-    const specforge::CsvRecordWriteResult result =
-        writer.WriteRecord(specforge::CsvRecord{"abcdef"});
+    spectiary::BoundedCsvRecordWriter writer(output);
+    const spectiary::CsvRecordWriteResult result =
+        writer.WriteRecord(spectiary::CsvRecord{"abcdef"});
     Require(
         !result.succeeded() &&
-            result.error.kind == specforge::CsvRecordErrorKind::IoFailure &&
+            result.error.kind == spectiary::CsvRecordErrorKind::IoFailure &&
             result.error.byte_offset == 3 &&
             writer.bytes_written() == 3 &&
             buffer.written() == "abc",
@@ -373,44 +373,44 @@ void TestShortWriteReportsConfirmedPartialByteOffset()
 void TestWriterEnforcesRecordFileAndFieldCountLimits()
 {
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_record_bytes = 4;
         std::ostringstream output;
-        specforge::BoundedCsvRecordWriter writer(output, limits);
-        const specforge::CsvRecordWriteResult result =
-            writer.WriteRecord(specforge::CsvRecord{"a,b"});
+        spectiary::BoundedCsvRecordWriter writer(output, limits);
+        const spectiary::CsvRecordWriteResult result =
+            writer.WriteRecord(spectiary::CsvRecord{"a,b"});
         Require(
             result.error.kind ==
-                    specforge::CsvRecordErrorKind::ResourceLimitExceeded &&
+                    spectiary::CsvRecordErrorKind::ResourceLimitExceeded &&
                 output.str().empty(),
             "writer should bound quoting expansion plus CRLF before output");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_file_bytes = 4;
         std::ostringstream output;
-        specforge::BoundedCsvRecordWriter writer(output, limits);
+        spectiary::BoundedCsvRecordWriter writer(output, limits);
         Require(
-            writer.WriteRecord(specforge::CsvRecord{"a"}).succeeded(),
+            writer.WriteRecord(spectiary::CsvRecord{"a"}).succeeded(),
             "first writer record should fit the file limit");
-        const specforge::CsvRecordWriteResult result =
-            writer.WriteRecord(specforge::CsvRecord{"b"});
+        const spectiary::CsvRecordWriteResult result =
+            writer.WriteRecord(spectiary::CsvRecord{"b"});
         Require(
             result.error.kind ==
-                    specforge::CsvRecordErrorKind::ResourceLimitExceeded &&
+                    spectiary::CsvRecordErrorKind::ResourceLimitExceeded &&
                 output.str() == "a\r\n",
             "writer should enforce cumulative file bytes before another record");
     }
     {
-        specforge::CsvRecordLimits limits;
+        spectiary::CsvRecordLimits limits;
         limits.maximum_fields_per_record = 0;
         std::ostringstream output;
-        specforge::BoundedCsvRecordWriter writer(output, limits);
-        const specforge::CsvRecordWriteResult result =
-            writer.WriteRecord(specforge::CsvRecord{});
+        spectiary::BoundedCsvRecordWriter writer(output, limits);
+        const spectiary::CsvRecordWriteResult result =
+            writer.WriteRecord(spectiary::CsvRecord{});
         Require(
             result.error.kind ==
-                    specforge::CsvRecordErrorKind::ResourceLimitExceeded &&
+                    spectiary::CsvRecordErrorKind::ResourceLimitExceeded &&
                 output.str().empty(),
             "a blank CSV record should still count as one empty field");
     }
@@ -420,7 +420,7 @@ void TestAtomicWriterPreservesTargetWhenALaterRecordExceedsLimits()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-csv-record-codec-tests";
+        "spectiary-csv-record-codec-tests";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
@@ -430,21 +430,21 @@ void TestAtomicWriterPreservesTargetWhenALaterRecordExceedsLimits()
         stream << "old CSV";
     }
 
-    specforge::CsvRecordLimits limits;
+    spectiary::CsvRecordLimits limits;
     limits.maximum_field_bytes = 3;
-    const std::vector<specforge::CsvRecord> invalid_records{
+    const std::vector<spectiary::CsvRecord> invalid_records{
         {"ok"},
         {"too long"},
     };
-    const specforge::CsvRecordWriteResult failed =
-        specforge::WriteCsvRecordsAtomically(
+    const spectiary::CsvRecordWriteResult failed =
+        spectiary::WriteCsvRecordsAtomically(
             target,
             invalid_records,
             limits);
     Require(
         !failed.succeeded() &&
             failed.error.kind ==
-                specforge::CsvRecordErrorKind::ResourceLimitExceeded,
+                spectiary::CsvRecordErrorKind::ResourceLimitExceeded,
         "atomic writer should return the codec's structured limit error");
     Require(
         ReadFile(target) == "old CSV",
@@ -453,12 +453,12 @@ void TestAtomicWriterPreservesTargetWhenALaterRecordExceedsLimits()
         !HasTemporarySibling(root),
         "failed atomic encoding should clean its sibling temporary file");
 
-    const std::vector<specforge::CsvRecord> valid_records{
+    const std::vector<spectiary::CsvRecord> valid_records{
         {"sample", "label"},
         {"a,b", "星系"},
     };
-    const specforge::CsvRecordWriteResult written =
-        specforge::WriteCsvRecordsAtomically(target, valid_records);
+    const spectiary::CsvRecordWriteResult written =
+        spectiary::WriteCsvRecordsAtomically(target, valid_records);
     Require(written.succeeded(), "valid atomic CSV write should succeed");
     Require(
         ReadAll(ReadFile(target)) == valid_records,

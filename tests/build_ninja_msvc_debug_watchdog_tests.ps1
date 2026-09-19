@@ -96,11 +96,11 @@ $resolverAst = $wrapperAst.Find(
     {
         param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -ceq 'Resolve-SpecForgeVcvarsPath'
+            $node.Name -ceq 'Resolve-SpectiaryVcvarsPath'
     },
     $true)
 if ($null -eq $resolverAst) {
-    throw 'Build wrapper must define Resolve-SpecForgeVcvarsPath.'
+    throw 'Build wrapper must define Resolve-SpectiaryVcvarsPath.'
 }
 . ([scriptblock]::Create($resolverAst.Extent.Text))
 
@@ -121,10 +121,10 @@ function Assert-PathEqual {
 }
 
 $resolverRoot = Join-Path $env:TEMP (
-    'specforge-vcvars-resolver-' + [guid]::NewGuid().ToString('N'))
-$originalResolverEnvironment = $env:SPECFORGE_VCVARS_PATH
-$originalVswhereResult = $env:SPECFORGE_TEST_VSWHERE_RESULT
-$originalVswhereArguments = $env:SPECFORGE_TEST_VSWHERE_ARGS_FILE
+    'spectiary-vcvars-resolver-' + [guid]::NewGuid().ToString('N'))
+$originalResolverEnvironment = $env:SPECTIARY_VCVARS_PATH
+$originalVswhereResult = $env:SPECTIARY_TEST_VSWHERE_RESULT
+$originalVswhereArguments = $env:SPECTIARY_TEST_VSWHERE_ARGS_FILE
 try {
     New-Item -ItemType Directory -Path $resolverRoot -Force | Out-Null
     $explicitVcvars = Join-Path $resolverRoot 'explicit-vcvars64.bat'
@@ -146,15 +146,15 @@ try {
         $fakeVswhere,
         (@'
 @echo off
-if not "%SPECFORGE_TEST_VSWHERE_ARGS_FILE%"=="" echo %*>"%SPECFORGE_TEST_VSWHERE_ARGS_FILE%"
-echo %SPECFORGE_TEST_VSWHERE_RESULT%
+if not "%SPECTIARY_TEST_VSWHERE_ARGS_FILE%"=="" echo %*>"%SPECTIARY_TEST_VSWHERE_ARGS_FILE%"
+echo %SPECTIARY_TEST_VSWHERE_RESULT%
 exit /b 0
 '@).TrimStart())
-    $env:SPECFORGE_TEST_VSWHERE_RESULT = $discoveredVcvars
-    $env:SPECFORGE_TEST_VSWHERE_ARGS_FILE = $vswhereArgumentsFile
+    $env:SPECTIARY_TEST_VSWHERE_RESULT = $discoveredVcvars
+    $env:SPECTIARY_TEST_VSWHERE_ARGS_FILE = $vswhereArgumentsFile
 
-    $env:SPECFORGE_VCVARS_PATH = $environmentVcvars
-    $resolved = Resolve-SpecForgeVcvarsPath `
+    $env:SPECTIARY_VCVARS_PATH = $environmentVcvars
+    $resolved = Resolve-SpectiaryVcvarsPath `
         -ExplicitPath $explicitVcvars `
         -VswherePath $fakeVswhere `
         -LegacyPath $legacyVcvars
@@ -166,7 +166,7 @@ exit /b 0
         throw 'Explicit vcvars resolution must not invoke vswhere.'
     }
 
-    $resolved = Resolve-SpecForgeVcvarsPath `
+    $resolved = Resolve-SpectiaryVcvarsPath `
         -ExplicitPath (Join-Path $resolverRoot 'missing-explicit.bat') `
         -VswherePath $fakeVswhere `
         -LegacyPath $legacyVcvars
@@ -178,8 +178,8 @@ exit /b 0
         throw 'Environment vcvars resolution must not invoke vswhere.'
     }
 
-    $env:SPECFORGE_VCVARS_PATH = Join-Path $resolverRoot 'missing-environment.bat'
-    $resolved = Resolve-SpecForgeVcvarsPath `
+    $env:SPECTIARY_VCVARS_PATH = Join-Path $resolverRoot 'missing-environment.bat'
+    $resolved = Resolve-SpectiaryVcvarsPath `
         -ExplicitPath (Join-Path $resolverRoot 'missing-explicit.bat') `
         -VswherePath $fakeVswhere `
         -LegacyPath $legacyVcvars
@@ -199,8 +199,8 @@ exit /b 0
         }
     }
 
-    $env:SPECFORGE_TEST_VSWHERE_RESULT = Join-Path $resolverRoot 'missing-discovered.bat'
-    $resolved = Resolve-SpecForgeVcvarsPath `
+    $env:SPECTIARY_TEST_VSWHERE_RESULT = Join-Path $resolverRoot 'missing-discovered.bat'
+    $resolved = Resolve-SpectiaryVcvarsPath `
         -ExplicitPath (Join-Path $resolverRoot 'missing-explicit.bat') `
         -VswherePath $fakeVswhere `
         -LegacyPath $legacyVcvars
@@ -212,7 +212,7 @@ exit /b 0
     $missingLegacy = Join-Path $resolverRoot 'missing-legacy.bat'
     $failureMessage = ''
     try {
-        Resolve-SpecForgeVcvarsPath `
+        Resolve-SpectiaryVcvarsPath `
             -ExplicitPath (Join-Path $resolverRoot 'missing-explicit.bat') `
             -VswherePath $fakeVswhere `
             -LegacyPath $missingLegacy | Out-Null
@@ -223,7 +223,7 @@ exit /b 0
     foreach ($expectedDiagnostic in @(
             'Unable to locate vcvars64.bat',
             'explicit -VcvarsPath',
-            'SPECFORGE_VCVARS_PATH',
+            'SPECTIARY_VCVARS_PATH',
             'vswhere',
             'legacy VS 2022 BuildTools'
         )) {
@@ -233,9 +233,9 @@ exit /b 0
     }
 }
 finally {
-    $env:SPECFORGE_VCVARS_PATH = $originalResolverEnvironment
-    $env:SPECFORGE_TEST_VSWHERE_RESULT = $originalVswhereResult
-    $env:SPECFORGE_TEST_VSWHERE_ARGS_FILE = $originalVswhereArguments
+    $env:SPECTIARY_VCVARS_PATH = $originalResolverEnvironment
+    $env:SPECTIARY_TEST_VSWHERE_RESULT = $originalVswhereResult
+    $env:SPECTIARY_TEST_VSWHERE_ARGS_FILE = $originalVswhereArguments
     if (Test-Path -LiteralPath $resolverRoot) {
         Remove-Item -LiteralPath $resolverRoot -Recurse -Force
     }

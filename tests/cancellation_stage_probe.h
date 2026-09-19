@@ -16,7 +16,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge::tests {
+namespace spectiary::tests {
 
 class SourceStage {
 public:
@@ -223,4 +223,4 @@ private:
     bool stage_observed_ = false;
 };
 
-}  // namespace specforge::tests
+}  // namespace spectiary::tests

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionLoadDependencies;
 struct SourceCollectionLoadQueueExecutionOptions;
@@ -119,4 +119,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

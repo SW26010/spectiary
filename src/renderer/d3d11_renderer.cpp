@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool IsAllowedLiveObjectMessage(D3D11_MESSAGE_ID id)
@@ -359,4 +359,4 @@ HRESULT D3D11Renderer::RecordFailure(std::string_view operation, HRESULT result)
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

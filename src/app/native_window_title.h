@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct NativeWindowTitleContext {
     std::filesystem::path source_path;
@@ -50,11 +50,11 @@ private:
     std::size_t sample_count_ = 0;
 };
 
-[[nodiscard]] std::wstring FormatSpecForgeNativeWindowTitle(
+[[nodiscard]] std::wstring FormatSpectiaryNativeWindowTitle(
     const NativeWindowTitleView& view);
 
-[[nodiscard]] std::wstring FormatSpecForgeNativeWindowTitle(
+[[nodiscard]] std::wstring FormatSpectiaryNativeWindowTitle(
     std::string_view product_name,
     const NativeWindowTitleContext& context = {});
 
-}  // namespace specforge
+}  // namespace spectiary

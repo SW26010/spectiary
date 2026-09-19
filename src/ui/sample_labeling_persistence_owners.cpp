@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <unordered_set>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 using Json = nlohmann::json;
 constexpr char kStateFormat[] = "spectiary.sample_labeling.state";
@@ -353,4 +353,4 @@ bool SaveSampleLabelingDraftCheckpoints(const std::filesystem::path& path,
     if (saved) HideUnsavedCheckpointDirectory(path.parent_path());
     return saved;
 }
-} // namespace specforge
+} // namespace spectiary

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace specforge::project_identity {
+namespace spectiary::project_identity {
 // Permanent lineage token, not a runtime Git revision or a display name.
 inline constexpr char kApplicationId[] = "@PROJECT_founding_identity@";
 // Machine namespaces are rooted in the complete immutable lineage token.
@@ -10,9 +10,9 @@ inline constexpr char kAsdfPreservationDomain[] = "@PROJECT_founding_identity@.s
 inline constexpr char kAsdfValuesRewriteDomain[] = "@PROJECT_founding_identity@.sample-labeling.asdf-values-rewrite-identity-v1";
 inline constexpr char kLabelingEditLeaseDomain[] = "@PROJECT_founding_identity@.sample-labeling.edit-lease.v1\n";
 inline constexpr char kProductDisplayName[] = "@PROJECT_product_display_name@";
-// Final destination contract; physical adoption is owned by #103.
+// Explicit human-readable storage leaf, adopted by the #103 role layout.
 inline constexpr char kLocalAppDataLeaf[] = "@PROJECT_local_app_data_leaf@";
 inline constexpr char kArtifactBasename[] = "@PROJECT_artifact_basename@";
 inline constexpr char kExecutableFilename[] = "@PROJECT_artifact_basename@.exe";
 inline constexpr char kMetadataFilename[] = "@PROJECT_metadata_filename@";
-}  // namespace specforge::project_identity
+}  // namespace spectiary::project_identity

@@ -28,18 +28,18 @@
 #include <type_traits>
 #include <utility>
 
-#ifndef SPECFORGE_BENCHMARK_BUILD_CONFIGURATION
-#define SPECFORGE_BENCHMARK_BUILD_CONFIGURATION "unknown"
+#ifndef SPECTIARY_BENCHMARK_BUILD_CONFIGURATION
+#define SPECTIARY_BENCHMARK_BUILD_CONFIGURATION "unknown"
 #endif
 
-#ifndef SPECFORGE_BENCHMARK_COMPILER
-#define SPECFORGE_BENCHMARK_COMPILER "unknown"
+#ifndef SPECTIARY_BENCHMARK_COMPILER
+#define SPECTIARY_BENCHMARK_COMPILER "unknown"
 #endif
 
 namespace {
 
-using specforge::asdf_labeling_benchmark::BenchmarkDocument;
-using specforge::asdf_labeling_benchmark::DatasetCase;
+using spectiary::asdf_labeling_benchmark::BenchmarkDocument;
+using spectiary::asdf_labeling_benchmark::DatasetCase;
 
 enum class Operation {
     InitialWrite,
@@ -53,7 +53,7 @@ struct Options {
     DatasetCase dataset_case = DatasetCase::SourceIndex;
     Operation operation = Operation::InitialWrite;
     std::size_t sample_count =
-        specforge::asdf_labeling_benchmark::kProductionSampleCount;
+        spectiary::asdf_labeling_benchmark::kProductionSampleCount;
     std::filesystem::path directory;
     std::string commit = "unknown";
     bool has_case = false;
@@ -77,8 +77,8 @@ struct Measurement {
 struct Record {
     std::string commit = "unknown";
     std::string build_configuration =
-        SPECFORGE_BENCHMARK_BUILD_CONFIGURATION;
-    std::string compiler = SPECFORGE_BENCHMARK_COMPILER;
+        SPECTIARY_BENCHMARK_BUILD_CONFIGURATION;
+    std::string compiler = SPECTIARY_BENCHMARK_COMPILER;
     std::string os;
     std::string cpu;
     std::uint32_t logical_cpu_count = 0;
@@ -157,7 +157,7 @@ struct Record {
 void PrintUsage()
 {
     std::cout
-        << "Usage: specforge_asdf_labeling_production_benchmark "
+        << "Usage: spectiary_asdf_labeling_production_benchmark "
         << "--case source-index|explicit-unicode "
         << "--operation initial-write|read-open|values-rewrite-1|"
         << "values-rewrite-1000|metadata-rewrite "
@@ -180,7 +180,7 @@ void PrintUsage()
         const std::string_view value = argv[++index];
         if (argument == "--case") {
             options.dataset_case =
-                specforge::asdf_labeling_benchmark::ParseDatasetCase(value);
+                spectiary::asdf_labeling_benchmark::ParseDatasetCase(value);
             options.has_case = true;
         } else if (argument == "--operation") {
             options.operation = ParseOperation(value);
@@ -484,11 +484,11 @@ template <typename Callable>
     };
 }
 
-[[nodiscard]] specforge::CanonicalTimestamp RequiredTimestamp(
+[[nodiscard]] spectiary::CanonicalTimestamp RequiredTimestamp(
     std::string_view text)
 {
-    const std::optional<specforge::CanonicalTimestamp> parsed =
-        specforge::ParseCanonicalTimestamp(text);
+    const std::optional<spectiary::CanonicalTimestamp> parsed =
+        spectiary::ParseCanonicalTimestamp(text);
     if (!parsed) {
         throw std::runtime_error("benchmark timestamp is invalid");
     }
@@ -496,9 +496,9 @@ template <typename Callable>
 }
 
 [[nodiscard]] std::string CodecErrorName(
-    specforge::SampleLabelingAsdfErrorKind kind)
+    spectiary::SampleLabelingAsdfErrorKind kind)
 {
-    using Kind = specforge::SampleLabelingAsdfErrorKind;
+    using Kind = spectiary::SampleLabelingAsdfErrorKind;
     switch (kind) {
     case Kind::None:
         return "none";
@@ -519,9 +519,9 @@ template <typename Callable>
 }
 
 [[nodiscard]] std::string StoreErrorName(
-    const specforge::SampleLabelingAsdfStoreError& error)
+    const spectiary::SampleLabelingAsdfStoreError& error)
 {
-    using Kind = specforge::SampleLabelingAsdfStoreErrorKind;
+    using Kind = spectiary::SampleLabelingAsdfStoreErrorKind;
     switch (error.kind) {
     case Kind::None:
         return "none";
@@ -570,11 +570,11 @@ void CreateFreshDirectory(const std::filesystem::path& directory)
 void WriteSetupDocument(const std::filesystem::path& path,
     const BenchmarkDocument& benchmark_document)
 {
-    const specforge::SampleLabelingSourceCompatibility compatibility =
-        specforge::asdf_labeling_benchmark::MakeCompatibilityView(
+    const spectiary::SampleLabelingSourceCompatibility compatibility =
+        spectiary::asdf_labeling_benchmark::MakeCompatibilityView(
             benchmark_document.document);
-    const specforge::SampleLabelingAsdfStoreGenerationWriteResult setup =
-        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+    const spectiary::SampleLabelingAsdfStoreGenerationWriteResult setup =
+        spectiary::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
             path,
             benchmark_document.document,
             compatibility);
@@ -585,7 +585,7 @@ void WriteSetupDocument(const std::filesystem::path& path,
 }
 
 void MutateValues(
-    specforge::SampleLabelingDocument& replacement,
+    spectiary::SampleLabelingDocument& replacement,
     std::size_t mutation_count)
 {
     if (replacement.annotation.values.size() < mutation_count) {
@@ -622,18 +622,18 @@ void RunOperation(const Options& options, Record& record)
     record.filesystem_path = PathUtf8(directory);
 
     BenchmarkDocument benchmark_document =
-        specforge::asdf_labeling_benchmark::MakeBenchmarkDocument(
+        spectiary::asdf_labeling_benchmark::MakeBenchmarkDocument(
             options.dataset_case, options.sample_count);
     record.roster_width = benchmark_document.roster_width;
     record.roster_kind =
         benchmark_document.document.source.roster.identity_kind;
-    const specforge::SampleLabelingSourceCompatibility compatibility =
-        specforge::asdf_labeling_benchmark::MakeCompatibilityView(
+    const spectiary::SampleLabelingSourceCompatibility compatibility =
+        spectiary::asdf_labeling_benchmark::MakeCompatibilityView(
             benchmark_document.document);
 
     if (options.operation == Operation::InitialWrite) {
         auto [result, measurement] = MeasureProductionCall([&]() {
-            return specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+            return spectiary::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
                 path,
                 benchmark_document.document,
                 compatibility);
@@ -647,11 +647,11 @@ void RunOperation(const Options& options, Record& record)
                    : StoreErrorName(result.error));
     } else {
         WriteSetupDocument(path, benchmark_document);
-        specforge::asdf_labeling_benchmark::SeedForwardUnknownMetadata(path);
+        spectiary::asdf_labeling_benchmark::SeedForwardUnknownMetadata(path);
 
         if (options.operation == Operation::ReadOpen) {
             auto [result, measurement] = MeasureProductionCall([&]() {
-                return specforge::OpenSampleLabelingAsdfDocumentStore(
+                return spectiary::OpenSampleLabelingAsdfDocumentStore(
                     path, compatibility);
             });
             ApplyMeasurement(record, measurement);
@@ -659,7 +659,7 @@ void RunOperation(const Options& options, Record& record)
                 result.snapshot->durable_base().valid() &&
                 result.snapshot->document().source.sample_count ==
                     options.sample_count &&
-                specforge::asdf_labeling_benchmark::
+                spectiary::asdf_labeling_benchmark::
                     ContainsSeededForwardUnknownMetadata(path);
             record.success = validated;
             record.error_kind = validated
@@ -668,15 +668,15 @@ void RunOperation(const Options& options, Record& record)
                        ? "benchmark_validation_failure"
                        : StoreErrorName(result.error));
         } else {
-            specforge::SampleLabelingAsdfStoreOpenResult opened =
-                specforge::OpenSampleLabelingAsdfDocumentStore(
+            spectiary::SampleLabelingAsdfStoreOpenResult opened =
+                spectiary::OpenSampleLabelingAsdfDocumentStore(
                     path, compatibility);
             if (!opened.succeeded()) {
                 throw std::runtime_error(
                     "production store rewrite setup open failed: " +
                     opened.error.message);
             }
-            specforge::SampleLabelingDocument replacement =
+            spectiary::SampleLabelingDocument replacement =
                 opened.snapshot->document();
 
             if (options.operation == Operation::MetadataRewrite) {
@@ -685,7 +685,7 @@ void RunOperation(const Options& options, Record& record)
                 replacement.labeling.canonical_metadata.modified_at =
                     RequiredTimestamp("2026-08-31T00:00:02.000Z");
                 auto [result, measurement] = MeasureProductionCall([&]() {
-                    return specforge::
+                    return spectiary::
                         RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                             *opened.snapshot,
                             replacement,
@@ -696,7 +696,7 @@ void RunOperation(const Options& options, Record& record)
                     result.document_replaced &&
                     result.snapshot->document().labeling.name ==
                         replacement.labeling.name &&
-                    specforge::asdf_labeling_benchmark::
+                    spectiary::asdf_labeling_benchmark::
                         ContainsSeededForwardUnknownMetadata(path);
                 record.success = validated;
                 record.error_kind = validated
@@ -711,7 +711,7 @@ void RunOperation(const Options& options, Record& record)
                     : 1'000U;
                 MutateValues(replacement, mutation_count);
                 auto [result, measurement] = MeasureProductionCall([&]() {
-                    return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                    return spectiary::RewriteSampleLabelingAsdfValuesAtomically(
                         *opened.snapshot, replacement);
                 });
                 ApplyMeasurement(record, measurement);
@@ -722,7 +722,7 @@ void RunOperation(const Options& options, Record& record)
                     result.roster_block_reused == expected_reuse &&
                     opened.snapshot->document().annotation.values ==
                         replacement.annotation.values &&
-                    specforge::asdf_labeling_benchmark::
+                    spectiary::asdf_labeling_benchmark::
                         ContainsSeededForwardUnknownMetadata(path);
                 record.success = validated;
                 record.error_kind = validated
@@ -861,16 +861,16 @@ void PrintRecord(const Record& record)
         ? std::string{}
         : PathUtf8(std::filesystem::absolute(options.directory));
     record.dataset_case = std::string(
-        specforge::asdf_labeling_benchmark::DatasetCaseName(
+        spectiary::asdf_labeling_benchmark::DatasetCaseName(
             options.dataset_case));
     record.operation = std::string(OperationName(options.operation));
     record.sample_count = options.sample_count;
     record.roster_kind = options.dataset_case == DatasetCase::ExplicitUnicode
-        ? std::string{specforge::kSampleLabelingDocumentExplicitNamesRoster}
-        : std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+        ? std::string{spectiary::kSampleLabelingDocumentExplicitNamesRoster}
+        : std::string{spectiary::kSampleLabelingDocumentSourceIndexRoster};
     record.roster_width =
         options.dataset_case == DatasetCase::ExplicitUnicode
-        ? specforge::asdf_labeling_benchmark::
+        ? spectiary::asdf_labeling_benchmark::
               kExplicitUnicodeRosterWidth
         : 0U;
     return record;

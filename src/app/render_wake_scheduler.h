@@ -3,7 +3,7 @@
 #include <chrono>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 struct RenderFrameActivity {
     bool touchpad_active = false;
@@ -80,4 +80,4 @@ private:
     std::optional<TimePoint> settings_save_deadline_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

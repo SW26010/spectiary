@@ -18,7 +18,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SourceCollectionLoadErrorKind {
     None,
@@ -340,4 +340,4 @@ struct SourceCollectionSessionView {
     LocalUserStateHealthView persistence;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

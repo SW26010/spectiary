@@ -22,8 +22,8 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-const specforge::SpectralLineMarker& FindMarker(
-    const specforge::SpectralLineCatalog& catalog,
+const spectiary::SpectralLineMarker& FindMarker(
+    const spectiary::SpectralLineCatalog& catalog,
     std::string_view id)
 {
     const auto match = std::find_if(catalog.markers.begin(), catalog.markers.end(), [id](const auto& marker) {
@@ -67,22 +67,22 @@ private:
 void TestLoadsPublicCatalog()
 {
     const std::filesystem::path path =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
     Require(catalog.markers.size() >= 30, "public catalog should contain the default reference markers");
 
     double previous_position = 0.0;
     bool first = true;
-    for (const specforge::SpectralLineMarker& marker : catalog.markers) {
-        const double position = specforge::SpectralLineMarkerPosition(marker);
+    for (const spectiary::SpectralLineMarker& marker : catalog.markers) {
+        const double position = spectiary::SpectralLineMarkerPosition(marker);
         Require(first || position >= previous_position, "catalog markers should load in wavelength order");
         first = false;
         previous_position = position;
     }
 }
 
-void RequireScientificLabelUtf8(const specforge::SpectralLineCatalog& catalog)
+void RequireScientificLabelUtf8(const spectiary::SpectralLineCatalog& catalog)
 {
     Require(FindMarker(catalog, "h_alpha").label == "H\xCE\xB1", "H alpha should use compact Greek notation");
     Require(FindMarker(catalog, "h_beta").label == "H\xCE\xB2", "H beta should use compact Greek notation");
@@ -109,8 +109,8 @@ void RequireScientificLabelUtf8(const specforge::SpectralLineCatalog& catalog)
 void TestPublicCatalogUsesScientificLabelTypography()
 {
     const std::filesystem::path path =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
     RequireScientificLabelUtf8(catalog);
 }
@@ -118,16 +118,16 @@ void TestPublicCatalogUsesScientificLabelTypography()
 void TestUsesVacuumWavelengthsForAtomicMarkers()
 {
     const std::filesystem::path path =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
     Require(NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6564.608, 1.0e-6), "H alpha should use Atomic Line List vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "h_beta").vacuum_angstrom, 4862.683, 1.0e-6), "H beta should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d2").vacuum_angstrom, 5891.583, 1.0e-6), "Na I D2 should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d1").vacuum_angstrom, 5897.558, 1.0e-6), "Na I D1 should use vacuum wavelength");
-    const specforge::SpectralLineMarker& lithium = FindMarker(catalog, "li_i_6708");
-    Require(lithium.kind == specforge::SpectralLineMarkerKind::Band, "Li I doublet should be one unresolved band marker");
+    const spectiary::SpectralLineMarker& lithium = FindMarker(catalog, "li_i_6708");
+    Require(lithium.kind == spectiary::SpectralLineMarkerKind::Band, "Li I doublet should be one unresolved band marker");
     Require(
         NearlyEqual(*lithium.start_vacuum_angstrom, 6709.613, 1.0e-6) &&
             NearlyEqual(*lithium.end_vacuum_angstrom, 6709.764, 1.0e-6),
@@ -152,15 +152,15 @@ void TestUsesVacuumWavelengthsForAtomicMarkers()
 void TestPublicCatalogProvidesDqCarbonAtomicMarkers()
 {
     const std::filesystem::path path =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
     const auto group_count = [&](std::string_view group) {
         return static_cast<std::size_t>(std::count_if(
             catalog.markers.begin(),
             catalog.markers.end(),
-            [group](const specforge::SpectralLineMarker& marker) {
+            [group](const spectiary::SpectralLineMarker& marker) {
                 return marker.group == group;
             }));
     };
@@ -168,8 +168,8 @@ void TestPublicCatalogProvidesDqCarbonAtomicMarkers()
     Require(group_count("C II") == 15, "public catalog should expose fifteen selected C II markers");
 
     const auto require_line = [&](std::string_view id, std::string_view group, double wavelength) {
-        const specforge::SpectralLineMarker& marker = FindMarker(catalog, id);
-        Require(marker.kind == specforge::SpectralLineMarkerKind::Line, "selected carbon line should remain a line marker");
+        const spectiary::SpectralLineMarker& marker = FindMarker(catalog, id);
+        Require(marker.kind == spectiary::SpectralLineMarkerKind::Line, "selected carbon line should remain a line marker");
         Require(marker.group == group, "selected carbon line should use its ionization-stage group");
         Require(marker.source_ref == "atll_v3_00b5", "selected carbon line should retain Atomic Line List provenance");
         Require(
@@ -181,8 +181,8 @@ void TestPublicCatalogProvidesDqCarbonAtomicMarkers()
                                        std::string_view group,
                                        double start,
                                        double end) {
-        const specforge::SpectralLineMarker& marker = FindMarker(catalog, id);
-        Require(marker.kind == specforge::SpectralLineMarkerKind::Band, "unresolved carbon multiplet should use one band marker");
+        const spectiary::SpectralLineMarker& marker = FindMarker(catalog, id);
+        Require(marker.kind == spectiary::SpectralLineMarkerKind::Band, "unresolved carbon multiplet should use one band marker");
         Require(marker.group == group, "carbon multiplet should use its ionization-stage group");
         Require(marker.source_ref == "atll_v3_00b5", "carbon multiplet should retain Atomic Line List provenance");
         Require(
@@ -247,11 +247,11 @@ void TestPublicCatalogProvidesDqCarbonAtomicMarkers()
 void TestPublicCatalogDoesNotContainPrivateOverlayConcepts()
 {
     const std::filesystem::path path =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
-    for (const specforge::SpectralLineMarker& marker : catalog.markers) {
+    for (const spectiary::SpectralLineMarker& marker : catalog.markers) {
         Require(!Contains(marker.id, "window"), "public catalog must not contain zoom windows");
         Require(!Contains(marker.group, "subtype"), "public catalog must not contain subtype groups");
         Require(marker.group != "C-H", "public catalog must not contain C-H subtype preset groups");
@@ -268,7 +268,7 @@ void TestPublicCatalogDoesNotContainPrivateOverlayConcepts()
 void TestLoadsCatalogWithoutOptionalNotesColumn()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_without_notes.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_spectral_line_catalog_without_notes.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -276,7 +276,7 @@ void TestLoadsCatalogWithoutOptionalNotesColumn()
         stream << "h_alpha\tH alpha\tline\tBalmer\t6564.614\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -288,7 +288,7 @@ void TestLoadsCatalogWithoutOptionalNotesColumn()
 void TestGenericCatalogMayOmitGrouping()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_without_group.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_spectral_line_catalog_without_group.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -297,7 +297,7 @@ void TestGenericCatalogMayOmitGrouping()
         stream << "marker_b\tMarker B\tline\t4200.0\t\t\tB\ttest\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -309,7 +309,7 @@ void TestGenericCatalogMayOmitGrouping()
 void TestPublicCatalogRequiresGrouping()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_public_spectral_line_catalog_empty_group.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_public_spectral_line_catalog_empty_group.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -317,7 +317,7 @@ void TestPublicCatalogRequiresGrouping()
         stream << "h_alpha\tH alpha\tline\t\t6564.614\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -329,18 +329,18 @@ void TestPublicCatalogRequiresGrouping()
 void TestPackagedCatalogPathIsIndependentOfCurrentDirectory()
 {
     const std::filesystem::path path =
-        specforge::DefaultRuntimePaths().public_spectral_line_catalog_path;
+        spectiary::DefaultRuntimePaths().public_spectral_line_catalog_path;
     const ScopedCurrentPath scoped_current_path(std::filesystem::temp_directory_path());
 
-    const specforge::SpectralLineCatalog catalog =
-        specforge::LoadPackagedPublicSpectralLineCatalog(path);
+    const spectiary::SpectralLineCatalog catalog =
+        spectiary::LoadPackagedPublicSpectralLineCatalog(path);
 
     Require(catalog.load_error.empty(), catalog.load_error);
     Require(
         !catalog.markers.empty(),
         "packaged catalog should load from its explicit runtime path when cwd differs");
     RequireScientificLabelUtf8(catalog);
-#ifdef SPECFORGE_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
+#ifdef SPECTIARY_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
     Require(
         catalog.path.is_relative(),
         "static-release catalog test should load the embedded resource, not an external TSV");
@@ -354,7 +354,7 @@ void TestPackagedCatalogPathIsIndependentOfCurrentDirectory()
 void TestRejectsDuplicateMarkerIds()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_duplicate_ids.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_spectral_line_catalog_duplicate_ids.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -363,7 +363,7 @@ void TestRejectsDuplicateMarkerIds()
         stream << "h_alpha\tH alpha duplicate\tline\tBalmer\t6564.614\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -376,7 +376,7 @@ void TestRejectsDuplicateMarkerIds()
 void TestRejectsEmptySourceRef()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_empty_source_ref.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_spectral_line_catalog_empty_source_ref.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -384,7 +384,7 @@ void TestRejectsEmptySourceRef()
         stream << "h_alpha\tH alpha\tline\tBalmer\t6564.614\t\t\tHa\t\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -396,7 +396,7 @@ void TestRejectsEmptySourceRef()
 void TestRejectsNonPositiveWavelengths()
 {
     const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_non_positive_wavelength.tsv";
+        std::filesystem::temp_directory_path() / "spectiary_spectral_line_catalog_non_positive_wavelength.tsv";
     {
         std::ofstream stream(path);
         stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
@@ -404,7 +404,7 @@ void TestRejectsNonPositiveWavelengths()
         stream << "h_alpha\tH alpha\tline\tBalmer\t0\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    const spectiary::SpectralLineCatalog catalog = spectiary::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 

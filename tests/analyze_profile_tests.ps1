@@ -139,7 +139,7 @@ function Invoke-Analyzer {
     }
 }
 
-$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("specforge_analyze_profile_tests_" + [guid]::NewGuid())
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("spectiary_analyze_profile_tests_" + [guid]::NewGuid())
 [System.IO.Directory]::CreateDirectory($temporaryDirectory) | Out-Null
 
 try {

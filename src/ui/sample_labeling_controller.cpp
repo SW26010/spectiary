@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -6090,4 +6090,4 @@ SampleLabelingController::PersistenceStatus() const
     };
 }
 
-}  // namespace specforge
+}  // namespace spectiary

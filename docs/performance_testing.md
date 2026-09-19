@@ -1,4 +1,4 @@
-# SpecForge 响应速度测试流程
+# Spectiary 响应速度测试流程
 
 ## 目标
 
@@ -94,13 +94,13 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -Initial
 powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetMs 6.9444 -InitialSource "C:\path\to\source.npy"
 ```
 
-程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
+程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 Spectiary 退出，再分析本次运行生成的 `logs/spectiary-profile-*.jsonl`。
 
 ### Default / Uncapped A/B
 
 `profile-implot-pan.ps1` 的 `-PanPacing` 只接受 `Default` 或 `Uncapped`。`Default` 不设置
-`SPECFORGE_PAN_PACING`，保留正常 Composition/compositor-clock 行为；`Uncapped` 只为本次子进程
-设置精确的 `SPECFORGE_PAN_PACING=uncapped`，让主窗口 `Spectrum` pan 使用 DXGI immediate
+`SPECTIARY_PAN_PACING`，保留正常 Composition/compositor-clock 行为；`Uncapped` 只为本次子进程
+设置精确的 `SPECTIARY_PAN_PACING=uncapped`，让主窗口 `Spectrum` pan 使用 DXGI immediate
 提交。脚本退出时会恢复调用者原有的环境变量。
 
 正式 A/B 必须使用同一个新构建的 Release 可执行文件、同一真实数据、同一窗口尺寸和显示模式。
@@ -111,20 +111,20 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\build-ninja-msvc-debug.ps1 `
   -Configure `
   -Preset ninja-msvc-release-static `
-  -Target specforge_native `
+  -Target spectiary_native `
   -TimeoutSec 1200
 
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\build-ninja-msvc-debug.ps1 `
   -Preset ninja-msvc-release-static `
-  -Target specforge_native `
+  -Target spectiary_native `
   -TimeoutSec 1200
 ```
 
-第一条配置 preset，第二条构建同一 preset 的 `specforge_native`。然后分别运行：
+第一条配置 preset，第二条构建同一 preset 的 `spectiary_native`。然后分别运行：
 
 ```powershell
-$exe = ".\build\ninja-msvc-release-static\SpecForge.exe"
+$exe = ".\build\ninja-msvc-release-static\Spectiary.exe"
 $source = "C:\path\to\same-real-source.npy"
 
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -151,13 +151,13 @@ launcher 会把选择的模式作为 `-ExpectedPanPacing` 传给 analyzer。手�
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\analyze-profile.ps1 `
-  logs\specforge-profile-<default-timestamp>.jsonl `
+  logs\spectiary-profile-<default-timestamp>.jsonl `
   -ExpectedPanPacing Default `
   -BudgetMs 8.3333
 
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\analyze-profile.ps1 `
-  logs\specforge-profile-<uncapped-timestamp>.jsonl `
+  logs\spectiary-profile-<uncapped-timestamp>.jsonl `
   -ExpectedPanPacing Uncapped `
   -BudgetMs 8.3333
 ```
@@ -175,16 +175,16 @@ Uncapped 报告中的 `submission_fps` 只表示带 recorder 插桩时测得的�
 合同，也不属于本次结果保证范围；正式 A/B 应把 `Spectrum` 停靠在主窗口。detached viewport 的
 Present 仍可能影响整个 UI frame，不能把这种混合场景与主窗口结果合并。
 
-自动化采集继续使用 `SPECFORGE_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
+自动化采集继续使用 `SPECTIARY_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
 `Settings > Diagnostics` 在运行时开始/停止采集；沉浸模式右上角的 `REC` 标记表示正在录制。复现卡顿后
 尽快停止录制，分析时结合停止前的一段帧时间线和输入事件定位。Portable build 的默认输出目录是可执行
 文件旁的 `logs/`，用户可在 Diagnostics 设置中修改；性能脚本会显式设置
-`SPECFORGE_PROFILE_DIR`，覆盖 UI 设置并把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态
+`SPECTIARY_PROFILE_DIR`，覆盖 UI 设置并把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态
 混在一起。
 
-默认文件名保留 `specforge-profile-` 前缀和本地时间戳，并追加进程 ID 与进程内序列号；文件以
+默认文件名保留 `spectiary-profile-` 前缀和本地时间戳，并追加进程 ID 与进程内序列号；文件以
 create-new 语义分配，因而同一时刻的普通实例不会互相截断。重启时遇到未完成的旧 JSONL 会分配新文件，
-分析器仍以末尾的 `profile_recorder_summary` 判断录制是否完整；已有的 `specforge-profile-*.jsonl` 日志
+分析器仍以末尾的 `profile_recorder_summary` 判断录制是否完整；已有的 `spectiary-profile-*.jsonl` 日志
 和按通配符收集的分析流程继续有效。
 
 运行时录制使用 4 MiB 有界队列和后台批量写入，不在输入/UI 热路径同步写磁盘。单次录制达到 5 分钟或
@@ -201,7 +201,7 @@ frame 已经在途，则只保留该帧的 duration、成功 Present、`navigati
 ## 运行期资源稳定性
 
 `scripts/test-runtime-resource-stability.ps1` 是进程级资源门禁。它启动真实
-`SpecForge.exe`，由应用内的受控工作负载执行 source 重复加载、同路径突发替换/取消、不同
+`Spectiary.exe`，由应用内的受控工作负载执行 source 重复加载、同路径突发替换/取消、不同
 source 切换、窗口 resize、基线恢复和正常关闭；外部 runner 同时采样：
 
 - Private Bytes（进程 private commit）；
@@ -246,7 +246,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\build-ninja-msvc-debug.ps1 `
-  -Target specforge_native `
+  -Target spectiary_native `
   -TimeoutSec 600
 ```
 
@@ -255,7 +255,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 ```powershell
 & scripts\test-runtime-resource-stability.ps1 `
-  -Executable build\ninja-msvc-debug\SpecForge.exe `
+  -Executable build\ninja-msvc-debug\Spectiary.exe `
   -Source @(
     'D:\spectra\stable-baseline.npy',
     'D:\spectra\stable-stress.fits'
@@ -266,21 +266,21 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 JSON 字符串数组的 `-SourceListFile`，或设置：
 
 ```powershell
-$env:SPECFORGE_RESOURCE_STABILITY_SOURCES_JSON = ConvertTo-Json @(
+$env:SPECTIARY_RESOURCE_STABILITY_SOURCES_JSON = ConvertTo-Json @(
   'D:\spectra\stable-baseline.npy',
   'D:\spectra\stable-stress.fits'
 ) -Compress
-$env:SPECFORGE_RESOURCE_STABILITY_TIER = 'smoke'
+$env:SPECTIARY_RESOURCE_STABILITY_TIER = 'smoke'
 
 ctest --test-dir build\ninja-msvc-debug `
-  -R '^specforge_runtime_resource_stability$' `
+  -R '^spectiary_runtime_resource_stability$' `
   --output-on-failure
 
-Remove-Item Env:SPECFORGE_RESOURCE_STABILITY_SOURCES_JSON
-Remove-Item Env:SPECFORGE_RESOURCE_STABILITY_TIER
+Remove-Item Env:SPECTIARY_RESOURCE_STABILITY_SOURCES_JSON
+Remove-Item Env:SPECTIARY_RESOURCE_STABILITY_TIER
 ```
 
-真实 GUI CTest 只有显式设置 `SPECFORGE_RESOURCE_STABILITY_TIER` 后才启用；仅配置 source 也仍会
+真实 GUI CTest 只有显式设置 `SPECTIARY_RESOURCE_STABILITY_TIER` 后才启用；仅配置 source 也仍会
 skip。tier 已启用但 source 缺失时则 fail closed，避免定期任务因配置错误得到绿色 skip。
 
 | 层级 | 循环 | 默认 CTest 行为 | 用途 |
@@ -291,8 +291,8 @@ skip。tier 已启用但 source 缺失时则 fail closed，避免定期任务因
 | `soak` | 5 warm-up + 100 measured | 显式启用 | 通常约一至数分钟，定期检查更慢的持续趋势 |
 
 不设置 tier 时，带 `resource-stability;periodic` label 的真实 GUI 项约在启动 runner 后立即返回
-skip；普通 CTest 承担快速的 `specforge_runtime_resource_workload_tests` 和
-`specforge_runtime_resource_stability_runner_tests`。数据加载时间仍取决于 source，因此表中
+skip；普通 CTest 承担快速的 `spectiary_runtime_resource_workload_tests` 和
+`spectiary_runtime_resource_stability_runner_tests`。数据加载时间仍取决于 source，因此表中
 只是量级，不是超时合同。建议普通提交不启用 tier；高风险 UI/加载改动可显式跑 `smoke`，
 `soak` 由定期任务执行。直接调用脚本而不加 `-CTestIntegration` 时仍是可调参数的 `custom` 层级。
 
@@ -325,14 +325,14 @@ Working Set 上涨而放宽 private commit/handle/thread 门禁。
 - `result.json`：最终 `PASS`/`FAIL`、每项 check、阈值、source 元数据和证据路径；
 - `samples.csv`：连续进程资源样本及对应 workload phase/cycle；
 - `workload-config.json` / `workload-status.json`：应用内驱动合同和最终 drain/取消/退休证据；
-- `specforge-profile-*.jsonl`：加载取消、present、shutdown 和 writer summary。
+- `spectiary-profile-*.jsonl`：加载取消、present、shutdown 和 writer summary。
 - `state/runtime-resource-startup-error.txt`：仅在自动 workload 启动异常时生成，进程直接非零退出，
   不弹阻塞 CI 的模态框。
 
 任一强制 check 失败时 runner 返回非零；`-ReportOnly` 仍写完整结果但不把观察性失败转成脚本失败。
 若安装了 Windows Graphics Tools，图形 live-object check 自动参与门禁；不可用时记录 `SKIP` 和
 HRESULT。要求该检查必须可用时加 `-RequireGraphicsDiagnostics`。runner 通过仅在工作负载环境存在时
-生效的隔离状态目录启动应用，不读取或写入普通用户的 SpecForge session/settings。
+生效的隔离状态目录启动应用，不读取或写入普通用户的 Spectiary session/settings。
 
 ## 显式添加/打开数据源延迟
 
@@ -375,7 +375,7 @@ navigation。
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\analyze-source-load-profile.ps1 `
-  logs\specforge-profile-<timestamp>.jsonl
+  logs\spectiary-profile-<timestamp>.jsonl
 ```
 
 analyzer 会按 `source_load_id` 关联 summary、attempt 和 preparation round，验证连续索引、时间
@@ -393,7 +393,7 @@ command call site 传入：左右键分别为 `keyboard_previous` / `keyboard_ne
 名称搜索跳转和其他通用导航命令不会混入这些统计。没有移动、没有目标或不需要异步加载
 的命令也不会伪装成一次 spectrum switch。
 
-键盘起点是应用消息循环从任意 SpecForge HWND（包括 detached viewport）取出初次
+键盘起点是应用消息循环从任意 Spectiary HWND（包括 detached viewport）取出初次
 `WM_KEYDOWN` 的时间。只有 ImGui shortcut router 在同一帧实际接受对应的左右键后才消费
 该候选；同方向多次输入取最新边沿，未消费的按键在帧末清除。这样被文本框、popup、修饰键
 或其他路由拦截的方向键不会污染下一次导航。若缺少可关联的原始键盘边沿，本次键盘导航
@@ -531,7 +531,7 @@ duration，且六项 duration 之和必须与 `target_resolution_ms` 在 0.001ms
 下一条，等最后一条显示后再停止录制。然后运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\analyze-navigation-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\analyze-navigation-profile.ps1 logs\spectiary-profile-YYYYMMDD-HHMMSS-mmm.jsonl
 ```
 
 比较 UI 与键盘 target resolution 时必须固定同一 source、同一 filter/sort/query 状态和同一
@@ -540,7 +540,7 @@ source-row 区间，分开录制纯 UI 与纯键盘各至少 100 次成功 prese
 `pending_present=false`。记录 source、起止 index、方向、样本数和 profile 路径，不能把不同
 目录、不同 index window 或 Previous/Next 混成输入设备差异。
 
-`specforge_shell_source_load_activation_tests` 还在同一 synthetic source 的固定 `0 ↔ 1`
+`spectiary_shell_source_load_activation_tests` 还在同一 synthetic source 的固定 `0 ↔ 1`
 窗口，对 UI/keyboard 的 Previous/Next 各执行 100 次 presented 复测，并输出
 `base_sequence_ns`/`target_sequence_ns` 的 p50/p95。它锁定 accepted-command 之后的 input kind、
 cache/build 计数、load/activation/Present 行为和投影成本；它不模拟物理点击/按键，也不替代真实
@@ -587,25 +587,25 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -ReportO
 手动分析某个日志：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\spectiary-profile-YYYYMMDD-HHMMSS-mmm.jsonl
 ```
 
 手动只看报告：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -ReportOnly
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\spectiary-profile-YYYYMMDD-HHMMSS-mmm.jsonl -ReportOnly
 ```
 
 144Hz stretch 预算：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 6.9444
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\spectiary-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 6.9444
 ```
 
 120Hz 预算：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 8.3333
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\spectiary-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 8.3333
 ```
 
 ## DRR boost 验证
@@ -645,10 +645,10 @@ DRR 升档。Windows 10 或 API 缺失时会自动保留原有 display-vsync 路
 
 真实数据 `carbon_net_increment_loglam_V0.31_X.npy` 上：
 
-- 鼠标日志 `logs/specforge-profile-20260717-184143.jsonl`：DWM 120.000Hz，Present interval
+- 鼠标日志 `logs/spectiary-profile-20260717-184143.jsonl`：DWM 120.000Hz，Present interval
   p50/p95 为 8.317/9.140ms，input→Present p95 为 8.397ms；相对实现前 DRR 的
   16.881ms 改善约 50.3%，与固定 120Hz 的 8.417ms 基本一致。
-- 触控板日志 `logs/specforge-profile-20260717-184604.jsonl`：两个 boost 窗口的 clock
+- 触控板日志 `logs/spectiary-profile-20260717-184604.jsonl`：两个 boost 窗口的 clock
   为 119.966/119.868Hz，合并 Present interval p50/p95 为 8.324/9.322ms，原生输入时间
   →Present p95 为 9.254ms；相对实现前 DRR 的 16.983ms 改善约 45.5%。
 - 两次触控板释放均为 `S_OK` 且 `active=false`；释放间隔内 `tick_count` 保持 1860，
@@ -677,7 +677,7 @@ DRR 升档。Windows 10 或 API 缺失时会自动保留原有 display-vsync 路
 
 ## 当前真实数据基线
 
-截至 2026-06-21，`logs/specforge-profile-20260621-064415.jsonl` 来自真实 `.npy` 数据
+截至 2026-06-21，`logs/spectiary-profile-20260621-064415.jsonl` 来自真实 `.npy` 数据
 `carbon_net_increment_loglam_V0.31_X.npy` 的主图 pan/drag 采集。该日志在 130Hz 预算
 `BudgetMs 7.6923` 下通过，在 144Hz stretch 预算 `BudgetMs 6.9444` 下失败。
 

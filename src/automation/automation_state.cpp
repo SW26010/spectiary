@@ -2,7 +2,7 @@
 
 
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string PathToUtf8(
@@ -40,4 +40,4 @@ void CompleteAutomationProfileStopTerminal(
 
 }
 
-}  // namespace specforge
+}  // namespace spectiary

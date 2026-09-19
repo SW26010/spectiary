@@ -7,7 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::string_view kRawSpectrumPlotSeriesId =
     "spectrum.raw";
@@ -118,4 +118,4 @@ private:
     std::size_t next_slot_ = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

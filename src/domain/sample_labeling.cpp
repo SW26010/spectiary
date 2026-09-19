@@ -11,7 +11,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string TrimAscii(std::string value)
@@ -503,4 +503,4 @@ void MarkSampleLabelTaskSaveFailed(
 }
 
 
-}  // namespace specforge
+}  // namespace spectiary

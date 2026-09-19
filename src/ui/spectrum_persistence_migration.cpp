@@ -6,7 +6,7 @@
 #include <Windows.h>
 #include <system_error>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 // Stage the domain-validated document, then publish only if still absent.
 // Ordinary writers do not need a migration lock and can win this race safely.
@@ -122,4 +122,4 @@ void MigrateLegacySpectrumViewState(
     return;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

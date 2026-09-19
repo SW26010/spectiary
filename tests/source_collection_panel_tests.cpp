@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionPanelUiTestAccess {
     [[nodiscard]] static bool IsNavigationNumberMove(
@@ -52,7 +52,7 @@ struct SourceCollectionPanelUiTestAccess {
 
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -97,14 +97,14 @@ public:
 void TestReopenableSourcePathEligibility()
 {
     Require(
-        !specforge::IsReopenableSourcePath({}),
+        !spectiary::IsReopenableSourcePath({}),
         "an empty source path must not be reopenable");
     Require(
-        specforge::IsReopenableSourcePath(
+        spectiary::IsReopenableSourcePath(
             std::filesystem::path{L"relative folder\\观测 file.npy"}),
         "relative filesystem source paths should be reopenable");
     Require(
-        specforge::IsReopenableSourcePath(
+        spectiary::IsReopenableSourcePath(
             std::filesystem::path{L"C:\\观测 data\\source file.npy"}),
         "Unicode and space-containing filesystem source paths should be reopenable");
 
@@ -112,7 +112,7 @@ void TestReopenableSourcePathEligibility()
         L"source\0path",
         11};
     Require(
-        !specforge::IsReopenableSourcePath(
+        !spectiary::IsReopenableSourcePath(
             std::filesystem::path{invalid_native}),
         "a source path containing an embedded NUL must not be reopenable");
 }
@@ -130,23 +130,23 @@ public:
     NavigationFixture()
         : interaction(
               [this](
-                  specforge::SourceCollectionSessionIntent intent,
+                  spectiary::SourceCollectionSessionIntent intent,
                   std::optional<
-                      specforge::NavigationLatencyInputKind>) {
+                      spectiary::NavigationLatencyInputKind>) {
                   ++submission_count;
                   Require(
-                      specforge::SourceCollectionPanelUiTestAccess::
+                      spectiary::SourceCollectionPanelUiTestAccess::
                           IsNavigationNumberMove(intent),
                       "numeric navigation input should submit a direct navigation request");
                   submitted_requests.push_back(
-                      specforge::SourceCollectionPanelUiTestAccess::
+                      spectiary::SourceCollectionPanelUiTestAccess::
                           MoveRequest(intent));
-                  specforge::SourceCollectionSessionResult result;
+                  spectiary::SourceCollectionSessionResult result;
                   result.action.navigation_inputs_changed = true;
                   return result;
               },
               [this]()
-                  -> const specforge::
+                  -> const spectiary::
                       SourceCollectionSessionView& {
                   return view;
               })
@@ -177,7 +177,7 @@ public:
         ImGui::SetNextWindowSize(
             ImVec2(420.0f, 240.0f),
             ImGuiCond_Always);
-        specforge::SampleWorkflowShortcut shortcut;
+        spectiary::SampleWorkflowShortcut shortcut;
         bool open = true;
         if (presentation !=
             NavigationFramePresentation::Hidden) {
@@ -187,7 +187,7 @@ public:
                 ImGuiCond_Always);
             panel.RenderNavigation(
                 interaction,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 live_numeric_navigation,
                 &open,
                 shortcut);
@@ -197,7 +197,7 @@ public:
         }
         panel.FinalizeNavigationInputEdits(
             interaction);
-        const specforge::SourceCollectionSessionAction action =
+        const spectiary::SourceCollectionSessionAction action =
             interaction.TakeAction();
         if (action.navigation_inputs_changed) {
             panel.SyncNavigationInputs(view.navigation);
@@ -239,7 +239,7 @@ public:
                 kDockSiblingWindow,
                 dockspace_id);
             ImGui::DockBuilderDockWindow(
-                specforge::SourceCollectionPanelUi::
+                spectiary::SourceCollectionPanelUi::
                     NavigationWindowName(),
                 dockspace_id);
             ImGui::DockBuilderFinish(dockspace_id);
@@ -252,7 +252,7 @@ public:
         const char* selected_window_name =
             select_sibling_before_navigation
             ? kDockSiblingWindow
-            : specforge::SourceCollectionPanelUi::
+            : spectiary::SourceCollectionPanelUi::
                   NavigationWindowName();
         if (ImGuiWindow* selected_window =
                 ImGui::FindWindowByName(
@@ -280,17 +280,17 @@ public:
             ImGui::SetNextWindowFocus();
         }
 
-        specforge::SampleWorkflowShortcut shortcut;
+        spectiary::SampleWorkflowShortcut shortcut;
         bool open = true;
         panel.RenderNavigation(
             interaction,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             live_numeric_navigation,
             &open,
             shortcut);
         ImGuiWindow* navigation_window =
             ImGui::FindWindowByName(
-                specforge::SourceCollectionPanelUi::
+                spectiary::SourceCollectionPanelUi::
                     NavigationWindowName());
         navigation_tab_visible_last_frame =
             navigation_window != nullptr &&
@@ -302,7 +302,7 @@ public:
         }
 
         panel.FinalizeNavigationInputEdits(interaction);
-        const specforge::SourceCollectionSessionAction action =
+        const spectiary::SourceCollectionSessionAction action =
             interaction.TakeAction();
         if (action.navigation_inputs_changed) {
             panel.SyncNavigationInputs(view.navigation);
@@ -314,7 +314,7 @@ public:
     {
         ImGuiWindow* window =
             ImGui::FindWindowByName(
-                specforge::SourceCollectionPanelUi::
+                spectiary::SourceCollectionPanelUi::
                     NavigationWindowName());
         Require(
             window != nullptr,
@@ -327,7 +327,7 @@ public:
     {
         ImGuiWindow* window =
             ImGui::FindWindowByName(
-                specforge::SourceCollectionPanelUi::
+                spectiary::SourceCollectionPanelUi::
                     NavigationWindowName());
         Require(
             window != nullptr,
@@ -336,12 +336,12 @@ public:
             "##SampleNavigationSample");
     }
 
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     int submission_count = 0;
-    std::vector<specforge::SampleNavigationRequest>
+    std::vector<spectiary::SampleNavigationRequest>
         submitted_requests;
-    specforge::SourceCollectionPanelUi panel;
-    specforge::PanelSessionInteraction interaction;
+    spectiary::SourceCollectionPanelUi panel;
+    spectiary::PanelSessionInteraction interaction;
     bool navigation_tab_visible_last_frame = false;
     bool live_numeric_navigation = false;
 
@@ -351,7 +351,7 @@ private:
     static constexpr const char* kDockspaceId =
         "NavigationTestDockspace";
     static constexpr const char* kDockSiblingWindow =
-        "Other###SpecForgeNavigationTestSibling";
+        "Other###SpectiaryNavigationTestSibling";
     bool docking_initialized_ = false;
 };
 
@@ -406,10 +406,10 @@ void TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync()
     Require(
         fixture.submitted_requests.size() == 2 &&
             fixture.submitted_requests[0].kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests[0].row_index == 3 &&
             fixture.submitted_requests[1].kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests[1].row_index == 44,
         "live source input should submit 4 and 45 in order when both characters arrive in one frame");
 
@@ -448,11 +448,11 @@ void TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent()
     Require(
         fixture.submitted_requests.size() == 2 &&
             fixture.submitted_requests[0].kind ==
-                specforge::SampleNavigationRequestKind::
+                spectiary::SampleNavigationRequestKind::
                     LocateSequencePosition &&
             fixture.submitted_requests[0].sequence_position == 3 &&
             fixture.submitted_requests[1].kind ==
-                specforge::SampleNavigationRequestKind::
+                spectiary::SampleNavigationRequestKind::
                     LocateSequencePosition &&
             fixture.submitted_requests[1].sequence_position == 44,
         "live sequence input should submit valid prefixes 4 and 45 as 0-based latest intents");
@@ -698,7 +698,7 @@ void TestSourceDraftWaitsForBlurAndSurvivesCursorSync()
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.front().row_index == 44,
         "source input 45 should submit one 0-based LocateRow target after blur despite a same-topology cursor sync");
 }
@@ -734,7 +734,7 @@ void TestEnterCommitsSourceDraftOnce()
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.front().row_index == 44,
         "Enter should submit the complete source draft exactly once with a 0-based target");
 }
@@ -779,7 +779,7 @@ void TestExplicitCommittedSourceRowCancelsPendingTarget()
         "explicitly committing the displayed source row must submit a latest-intent request");
     Require(
         fixture.submitted_requests.back().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.back().row_index == 19,
         "the pending-cancel source request should preserve the 1-based to 0-based row contract");
 }
@@ -940,7 +940,7 @@ void RequireSourceDraftFinalizesWhenNotRendered(
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.front().row_index == 5,
         message);
 }
@@ -984,7 +984,7 @@ void TestCoveredDockTabFinalizesSourceDraft()
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.front().row_index == 5,
         "covering the Navigation dock tab should finalize the dirty source draft");
 }
@@ -1013,7 +1013,7 @@ void TestSourceAndSequenceEditsKeepIndependentCommitRouting()
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::LocateRow &&
+                spectiary::SampleNavigationRequestKind::LocateRow &&
             fixture.submitted_requests.front().row_index == 5,
         "moving focus from source to sequence should route the source blur commit to LocateRow");
     Require(
@@ -1026,7 +1026,7 @@ void TestSourceAndSequenceEditsKeepIndependentCommitRouting()
     Require(
         fixture.submitted_requests.size() == 2 &&
             fixture.submitted_requests.back().kind ==
-                specforge::SampleNavigationRequestKind::
+                spectiary::SampleNavigationRequestKind::
                     LocateSequencePosition &&
             fixture.submitted_requests.back().sequence_position == 6,
         "the following sequence blur should keep its independent LocateSequencePosition routing");
@@ -1095,7 +1095,7 @@ void TestDeferredShellSyncDoesNotSubmitAMultiDigitPrefix()
     Require(
         fixture.submitted_requests.size() == 1 &&
             fixture.submitted_requests.front().kind ==
-                specforge::SampleNavigationRequestKind::
+                spectiary::SampleNavigationRequestKind::
                     LocateSequencePosition &&
             fixture.submitted_requests.front().sequence_position ==
                 44,
@@ -1194,7 +1194,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingTarget()
         "explicitly committing the displayed position must submit a latest-intent request that can cancel the pending target");
     Require(
         fixture.submitted_requests.back().kind ==
-                specforge::SampleNavigationRequestKind::
+                spectiary::SampleNavigationRequestKind::
                     LocateSequencePosition &&
             fixture.submitted_requests.back().sequence_position ==
                 19,

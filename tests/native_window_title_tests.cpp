@@ -18,24 +18,24 @@ void Require(bool condition, const char* message)
 
 std::wstring ProductAndVersion()
 {
-    return L"SpecForge " +
-           specforge::Utf8ToWide(
-               SPECFORGE_EXPECTED_VERSION);
+    return L"Spectiary " +
+           spectiary::Utf8ToWide(
+               SPECTIARY_EXPECTED_VERSION);
 }
 
 void TestIdleTitleContainsOnlyProductIdentity()
 {
     Require(
-        specforge::FormatSpecForgeNativeWindowTitle(
-            "SpecForge") == ProductAndVersion(),
+        spectiary::FormatSpectiaryNativeWindowTitle(
+            "Spectiary") == ProductAndVersion(),
         "idle title should contain the product name and build version");
 }
 
 void TestActiveTitleUsesFilenameAndOneBasedPosition()
 {
     const std::wstring title =
-        specforge::FormatSpecForgeNativeWindowTitle(
-            "SpecForge",
+        spectiary::FormatSpectiaryNativeWindowTitle(
+            "Spectiary",
             {
                 .source_path =
                     std::filesystem::path(
@@ -57,8 +57,8 @@ void TestActiveTitleUsesFilenameAndOneBasedPosition()
 void TestLoadingTitleDoesNotRetainSampleContext()
 {
     const std::wstring title =
-        specforge::FormatSpecForgeNativeWindowTitle(
-            "SpecForge",
+        spectiary::FormatSpectiaryNativeWindowTitle(
+            "Spectiary",
             {
                 .source_path = L"next-source.npy",
                 .loading = true,
@@ -80,8 +80,8 @@ void TestLoadingTitleDoesNotRetainSampleContext()
 void TestLongNamesAreCompressedPredictably()
 {
     const std::wstring title =
-        specforge::FormatSpecForgeNativeWindowTitle(
-            "SpecForge",
+        spectiary::FormatSpectiaryNativeWindowTitle(
+            "Spectiary",
             {
                 .source_path =
                     L"an_extremely_long_observation_source_filename_that_should_keep_its_extension.fits",
@@ -109,15 +109,15 @@ void TestSemanticKeyTracksOnlyTitleInputs()
 {
     const std::filesystem::path source_path =
         L"source.npy";
-    specforge::NativeWindowTitleView view{
-        .product_name = "SpecForge",
+    spectiary::NativeWindowTitleView view{
+        .product_name = "Spectiary",
         .source_path = &source_path,
         .sample_present = true,
         .sample_name = "HD 12345",
         .sample_index = 2,
         .sample_count = 12,
     };
-    const specforge::NativeWindowTitleSemanticKey key(
+    const spectiary::NativeWindowTitleSemanticKey key(
         view);
     Require(
         key.Matches(view),

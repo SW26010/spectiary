@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace trace = specforge::presentation_trace;
+namespace trace = spectiary::presentation_trace;
 namespace {
 void Require(bool value, const char* message)
 {
@@ -83,15 +83,15 @@ void TestDisabledAndInvalidation()
 void TestProductionSerialization()
 {
     const auto path = std::filesystem::temp_directory_path() /
-        ("specforge-presentation-trace-" + std::to_string(trace::Clock::now().time_since_epoch().count()) + ".jsonl");
+        ("spectiary-presentation-trace-" + std::to_string(trace::Clock::now().time_since_epoch().count()) + ".jsonl");
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         Require(sink.is_open(), "test recorder must open");
 #ifdef _WIN32
-        specforge::WritePresentationTrace(sink, trace::Event{
+        spectiary::WritePresentationTrace(sink, trace::Event{
             .name = "viewport_lifecycle", .phase = "begin", .window = {42, 3}}, "detached", 22);
 #endif
-        specforge::WritePresentationTrace(sink, trace::Event{
+        spectiary::WritePresentationTrace(sink, trace::Event{
             .name = "viewport_present", .phase = "end", .window = {42, 3},
             .operation = 5, .frame = 8, .backend = "dxgi", .result = -1}, "detached", 22);
         sink.Stop();

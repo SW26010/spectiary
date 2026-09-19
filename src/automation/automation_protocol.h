@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr int kAutomationProtocolVersion = 1;
 inline constexpr std::size_t kAutomationMaxMessageBytes =
@@ -262,4 +262,4 @@ using AutomationCommandResult = std::variant<std::monostate,
 [[nodiscard]] const std::vector<std::string_view>&
 AutomationCapabilityNames();
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -2,7 +2,7 @@
 
 #include "domain/spectrum_format_adapters.h"
 
-namespace specforge {
+namespace spectiary {
 
 SpectrumSnapshotHandle LoadSpectrumSnapshotFromPath(
     const std::filesystem::path& path,
@@ -32,4 +32,4 @@ SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
         cancellation_requested);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

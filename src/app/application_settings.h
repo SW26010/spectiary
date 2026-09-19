@@ -15,7 +15,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct RuntimePaths;
 
@@ -317,4 +317,4 @@ private:
         pending_profile_output_directory_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

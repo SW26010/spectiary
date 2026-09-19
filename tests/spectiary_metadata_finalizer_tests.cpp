@@ -1,5 +1,5 @@
-#include "app/specforge_metadata.h"
-#include "app/specforge_metadata_finalizer.h"
+#include "app/spectiary_metadata.h"
+#include "app/spectiary_metadata_finalizer.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -59,11 +59,11 @@ bool HasTemporarySibling(const std::filesystem::path& root)
     return false;
 }
 
-specforge::BuildIdentity WorkingTreeIdentity()
+spectiary::BuildIdentity WorkingTreeIdentity()
 {
     return {
         .product_name = "Spectiary",
-        .specforge_version = "0.4.1",
+        .spectiary_version = "0.4.1",
         .configuration = "Debug",
         .target_architecture = "amd64",
         .source_mode = "working_tree",
@@ -71,7 +71,7 @@ specforge::BuildIdentity WorkingTreeIdentity()
     };
 }
 
-specforge::BuildMetadata ConfiguredBuildMetadata()
+spectiary::BuildMetadata ConfiguredBuildMetadata()
 {
     return {
         .compiler_id = "MSVC",
@@ -90,10 +90,10 @@ specforge::BuildMetadata ConfiguredBuildMetadata()
 std::filesystem::path TestRoot(std::string_view name)
 {
     return std::filesystem::temp_directory_path() /
-        ("specforge-metadata-finalizer-" + std::string(name));
+        ("spectiary-metadata-finalizer-" + std::string(name));
 }
 
-specforge::SpecForgeMetadataFinalizerOptions OptionsFor(
+spectiary::SpectiaryMetadataFinalizerOptions OptionsFor(
     const std::filesystem::path& root)
 {
     const std::filesystem::path executable_path = root / "Spectiary.exe";
@@ -129,12 +129,12 @@ void TestFinalizerWritesSchema6AndHashesFinalExecutable()
         root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "abc");
 
-    specforge::SpecForgeMetadataFinalizerOptions options =
+    spectiary::SpectiaryMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
     std::string error;
     const bool finalized =
-        specforge::FinalizeSpecForgeMetadata(options, &error);
+        spectiary::FinalizeSpectiaryMetadata(options, &error);
     Require(
         finalized,
         "finalizer should write schema 6 metadata: " + error);
@@ -142,17 +142,17 @@ void TestFinalizerWritesSchema6AndHashesFinalExecutable()
         std::filesystem::exists(metadata_path),
         "successful finalization should replace the metadata target");
 
-    const specforge::SpecForgeMetadataReadResult result =
-        specforge::ReadSpecForgeMetadata(
+    const spectiary::SpectiaryMetadataReadResult result =
+        spectiary::ReadSpectiaryMetadata(
             metadata_path,
             WorkingTreeIdentity());
     Require(
         !result.startup_error &&
             result.build_metadata.status ==
-                specforge::BuildMetadataStatus::Available &&
+                spectiary::BuildMetadataStatus::Available &&
             result.build_metadata.metadata,
         "finalizer output should be readable as available schema 6 metadata");
-    const specforge::BuildMetadata& metadata =
+    const spectiary::BuildMetadata& metadata =
         *result.build_metadata.metadata;
     Require(
         metadata.cfitsio_version == "4.6.4" &&
@@ -177,11 +177,11 @@ void TestFailedFinalizationRemovesStaleTargetAndRecovers()
         root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "old executable bytes");
 
-    specforge::SpecForgeMetadataFinalizerOptions options =
+    spectiary::SpectiaryMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
     Require(
-        specforge::FinalizeSpecForgeMetadata(options),
+        spectiary::FinalizeSpectiaryMetadata(options),
         "fixture finalization should create the old schema 6 sidecar");
     const std::string original_metadata = ReadTextFile(metadata_path);
 
@@ -200,7 +200,7 @@ void TestFailedFinalizationRemovesStaleTargetAndRecovers()
 
     std::string error;
     const bool finalized =
-        specforge::FinalizeSpecForgeMetadata(options, &error);
+        spectiary::FinalizeSpectiaryMetadata(options, &error);
     Require(!finalized, "pre-replace failure should fail finalization");
     Require(
         temporary_existed_at_checkpoint,
@@ -221,7 +221,7 @@ void TestFailedFinalizationRemovesStaleTargetAndRecovers()
         return FixedUtcTime() + std::chrono::seconds{1};
     };
     Require(
-        specforge::FinalizeSpecForgeMetadata(options),
+        spectiary::FinalizeSpectiaryMetadata(options),
         "a later finalization should recover after the stale target is removed");
     Require(
         std::filesystem::exists(metadata_path) &&
@@ -241,11 +241,11 @@ void TestReplacementFailureRemovesStaleTargetAndRecovers()
         root / "spectiary_metadata.json";
     WriteTextFile(executable_path, "old executable bytes");
 
-    specforge::SpecForgeMetadataFinalizerOptions options =
+    spectiary::SpectiaryMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
     Require(
-        specforge::FinalizeSpecForgeMetadata(options),
+        spectiary::FinalizeSpectiaryMetadata(options),
         "replacement fixture should create the old schema 6 sidecar");
 
     Require(
@@ -260,7 +260,7 @@ void TestReplacementFailureRemovesStaleTargetAndRecovers()
 
     std::string error;
     const bool finalized =
-        specforge::FinalizeSpecForgeMetadata(options, &error);
+        spectiary::FinalizeSpectiaryMetadata(options, &error);
     Require(!finalized, "an atomic replacement failure should fail finalization");
     Require(
         error.find("could not replace") != std::string::npos,
@@ -276,7 +276,7 @@ void TestReplacementFailureRemovesStaleTargetAndRecovers()
         return FixedUtcTime() + std::chrono::seconds{1};
     };
     Require(
-        specforge::FinalizeSpecForgeMetadata(options),
+        spectiary::FinalizeSpectiaryMetadata(options),
         "a later finalization should recover after replacement failure");
     Require(
         std::filesystem::exists(metadata_path),
@@ -294,12 +294,12 @@ void TestHashFailureDoesNotCreateMetadataOrTemporaryFile()
         root / "spectiary_metadata.json";
     WriteTextFile(metadata_path, "old metadata\n");
 
-    specforge::SpecForgeMetadataFinalizerOptions options =
+    spectiary::SpectiaryMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
     std::string error;
     const bool finalized =
-        specforge::FinalizeSpecForgeMetadata(options, &error);
+        spectiary::FinalizeSpectiaryMetadata(options, &error);
     Require(!finalized, "missing executable should fail finalization");
     Require(
         error.find("could not open file for hashing") != std::string::npos,
@@ -324,7 +324,7 @@ void TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects()
     WriteTextFile(metadata_path, original_metadata);
     const std::string original_executable = ReadTextFile(executable_path);
 
-    specforge::SpecForgeMetadataFinalizerOptions options = OptionsFor(root);
+    spectiary::SpectiaryMetadataFinalizerOptions options = OptionsFor(root);
     options.executable_path = executable_path;
     bool clock_called = false;
     bool checkpoint_called = false;
@@ -339,7 +339,7 @@ void TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects()
 
     std::string error;
     const bool finalized =
-        specforge::FinalizeSpecForgeMetadata(options, &error);
+        spectiary::FinalizeSpectiaryMetadata(options, &error);
     Require(
         !finalized,
         "a non-canonical executable filename should fail finalization");
@@ -375,7 +375,7 @@ void TestRejectsArbitraryMetadataPathsBeforeSideEffects()
         std::filesystem::remove_all(root, cleanup_error);
         WriteTextFile(metadata_path, original_metadata);
 
-        specforge::SpecForgeMetadataFinalizerOptions options =
+        spectiary::SpectiaryMetadataFinalizerOptions options =
             OptionsFor(root);
         options.executable_path = root / "app" / "Spectiary.exe";
         options.metadata_path = metadata_path;
@@ -387,7 +387,7 @@ void TestRejectsArbitraryMetadataPathsBeforeSideEffects()
 
         std::string error;
         const bool finalized =
-            specforge::FinalizeSpecForgeMetadata(options, &error);
+            spectiary::FinalizeSpectiaryMetadata(options, &error);
         Require(
             !finalized,
             "an arbitrary metadata path should fail validation");
@@ -428,7 +428,7 @@ void TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects()
         const std::string original_metadata = ReadTextFile(
             original_metadata_path);
 
-        specforge::SpecForgeMetadataFinalizerOptions options =
+        spectiary::SpectiaryMetadataFinalizerOptions options =
             OptionsFor(root);
         options.metadata_path = metadata_path;
         bool clock_called = false;
@@ -444,7 +444,7 @@ void TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects()
 
         std::string error;
         const bool finalized =
-            specforge::FinalizeSpecForgeMetadata(options, &error);
+            spectiary::FinalizeSpectiaryMetadata(options, &error);
         Require(
             !finalized,
             "equivalent executable and metadata paths should fail finalization");
@@ -477,23 +477,23 @@ void TestRejectsSchema6InvalidBuildValuesWithoutPublishingMetadata()
         root / "spectiary_metadata.json";
     const std::string original_metadata = "old schema 6 metadata\n";
 
-    const std::vector<std::function<void(specforge::BuildMetadata&)>> invalid_cases = {
-        [](specforge::BuildMetadata& build) {
+    const std::vector<std::function<void(spectiary::BuildMetadata&)>> invalid_cases = {
+        [](spectiary::BuildMetadata& build) {
             build.compiler_version = "19.44-preview";
         },
-        [](specforge::BuildMetadata& build) {
+        [](spectiary::BuildMetadata& build) {
             build.cmake_version = "4.x";
         },
-        [](specforge::BuildMetadata& build) {
+        [](spectiary::BuildMetadata& build) {
             build.generator = "Ninja\nVisual Studio";
         },
-        [](specforge::BuildMetadata& build) {
+        [](spectiary::BuildMetadata& build) {
             build.windows_sdk_version = "10.0.26100.preview";
         },
-        [](specforge::BuildMetadata& build) {
+        [](spectiary::BuildMetadata& build) {
             build.cfitsio_version.clear();
         },
-        [](specforge::BuildMetadata& build) {
+        [](spectiary::BuildMetadata& build) {
             build.cfitsio_version = "4.6.x";
         },
     };
@@ -503,14 +503,14 @@ void TestRejectsSchema6InvalidBuildValuesWithoutPublishingMetadata()
         WriteTextFile(root / "Spectiary.exe", "abc");
         WriteTextFile(metadata_path, original_metadata);
 
-        specforge::SpecForgeMetadataFinalizerOptions options =
+        spectiary::SpectiaryMetadataFinalizerOptions options =
             OptionsFor(root);
         options.utc_now = [] { return FixedUtcTime(); };
         make_invalid(options.configured_build_metadata);
 
         std::string error;
         const bool finalized =
-            specforge::FinalizeSpecForgeMetadata(options, &error);
+            spectiary::FinalizeSpectiaryMetadata(options, &error);
         Require(
             !finalized,
             "schema 6-invalid build values should fail finalization");
@@ -540,6 +540,6 @@ int main()
     TestRejectsArbitraryMetadataPathsBeforeSideEffects();
     TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects();
     TestRejectsSchema6InvalidBuildValuesWithoutPublishingMetadata();
-    std::cout << "SpecForge metadata finalizer tests passed\n";
+    std::cout << "Spectiary metadata finalizer tests passed\n";
     return 0;
 }

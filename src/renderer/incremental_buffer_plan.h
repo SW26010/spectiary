@@ -3,7 +3,7 @@
 #include <array>
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 inline constexpr std::uint64_t kIncrementalBufferBudget = 256ULL * 1024 * 1024;
 struct IncrementalBufferSlot {
     unsigned width = 0, height = 0;
@@ -41,4 +41,4 @@ inline BufferPlan PlanIncrementalBuffer(const std::array<IncrementalBufferSlot, 
         if (available[i] && i != bound) return {BufferPlanAction::Replace, i, live + requested};
     return {BufferPlanAction::Skip, -1, live};
 }
-} // namespace specforge
+} // namespace spectiary

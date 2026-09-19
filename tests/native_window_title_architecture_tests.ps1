@@ -6,11 +6,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $appSource = Get-Content -Raw (
-    Join-Path $RepoRoot 'src/app/specforge_app.cpp')
+    Join-Path $RepoRoot 'src/app/spectiary_app.cpp')
 
 $reconcileTitle = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::ApplyLocalizedWindowTitle\(\).*?(?=void SpecForgeApp::WriteDpiConfiguration\()',
+    'void SpectiaryApp::ApplyLocalizedWindowTitle\(\).*?(?=void SpectiaryApp::WriteDpiConfiguration\()',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $reconcileTitle.Success) {
@@ -28,7 +28,7 @@ $semanticMatchPosition =
         [StringComparison]::Ordinal)
 $formatPosition =
     $reconcileTitle.Value.IndexOf(
-        'FormatSpecForgeNativeWindowTitle(title_view)',
+        'FormatSpectiaryNativeWindowTitle(title_view)',
         [StringComparison]::Ordinal)
 if ($semanticMatchPosition -lt 0 -or
     $formatPosition -lt 0 -or

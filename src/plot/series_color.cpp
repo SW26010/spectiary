@@ -1,6 +1,6 @@
 #include "plot/series_color.h"
 
-namespace specforge {
+namespace spectiary {
 
 ImVec4 ResolvePlotSeriesColor(
     const PlotSeriesColor& selection,
@@ -35,4 +35,4 @@ ImVec4 ResolvePlotSeriesColor(
         assignments.SlotFor(stable_series_id));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

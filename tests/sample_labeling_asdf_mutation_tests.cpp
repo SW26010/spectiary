@@ -30,11 +30,11 @@
 
 namespace {
 
-namespace mutation = specforge::asdf_mutation_test;
+namespace mutation = spectiary::asdf_mutation_test;
 
 inline constexpr std::uint64_t kDefaultSeed = 0x78c0de2026ULL;
 inline constexpr std::string_view kArtifactDirectoryEnvironment =
-    "SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY";
+    "SPECTIARY_ASDF_MUTATION_ARTIFACT_DIRECTORY";
 
 [[nodiscard]] std::filesystem::path DefaultArtifactDirectory()
 {
@@ -77,7 +77,7 @@ public:
                                .time_since_epoch()
                                .count();
         path_ = std::filesystem::temp_directory_path() /
-            ("specforge-asdf-mutation-" + std::to_string(nonce));
+            ("spectiary-asdf-mutation-" + std::to_string(nonce));
         std::error_code error;
         if (!std::filesystem::create_directories(path_, error) || error) {
             throw std::runtime_error(
@@ -243,7 +243,7 @@ void PrintHelp()
         return std::filesystem::absolute(requested);
     }
     const std::filesystem::path fixture =
-        std::filesystem::path(SPECFORGE_ASDF_LABELING_FIXTURE_DIR) /
+        std::filesystem::path(SPECTIARY_ASDF_LABELING_FIXTURE_DIR) /
         requested;
     error.clear();
     if (!std::filesystem::is_regular_file(fixture, error) || error) {
@@ -338,9 +338,9 @@ void WriteBytes(const std::filesystem::path& path,
 }
 
 [[nodiscard]] std::string CodecErrorName(
-    specforge::SampleLabelingAsdfErrorKind kind)
+    spectiary::SampleLabelingAsdfErrorKind kind)
 {
-    using Kind = specforge::SampleLabelingAsdfErrorKind;
+    using Kind = spectiary::SampleLabelingAsdfErrorKind;
     switch (kind) {
     case Kind::None:
         return "None";
@@ -360,10 +360,10 @@ void WriteBytes(const std::filesystem::path& path,
     return "Unknown";
 }
 
-[[nodiscard]] specforge::SampleLabelingSourceCompatibility CompatibleSource(
-    const specforge::SampleLabelingDocument& document)
+[[nodiscard]] spectiary::SampleLabelingSourceCompatibility CompatibleSource(
+    const spectiary::SampleLabelingDocument& document)
 {
-    return specforge::SampleLabelingSourceCompatibility{
+    return spectiary::SampleLabelingSourceCompatibility{
         .base_identity = document.source.base_identity,
         .source_kind = document.source.kind,
         .source_name = document.source.name,
@@ -588,8 +588,8 @@ void VerifyUnknownMappings(
 }
 
 [[nodiscard]] bool DocumentsEqual(
-    const specforge::SampleLabelingDocument& left,
-    const specforge::SampleLabelingDocument& right)
+    const spectiary::SampleLabelingDocument& left,
+    const spectiary::SampleLabelingDocument& right)
 {
     if (left.format_kind != right.format_kind ||
         left.schema_version != right.schema_version ||
@@ -616,9 +616,9 @@ void VerifyUnknownMappings(
     }
     for (std::size_t index = 0; index < left.labeling.labels.size();
          ++index) {
-        const specforge::SampleLabelingDocumentLabel& left_label =
+        const spectiary::SampleLabelingDocumentLabel& left_label =
             left.labeling.labels[index];
-        const specforge::SampleLabelingDocumentLabel& right_label =
+        const spectiary::SampleLabelingDocumentLabel& right_label =
             right.labeling.labels[index];
         if (left_label.code != right_label.code ||
             left_label.name != right_label.name ||
@@ -634,21 +634,21 @@ void VerifyUnknownMappings(
     const std::filesystem::path& verification_path,
     std::size_t maximum_bytes)
 {
-    const specforge::SampleLabelingAsdfReadResult loaded =
-        specforge::ReadSampleLabelingAsdfDocument(fixture);
+    const spectiary::SampleLabelingAsdfReadResult loaded =
+        spectiary::ReadSampleLabelingAsdfDocument(fixture);
     if (!loaded.succeeded()) {
         throw std::runtime_error(
             "production reader rejected base fixture: " +
             CodecErrorName(loaded.error.kind) + ": " + loaded.error.message);
     }
 
-    specforge::SampleLabelingDocument document = *loaded.document;
+    spectiary::SampleLabelingDocument document = *loaded.document;
     if (document.source.sample_count < 3U) {
         document.source.sample_count = 3U;
         document.annotation.values.assign(3U, -1);
     }
     document.source.roster.identity_kind =
-        std::string(specforge::kSampleLabelingDocumentExplicitNamesRoster);
+        std::string(spectiary::kSampleLabelingDocumentExplicitNamesRoster);
     if (document.source.roster.sample_names.size() !=
         document.source.sample_count) {
         document.source.roster.sample_names.clear();
@@ -667,20 +667,20 @@ void VerifyUnknownMappings(
     document.labeling.canonical_metadata.origin.kind =
         "annotation_promotion";
     document.labeling.canonical_metadata.origin.annotation =
-        specforge::SampleLabelingAnnotationOrigin{
+        spectiary::SampleLabelingAnnotationOrigin{
             .name = "mutation-seed.csv",
             .format = "csv",
         };
 
-    const specforge::SampleLabelingDocumentValidationResult validation =
-        specforge::diagnostics::ValidateSampleLabelingDocument(document);
+    const spectiary::SampleLabelingDocumentValidationResult validation =
+        spectiary::diagnostics::ValidateSampleLabelingDocument(document);
     if (!validation.valid()) {
         throw std::runtime_error(
             "normalized mutation seed failed canonical validation");
     }
     std::ostringstream output(std::ios::binary | std::ios::out);
-    const specforge::SampleLabelingAsdfWriteResult written =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult written =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     if (!written.succeeded()) {
         throw std::runtime_error(
             "production writer rejected normalized mutation seed: " +
@@ -695,10 +695,10 @@ void VerifyUnknownMappings(
             "canonical mutation seed exceeds --max-input-bytes");
     }
     WriteBytes(verification_path, bytes);
-    const specforge::SampleLabelingAsdfReadResult verified =
-        specforge::ReadSampleLabelingAsdfDocument(verification_path);
+    const spectiary::SampleLabelingAsdfReadResult verified =
+        spectiary::ReadSampleLabelingAsdfDocument(verification_path);
     if (!verified.succeeded() || !verified.durable_base ||
-        !specforge::diagnostics::ValidateSampleLabelingDocument(*verified.document)
+        !spectiary::diagnostics::ValidateSampleLabelingDocument(*verified.document)
              .valid()) {
         throw std::runtime_error(
             "production reader did not accept the canonical durable seed");
@@ -707,15 +707,15 @@ void VerifyUnknownMappings(
 }
 
 void VerifyInvalidWriterEmitsNoBytes(
-    const specforge::SampleLabelingDocument& canonical_seed)
+    const spectiary::SampleLabelingDocument& canonical_seed)
 {
-    specforge::SampleLabelingDocument invalid = canonical_seed;
+    spectiary::SampleLabelingDocument invalid = canonical_seed;
     ++invalid.source.sample_count;
     std::ostringstream output(std::ios::binary | std::ios::out);
-    const specforge::SampleLabelingAsdfWriteResult result =
-        specforge::WriteSampleLabelingAsdfDocument(output, invalid);
+    const spectiary::SampleLabelingAsdfWriteResult result =
+        spectiary::WriteSampleLabelingAsdfDocument(output, invalid);
     if (result.succeeded() ||
-        result.error.kind == specforge::SampleLabelingAsdfErrorKind::None ||
+        result.error.kind == spectiary::SampleLabelingAsdfErrorKind::None ||
         !output.str().empty()) {
         throw std::runtime_error(
             "invalid production writer input did not fail before byte zero");
@@ -727,10 +727,10 @@ void VerifyInvalidWriterEmitsNoBytes(
     const std::filesystem::path& case_path)
 {
     WriteBytes(case_path, generated.bytes);
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(case_path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(case_path);
     if (!read.succeeded()) {
-        if (read.error.kind == specforge::SampleLabelingAsdfErrorKind::None) {
+        if (read.error.kind == spectiary::SampleLabelingAsdfErrorKind::None) {
             throw std::runtime_error(
                 "production reader rejected with error kind None");
         }
@@ -743,7 +743,7 @@ void VerifyInvalidWriterEmitsNoBytes(
         if (generated.recipe.expected ==
                 mutation::ExpectedInvariant::MustRejectResourceLimit &&
             read.error.kind !=
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     ResourceLimitExceeded) {
             throw std::runtime_error(
                 "resource-limit mutation rejected with " +
@@ -760,19 +760,19 @@ void VerifyInvalidWriterEmitsNoBytes(
         throw std::runtime_error(
             "mutation marked MustReject was accepted");
     }
-    if (!specforge::diagnostics::ValidateSampleLabelingDocument(*read.document).valid()) {
+    if (!spectiary::diagnostics::ValidateSampleLabelingDocument(*read.document).valid()) {
         throw std::runtime_error(
             "accepted mutation failed canonical document validation");
     }
 
-    const specforge::SampleLabelingSourceCompatibility source =
+    const spectiary::SampleLabelingSourceCompatibility source =
         CompatibleSource(*read.document);
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(case_path, source);
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(case_path, source);
     if (!read.durable_base) {
         if (opened.succeeded() ||
             opened.error.kind !=
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     DurableBaseUnavailable) {
             throw std::runtime_error(
                 "accepted compatibility profile without a durable base did not return DurableBaseUnavailable");
@@ -790,10 +790,10 @@ void VerifyInvalidWriterEmitsNoBytes(
         const std::vector<UnknownMappingObservation> unknown_observations =
             CaptureUnknownMappings(
                 generated.bytes, generated.unknown_mappings);
-        specforge::SampleLabelingDocument replacement =
+        spectiary::SampleLabelingDocument replacement =
             opened.snapshot->document();
         replacement.labeling.name += " mutation rewrite";
-        const auto modified = specforge::CanonicalTimestamp::FromTimePoint(
+        const auto modified = spectiary::CanonicalTimestamp::FromTimePoint(
             replacement.labeling.canonical_metadata.modified_at.time_point() +
             std::chrono::milliseconds{1});
         if (!modified) {
@@ -801,10 +801,10 @@ void VerifyInvalidWriterEmitsNoBytes(
                 "mutation rewrite timestamp fixture did not parse");
         }
         replacement.labeling.canonical_metadata.modified_at = *modified;
-        const specforge::SampleLabelingSourceCompatibility rewrite_source =
+        const spectiary::SampleLabelingSourceCompatibility rewrite_source =
             CompatibleSource(replacement);
-        const specforge::SampleLabelingAsdfStoreGenerationWriteResult rewritten =
-            specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        const spectiary::SampleLabelingAsdfStoreGenerationWriteResult rewritten =
+            spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                 *opened.snapshot,
                 replacement,
                 rewrite_source);
@@ -816,10 +816,10 @@ void VerifyInvalidWriterEmitsNoBytes(
                 "wrong replacement document: " +
                 rewritten.error.message);
         }
-        const specforge::SampleLabelingAsdfReadResult reread =
-            specforge::ReadSampleLabelingAsdfDocument(case_path);
+        const spectiary::SampleLabelingAsdfReadResult reread =
+            spectiary::ReadSampleLabelingAsdfDocument(case_path);
         if (!reread.succeeded() ||
-            !specforge::diagnostics::ValidateSampleLabelingDocument(*reread.document)
+            !spectiary::diagnostics::ValidateSampleLabelingDocument(*reread.document)
                  .valid() ||
             !DocumentsEqual(*reread.document, replacement)) {
             throw std::runtime_error(
@@ -1030,10 +1030,10 @@ int Run(const Options& options)
             options.maximum_input_bytes);
     }
 
-    specforge::SampleLabelingDocument canonical_document;
+    spectiary::SampleLabelingDocument canonical_document;
     if (!options.replay_file) {
-        const specforge::SampleLabelingAsdfReadResult canonical =
-            specforge::ReadSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfReadResult canonical =
+            spectiary::ReadSampleLabelingAsdfDocument(
                 temporary.path() / "canonical-seed.asdf");
         if (!canonical.succeeded()) {
             throw std::runtime_error(

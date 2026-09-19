@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class SourceLoadLatencyTrace;
 
@@ -111,4 +111,4 @@ struct PreparedSourceCollection {
         SampleNavigationDirection::Next;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

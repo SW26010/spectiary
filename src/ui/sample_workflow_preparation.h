@@ -18,7 +18,7 @@
 #include <string>
 #include <variant>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleWorkflowPreparationPaths {
     std::filesystem::path labeling_state_cache_path;
@@ -89,4 +89,4 @@ using PreparedSourceCollectionPayload =
     const SampleLabelingSourceState* labeling_state_override = nullptr,
     const std::function<void()>& cancellation_checkpoint = {});
 
-}  // namespace specforge
+}  // namespace spectiary

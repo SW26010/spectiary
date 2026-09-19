@@ -37,7 +37,7 @@ void TestWriterExceptionCleansTemporaryFile()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge-atomic-file-writer-exception";
+        "spectiary-atomic-file-writer-exception";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
@@ -47,10 +47,10 @@ void TestWriterExceptionCleansTemporaryFile()
         stream << "old metadata";
     }
 
-    specforge::AtomicFileWriteOptions options;
+    spectiary::AtomicFileWriteOptions options;
     options.target_description = "test metadata";
     std::string error;
-    const bool written = specforge::WriteFileAtomically(
+    const bool written = spectiary::WriteFileAtomically(
         target,
         options,
         [](std::ostream& stream, std::string&) -> bool {

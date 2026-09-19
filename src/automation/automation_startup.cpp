@@ -22,7 +22,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::wstring_view kAutomationPipeOption =
@@ -41,10 +41,10 @@ constexpr std::wstring_view
         project_identity::kAutomationRootLock;
 constexpr std::array<std::wstring_view, 4>
     kIncompatibleAutomationEnvironmentVariables = {
-        L"SPECFORGE_PROFILE",
-        L"SPECFORGE_PROFILE_DIR",
-        L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD",
-        L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR",
+        L"SPECTIARY_PROFILE",
+        L"SPECTIARY_PROFILE_DIR",
+        L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD",
+        L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR",
     };
 
 bool IsLowerHex(std::string_view value)
@@ -340,7 +340,7 @@ std::wstring ProfileOutputFileName()
     GetSystemTime(&utc);
     static std::atomic_uint32_t sequence = 0;
     std::wostringstream name;
-    name << L"specforge-profile-"
+    name << L"spectiary-profile-"
          << std::setfill(L'0')
          << std::setw(4) << utc.wYear
          << std::setw(2) << utc.wMonth
@@ -668,8 +668,8 @@ OrdinaryUserStateRootForExecutable(
             executable_path);
     inputs.application_data_root_override.reset();
     inputs.legacy_application_data_root.clear();
-    const SpecForgeStartup startup =
-        PrepareSpecForgeStartup(
+    const SpectiaryStartup startup =
+        PrepareSpectiaryStartup(
             std::move(inputs));
     return startup.runtime_paths()
         .application_data_root;
@@ -1341,10 +1341,10 @@ ValidateAutomationCapturePath(
     };
 }
 
-SpecForgeCommandLine ParseSpecForgeCommandLine(
+SpectiaryCommandLine ParseSpectiaryCommandLine(
     std::span<const std::wstring> arguments)
 {
-    SpecForgeCommandLine result;
+    SpectiaryCommandLine result;
     std::optional<std::wstring> pipe_name;
     std::optional<std::wstring> nonce;
     std::optional<std::wstring> instance_id;
@@ -1485,8 +1485,8 @@ SpecForgeCommandLine ParseSpecForgeCommandLine(
     return result;
 }
 
-SpecForgeCommandLine
-ParseCurrentProcessSpecForgeCommandLine()
+SpectiaryCommandLine
+ParseCurrentProcessSpectiaryCommandLine()
 {
     int argument_count = 0;
     LPWSTR* raw_arguments =
@@ -1496,7 +1496,7 @@ ParseCurrentProcessSpecForgeCommandLine()
     if (raw_arguments == nullptr) {
         return {
             .error_message =
-                "Could not parse the SpecForge process command line.",
+                "Could not parse the Spectiary process command line.",
         };
     }
 
@@ -1512,7 +1512,7 @@ ParseCurrentProcessSpecForgeCommandLine()
                 : L"");
     }
     LocalFree(raw_arguments);
-    return ParseSpecForgeCommandLine(arguments);
+    return ParseSpectiaryCommandLine(arguments);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

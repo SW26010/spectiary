@@ -1,10 +1,10 @@
 #include "platform/win32_application_icon.h"
 
-#include "platform/specforge_resource.h"
+#include "platform/spectiary_resource.h"
 
 #include <imgui.h>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using ImGuiPlatformCreateWindowCallback =
@@ -20,7 +20,7 @@ HICON LoadIconForSystemMetric(
 {
     return static_cast<HICON>(LoadImageW(
         instance,
-        MAKEINTRESOURCEW(SPECFORGE_RESOURCE_APPLICATION_ICON),
+        MAKEINTRESOURCEW(SPECTIARY_RESOURCE_APPLICATION_ICON),
         IMAGE_ICON,
         GetSystemMetrics(width_metric),
         GetSystemMetrics(height_metric),
@@ -105,4 +105,4 @@ bool InstallImGuiPlatformWindowIconHook() noexcept
     return true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

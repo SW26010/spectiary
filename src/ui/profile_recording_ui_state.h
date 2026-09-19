@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class ProfileRecordingToggleAction {
     None,
@@ -40,4 +40,4 @@ struct ProfileRecordingUiPresentation {
     return recording ? ProfileRecordingToggleAction::Stop : ProfileRecordingToggleAction::Start;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -1,4 +1,4 @@
-function(specforge_read_vcpkg_package_version package_name output_variable)
+function(spectiary_read_vcpkg_package_version package_name output_variable)
     if(NOT DEFINED VCPKG_INSTALLED_DIR OR VCPKG_INSTALLED_DIR STREQUAL "")
         message(FATAL_ERROR
             "VCPKG_INSTALLED_DIR is required to resolve the installed ${package_name} version."
@@ -46,7 +46,7 @@ function(specforge_read_vcpkg_package_version package_name output_variable)
     )
 endfunction()
 
-function(specforge_require_notice_heading notice_path component_name expected_heading)
+function(spectiary_require_notice_heading notice_path component_name expected_heading)
     if(NOT EXISTS "${notice_path}")
         message(FATAL_ERROR "Third-party notice file was not found: ${notice_path}")
     endif()

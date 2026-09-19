@@ -35,7 +35,7 @@ std::filesystem::path FreshTestDirectory(std::string_view name)
 
 std::filesystem::path FixturePath(std::string_view name)
 {
-    return std::filesystem::path(SPECFORGE_ASDF_LABELING_FIXTURE_DIR) /
+    return std::filesystem::path(SPECTIARY_ASDF_LABELING_FIXTURE_DIR) /
         std::string(name);
 }
 
@@ -170,9 +170,9 @@ bool HasTemporarySibling(const std::filesystem::path& target)
     return false;
 }
 
-specforge::SampleLabelingDocument MakeDocument()
+spectiary::SampleLabelingDocument MakeDocument()
 {
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = "source-base-v1";
     document.source.kind = "npy";
     document.source.name = "spectra.npy";
@@ -180,7 +180,7 @@ specforge::SampleLabelingDocument MakeDocument()
     document.source.sample_count = 3;
     document.source.roster.identity_kind =
         std::string{
-            specforge::kSampleLabelingDocumentExplicitNamesRoster};
+            spectiary::kSampleLabelingDocumentExplicitNamesRoster};
     document.source.roster.sample_names = {
         "sample-a",
         "sample-b",
@@ -190,7 +190,7 @@ specforge::SampleLabelingDocument MakeDocument()
     document.labeling.id =
         "00000000-0000-4000-8000-000000000005";
     document.labeling.name = "Quality review";
-    const auto timestamp = specforge::ParseCanonicalTimestamp(
+    const auto timestamp = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:00.000Z");
     Require(timestamp.has_value(), "store timestamp fixture should parse");
     document.labeling.canonical_metadata.created_at = *timestamp;
@@ -203,10 +203,10 @@ specforge::SampleLabelingDocument MakeDocument()
     return document;
 }
 
-specforge::SampleLabelingSourceCompatibility CompatibleSource(
-    const specforge::SampleLabelingDocument& document)
+spectiary::SampleLabelingSourceCompatibility CompatibleSource(
+    const spectiary::SampleLabelingDocument& document)
 {
-    return specforge::SampleLabelingSourceCompatibility{
+    return spectiary::SampleLabelingSourceCompatibility{
         .base_identity = document.source.base_identity,
         .source_kind = document.source.kind,
         .source_name = document.source.name,
@@ -219,43 +219,43 @@ specforge::SampleLabelingSourceCompatibility CompatibleSource(
 void TestSourceKindMismatchIsRejected()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-kind-mismatch");
+        FreshTestDirectory("spectiary-asdf-store-kind-mismatch");
     const std::filesystem::path path =
         directory / "labels.asdf";
-    const specforge::SampleLabelingDocument document = MakeDocument();
+    const spectiary::SampleLabelingDocument document = MakeDocument();
     Require(
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             document)
             .succeeded(),
         "source-kind mismatch fixture should write");
 
-    specforge::SampleLabelingSourceCompatibility wrong_kind =
+    spectiary::SampleLabelingSourceCompatibility wrong_kind =
         CompatibleSource(document);
     wrong_kind.source_kind = "fits";
-    const specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             wrong_kind);
     Require(
         !opened.succeeded() &&
             opened.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch,
         "store open should reject a different canonical source kind");
 
-    specforge::SampleLabelingSourceCompatibility missing_kind =
+    spectiary::SampleLabelingSourceCompatibility missing_kind =
         CompatibleSource(document);
     missing_kind.source_kind = {};
-    const specforge::SampleLabelingAsdfStoreOpenResult
+    const spectiary::SampleLabelingAsdfStoreOpenResult
         opened_without_kind =
-            specforge::OpenSampleLabelingAsdfDocumentStore(
+            spectiary::OpenSampleLabelingAsdfDocumentStore(
                 path,
                 missing_kind);
     Require(
         !opened_without_kind.succeeded() &&
             opened_without_kind.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch,
         "writable store open should not allow callers to bypass source-kind validation");
 }
@@ -263,13 +263,13 @@ void TestSourceKindMismatchIsRejected()
 void TestAtomicFullWriteAndSourceAwareOpen()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-open");
+        FreshTestDirectory("spectiary-asdf-store-open");
     const std::filesystem::path path =
         directory / "nested" / "labels.asdf";
-    const specforge::SampleLabelingDocument document = MakeDocument();
+    const spectiary::SampleLabelingDocument document = MakeDocument();
 
-    const specforge::SampleLabelingAsdfStoreWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             document);
     Require(
@@ -281,8 +281,8 @@ void TestAtomicFullWriteAndSourceAwareOpen()
         std::filesystem::exists(path) && !HasTemporarySibling(path),
         "atomic ASDF full write should publish only the target");
 
-    const specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(document));
     Require(
@@ -296,17 +296,17 @@ void TestAtomicFullWriteAndSourceAwareOpen()
             ? "source-aware ASDF store open should restore the document and durable base"
             : opened.error.message);
 
-    specforge::SampleLabelingSourceCompatibility wrong_source =
+    spectiary::SampleLabelingSourceCompatibility wrong_source =
         CompatibleSource(document);
     wrong_source.base_identity = "another-source";
-    const specforge::SampleLabelingAsdfStoreOpenResult rejected_identity =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult rejected_identity =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             wrong_source);
     Require(
         !rejected_identity.succeeded() &&
             rejected_identity.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch,
         "store open should reject a different base source identity");
 
@@ -315,17 +315,17 @@ void TestAtomicFullWriteAndSourceAwareOpen()
         "sample-a",
         "sample-c",
     };
-    specforge::SampleLabelingSourceCompatibility wrong_roster =
+    spectiary::SampleLabelingSourceCompatibility wrong_roster =
         CompatibleSource(document);
     wrong_roster.sample_names = reordered;
-    const specforge::SampleLabelingAsdfStoreOpenResult rejected_roster =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult rejected_roster =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             wrong_roster);
     Require(
         !rejected_roster.succeeded() &&
             rejected_roster.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch,
         "store open should reject a reordered explicit roster");
 
@@ -346,32 +346,32 @@ void TestAtomicFullWriteAndSourceAwareOpen()
         "test ASDF roster should begin with the expected zlib CMF byte");
     compatibility_bytes[zlib_header_offset + 1U] = 0x01U;
     WriteAllBytes(compatibility_path, compatibility_bytes);
-    const specforge::SampleLabelingAsdfReadResult compatible_read =
-        specforge::ReadSampleLabelingAsdfDocument(compatibility_path);
+    const spectiary::SampleLabelingAsdfReadResult compatible_read =
+        spectiary::ReadSampleLabelingAsdfDocument(compatibility_path);
     Require(
         compatible_read.succeeded() &&
             !compatible_read.durable_base.has_value(),
         "codec compatibility read should accept a valid non-FLEVEL=2 roster without granting durable reuse");
-    const specforge::SampleLabelingAsdfStoreOpenResult nondurable =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult nondurable =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             compatibility_path,
             CompatibleSource(document));
     Require(
         !nondurable.succeeded() &&
             nondurable.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     DurableBaseUnavailable,
         "writable store open should reject a compatibility profile without a durable base");
-    specforge::SampleLabelingDocument replacement = document;
+    spectiary::SampleLabelingDocument replacement = document;
     replacement.labeling.name = "unsafe replacement must fail";
-    const specforge::SampleLabelingAsdfStoreWriteResult refused_replacement =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult refused_replacement =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             compatibility_path,
             replacement);
     Require(
         !refused_replacement.succeeded() &&
             refused_replacement.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     DurableBaseUnavailable &&
             ReadAllBytes(compatibility_path) == compatibility_bytes &&
             !HasTemporarySibling(compatibility_path),
@@ -381,12 +381,12 @@ void TestAtomicFullWriteAndSourceAwareOpen()
 void TestInitialCanonicalPublicationReopensExactGeneration()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-initial-publication");
+        FreshTestDirectory("spectiary-asdf-store-initial-publication");
     const std::filesystem::path path = directory / "labels.asdf";
-    const specforge::SampleLabelingDocument document = MakeDocument();
+    const spectiary::SampleLabelingDocument document = MakeDocument();
 
-    const specforge::SampleLabelingAsdfStoreGenerationWriteResult published =
-        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+    const spectiary::SampleLabelingAsdfStoreGenerationWriteResult published =
+        spectiary::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
             path,
             document,
             CompatibleSource(document));
@@ -406,11 +406,11 @@ void TestInitialCanonicalPublicationReopensExactGeneration()
 
     const std::filesystem::path rejected_path =
         directory / "source-mismatch.asdf";
-    specforge::SampleLabelingSourceCompatibility wrong_source =
+    spectiary::SampleLabelingSourceCompatibility wrong_source =
         CompatibleSource(document);
     wrong_source.source_kind = "fits";
-    const specforge::SampleLabelingAsdfStoreGenerationWriteResult rejected =
-        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+    const spectiary::SampleLabelingAsdfStoreGenerationWriteResult rejected =
+        spectiary::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
             rejected_path,
             document,
             wrong_source);
@@ -418,7 +418,7 @@ void TestInitialCanonicalPublicationReopensExactGeneration()
         !rejected.document_replaced &&
             !rejected.succeeded() &&
             rejected.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch &&
             !std::filesystem::exists(rejected_path),
         "initial canonical publication should reject source mismatch before replacement");
@@ -427,21 +427,21 @@ void TestInitialCanonicalPublicationReopensExactGeneration()
 void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-rewrite");
+        FreshTestDirectory("spectiary-asdf-store-rewrite");
     const std::filesystem::path path = directory / "labels.asdf";
-    const specforge::SampleLabelingDocument document = MakeDocument();
+    const spectiary::SampleLabelingDocument document = MakeDocument();
     Require(
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             document)
             .succeeded(),
         "rewrite fixture should write");
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(document));
     Require(opened.succeeded(), "rewrite fixture should open");
-    const std::shared_ptr<const specforge::SampleLabelingDocument>
+    const std::shared_ptr<const spectiary::SampleLabelingDocument>
         generation_handle =
             opened.snapshot->document_handle();
     const std::string* const roster_storage =
@@ -451,17 +451,17 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
 
     const std::vector<unsigned char> before_identity_mismatch =
         ReadAllBytes(path);
-    specforge::SampleLabelingDocument identity_mismatch =
+    spectiary::SampleLabelingDocument identity_mismatch =
         opened.snapshot->document();
     identity_mismatch.labeling.name = "metadata change is not values-only";
-    const specforge::SampleLabelingAsdfStoreWriteResult rejected_identity =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult rejected_identity =
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
             identity_mismatch);
     Require(
         !rejected_identity.succeeded() &&
             rejected_identity.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     PreservationIdentityMismatch &&
             ReadAllBytes(path) == before_identity_mismatch &&
             opened.snapshot->document_handle() == generation_handle &&
@@ -469,16 +469,16 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
         "values fast path must reject metadata changes before creating a replacement generation");
 
     const std::array<std::int32_t, 3> first_values = {7, 2, -1};
-    const auto first_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto first_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:01.000Z");
-    specforge::SampleLabelingDocument first_replacement =
+    spectiary::SampleLabelingDocument first_replacement =
         opened.snapshot->document();
     first_replacement.annotation.values.assign(
         first_values.begin(), first_values.end());
     first_replacement.labeling.canonical_metadata.modified_at =
         *first_modified_at;
-    const specforge::SampleLabelingAsdfStoreWriteResult first_rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult first_rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
             first_replacement);
     Require(
@@ -501,16 +501,16 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
         "value-only rewrite should preserve the raw roster block verbatim");
 
     const std::array<std::int32_t, 3> second_values = {2, 2, 7};
-    const auto second_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto second_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:02.000Z");
-    specforge::SampleLabelingDocument second_replacement =
+    spectiary::SampleLabelingDocument second_replacement =
         opened.snapshot->document();
     second_replacement.annotation.values.assign(
         second_values.begin(), second_values.end());
     second_replacement.labeling.canonical_metadata.modified_at =
         *second_modified_at;
-    const specforge::SampleLabelingAsdfStoreWriteResult second_rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult second_rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
             second_replacement);
     Require(
@@ -530,8 +530,8 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
         FirstRawBlock(ReadAllBytes(path)) == roster_before,
         "repeated rewrites should keep the same encoded roster bytes");
 
-    const specforge::SampleLabelingAsdfStoreOpenResult reopened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult reopened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(document));
     Require(
@@ -546,11 +546,11 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
 void TestMetadataChangingRewritesPreserveForwardUnknownFields()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-forward-metadata");
+        FreshTestDirectory("spectiary-asdf-store-forward-metadata");
     const std::filesystem::path path = directory / "labels.asdf";
-    const specforge::SampleLabelingDocument original = MakeDocument();
+    const spectiary::SampleLabelingDocument original = MakeDocument();
     Require(
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "forward-metadata store fixture should write");
 
@@ -563,24 +563,24 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
         "    shortcut: \"a\"\n    future_label: \"store-label-survives\"\n");
     WriteAllBytes(path, bytes);
 
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(original));
     Require(opened.succeeded(), "forward-metadata store fixture should open");
-    specforge::SampleLabelingDocument edited = opened.snapshot->document();
+    spectiary::SampleLabelingDocument edited = opened.snapshot->document();
     edited.labeling.name = "Edited through snapshot";
     edited.labeling.labels[0].name = "snapshot edit";
-    const std::shared_ptr<const specforge::SampleLabelingDocument>
+    const std::shared_ptr<const spectiary::SampleLabelingDocument>
         old_generation = opened.snapshot->document_handle();
-    specforge::SampleLabelingSourceCompatibility
+    spectiary::SampleLabelingSourceCompatibility
         incompatible_source = CompatibleSource(original);
     incompatible_source.source_kind = "fits";
     const std::vector<unsigned char> before_incompatible_source =
         ReadAllBytes(path);
-    const specforge::SampleLabelingAsdfStoreGenerationWriteResult
+    const spectiary::SampleLabelingAsdfStoreGenerationWriteResult
         incompatible_rewrite =
-            specforge::
+            spectiary::
                 RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                     *opened.snapshot,
                     edited,
@@ -589,15 +589,15 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
         !incompatible_rewrite.succeeded() &&
             !incompatible_rewrite.document_replaced &&
             incompatible_rewrite.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     SourceMismatch &&
             ReadAllBytes(path) == before_incompatible_source &&
             !HasTemporarySibling(path),
         "metadata publication should reject an incompatible reopen descriptor before replacing the durable document");
 
-    specforge::SampleLabelingAsdfStoreGenerationWriteResult
+    spectiary::SampleLabelingAsdfStoreGenerationWriteResult
         snapshot_rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
             *opened.snapshot,
             edited,
             CompatibleSource(original));
@@ -618,29 +618,29 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
 
     const std::vector<unsigned char> before_identity_mismatch =
         ReadAllBytes(path);
-    specforge::SampleLabelingDocument unrelated =
+    spectiary::SampleLabelingDocument unrelated =
         snapshot_rewrite.snapshot->document();
     unrelated.labeling.id = "another-task";
-    const specforge::SampleLabelingAsdfStoreWriteResult identity_mismatch =
-        specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult identity_mismatch =
+        spectiary::RewriteSampleLabelingAsdfDocumentAtomically(
             *snapshot_rewrite.snapshot,
             unrelated);
     Require(
         !identity_mismatch.succeeded() &&
             identity_mismatch.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     PreservationIdentityMismatch &&
             ReadAllBytes(path) == before_identity_mismatch &&
             !HasTemporarySibling(path),
         "metadata preservation must not carry unknown fields into another document identity");
-    specforge::SampleLabelingDocument edited_again =
+    spectiary::SampleLabelingDocument edited_again =
         snapshot_rewrite.snapshot->document();
     edited_again.labeling.name = "Edited through path write";
     edited_again.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:03.000Z");
-    const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult path_rewrite =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             edited_again);
     Require(
@@ -655,19 +655,19 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
 void TestFullDocumentRewritePreservesCanonicalLifecycleIdentity()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-canonical-identity");
+        FreshTestDirectory("spectiary-asdf-store-canonical-identity");
     const std::filesystem::path path = directory / "labels.asdf";
-    specforge::SampleLabelingDocument original = MakeDocument();
+    spectiary::SampleLabelingDocument original = MakeDocument();
     original.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:05.000Z");
     Require(
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "canonical-identity store fixture should write");
 
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(original));
     Require(
@@ -676,34 +676,34 @@ void TestFullDocumentRewritePreservesCanonicalLifecycleIdentity()
     const std::vector<unsigned char> durable_bytes = ReadAllBytes(path);
 
     const auto require_rejected_without_replacement =
-        [&](const specforge::SampleLabelingDocument& replacement,
+        [&](const spectiary::SampleLabelingDocument& replacement,
             std::string_view message) {
-            const specforge::SampleLabelingAsdfStoreWriteResult result =
-                specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+            const spectiary::SampleLabelingAsdfStoreWriteResult result =
+                spectiary::RewriteSampleLabelingAsdfDocumentAtomically(
                     *opened.snapshot,
                     replacement);
             Require(
                 !result.succeeded() &&
                     result.error.kind ==
-                        specforge::SampleLabelingAsdfStoreErrorKind::
+                        spectiary::SampleLabelingAsdfStoreErrorKind::
                             PreservationIdentityMismatch &&
                     ReadAllBytes(path) == durable_bytes &&
                     !HasTemporarySibling(path),
                 message);
         };
 
-    specforge::SampleLabelingDocument changed_created_at = original;
+    spectiary::SampleLabelingDocument changed_created_at = original;
     changed_created_at.labeling.canonical_metadata.created_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T07:59:59.000Z");
     require_rejected_without_replacement(
         changed_created_at,
         "full-document rewrite must preserve the durable created_at");
 
-    specforge::SampleLabelingDocument changed_origin = original;
+    spectiary::SampleLabelingDocument changed_origin = original;
     changed_origin.labeling.canonical_metadata.origin = {
         .kind = "annotation_promotion",
-        .annotation = specforge::SampleLabelingAnnotationOrigin{
+        .annotation = spectiary::SampleLabelingAnnotationOrigin{
             .name = "labels.npy",
             .format = "npy",
             .fingerprint = std::string(64U, 'a'),
@@ -713,22 +713,22 @@ void TestFullDocumentRewritePreservesCanonicalLifecycleIdentity()
         changed_origin,
         "full-document rewrite must preserve the durable origin");
 
-    specforge::SampleLabelingDocument regressed_modified_at = original;
+    spectiary::SampleLabelingDocument regressed_modified_at = original;
     regressed_modified_at.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:03.000Z");
     require_rejected_without_replacement(
         regressed_modified_at,
         "full-document rewrite must not regress the durable modified_at");
 
-    const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult path_rewrite =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             changed_created_at);
     Require(
         !path_rewrite.succeeded() &&
             path_rewrite.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     PreservationIdentityMismatch &&
             ReadAllBytes(path) == durable_bytes &&
             !HasTemporarySibling(path),
@@ -738,27 +738,27 @@ void TestFullDocumentRewritePreservesCanonicalLifecycleIdentity()
 void TestWriteFailuresPreserveThePreviousDocument()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-failure");
+        FreshTestDirectory("spectiary-asdf-store-failure");
     const std::filesystem::path path = directory / "labels.asdf";
-    const specforge::SampleLabelingDocument document = MakeDocument();
+    const spectiary::SampleLabelingDocument document = MakeDocument();
     Require(
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             document)
             .succeeded(),
         "failure fixture should write");
     const std::vector<unsigned char> original = ReadAllBytes(path);
 
-    specforge::SampleLabelingDocument invalid = document;
+    spectiary::SampleLabelingDocument invalid = document;
     invalid.annotation.values[0] = 99;
-    const specforge::SampleLabelingAsdfStoreWriteResult codec_failure =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult codec_failure =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path,
             invalid);
     Require(
         !codec_failure.succeeded() &&
             codec_failure.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::CodecFailure &&
+                spectiary::SampleLabelingAsdfStoreErrorKind::CodecFailure &&
             ReadAllBytes(path) == original &&
             !HasTemporarySibling(path),
         "a full-write codec failure should preserve the previous document and clean its temporary file");
@@ -767,8 +767,8 @@ void TestWriteFailuresPreserveThePreviousDocument()
     // shared atomic-file suite separately injects failures in the platform
     // replacement operation itself.
     bool full_publish_hook_reached = false;
-    const specforge::SampleLabelingAsdfStoreWriteResult full_publish_abort =
-        specforge::sample_labeling_asdf_store_test_seam::
+    const spectiary::SampleLabelingAsdfStoreWriteResult full_publish_abort =
+        spectiary::sample_labeling_asdf_store_test_seam::
             WriteWithBeforeReplace(
                 path,
                 document,
@@ -780,28 +780,28 @@ void TestWriteFailuresPreserveThePreviousDocument()
     Require(
         full_publish_hook_reached && !full_publish_abort.succeeded() &&
             full_publish_abort.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     AtomicWriteFailure &&
             ReadAllBytes(path) == original &&
             !HasTemporarySibling(path),
         "a full-write pre-replacement abort should preserve the previous document");
 
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(document));
     Require(opened.succeeded(), "failure fixture should open");
-    specforge::SampleLabelingDocument wrong_count =
+    spectiary::SampleLabelingDocument wrong_count =
         opened.snapshot->document();
     wrong_count.annotation.values = {2, 7};
-    const specforge::SampleLabelingAsdfStoreWriteResult rewrite_codec_failure =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult rewrite_codec_failure =
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
             wrong_count);
     Require(
         !rewrite_codec_failure.succeeded() &&
             rewrite_codec_failure.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::CodecFailure &&
+                spectiary::SampleLabelingAsdfStoreErrorKind::CodecFailure &&
             opened.snapshot->document().annotation.values ==
                 document.annotation.values &&
             ReadAllBytes(path) == original &&
@@ -809,12 +809,12 @@ void TestWriteFailuresPreserveThePreviousDocument()
         "a rewrite codec failure should preserve the previous document and open snapshot");
 
     bool metadata_publish_hook_reached = false;
-    specforge::SampleLabelingDocument metadata_edit =
+    spectiary::SampleLabelingDocument metadata_edit =
         opened.snapshot->document();
     metadata_edit.labeling.name = "metadata publication must abort";
-    const specforge::SampleLabelingAsdfStoreWriteResult
+    const spectiary::SampleLabelingAsdfStoreWriteResult
         metadata_publish_abort =
-            specforge::sample_labeling_asdf_store_test_seam::
+            spectiary::sample_labeling_asdf_store_test_seam::
                 RewriteDocumentWithBeforeReplace(
                     *opened.snapshot,
                     metadata_edit,
@@ -828,19 +828,19 @@ void TestWriteFailuresPreserveThePreviousDocument()
         metadata_publish_hook_reached &&
             !metadata_publish_abort.succeeded() &&
             metadata_publish_abort.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     AtomicWriteFailure &&
             ReadAllBytes(path) == original &&
             !HasTemporarySibling(path),
         "a metadata rewrite pre-replacement abort should preserve the previous document and clean its temporary file");
 
     bool rewrite_publish_hook_reached = false;
-    specforge::SampleLabelingDocument replacement =
+    spectiary::SampleLabelingDocument replacement =
         opened.snapshot->document();
     replacement.annotation.values = {7, 7, 2};
-    const specforge::SampleLabelingAsdfStoreWriteResult
+    const spectiary::SampleLabelingAsdfStoreWriteResult
         rewrite_publish_abort =
-            specforge::sample_labeling_asdf_store_test_seam::
+            spectiary::sample_labeling_asdf_store_test_seam::
                 RewriteWithBeforeReplace(
                     *opened.snapshot,
                     replacement,
@@ -853,7 +853,7 @@ void TestWriteFailuresPreserveThePreviousDocument()
         rewrite_publish_hook_reached &&
             !rewrite_publish_abort.succeeded() &&
             rewrite_publish_abort.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     AtomicWriteFailure &&
             ReadAllBytes(path) == original &&
             !HasTemporarySibling(path),
@@ -863,7 +863,7 @@ void TestWriteFailuresPreserveThePreviousDocument()
 void TestValueRewriteReplacementFailurePreservesWholeGeneration()
 {
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-asdf-store-value-replace-failure");
+        FreshTestDirectory("spectiary-asdf-store-value-replace-failure");
     const std::filesystem::path path = directory / "labels.asdf";
     const std::vector<unsigned char> fixture_bytes =
         ReadAllBytes(FixturePath("forward_unknown.asdf"));
@@ -872,14 +872,14 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
         "forward-unknown fixture should contain concrete root, task, origin, and label mappings");
     WriteAllBytes(path, fixture_bytes);
 
-    const specforge::SampleLabelingAsdfReadResult fixture =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult fixture =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         fixture.succeeded(),
         "forward-unknown atomic rewrite fixture should be a valid canonical document");
 
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(*fixture.document));
     Require(
@@ -890,13 +890,13 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
         FirstRawBlock(durable_bytes);
     const std::vector<std::int32_t> durable_values =
         opened.snapshot->document().annotation.values;
-    const specforge::CanonicalTimestamp durable_modified_at =
+    const spectiary::CanonicalTimestamp durable_modified_at =
         opened.snapshot->document()
             .labeling.canonical_metadata.modified_at;
-    const std::shared_ptr<const specforge::SampleLabelingDocument>
+    const std::shared_ptr<const spectiary::SampleLabelingDocument>
         durable_generation = opened.snapshot->document_handle();
     const auto replacement_modified_at =
-        specforge::ParseCanonicalTimestamp(
+        spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:04.000Z");
     Require(
         replacement_modified_at.has_value(),
@@ -904,13 +904,13 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
 
     bool replacement_hook_reached = false;
     bool temporary_generation_matches = false;
-    specforge::SampleLabelingDocument replacement =
+    spectiary::SampleLabelingDocument replacement =
         opened.snapshot->document();
     replacement.annotation.values = {1, 0};
     replacement.labeling.canonical_metadata.modified_at =
         *replacement_modified_at;
-    const specforge::SampleLabelingAsdfStoreWriteResult aborted =
-        specforge::sample_labeling_asdf_store_test_seam::
+    const spectiary::SampleLabelingAsdfStoreWriteResult aborted =
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteWithBeforeReplace(
                 *opened.snapshot,
                 replacement,
@@ -923,9 +923,9 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
                     replacement_hook_reached = true;
                     const std::vector<unsigned char> temporary_bytes =
                         ReadAllBytes(temporary_path);
-                    const specforge::SampleLabelingAsdfReadResult
+                    const spectiary::SampleLabelingAsdfReadResult
                         temporary_document =
-                            specforge::ReadSampleLabelingAsdfDocument(
+                            spectiary::ReadSampleLabelingAsdfDocument(
                                 temporary_path);
                     temporary_generation_matches =
                         temporary_document.succeeded() &&
@@ -944,8 +944,8 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
                 });
 
     const std::vector<unsigned char> after_abort = ReadAllBytes(path);
-    const specforge::SampleLabelingAsdfStoreOpenResult reopened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult reopened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(*fixture.document));
     Require(
@@ -953,7 +953,7 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
             temporary_generation_matches &&
             !aborted.succeeded() &&
             aborted.error.kind ==
-                specforge::SampleLabelingAsdfStoreErrorKind::
+                spectiary::SampleLabelingAsdfStoreErrorKind::
                     AtomicWriteFailure &&
             after_abort == durable_bytes &&
             ContainsForwardUnknownMappingsWithConcreteValues(after_abort) &&
@@ -973,12 +973,12 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
             !HasTemporarySibling(path),
         "an aborted value replacement must preserve old values, timestamp, unknown mappings, roster bytes, and snapshot generation");
 
-    const specforge::SampleLabelingAsdfStoreWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult retry =
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot,
             replacement);
-    const specforge::SampleLabelingAsdfStoreOpenResult after_retry =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    const spectiary::SampleLabelingAsdfStoreOpenResult after_retry =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path,
             CompatibleSource(*fixture.document));
     const std::vector<unsigned char> retry_bytes = ReadAllBytes(path);

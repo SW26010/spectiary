@@ -1,10 +1,10 @@
-# SpecForge 产品需求
+# Spectiary 产品需求
 
 ## 当前阶段
 
 仓库已经完成第一次项目整理、native shell 和多格式真实数据 loader。当前可提交状态包括：
 
-- `specforge_native` Windows executable target。
+- `spectiary_native` Windows executable target。
 - Win32 + DirectX 11 + Dear ImGui docking + ImPlot shell。
 - 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture、`.npy`、CSV 和 FITS loader 使用同一条 UI/plot 路径。
 - loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`，以及由唯一 CFITSIO
@@ -19,7 +19,7 @@
 
 ## 产品目标
 
-SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、跟手、克制、专业，用户可以长时间反复检查真实光谱数据，而不会被布局噪音、延迟或不稳定交互打断。
+Spectiary 是一个本地 Windows 光谱查看工具。目标体验是优雅、跟手、克制、专业，用户可以长时间反复检查真实光谱数据，而不会被布局噪音、延迟或不稳定交互打断。
 
 UI 跟手程度是产品基础能力，不是可以被其它功能换取的优化项。任何 loader、overlay、sample filtering、labeling、面板状态或本地状态功能，都不能让主图 pan、wheel zoom、上一条/下一条、range navigation 等实时交互退化；需要重计算、IO 或状态构造时，必须隔离、缓存、延后，或用真实数据 profile 证明不影响交互预算。
 
@@ -98,7 +98,7 @@ Files 表格中，恢复失败的来源保留为灰色行，文件名、类型�
 
 ### 调整
 
-- 交接稿中关于 Python 继续承担数据与业务状态的描述不能直接搬到本仓库。SpecForge 的目标栈是 native Windows C++，当前已通过 `SpectrumSnapshotHandle` 和 `.npy` loader 落地第一条输入合同；后续 Python、导出文件、IPC 或 native loader 只能作为 producer 侧实现选择，不能渗入 UI/plot 路径。
+- 交接稿中关于 Python 继续承担数据与业务状态的描述不能直接搬到本仓库。Spectiary 的目标栈是 native Windows C++，当前已通过 `SpectrumSnapshotHandle` 和 `.npy` loader 落地第一条输入合同；后续 Python、导出文件、IPC 或 native loader 只能作为 producer 侧实现选择，不能渗入 UI/plot 路径。
 - range slider 不要求照搬旧 UI。优先用 ImPlot 的轴限制、overview plot、drag rect、drag line、numeric inputs 或 lock toggles 组合出更适合 ImGui 的交互。
 - 谱线 overlay 不需要手写 canvas 系统。优先使用 ImPlot 的 line、annotation、shaded region 和 legend/selection 能力。
 - 鼠标 pan 和 wheel zoom 优先使用 ImPlot 原生交互；Precision Touchpad 使用 Windows Direct Manipulation 采集双指 pan/pinch，再统一映射到 ImPlot axis limits，不引入自定义 renderer。

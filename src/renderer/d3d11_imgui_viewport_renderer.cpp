@@ -7,7 +7,7 @@
 
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 struct ViewportRendererData {
@@ -347,4 +347,4 @@ void D3D11ImGuiViewportRenderer::CollectPresentationUpdate(
     });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

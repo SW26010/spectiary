@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::string_view kFallbackName = "labeling-task";
@@ -119,4 +119,4 @@ std::string SuggestedSampleLabelingFilename(
     return safe_name;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

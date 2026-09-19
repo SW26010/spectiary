@@ -14,7 +14,7 @@
 #endif
 #include <windows.h>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::wstring FoldWindowsPathCase(std::wstring value)
@@ -262,4 +262,4 @@ std::string OutputPathIdentityKey(
         : std::move(keys.front());
 }
 
-}  // namespace specforge
+}  // namespace spectiary

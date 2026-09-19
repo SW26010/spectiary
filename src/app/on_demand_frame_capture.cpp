@@ -4,7 +4,7 @@
 #include <memory>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::string_view kUnavailableMessage =
@@ -38,7 +38,7 @@ ResolveOnDemandFrameCaptureEnvironment()
     if (_dupenv_s(
             &requested_buffer,
             &requested_size,
-            "SPECFORGE_FRAME_CAPTURE") != 0) {
+            "SPECTIARY_FRAME_CAPTURE") != 0) {
         return {};
     }
     const std::unique_ptr<char, decltype(&std::free)> requested(
@@ -201,4 +201,4 @@ void OnDemandFrameCapture::FailCapture(
         "); no image was produced.";
 }
 
-}  // namespace specforge
+}  // namespace spectiary

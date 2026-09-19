@@ -5,7 +5,7 @@
 
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] std::string LocalizedSampleLabelValue(
     UiLanguage language,
@@ -20,4 +20,4 @@ namespace specforge {
     const SampleLabelSet& label_set,
     int code);
 
-}  // namespace specforge
+}  // namespace spectiary

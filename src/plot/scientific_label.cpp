@@ -6,7 +6,7 @@
 #include <optional>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr float kScriptScale = 0.72f;
@@ -300,4 +300,4 @@ void DrawScientificLabel(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

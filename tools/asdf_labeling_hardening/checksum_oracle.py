@@ -701,7 +701,7 @@ def _parser() -> argparse.ArgumentParser:
         "--native",
         required=True,
         type=Path,
-        help="Path to specforge_sample_labeling_asdf_codec_tests.exe",
+        help="Path to spectiary_sample_labeling_asdf_codec_tests.exe",
     )
     parser.add_argument("--output", type=Path, help="Optional JSON evidence path")
     parser.add_argument(
@@ -741,7 +741,7 @@ def main() -> int:
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     if arguments.work_dir is None:
-        temporary = tempfile.TemporaryDirectory(prefix="specforge-asdf-checksum-")
+        temporary = tempfile.TemporaryDirectory(prefix="spectiary-asdf-checksum-")
         work_dir = Path(temporary.name)
     else:
         work_dir = arguments.work_dir.resolve()

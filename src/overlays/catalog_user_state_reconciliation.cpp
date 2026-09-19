@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool SameIdentity(const CatalogIdentity& left, const CatalogIdentity& right)
@@ -754,4 +754,4 @@ bool ReconcileCatalogUserStateTask(
     return true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

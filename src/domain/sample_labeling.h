@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr int kUnlabeledSampleLabelCode = -1;
 
@@ -264,4 +264,4 @@ void MarkSampleLabelTaskSaveFailed(
     SampleLabelSaveMessageKind message_kind =
         SampleLabelSaveMessageKind::SystemDetail);
 
-}  // namespace specforge
+}  // namespace spectiary

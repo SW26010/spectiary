@@ -21,16 +21,16 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-specforge::NavigationLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
+spectiary::NavigationLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
 {
-    return specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(milliseconds));
+    return spectiary::NavigationLatencyTimePoint(std::chrono::milliseconds(milliseconds));
 }
 
 std::filesystem::path UniqueTempPath()
 {
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-           ("specforge_navigation_latency_" + std::to_string(next_id.fetch_add(1)) + ".jsonl");
+           ("spectiary_navigation_latency_" + std::to_string(next_id.fetch_add(1)) + ".jsonl");
 }
 
 std::string ReadText(const std::filesystem::path& path)
@@ -41,11 +41,11 @@ std::string ReadText(const std::filesystem::path& path)
 
 void TestPresentedTraceCapturesCorrelatedPhases()
 {
-    specforge::NavigationLatencyTrace trace(
+    spectiary::NavigationLatencyTrace trace(
         7,
         10,
         11,
-        specforge::NavigationLatencyInputKind::UiNext,
+        spectiary::NavigationLatencyInputKind::UiNext,
         AtMilliseconds(1),
         AtMilliseconds(2),
         AtMilliseconds(3),
@@ -59,7 +59,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
             .pending_present = true,
             .sequence_build_count = 2,
         });
-    const specforge::NavigationLatencyAttemptHandle attempt =
+    const spectiary::NavigationLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(11, AtMilliseconds(4));
     attempt->MarkSourceTaskId(99);
     attempt->MarkWorkerStarted(AtMilliseconds(5));
@@ -88,7 +88,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(
         trace.MarkPresentedForViewport(42, 7, AtMilliseconds(17)),
         "the activation frame Present should complete the trace");
-    const std::optional<specforge::NavigationLatencyReport> report = trace.TerminalReport();
+    const std::optional<spectiary::NavigationLatencyReport> report = trace.TerminalReport();
     Require(report.has_value(), "a presented trace should expose one terminal report");
     Require(report->navigation_id == 7, "navigation id should survive the trace");
     Require(report->attempts.size() == 1, "one load should remain one trace attempt");
@@ -96,11 +96,11 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(report->from_index == 10 && report->target_index == 11, "sample indices should survive the trace");
     Require(report->activation_frame == 42, "activation frame should survive the trace");
     Require(report->presentation_viewport_id == 7, "presenting viewport should survive the trace");
-    Require(report->outcome == specforge::NavigationLatencyOutcome::Presented, "outcome should be presented");
+    Require(report->outcome == spectiary::NavigationLatencyOutcome::Presented, "outcome should be presented");
     Require(
         report->cache_hit &&
             report->cache_kind ==
-                specforge::NavigationSnapshotCacheKind::History,
+                spectiary::NavigationSnapshotCacheKind::History,
         "verified history reuse should survive the trace");
     Require(report->attempts[0].workflow_reused, "workflow reuse should be recorded");
     Require(report->attempts[0].context_reused, "context reuse should be recorded");
@@ -108,10 +108,10 @@ void TestPresentedTraceCapturesCorrelatedPhases()
 
     const std::filesystem::path path = UniqueTempPath();
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         Require(sink.is_open(), "profile sink should open for the trace fixture");
         Require(
-            specforge::WriteNavigationLatencyProfileEvent(sink, *report),
+            spectiary::WriteNavigationLatencyProfileEvent(sink, *report),
             "navigation latency event should be accepted");
         sink.Stop();
     }
@@ -162,42 +162,42 @@ void TestPresentedTraceCapturesCorrelatedPhases()
 
 void TestTerminalOutcomeIsStable()
 {
-    specforge::NavigationLatencyTrace trace(
+    spectiary::NavigationLatencyTrace trace(
         8,
         2,
         3,
-        specforge::NavigationLatencyInputKind::UiPrevious,
+        spectiary::NavigationLatencyInputKind::UiPrevious,
         AtMilliseconds(1),
         AtMilliseconds(1),
         AtMilliseconds(2));
     Require(
-        trace.MarkTerminal(specforge::NavigationLatencyOutcome::Superseded, AtMilliseconds(4)),
+        trace.MarkTerminal(spectiary::NavigationLatencyOutcome::Superseded, AtMilliseconds(4)),
         "the first terminal outcome should win");
     Require(
-        !trace.MarkTerminal(specforge::NavigationLatencyOutcome::Failed, AtMilliseconds(5)),
+        !trace.MarkTerminal(spectiary::NavigationLatencyOutcome::Failed, AtMilliseconds(5)),
         "a later terminal outcome must not overwrite the first");
     Require(
         !trace.MarkPresentedForViewport(100, 3, AtMilliseconds(6)),
         "a terminal trace must not later become presented");
-    const std::optional<specforge::NavigationLatencyReport> report = trace.TerminalReport();
+    const std::optional<spectiary::NavigationLatencyReport> report = trace.TerminalReport();
     Require(report.has_value(), "terminal trace should expose a report");
     Require(
-        report->outcome == specforge::NavigationLatencyOutcome::Superseded,
+        report->outcome == spectiary::NavigationLatencyOutcome::Superseded,
         "the first terminal outcome should remain stable");
     Require(report->terminal_ns == 4'000'000, "terminal time should remain stable");
 }
 
 void TestSameFrameStopRetainsPresentedNavigationReport()
 {
-    specforge::NavigationLatencyTrace trace(
+    spectiary::NavigationLatencyTrace trace(
         10,
         4,
         5,
-        specforge::NavigationLatencyInputKind::UiNext,
+        spectiary::NavigationLatencyInputKind::UiNext,
         AtMilliseconds(1),
         AtMilliseconds(2),
         AtMilliseconds(3));
-    const specforge::NavigationLatencyAttemptHandle attempt =
+    const spectiary::NavigationLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(5, AtMilliseconds(4));
     attempt->MarkSourceTaskId(101);
     attempt->MarkWorkerStarted(AtMilliseconds(5));
@@ -219,11 +219,11 @@ void TestSameFrameStopRetainsPresentedNavigationReport()
 
     const std::filesystem::path path = UniqueTempPath();
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         sink.BeginFrame();
         sink.RequestStopAfterFrame();
         Require(
-            specforge::WriteNavigationLatencyProfileEvent(sink, *report),
+            spectiary::WriteNavigationLatencyProfileEvent(sink, *report),
             "a navigation report completed after Stop in the same frame must be retained");
         sink.CompleteFrameFinalization();
         sink.Stop();
@@ -242,15 +242,15 @@ void TestSameFrameStopRetainsPresentedNavigationReport()
 
 void TestRetargetedLoadsKeepSeparateAttempts()
 {
-    specforge::NavigationLatencyTrace trace(
+    spectiary::NavigationLatencyTrace trace(
         9,
         1,
         2,
-        specforge::NavigationLatencyInputKind::AutoAdvance,
+        spectiary::NavigationLatencyInputKind::AutoAdvance,
         AtMilliseconds(1),
         AtMilliseconds(2),
         AtMilliseconds(3));
-    const specforge::NavigationLatencyAttemptHandle first =
+    const spectiary::NavigationLatencyAttemptHandle first =
         trace.BeginLoadAttempt(2, AtMilliseconds(4));
     first->MarkSourceTaskId(10);
     first->MarkWorkerStarted(AtMilliseconds(5));
@@ -264,7 +264,7 @@ void TestRetargetedLoadsKeepSeparateAttempts()
     first->MarkCompletionDrained(AtMilliseconds(14));
 
     trace.SetTargetIndex(3);
-    const specforge::NavigationLatencyAttemptHandle second =
+    const spectiary::NavigationLatencyAttemptHandle second =
         trace.BeginLoadAttempt(3, AtMilliseconds(15));
     second->MarkSourceTaskId(11);
     second->MarkWorkerStarted(AtMilliseconds(16));
@@ -277,7 +277,7 @@ void TestRetargetedLoadsKeepSeparateAttempts()
     second->MarkCompletionPublished(AtMilliseconds(25));
     second->MarkCompletionDrained(AtMilliseconds(26));
     Require(
-        trace.MarkTerminal(specforge::NavigationLatencyOutcome::Superseded, AtMilliseconds(27)),
+        trace.MarkTerminal(spectiary::NavigationLatencyOutcome::Superseded, AtMilliseconds(27)),
         "fixture should terminate after two attempts");
 
     const auto report = trace.TerminalReport();
@@ -293,15 +293,15 @@ void TestRetargetedLoadsKeepSeparateAttempts()
 
 void TestRepeatedPreparationKeepsDistinctRounds()
 {
-    specforge::NavigationLatencyTrace trace(
+    spectiary::NavigationLatencyTrace trace(
         11,
         0,
         1,
-        specforge::NavigationLatencyInputKind::UiNext,
+        spectiary::NavigationLatencyInputKind::UiNext,
         AtMilliseconds(1),
         AtMilliseconds(2),
         AtMilliseconds(3));
-    const specforge::NavigationLatencyAttemptHandle attempt =
+    const spectiary::NavigationLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(1, AtMilliseconds(4));
     attempt->MarkWorkerStarted(AtMilliseconds(5));
     attempt->MarkSnapshotLoadStarted(false, AtMilliseconds(6));
@@ -313,7 +313,7 @@ void TestRepeatedPreparationKeepsDistinctRounds()
     attempt->MarkContextPrepared(AtMilliseconds(15));
     attempt->MarkSourceRevalidated(AtMilliseconds(16));
 
-    const specforge::NavigationLatencyAttemptReport report = attempt->Report();
+    const spectiary::NavigationLatencyAttemptReport report = attempt->Report();
     Require(
         report.preparation_rounds.size() == 2,
         "repeated preparation on one source task must retain two diagnostic rounds");
@@ -328,22 +328,22 @@ void TestPrefetchCancellationSerializesRequestAndTerminalTimes()
 {
     const std::filesystem::path path = UniqueTempPath();
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         Require(
             sink.is_open(),
             "profile sink should open for the prefetch fixture");
         Require(
-            specforge::WriteNavigationPrefetchProfileEvent(
+            spectiary::WriteNavigationPrefetchProfileEvent(
                 sink,
                 {
                     .prefetch_id = 12,
                     .source_task_id = 120,
                     .target_index = 4,
                     .direction =
-                        specforge::
+                        spectiary::
                             SampleNavigationDirection::Next,
                     .outcome =
-                        specforge::
+                        spectiary::
                             NavigationPrefetchOutcome::Canceled,
                     .scheduled_at = AtMilliseconds(1),
                     .cancel_requested_at =

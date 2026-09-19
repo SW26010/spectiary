@@ -2,7 +2,7 @@
 
 #include <imgui.h>
 
-namespace specforge {
+namespace spectiary {
 
 // Call while the dock host menu bar is current. The window check supplies the
 // Z-order ownership that a geometric rectangle hit alone does not provide.
@@ -22,4 +22,4 @@ namespace specforge {
            ImGui::IsMouseClicked(ImGuiMouseButton_Left);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

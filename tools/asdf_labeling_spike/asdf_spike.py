@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ASDF fixtures and measurements for SpecForge sample-labeling schema 2.0.0."""
+"""ASDF fixtures and measurements for Spectiary sample-labeling schema 2.0.0."""
 
 from __future__ import annotations
 
@@ -340,7 +340,7 @@ def _semantic_errors(tree: Any) -> list[str]:
     if summary["alignment_target"] != "sample_roster":
         errors.append("annotation alignment target")
     if "name" in tree["annotation"]:
-        errors.append("annotation.name is not in SpecForge sample-labeling schema 2.0.0")
+        errors.append("annotation.name is not in Spectiary sample-labeling schema 2.0.0")
     if not UUID_V4_PATTERN.fullmatch(summary["task_id"]):
         errors.append("task id")
     if not _is_non_whitespace_text(summary["task_name"]):
@@ -990,7 +990,7 @@ def wire_version_experiment(output: Path) -> dict[str, Any]:
         "asdf": asdf.__version__,
         "supported": records,
         "selected_baseline": REFERENCE_STANDARD_VERSION,
-        "selection_note": "ASDF Standard 1.5.0 is the maintained stable baseline; 1.6.0 adds no wire construct required by SpecForge sample-labeling schema 2.0.0.",
+        "selection_note": "ASDF Standard 1.5.0 is the maintained stable baseline; 1.6.0 adds no wire construct required by Spectiary sample-labeling schema 2.0.0.",
     }
 
 
@@ -1837,7 +1837,7 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             status = "native-controlled-rejection"
         records.append({"fixture": fixture["name"], "status": status, "returncode": completed.returncode})
 
-    with tempfile.TemporaryDirectory(prefix="specforge-asdf-native-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="spectiary-asdf-native-") as temporary:
         _verify_native_author_email_type_rejections(
             native, fixtures / "unicode.asdf", Path(temporary)
         )

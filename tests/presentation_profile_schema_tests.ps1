@@ -1,6 +1,6 @@
 param([Parameter(Mandatory = $true)][string]$Analyzer)
 $ErrorActionPreference = 'Stop'
-$directory = Join-Path ([IO.Path]::GetTempPath()) ('specforge-resize-schema-' + [guid]::NewGuid())
+$directory = Join-Path ([IO.Path]::GetTempPath()) ('spectiary-resize-schema-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $directory | Out-Null
 $path = Join-Path $directory 'fixture.jsonl'
 function Event($name, $phase, $operation) {

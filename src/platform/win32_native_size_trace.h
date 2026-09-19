@@ -6,7 +6,7 @@
 #include <array>
 #include <optional>
 
-namespace specforge::native_size_trace {
+namespace spectiary::native_size_trace {
 
 // Hooks observe the existing UI-thread call path; they never dispatch messages.
 inline thread_local bool hook_available = false;
@@ -109,4 +109,4 @@ private:
     std::uint64_t start_errors_ = 0, cpu_start_ = 0;
     std::optional<presentation_trace::Span> span_;
 };
-} // namespace specforge::native_size_trace
+} // namespace spectiary::native_size_trace

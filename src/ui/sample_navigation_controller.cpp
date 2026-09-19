@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -1618,4 +1618,4 @@ void SampleNavigationController::RecomputeMatches(SourceSession& session)
         session.sample_name_query);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

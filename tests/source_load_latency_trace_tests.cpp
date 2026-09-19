@@ -20,9 +20,9 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-specforge::LoadLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
+spectiary::LoadLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
 {
-    return specforge::LoadLatencyTimePoint(
+    return spectiary::LoadLatencyTimePoint(
         std::chrono::milliseconds(milliseconds));
 }
 
@@ -30,7 +30,7 @@ std::filesystem::path UniqueTempPath()
 {
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-           ("specforge_source_load_latency_" +
+           ("spectiary_source_load_latency_" +
             std::to_string(next_id.fetch_add(1)) + ".jsonl");
 }
 
@@ -44,12 +44,12 @@ std::string ReadText(const std::filesystem::path& path)
 
 void TestPresentedSourceLoadCapturesAcceptedToPresentPhases()
 {
-    specforge::SourceLoadLatencyTrace trace(
+    spectiary::SourceLoadLatencyTrace trace(
         17,
         2,
-        specforge::SourceLoadLatencyRequestKind::ExplicitOpen,
+        spectiary::SourceLoadLatencyRequestKind::ExplicitOpen,
         AtMilliseconds(1));
-    const specforge::LoadLatencyAttemptHandle attempt =
+    const spectiary::LoadLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(2, AtMilliseconds(2));
     attempt->MarkSourceTaskId(71);
     attempt->MarkWorkerStarted(AtMilliseconds(3));
@@ -74,14 +74,14 @@ void TestPresentedSourceLoadCapturesAcceptedToPresentPhases()
     Require(
         trace.MarkPresentedForViewport(42, 7, AtMilliseconds(15)),
         "the first successful Present should complete the source load trace");
-    const std::optional<specforge::SourceLoadLatencyReport> report =
+    const std::optional<spectiary::SourceLoadLatencyReport> report =
         trace.TerminalReport();
     Require(report.has_value(), "a presented source load should expose a report");
     Require(
         report->source_load_id == 17 && report->target_index == 2,
         "source load identity and final target should survive the trace");
     Require(
-        report->outcome == specforge::SourceLoadLatencyOutcome::Presented,
+        report->outcome == spectiary::SourceLoadLatencyOutcome::Presented,
         "the source load outcome should be presented");
     Require(
         report->attempts.size() == 1 &&
@@ -93,10 +93,10 @@ void TestPresentedSourceLoadCapturesAcceptedToPresentPhases()
 
     const std::filesystem::path path = UniqueTempPath();
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         Require(sink.is_open(), "profile sink should open for the source load fixture");
         Require(
-            specforge::WriteSourceLoadLatencyProfileEvent(sink, *report),
+            spectiary::WriteSourceLoadLatencyProfileEvent(sink, *report),
             "source load latency event should be accepted");
         sink.Stop();
     }
@@ -140,19 +140,19 @@ void TestPresentedSourceLoadCapturesAcceptedToPresentPhases()
 
 void TestTerminalOutcomeIsStable()
 {
-    specforge::SourceLoadLatencyTrace trace(
+    spectiary::SourceLoadLatencyTrace trace(
         18,
         0,
-        specforge::SourceLoadLatencyRequestKind::ExplicitOpen,
+        spectiary::SourceLoadLatencyRequestKind::ExplicitOpen,
         AtMilliseconds(1));
     Require(
         trace.MarkTerminal(
-            specforge::SourceLoadLatencyOutcome::Superseded,
+            spectiary::SourceLoadLatencyOutcome::Superseded,
             AtMilliseconds(4)),
         "the first source load terminal outcome should win");
     Require(
         !trace.MarkTerminal(
-            specforge::SourceLoadLatencyOutcome::Failed,
+            spectiary::SourceLoadLatencyOutcome::Failed,
             AtMilliseconds(5)),
         "a later terminal outcome must not replace superseded");
     Require(
@@ -162,20 +162,20 @@ void TestTerminalOutcomeIsStable()
     Require(
         report &&
             report->outcome ==
-                specforge::SourceLoadLatencyOutcome::Superseded &&
+                spectiary::SourceLoadLatencyOutcome::Superseded &&
             report->terminal_ns == 4'000'000,
         "the first terminal source load state should remain stable");
 }
 
 void TestRetargetedSourceLoadAggregatesAttemptsAndRounds()
 {
-    specforge::SourceLoadLatencyTrace trace(
+    spectiary::SourceLoadLatencyTrace trace(
         19,
         1,
-        specforge::SourceLoadLatencyRequestKind::ExplicitOpen,
+        spectiary::SourceLoadLatencyRequestKind::ExplicitOpen,
         AtMilliseconds(1));
     const auto finish_attempt =
-        [](const specforge::LoadLatencyAttemptHandle& attempt,
+        [](const spectiary::LoadLatencyAttemptHandle& attempt,
            std::uint64_t task_id,
            std::int64_t base_ms,
            std::int64_t decode_end_ms) {
@@ -200,11 +200,11 @@ void TestRetargetedSourceLoadAggregatesAttemptsAndRounds()
                 AtMilliseconds(decode_end_ms + 6));
         };
 
-    const specforge::LoadLatencyAttemptHandle first =
+    const spectiary::LoadLatencyAttemptHandle first =
         trace.BeginLoadAttempt(1, AtMilliseconds(2));
     finish_attempt(first, 101, 2, 6);
     trace.SetTargetIndex(2);
-    const specforge::LoadLatencyAttemptHandle second =
+    const spectiary::LoadLatencyAttemptHandle second =
         trace.BeginLoadAttempt(2, AtMilliseconds(13));
     finish_attempt(second, 102, 13, 18);
     trace.MarkSnapshotActivated(50, AtMilliseconds(25));
@@ -226,9 +226,9 @@ void TestRetargetedSourceLoadAggregatesAttemptsAndRounds()
 
     const std::filesystem::path path = UniqueTempPath();
     {
-        specforge::ProfileSink sink(path);
+        spectiary::ProfileSink sink(path);
         Require(
-            specforge::WriteSourceLoadLatencyProfileEvent(sink, *report),
+            spectiary::WriteSourceLoadLatencyProfileEvent(sink, *report),
             "the retargeted source load report should be accepted");
         sink.Stop();
     }

@@ -1,0 +1,21 @@
+#pragma once
+
+namespace spectiary::build_info {
+
+inline constexpr char kSpectiaryVersion[] = "@PROJECT_VERSION@";
+inline constexpr char kBuildConfiguration[] = "$<CONFIG>";
+inline constexpr char kTargetArchitecture[] = "@SPECTIARY_BUILD_TARGET_ARCHITECTURE@";
+inline constexpr char kBuildSourceMode[] = "@SPECTIARY_BUILD_SOURCE_MODE@";
+inline constexpr char kBuildSourceRevision[] = "@SPECTIARY_BUILD_SOURCE_REVISION@";
+inline constexpr char kBuildCompilerId[] = "@SPECTIARY_BUILD_COMPILER_ID@";
+inline constexpr char kBuildCompilerVersion[] = "@SPECTIARY_BUILD_COMPILER_VERSION@";
+inline constexpr char kBuildCMakeVersion[] = "@SPECTIARY_BUILD_CMAKE_VERSION@";
+inline constexpr char kBuildGenerator[] = "@SPECTIARY_BUILD_GENERATOR@";
+inline constexpr char kBuildWindowsSdkVersion[] = "@SPECTIARY_BUILD_WINDOWS_SDK_VERSION@";
+inline constexpr char kBuildDearImguiVersion[] = "@SPECTIARY_IMGUI_VERSION@";
+inline constexpr char kBuildImPlotVersion[] = "@SPECTIARY_IMPLOT_VERSION@";
+inline constexpr char kBuildCfitsioVersion[] = "@SPECTIARY_CFITSIO_VERSION@";
+inline constexpr char kBuildYamlCppVersion[] = "@SPECTIARY_YAML_CPP_VERSION@";
+inline constexpr char kBuildZlibVersion[] = "@SPECTIARY_ZLIB_VERSION@";
+
+}  // namespace spectiary::build_info

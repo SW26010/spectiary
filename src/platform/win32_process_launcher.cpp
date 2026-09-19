@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool ContainsCommandLineWhitespaceOrQuote(
@@ -82,7 +82,7 @@ CurrentExecutableLaunchResult InvalidSourcePathResult()
         .failure =
             CurrentExecutableLaunchFailure::InvalidSourcePath,
         .diagnostic =
-            "Could not launch SpecForge with an empty or invalid source path.",
+            "Could not launch Spectiary with an empty or invalid source path.",
     };
 }
 
@@ -125,7 +125,7 @@ CurrentExecutablePathResult ResolveCurrentExecutablePathImpl()
 std::string ExecutablePathUnavailableDiagnostic(
     std::uint32_t error)
 {
-    return "Could not resolve the current SpecForge executable path (Win32 error " +
+    return "Could not resolve the current Spectiary executable path (Win32 error " +
            std::to_string(error) +
            ")" +
            ErrorSuffix(error) +
@@ -137,7 +137,7 @@ std::string ProcessCreationFailureDiagnostic(
     const std::filesystem::path& source_path,
     std::uint32_t error)
 {
-    return "Could not launch SpecForge executable '" +
+    return "Could not launch Spectiary executable '" +
            PathText(executable_path) +
            "' with source '" +
            PathText(source_path) +
@@ -161,7 +161,7 @@ CurrentExecutableLaunchResult SourcePathResolutionFailureResult(
         .diagnostic =
             "Could not resolve source path '" +
             PathText(source_path) +
-            "' before launching SpecForge (Win32 error " +
+            "' before launching Spectiary (Win32 error " +
             std::to_string(native_error) +
             ")" +
             ErrorSuffix(native_error) +
@@ -241,7 +241,7 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
                 CurrentExecutableLaunchFailure::
                     ExecutablePathUnavailable,
             .diagnostic =
-                "Could not launch SpecForge because the executable path is empty or invalid.",
+                "Could not launch Spectiary because the executable path is empty or invalid.",
         };
     }
 
@@ -314,4 +314,4 @@ CurrentExecutableLaunchResult LaunchCurrentExecutableWithSource(
         source_path);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

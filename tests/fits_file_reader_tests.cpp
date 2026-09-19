@@ -22,16 +22,16 @@
 
 namespace {
 
-using specforge::detail::FitsColumn;
-using specforge::detail::FitsFile;
-using specforge::detail::FitsFileError;
-using specforge::detail::FitsFileErrorCode;
-using specforge::detail::FitsHdu;
-using specforge::detail::FitsHduKind;
-using specforge::detail::FitsNumericType;
-using specforge::detail::FitsSourceEncoding;
-using specforge::tests::CancellationStageProbe;
-using specforge::tests::SourceStage;
+using spectiary::detail::FitsColumn;
+using spectiary::detail::FitsFile;
+using spectiary::detail::FitsFileError;
+using spectiary::detail::FitsFileErrorCode;
+using spectiary::detail::FitsHdu;
+using spectiary::detail::FitsHduKind;
+using spectiary::detail::FitsNumericType;
+using spectiary::detail::FitsSourceEncoding;
+using spectiary::tests::CancellationStageProbe;
+using spectiary::tests::SourceStage;
 
 static_assert(std::is_move_constructible_v<FitsFile>);
 static_assert(std::is_move_assignable_v<FitsFile>);
@@ -78,7 +78,7 @@ public:
                                 .time_since_epoch()
                                 .count();
         path_ = std::filesystem::temp_directory_path() /
-            ("specforge_fits_file_reader_tests_" +
+            ("spectiary_fits_file_reader_tests_" +
              std::to_string(suffix));
         std::error_code error;
         std::filesystem::remove_all(path_, error);
@@ -873,7 +873,7 @@ void TestOpenAndResourceErrorMatrix(const TempDirectory& temporary)
             (void)FitsFile::Open(
                 gzip_path,
                 FitsSourceEncoding::Gzip,
-                specforge::detail::kMaxSynchronousFitsFileBytes,
+                spectiary::detail::kMaxSynchronousFitsFileBytes,
                 inflated_size - 1U);
         },
         "inflated FITS size limit");
@@ -931,7 +931,7 @@ void TestCfitsioErrorStackIsolation(const TempDirectory& temporary)
     missing_hdu.index = 999U;
 
     constexpr char kForeignStackEntry[] =
-        "SpecForge foreign CFITSIO error-stack sentinel";
+        "Spectiary foreign CFITSIO error-stack sentinel";
     fits_clear_errmsg();
     ffpmsg(kForeignStackEntry);
 
@@ -963,7 +963,7 @@ void TestCfitsioErrorStackIsolation(const TempDirectory& temporary)
 void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
 {
     const std::filesystem::path reader_source =
-        std::filesystem::path(SPECFORGE_SOURCE_DIR) /
+        std::filesystem::path(SPECTIARY_SOURCE_DIR) /
         "src/domain/fits_file_reader.cpp";
     const std::filesystem::path large_image_path =
         temporary.path() / "large_image.fits";
@@ -984,8 +984,8 @@ void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
             (void)FitsFile::Open(
                 gzip_path,
                 FitsSourceEncoding::Gzip,
-                specforge::detail::kMaxSynchronousFitsFileBytes,
-                specforge::detail::kMaxSynchronousInflatedFitsBytes,
+                spectiary::detail::kMaxSynchronousFitsFileBytes,
+                spectiary::detail::kMaxSynchronousInflatedFitsBytes,
                 [&gzip_probe]() { return gzip_probe.Poll(); });
         },
         "gzip inflate cancellation");
@@ -1007,8 +1007,8 @@ void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
             (void)FitsFile::Open(
                 many_hdu_path,
                 FitsSourceEncoding::Plain,
-                specforge::detail::kMaxSynchronousFitsFileBytes,
-                specforge::detail::kMaxSynchronousInflatedFitsBytes,
+                spectiary::detail::kMaxSynchronousFitsFileBytes,
+                spectiary::detail::kMaxSynchronousInflatedFitsBytes,
                 [&hdu_probe]() { return hdu_probe.Poll(); });
         },
         "HDU enumeration cancellation");
@@ -1030,8 +1030,8 @@ void TestCancellationAcrossReaderStages(const TempDirectory& temporary)
             (void)FitsFile::Open(
                 many_column_path,
                 FitsSourceEncoding::Plain,
-                specforge::detail::kMaxSynchronousFitsFileBytes,
-                specforge::detail::kMaxSynchronousInflatedFitsBytes,
+                spectiary::detail::kMaxSynchronousFitsFileBytes,
+                spectiary::detail::kMaxSynchronousInflatedFitsBytes,
                 [&column_discovery_probe]() {
                     return column_discovery_probe.Poll();
                 });

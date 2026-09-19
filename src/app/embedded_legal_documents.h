@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class LegalDocument {
     ThirdPartyNotices,
@@ -12,4 +12,4 @@ enum class LegalDocument {
 [[nodiscard]] std::string_view EmbeddedLegalDocumentContent(
     LegalDocument document) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -19,13 +19,13 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kFilesWindow = "Files###FilesV2";
 constexpr const char* kNavigationWindow = "Navigation###NavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###AnnotationsV1";
-constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
+constexpr const char* kSampleAnnotationDragPayload = "SAMPLE_ANNOTATION_PATH_V1";
 constexpr const char* kSampleNavigationSourceInput =
     "##SampleNavigationSample";
 constexpr const char* kSampleNavigationSequenceInput =
@@ -1969,4 +1969,4 @@ void SourceCollectionPanelUi::CommitSampleNameSearch(
     ClearSampleNameSearch();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

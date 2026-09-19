@@ -12,7 +12,7 @@
 
 struct ImPlotStyle;
 
-namespace specforge {
+namespace spectiary {
 
 struct ThemeSelection;
 
@@ -49,7 +49,7 @@ enum class ThemeColorScheme {
 // Application-owned colors are named by meaning so feature code never needs
 // to infer whether the active theme is light or dark. ImGui and ImPlot keep
 // ownership of their standard widget colors; this palette covers colors used
-// by SpecForge rendering and status affordances.
+// by Spectiary rendering and status affordances.
 struct SemanticPalette {
     ImVec4 background{};
     ImVec4 surface{};
@@ -142,4 +142,4 @@ ParseThemeSelectionStableValue(std::string_view value);
 WindowsSystemThemeIdFromAppsUseLightTheme(
     std::optional<std::uint32_t> apps_use_light_theme);
 
-}  // namespace specforge
+}  // namespace spectiary

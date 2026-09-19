@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 struct ShellUiTestAccess {
     static SpectrumViewSessionView SpectrumView(const ShellUi& shell)
     {
@@ -41,12 +41,12 @@ struct ShellUiTestAccess {
         shell.spectrum_view_session_.Submit(SpectrumViewSessionCommand::RequestFitView());
     }
 };
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
-specforge::RuntimePaths FixtureRuntimePaths(const std::filesystem::path& state)
+spectiary::RuntimePaths FixtureRuntimePaths(const std::filesystem::path& state)
 {
-    specforge::RuntimePaths paths;
+    spectiary::RuntimePaths paths;
     if (state.filename() == "sample-labeling-state.json" && state.parent_path().filename() == "state") {
         paths.sample_labeling_state_path = state;
         paths.sample_labeling_drafts_path = state.parent_path().parent_path() / "unsaved" / "sample-labeling-drafts.json";
@@ -85,14 +85,14 @@ std::filesystem::path UniqueRoot()
             .time_since_epoch()
             .count();
     return std::filesystem::temp_directory_path() /
-           ("specforge-automation-state-isolation-" +
+           ("spectiary-automation-state-isolation-" +
             std::to_string(GetCurrentProcessId()) +
             "-" + std::to_string(suffix));
 }
 
 void TestPortableSpectrumOwnerIsolation(const std::filesystem::path& fixture_root)
 {
-    using namespace specforge;
+    using namespace spectiary;
     const auto package = fixture_root / "portable-package";
     const auto isolated_root = fixture_root / "portable-automation";
     std::filesystem::create_directories(package);
@@ -100,7 +100,7 @@ void TestPortableSpectrumOwnerIsolation(const std::filesystem::path& fixture_roo
     std::ofstream(package / project_identity::kMetadataFilename) <<
         R"({"schema_version":6,"deployment":{"distribution":"portable","storage_profile":"portable"}})";
     RuntimePathInputs inputs{.executable_path = package / "renamed.exe"};
-    const auto ordinary = PrepareSpecForgeStartup(inputs);
+    const auto ordinary = PrepareSpectiaryStartup(inputs);
     Require(ordinary.runtime_paths().storage_profile == StorageProfile::Portable,
         "isolation fixture must exercise actual Portable startup");
     const auto config = ordinary.runtime_paths().spectrum_plot_preferences_path;
@@ -118,7 +118,7 @@ void TestPortableSpectrumOwnerIsolation(const std::filesystem::path& fixture_roo
     std::filesystem::last_write_time(state, fixed_time);
 
     inputs.application_data_root_override = isolated_root;
-    const auto isolated = PrepareSpecForgeStartup(inputs);
+    const auto isolated = PrepareSpectiaryStartup(inputs);
     const auto& paths = isolated.runtime_paths();
     Require(paths.package_root == package && paths.application_data_root == isolated_root &&
             paths.spectrum_plot_preferences_path == isolated_root / "config" / "spectrum-plot-preferences.json" &&
@@ -296,7 +296,7 @@ int WriteLabelingCoordinationDirectoriesFixture(
     }
 
     const std::vector<std::filesystem::path> directories =
-        specforge::SampleLabelingStateCoordinationDirectories(
+        spectiary::SampleLabelingStateCoordinationDirectories(
             *cache_path);
     if (directories.empty()) {
         return 3;
@@ -340,8 +340,8 @@ int WriteLabelingSeedFixture(
         return 2;
     }
 
-    const specforge::SpectrumSnapshotHandle snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(
+    const spectiary::SpectrumSnapshotHandle snapshot =
+        spectiary::LoadSpectrumSnapshotFromPath(
             *source_path,
             0);
     if (!snapshot ||
@@ -349,18 +349,18 @@ int WriteLabelingSeedFixture(
         snapshot->collection.spectrum_count < 2U) {
         return 3;
     }
-    const specforge::SourceCollectionContext context =
-        specforge::LoadSourceCollectionContext(
+    const spectiary::SourceCollectionContext context =
+        spectiary::LoadSourceCollectionContext(
             *snapshot);
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(
             kLabelingTaskId,
             "Quality",
             context.identity.spectrum_count);
-    if (!specforge::UpsertSampleLabel(
+    if (!spectiary::UpsertSampleLabel(
             task.label_set,
             {5, "accepted", 'a'}) ||
-        !specforge::UpsertSampleLabel(
+        !spectiary::UpsertSampleLabel(
             task.label_set,
             {7, "rejected", 'r'})) {
         return 4;
@@ -369,7 +369,7 @@ int WriteLabelingSeedFixture(
     if (output_path) {
         task.persistence.output_path = *output_path;
         task.persistence.output_format =
-            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+            spectiary::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
         if (HasArgument(
                 argc,
                 argv,
@@ -381,15 +381,15 @@ int WriteLabelingSeedFixture(
             if (directory_error) {
                 return 5;
             }
-            const auto descriptor = specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+            const auto descriptor = spectiary::BuildSampleLabelingCanonicalSourceDescriptor(
                 *snapshot, context);
-            const auto write_outcome = specforge::WriteSampleLabelingAsdfDocumentAtomically(
-                *output_path, specforge::BuildSampleLabelingDocument(descriptor, task.Content().value()));
+            const auto write_outcome = spectiary::WriteSampleLabelingAsdfDocumentAtomically(
+                *output_path, spectiary::BuildSampleLabelingDocument(descriptor, task.Content().value()));
             if (!write_outcome.succeeded()) {
                 return 5;
             }
             task.persistence.save_state.kind =
-                specforge::SampleLabelSaveStateKind::AutosavedToOutput;
+                spectiary::SampleLabelSaveStateKind::AutosavedToOutput;
         }
     }
 
@@ -416,7 +416,7 @@ int WriteLabelingSeedFixture(
     fixture_output.close();
     if (!fixture_output) return 5;
     if (output_path) return 0; // Negative seed tests deliberately contain an output locator.
-    return specforge::LoadLegacySampleLabelingDraftSeed(*seed_path).warning.empty() ? 0 : 6;
+    return spectiary::LoadLegacySampleLabelingDraftSeed(*seed_path).warning.empty() ? 0 : 6;
 }
 
 int ExerciseLabelingDeleteFixture(
@@ -439,8 +439,8 @@ int ExerciseLabelingDeleteFixture(
         return 2;
     }
 
-    const specforge::SpectrumSnapshotHandle snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(
+    const spectiary::SpectrumSnapshotHandle snapshot =
+        spectiary::LoadSpectrumSnapshotFromPath(
             *source_path,
             0);
     if (!snapshot ||
@@ -448,9 +448,9 @@ int ExerciseLabelingDeleteFixture(
         snapshot->collection.spectrum_count == 0U) {
         return 3;
     }
-    const specforge::SourceCollectionContext context =
-        specforge::LoadSourceCollectionContext(*snapshot);
-    specforge::SampleLabelingController controller(*cache_path, FixtureRuntimePaths(*cache_path));
+    const spectiary::SourceCollectionContext context =
+        spectiary::LoadSourceCollectionContext(*snapshot);
+    spectiary::SampleLabelingController controller(*cache_path, FixtureRuntimePaths(*cache_path));
     controller.ActivateSource(context.identity);
     const std::string selected_task_id =
         task_id
@@ -462,17 +462,17 @@ int ExerciseLabelingDeleteFixture(
         return 4;
     }
 
-    const specforge::SampleLabelingOperationResult deactivated =
+    const spectiary::SampleLabelingOperationResult deactivated =
         controller.DeactivateActiveTask();
     if (!deactivated.accepted || !deactivated.state_saved) {
         return 5;
     }
-    const specforge::SampleLabelingOperationResult reactivated =
+    const spectiary::SampleLabelingOperationResult reactivated =
         controller.ActivateTask(selected_task_id);
     if (!reactivated.accepted || !reactivated.state_saved) {
         return 6;
     }
-    const specforge::SampleLabelingOperationResult deleted =
+    const spectiary::SampleLabelingOperationResult deleted =
         controller.DeleteActiveTask();
     if (!deleted.accepted || !deleted.state_saved ||
         controller.View().active_task != nullptr) {
@@ -506,22 +506,22 @@ int VerifyLabelOutputFixture(
         return 2;
     }
 
-    const specforge::SpectrumSnapshotHandle snapshot =
-        specforge::LoadSpectrumSnapshotFromPath(
+    const spectiary::SpectrumSnapshotHandle snapshot =
+        spectiary::LoadSpectrumSnapshotFromPath(
             *source_path,
             0);
     if (!snapshot ||
         snapshot->capabilities.has_domain_error) {
         return 3;
     }
-    const specforge::SourceCollectionContext context =
-        specforge::LoadSourceCollectionContext(*snapshot);
+    const spectiary::SourceCollectionContext context =
+        spectiary::LoadSourceCollectionContext(*snapshot);
     if (expected_values->size() !=
         context.identity.spectrum_count) {
         return 4;
     }
 
-    const auto loaded = specforge::ReadSampleLabelingAsdfDocument(*output_path);
+    const auto loaded = spectiary::ReadSampleLabelingAsdfDocument(*output_path);
     if (!loaded.succeeded()) {
         return 5;
     }
@@ -579,9 +579,9 @@ int VerifyLabelingStateFixture(
         return 2;
     }
 
-    const specforge::SpectrumSnapshotHandle
+    const spectiary::SpectrumSnapshotHandle
         snapshot =
-            specforge::
+            spectiary::
                 LoadSpectrumSnapshotFromPath(
                     *source_path,
                     0);
@@ -589,13 +589,13 @@ int VerifyLabelingStateFixture(
         snapshot->capabilities.has_domain_error) {
         return 3;
     }
-    const specforge::SourceCollectionContext
+    const spectiary::SourceCollectionContext
         context =
-            specforge::
+            spectiary::
                 LoadSourceCollectionContext(
                     *snapshot);
     const auto loaded =
-        specforge::LoadSampleLabelingStateCache(FixtureRuntimePaths(*cache_path),
+        spectiary::LoadSampleLabelingStateCache(FixtureRuntimePaths(*cache_path),
             *cache_path);
     if (!loaded.warning.empty()) {
         return 4;
@@ -619,12 +619,12 @@ int VerifyLabelingStateFixture(
     if (task == source->second.tasks.end()) {
         return 6;
     }
-    std::optional<specforge::SampleLabelingTask> projected;
-    const specforge::SampleLabelingTask* effective = &*task;
-    if (task->persistence.output_format == specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
-        const auto document = specforge::ReadSampleLabelingAsdfDocument(*task->persistence.output_path);
+    std::optional<spectiary::SampleLabelingTask> projected;
+    const spectiary::SampleLabelingTask* effective = &*task;
+    if (task->persistence.output_format == spectiary::SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        const auto document = spectiary::ReadSampleLabelingAsdfDocument(*task->persistence.output_path);
         if (!document.succeeded()) return 6;
-        projected = specforge::ProjectSampleLabelingDocumentTask(*document.document, *task);
+        projected = spectiary::ProjectSampleLabelingDocumentTask(*document.document, *task);
         if (!projected) return 6;
         effective = &*projected;
     }
@@ -703,9 +703,9 @@ int wmain(int argc, wchar_t** argv)
         forbidden_output =
             ordinary_root /
             "must-not-be-read.npy";
-    specforge::SampleLabelingTask
+    spectiary::SampleLabelingTask
         persistent_task =
-            specforge::
+            spectiary::
                 CreateSampleLabelingTask(
                     kPersistentLabelingTaskId,
                     "Persistent",
@@ -713,29 +713,29 @@ int wmain(int argc, wchar_t** argv)
     persistent_task.persistence.output_path =
         forbidden_output;
     persistent_task.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    specforge::SampleLabelingSourceState
+        spectiary::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+    spectiary::SampleLabelingSourceState
         persistent_source;
     persistent_source.sample_count = 2U;
     persistent_source.tasks.push_back(
         std::move(persistent_task));
     persistent_source.active_task_id =
         kPersistentLabelingTaskId;
-    specforge::SampleLabelingStateCache
+    spectiary::SampleLabelingStateCache
         persistent_cache;
     persistent_cache.sources.emplace(
         "seed-source",
         std::move(persistent_source));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             persistent_seed_cache,
             persistent_cache),
         "persistent-output seed fixture should use the production serializer");
     const auto restricted_seed =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             persistent_seed_cache,
             {},
-            specforge::
+            spectiary::
                 SampleLabelingStateCacheLoadPolicy::
                     InternalDraftsOnly);
     Require(
@@ -748,7 +748,7 @@ int wmain(int argc, wchar_t** argv)
 
     const std::filesystem::path ordinary_language =
         ordinary_root / "ui-language.json";
-    specforge::ApplicationSettings ordinary_settings({
+    spectiary::ApplicationSettings ordinary_settings({
         .language_settings_path = ordinary_language,
         .appearance_settings_path =
             ordinary_root / "appearance-settings.json",
@@ -760,10 +760,10 @@ int wmain(int argc, wchar_t** argv)
         .panel_visibility_path = ordinary_root / "panel-visibility.json",
         .default_profile_output_directory = ordinary_root / "profiles",
     });
-    const specforge::ApplicationSettingsResult language_result =
+    const spectiary::ApplicationSettingsResult language_result =
         ordinary_settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::SimplifiedChinese),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::SimplifiedChinese),
             {});
     Require(
         language_result.applied(),
@@ -774,15 +774,15 @@ int wmain(int argc, wchar_t** argv)
         std::filesystem::last_write_time(
             ordinary_language);
 
-    specforge::RuntimePathInputs inputs;
+    spectiary::RuntimePathInputs inputs;
     inputs.executable_path =
-        specforge::CurrentExecutablePath();
+        spectiary::CurrentExecutablePath();
     inputs.local_app_data_user_state_root =
         ordinary_root;
     inputs.application_data_root_override =
         automation_root;
-    const specforge::SpecForgeStartup startup =
-        specforge::PrepareSpecForgeStartup(
+    const spectiary::SpectiaryStartup startup =
+        spectiary::PrepareSpectiaryStartup(
             std::move(inputs));
     Require(
         startup.runtime_paths()
@@ -809,10 +809,10 @@ int wmain(int argc, wchar_t** argv)
         "automation override should remap the complete local-state path family");
 
     {
-        specforge::ShellUi shell(startup);
+        spectiary::ShellUi shell(startup);
         Require(
             shell.ui_language() ==
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
             "Shell should not import the ordinary root's Chinese language setting");
         Require(
             !shell.current_snapshot(),

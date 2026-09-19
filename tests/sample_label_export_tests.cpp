@@ -32,16 +32,16 @@ std::filesystem::path FreshTestDirectory(std::string_view name)
     return path;
 }
 
-std::vector<specforge::CsvRecord> ReadCsvRecords(
+std::vector<spectiary::CsvRecord> ReadCsvRecords(
     const std::filesystem::path& path)
 {
-    specforge::BoundedCsvFileReader reader(path);
-    std::vector<specforge::CsvRecord> records;
+    spectiary::BoundedCsvFileReader reader(path);
+    std::vector<spectiary::CsvRecord> records;
     while (true) {
-        specforge::CsvRecordReadResult result =
+        spectiary::CsvRecordReadResult result =
             reader.ReadRecord();
         if (result.status ==
-            specforge::CsvRecordReadStatus::End) {
+            spectiary::CsvRecordReadStatus::End) {
             return records;
         }
         if (!result.has_record()) {
@@ -64,22 +64,22 @@ std::string ReadBinaryText(const std::filesystem::path& path)
 
 void TestUnlabeledSentinelCannotCollideWithLabelName()
 {
-    specforge::SampleLabelSet labels;
+    spectiary::SampleLabelSet labels;
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             labels,
-            specforge::SampleLabelDefinition{
+            spectiary::SampleLabelDefinition{
                 5,
                 "unlabeled",
                 'u'}),
         "the labeling domain should continue to accept the existing legal name");
 
     const std::string sentinel =
-        specforge::SerializeSampleLabelValueForExport(
+        spectiary::SerializeSampleLabelValueForExport(
             labels,
-            specforge::kUnlabeledSampleLabelCode);
+            spectiary::kUnlabeledSampleLabelCode);
     const std::string labeled =
-        specforge::SerializeSampleLabelValueForExport(
+        spectiary::SerializeSampleLabelValueForExport(
             labels,
             5);
     Require(
@@ -88,13 +88,13 @@ void TestUnlabeledSentinelCannotCollideWithLabelName()
             sentinel != labeled,
         "unlabeled sentinel text must not collide with a legal label name");
 
-    const specforge::DeserializedSampleLabelExportValue
+    const spectiary::DeserializedSampleLabelExportValue
         sentinel_value =
-            specforge::DeserializeSampleLabelValueFromExport(
+            spectiary::DeserializeSampleLabelValueFromExport(
                 sentinel);
-    const specforge::DeserializedSampleLabelExportValue
+    const spectiary::DeserializedSampleLabelExportValue
         labeled_value =
-            specforge::DeserializeSampleLabelValueFromExport(
+            spectiary::DeserializeSampleLabelValueFromExport(
                 labeled);
     Require(
         sentinel_value.represents_unlabeled &&
@@ -108,15 +108,15 @@ void TestLeadingEscapePrefixRoundTrips()
 {
     const std::string label_name = "\\unlabeled";
     const std::string serialized =
-        specforge::SerializeSampleLabelNameForExport(
+        spectiary::SerializeSampleLabelNameForExport(
             label_name);
     Require(
         serialized == "\\\\unlabeled",
         "an existing leading escape prefix should be escaped exactly once");
 
-    const specforge::DeserializedSampleLabelExportValue
+    const spectiary::DeserializedSampleLabelExportValue
         deserialized =
-            specforge::DeserializeSampleLabelValueFromExport(
+            spectiary::DeserializeSampleLabelValueFromExport(
                 serialized);
     Require(
         !deserialized.represents_unlabeled &&
@@ -128,15 +128,15 @@ void TestOrdinaryLabelTextRemainsReadableAndRoundTrips()
 {
     const std::string label_name = "星系,A\n可信";
     const std::string serialized =
-        specforge::SerializeSampleLabelNameForExport(
+        spectiary::SerializeSampleLabelNameForExport(
             label_name);
     Require(
         serialized == label_name,
         "ordinary label text should not receive unnecessary encoding");
 
-    const specforge::DeserializedSampleLabelExportValue
+    const spectiary::DeserializedSampleLabelExportValue
         deserialized =
-            specforge::DeserializeSampleLabelValueFromExport(
+            spectiary::DeserializeSampleLabelValueFromExport(
                 serialized);
     Require(
         !deserialized.represents_unlabeled &&
@@ -146,45 +146,45 @@ void TestOrdinaryLabelTextRemainsReadableAndRoundTrips()
 
 void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
 {
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(
             "quality",
             "Quality",
             4);
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             task.label_set,
-            specforge::SampleLabelDefinition{
+            spectiary::SampleLabelDefinition{
                 5,
                 "星系,\"A\"\n可信",
                 'a'}) &&
-            specforge::UpsertSampleLabel(
+            spectiary::UpsertSampleLabel(
                 task.label_set,
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     6,
                     "unlabeled",
                     'u'}) &&
-            specforge::UpsertSampleLabel(
+            spectiary::UpsertSampleLabel(
                 task.label_set,
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     7,
                     "\\leading",
                     'l'}),
         "folder CSV fixture should define stable label text");
     Require(
-        specforge::AssignSampleLabel(task, 0, 5).accepted &&
-            specforge::AssignSampleLabel(task, 2, 6).accepted &&
-            specforge::AssignSampleLabel(task, 3, 7).accepted,
+        spectiary::AssignSampleLabel(task, 0, 5).accepted &&
+            spectiary::AssignSampleLabel(task, 2, 6).accepted &&
+            spectiary::AssignSampleLabel(task, 3, 7).accepted,
         "folder CSV fixture should assign canonical rows");
     task.persistence.output_path = "owner.asdf";
     task.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     task.session.remembered_position = 2;
     task.persistence.metadata_save_pending = true;
-    const specforge::SampleLabelingTask before = task;
+    const spectiary::SampleLabelingTask before = task;
 
-    const specforge::SampleLabelingCanonicalSourceDescriptor source{
+    const spectiary::SampleLabelingCanonicalSourceDescriptor source{
         .base_identity = "folder-source",
         .source_kind = "folder",
         .source_name = "spectra",
@@ -197,9 +197,9 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
             "gamma.fits"},
     };
     std::string error;
-    const std::optional<specforge::SampleLabelExportSnapshot>
-        snapshot = specforge::BuildSampleLabelExportSnapshot(
-            specforge::SampleLabelExportFormat::Csv,
+    const std::optional<spectiary::SampleLabelExportSnapshot>
+        snapshot = spectiary::BuildSampleLabelExportSnapshot(
+            spectiary::SampleLabelExportFormat::Csv,
             task,
             source,
             &error);
@@ -210,18 +210,18 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
             : error);
 
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-folder-label-csv-export");
+        FreshTestDirectory("spectiary-folder-label-csv-export");
     const std::filesystem::path path =
         directory / "labels.csv";
     Require(
-        specforge::ExportSampleLabelSnapshot(
+        spectiary::ExportSampleLabelSnapshot(
             path,
             *snapshot,
             &error),
         error.empty()
             ? "folder CSV export should succeed"
             : error);
-    const std::vector<specforge::CsvRecord> expected{
+    const std::vector<spectiary::CsvRecord> expected{
         {"filename", "label"},
         {"zeta,\n\"one\".fits", "星系,\"A\"\n可信"},
         {"alpha.fits", "unlabeled"},
@@ -249,11 +249,11 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
 
     std::ofstream(path, std::ios::binary | std::ios::trunc)
         << "existing CSV";
-    specforge::SampleLabelExportSnapshot invalid = *snapshot;
+    spectiary::SampleLabelExportSnapshot invalid = *snapshot;
     invalid.sample_names[1] = std::string("\xc3\x28", 2);
     error.clear();
     Require(
-        !specforge::ExportSampleLabelSnapshot(
+        !spectiary::ExportSampleLabelSnapshot(
             path,
             invalid,
             &error) &&
@@ -261,13 +261,13 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
             ReadBinaryText(path) == "existing CSV",
         "failed CSV encoding should preserve the previous target atomically");
 
-    specforge::SampleLabelingCanonicalSourceDescriptor missing_roster =
+    spectiary::SampleLabelingCanonicalSourceDescriptor missing_roster =
         source;
     missing_roster.sample_names.clear();
     error.clear();
     Require(
-        !specforge::BuildSampleLabelExportSnapshot(
-            specforge::SampleLabelExportFormat::Csv,
+        !spectiary::BuildSampleLabelExportSnapshot(
+            spectiary::SampleLabelExportFormat::Csv,
             task,
             missing_roster,
             &error) &&
@@ -278,22 +278,22 @@ void TestFolderCsvExportUsesCanonicalFilenameRosterAndStableLabels()
 
 void TestNonFolderCsvUsesNamesOrStableSourceIndices()
 {
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(
             "quality",
             "Quality",
             2);
     Require(
-        specforge::UpsertSampleLabel(
+        spectiary::UpsertSampleLabel(
             task.label_set,
-            specforge::SampleLabelDefinition{
+            spectiary::SampleLabelDefinition{
                 5,
                 "selected",
                 's'}) &&
-            specforge::AssignSampleLabel(task, 0, 5).accepted,
+            spectiary::AssignSampleLabel(task, 0, 5).accepted,
         "non-folder CSV fixture should assign its first source row");
 
-    specforge::SampleLabelingCanonicalSourceDescriptor source{
+    spectiary::SampleLabelingCanonicalSourceDescriptor source{
         .base_identity = "npy-source",
         .source_kind = "npy",
         .source_name = "spectra.npy",
@@ -302,17 +302,17 @@ void TestNonFolderCsvUsesNamesOrStableSourceIndices()
         .sample_names = {"beta", "alpha"},
     };
     const std::filesystem::path directory =
-        FreshTestDirectory("specforge-npy-label-csv-export");
+        FreshTestDirectory("spectiary-npy-label-csv-export");
     std::string error;
-    const std::optional<specforge::SampleLabelExportSnapshot>
-        named = specforge::BuildSampleLabelExportSnapshot(
-            specforge::SampleLabelExportFormat::Csv,
+    const std::optional<spectiary::SampleLabelExportSnapshot>
+        named = spectiary::BuildSampleLabelExportSnapshot(
+            spectiary::SampleLabelExportFormat::Csv,
             task,
             source,
             &error);
     Require(
         named.has_value() &&
-            specforge::ExportSampleLabelSnapshot(
+            spectiary::ExportSampleLabelSnapshot(
                 directory / "named.csv",
                 *named,
                 &error),
@@ -321,7 +321,7 @@ void TestNonFolderCsvUsesNamesOrStableSourceIndices()
             : error);
     Require(
         ReadCsvRecords(directory / "named.csv") ==
-            std::vector<specforge::CsvRecord>({
+            std::vector<spectiary::CsvRecord>({
                 {"sample", "label"},
                 {"beta", "selected"},
                 {"alpha", "unlabeled"},
@@ -330,15 +330,15 @@ void TestNonFolderCsvUsesNamesOrStableSourceIndices()
 
     source.sample_names.clear();
     error.clear();
-    const std::optional<specforge::SampleLabelExportSnapshot>
-        indexed = specforge::BuildSampleLabelExportSnapshot(
-            specforge::SampleLabelExportFormat::Csv,
+    const std::optional<spectiary::SampleLabelExportSnapshot>
+        indexed = spectiary::BuildSampleLabelExportSnapshot(
+            spectiary::SampleLabelExportFormat::Csv,
             task,
             source,
             &error);
     Require(
         indexed.has_value() && indexed->uses_source_index &&
-            specforge::ExportSampleLabelSnapshot(
+            spectiary::ExportSampleLabelSnapshot(
                 directory / "indexed.csv",
                 *indexed,
                 &error),
@@ -347,7 +347,7 @@ void TestNonFolderCsvUsesNamesOrStableSourceIndices()
             : error);
     Require(
         ReadCsvRecords(directory / "indexed.csv") ==
-            std::vector<specforge::CsvRecord>({
+            std::vector<spectiary::CsvRecord>({
                 {"sample", "label"},
                 {"0", "selected"},
                 {"1", "unlabeled"},
@@ -357,23 +357,23 @@ void TestNonFolderCsvUsesNamesOrStableSourceIndices()
 
 void TestDispatcherRejectsInvalidExplicitNameRoster()
 {
-    specforge::SampleLabelExportSnapshot snapshot{
-        .format = specforge::SampleLabelExportFormat::Csv,
+    spectiary::SampleLabelExportSnapshot snapshot{
+        .format = spectiary::SampleLabelExportFormat::Csv,
         .source_kind = "npy",
         .sample_names = {"duplicate", "duplicate"},
         .uses_source_index = false,
         .values = {
-            specforge::kUnlabeledSampleLabelCode,
-            specforge::kUnlabeledSampleLabelCode},
+            spectiary::kUnlabeledSampleLabelCode,
+            spectiary::kUnlabeledSampleLabelCode},
     };
     const std::filesystem::path directory =
         FreshTestDirectory(
-            "specforge-invalid-label-export-roster");
+            "spectiary-invalid-label-export-roster");
     const std::filesystem::path path =
         directory / "invalid.csv";
     std::string error;
     Require(
-        !specforge::ExportSampleLabelSnapshot(
+        !spectiary::ExportSampleLabelSnapshot(
             path,
             snapshot,
             &error) &&
@@ -384,7 +384,7 @@ void TestDispatcherRejectsInvalidExplicitNameRoster()
     snapshot.sample_names = {"valid", ""};
     error.clear();
     Require(
-        !specforge::ExportSampleLabelSnapshot(
+        !spectiary::ExportSampleLabelSnapshot(
             path,
             snapshot,
             &error) &&

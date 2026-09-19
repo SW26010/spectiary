@@ -13,7 +13,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 [[nodiscard]] CsvRecordError MakeError(
@@ -631,4 +631,4 @@ CsvRecordWriteResult WriteCsvRecordsAtomically(
     };
 }
 
-}  // namespace specforge
+}  // namespace spectiary

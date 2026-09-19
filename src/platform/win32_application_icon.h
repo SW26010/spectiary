@@ -2,7 +2,7 @@
 
 #include <Windows.h>
 
-namespace specforge {
+namespace spectiary {
 
 struct Win32ApplicationIcons {
     HICON large_icon = nullptr;
@@ -25,4 +25,4 @@ void ApplyWin32ApplicationIcons(
 [[nodiscard]] bool
 InstallImGuiPlatformWindowIconHook() noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

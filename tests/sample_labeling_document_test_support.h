@@ -6,7 +6,7 @@
 
 #include <utility>
 
-namespace specforge::test_support {
+namespace spectiary::test_support {
 
 // Fixture adapter only: production retains the durable source descriptor.
 inline SampleLabelingDocument BuildSampleLabelingDocument(
@@ -21,9 +21,9 @@ inline SampleLabelingDocument BuildSampleLabelingDocument(
     source.source_fingerprint = context.identity.source_fingerprint;
     source.sample_count = context.identity.spectrum_count;
     source.sample_names = context.manifest.sample_names;
-    return specforge::BuildSampleLabelingDocument(source, task.Content().value());
+    return spectiary::BuildSampleLabelingDocument(source, task.Content().value());
 }
 
-using specforge::BuildSampleLabelingDocument;
+using spectiary::BuildSampleLabelingDocument;
 
-}  // namespace specforge::test_support
+}  // namespace spectiary::test_support

@@ -22,7 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class SampleWorkflowCoordinator;
 struct SourceCollectionPanelUiTestAccess;
@@ -449,4 +449,4 @@ private:
     std::uint64_t cached_session_view_revision_ = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

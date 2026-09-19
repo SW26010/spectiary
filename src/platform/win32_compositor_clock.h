@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace specforge {
+namespace spectiary {
 
 struct Win32CompositorClockApi {
     using BoostFunction = HRESULT(WINAPI*)(BOOL enable);
@@ -42,4 +42,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

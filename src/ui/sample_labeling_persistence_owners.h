@@ -6,7 +6,7 @@
 
 #include <unordered_map>
 
-namespace specforge {
+namespace spectiary {
 
 // Deliberately contains no canonical content or save/retry state.
 struct SampleLabelingTaskRegistration {
@@ -78,4 +78,4 @@ LoadSampleLabelingDraftCheckpoints(const std::filesystem::path& path,
     const std::filesystem::path& path, const SampleLabelingDraftCheckpoints& owner,
     std::string* error = nullptr);
 
-} // namespace specforge
+} // namespace spectiary

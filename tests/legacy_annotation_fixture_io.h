@@ -5,7 +5,7 @@
 #include "app/local_user_state_json.h"
 #include "platform/atomic_file.h"
 
-namespace specforge::test_support {
+namespace spectiary::test_support {
 
 struct SampleLabelResultWriteOutcome {
     bool array_saved = false;
@@ -32,7 +32,7 @@ public:
 };
 
 namespace legacy_fixture_detail {
-inline constexpr const char* kMetadataFormatKind = "spectiary.sample_label_result.metadata";
+inline constexpr const char* kMetadataFormatKind = "specforge.sample_label_result.metadata";
 inline constexpr int kMetadataSchemaVersion = 1;
 inline constexpr std::string_view kInt32DtypeText = "int32";
 inline std::string PathToUtf8(const std::filesystem::path& path)
@@ -218,4 +218,4 @@ inline SampleLabelResultWriteOutcome LegacyFixtureIo::SaveLabelResult(
 }
 
 
-}  // namespace specforge::test_support
+}  // namespace spectiary::test_support

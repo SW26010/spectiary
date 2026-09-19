@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 struct SourceCollectionPanelUiTestAccess {
     static const std::optional<std::string>& SourceLaunchError(const SourceCollectionPanelUi& panel)
     { return panel.source_launch_error_; }
@@ -63,16 +63,16 @@ public:
 void TestFilesPanelAddFileForwardsCsvToInAppOpener()
 {
     ScopedImGuiContext context;
-    specforge::SourceCollectionSessionView view;
-    specforge::PanelSessionInteraction interaction(
-        [](specforge::SourceCollectionSessionIntent,
-           std::optional<specforge::NavigationLatencyInputKind>) {
-            return specforge::SourceCollectionSessionResult{};
+    spectiary::SourceCollectionSessionView view;
+    spectiary::PanelSessionInteraction interaction(
+        [](spectiary::SourceCollectionSessionIntent,
+           std::optional<spectiary::NavigationLatencyInputKind>) {
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
-    specforge::SourceCollectionPanelUi panel;
+    spectiary::SourceCollectionPanelUi panel;
     const std::filesystem::path selected_path =
         std::filesystem::path{"selected.CSV"};
     std::optional<std::filesystem::path> opened_path;
@@ -93,7 +93,7 @@ void TestFilesPanelAddFileForwardsCsvToInAppOpener()
             ImGuiCond_Always);
         panel.RenderFiles(
             interaction,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             &open,
             [&]() -> std::optional<std::filesystem::path> {
                 ++choose_file_count;
@@ -112,8 +112,8 @@ void TestFilesPanelAddFileForwardsCsvToInAppOpener()
         ImGui::EndFrame();
     };
 
-    specforge::test::WidgetHarness ui{render_frame,
-        specforge::test::WidgetHarness::FrameMode::ExistingContext};
+    spectiary::test::WidgetHarness ui{render_frame,
+        spectiary::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
     ui.Click("FilesAddFile");
     Require(
@@ -127,13 +127,13 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
     ScopedImGuiContext context;
     const std::filesystem::path source_path =
         std::filesystem::path{L"C:\\观测 data\\source file.npy"};
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.path = source_path;
     snapshot->source.display_name = "source file";
     snapshot->collection.spectrum_count = 4;
     snapshot->collection.current_index = 2;
 
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.snapshot = snapshot;
     view.current_sample_snapshot = snapshot;
     view.sources = {
@@ -141,7 +141,7 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
             source_path,
             "source file",
             std::string{"npy"},
-            specforge::SourceCollectionSourceState::Loaded,
+            spectiary::SourceCollectionSourceState::Loaded,
         },
     };
     view.current_source_index = 0;
@@ -153,23 +153,23 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
     view.labeling.source_identity = "source identity";
     view.sorting.has_active_source = true;
     view.sorting.active_source_id = "source identity";
-    const specforge::SourceCollectionSessionView before = view;
+    const spectiary::SourceCollectionSessionView before = view;
 
     int submit_count = 0;
     int launch_count = 0;
     std::optional<std::filesystem::path> launched_path;
-    specforge::PanelSessionInteraction interaction(
-        [&](specforge::SourceCollectionSessionIntent,
-            std::optional<specforge::NavigationLatencyInputKind>) {
+    spectiary::PanelSessionInteraction interaction(
+        [&](spectiary::SourceCollectionSessionIntent,
+            std::optional<spectiary::NavigationLatencyInputKind>) {
             ++submit_count;
-            return specforge::SourceCollectionSessionResult{};
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
-    specforge::SourceCollectionPanelUi panel;
+    spectiary::SourceCollectionPanelUi panel;
     bool open = true;
-    const specforge::SourceCollectionPathLauncher launch_source =
+    const spectiary::SourceCollectionPathLauncher launch_source =
         [&](const std::filesystem::path& path)
         -> std::optional<std::string> {
         ++launch_count;
@@ -190,7 +190,7 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
             ImGuiCond_Always);
         panel.RenderFiles(
             interaction,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             &open,
             []() -> std::optional<std::filesystem::path> {
                 return std::nullopt;
@@ -203,8 +203,8 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
         ImGui::EndFrame();
     };
 
-    specforge::test::WidgetHarness ui{render_frame,
-        specforge::test::WidgetHarness::FrameMode::ExistingContext};
+    spectiary::test::WidgetHarness ui{render_frame,
+        spectiary::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
     ui.Click("type", ImGuiMouseButton_Right);
     Require(ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId |
@@ -225,7 +225,7 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
             view.labeling.source_identity == before.labeling.source_identity &&
             view.sorting.active_source_id == before.sorting.active_source_id,
         "the original source, selection, and workflow state must remain unchanged");
-    const specforge::SourceCollectionSessionAction pending_action =
+    const spectiary::SourceCollectionSessionAction pending_action =
         interaction.TakeAction();
     Require(
         !pending_action.source_roster_changed &&
@@ -238,8 +238,8 @@ void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
             !interaction.PendingAction().navigation_inputs_changed,
         "opening a source in a new instance must not change pending session state");
     Require(
-        specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) &&
-            *specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) ==
+        spectiary::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) &&
+            *spectiary::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) ==
                 "test process creation failure",
         "a launcher failure should remain visible as a Files-panel diagnostic");
 }
@@ -248,12 +248,12 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
     ScopedImGuiContext context;
     const std::filesystem::path loaded_path =
         std::filesystem::path{L"C:\\观测 data\\loaded source.npy"};
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.path = loaded_path;
     snapshot->source.display_name = "loaded source";
     snapshot->collection.spectrum_count = 1;
 
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.snapshot = snapshot;
     view.current_sample_snapshot = snapshot;
     view.sources = {
@@ -261,24 +261,24 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
             {},
             "unavailable source",
             std::string{"npy"},
-            specforge::SourceCollectionSourceState::Unavailable,
+            spectiary::SourceCollectionSourceState::Unavailable,
         },
     };
     view.current_source_index = 0;
 
     int launch_count = 0;
-    specforge::PanelSessionInteraction interaction(
-        [](specforge::SourceCollectionSessionIntent,
-           std::optional<specforge::NavigationLatencyInputKind>) {
-            return specforge::SourceCollectionSessionResult{};
+    spectiary::PanelSessionInteraction interaction(
+        [](spectiary::SourceCollectionSessionIntent,
+           std::optional<spectiary::NavigationLatencyInputKind>) {
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
-    specforge::SourceCollectionPanelUi panel;
+    spectiary::SourceCollectionPanelUi panel;
     bool open = true;
     bool cover_source_context_cell = false;
-    const specforge::SourceCollectionPathLauncher launch_source =
+    const spectiary::SourceCollectionPathLauncher launch_source =
         [&launch_count](const std::filesystem::path&)
         -> std::optional<std::string> {
         ++launch_count;
@@ -298,7 +298,7 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
             ImGuiCond_Always);
         panel.RenderFiles(
             interaction,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             &open,
             []() -> std::optional<std::filesystem::path> {
                 return std::nullopt;
@@ -318,8 +318,8 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
         ImGui::EndFrame();
     };
 
-    specforge::test::WidgetHarness ui{render_frame,
-        specforge::test::WidgetHarness::FrameMode::ExistingContext};
+    spectiary::test::WidgetHarness ui{render_frame,
+        spectiary::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
     const auto type_widget = ui.Find("type");
     // Exercise the cell's left padding, outside the InvisibleButton itself.
@@ -364,24 +364,24 @@ void TestFilesPanelContextActionIsDisabledForIneligiblePath()
 void TestFailedSourceRowWithoutSnapshotIsDisabledAndRemovable()
 {
     ScopedImGuiContext context;
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.sources = {{
         std::filesystem::path{"missing.csv"}, "missing.csv", {},
-        specforge::SourceCollectionSourceState::Unavailable,
-        specforge::SourceCollectionLoadError{
-            specforge::SourceCollectionLoadErrorKind::BackgroundLoadingFailed,
+        spectiary::SourceCollectionSourceState::Unavailable,
+        spectiary::SourceCollectionLoadError{
+            spectiary::SourceCollectionLoadErrorKind::BackgroundLoadingFailed,
             "The saved source no longer exists"},
     }};
     view.current_source_index = 0;
     int submissions = 0;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&](auto, auto) {
             ++submissions;
             view.sources.clear();
-            return specforge::SourceCollectionSessionResult{};
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&]() -> const specforge::SourceCollectionSessionView& { return view; });
-    specforge::SourceCollectionPanelUi panel;
+        [&]() -> const spectiary::SourceCollectionSessionView& { return view; });
+    spectiary::SourceCollectionPanelUi panel;
     bool open = true;
     const auto render_frame = [&]() {
         ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
@@ -389,14 +389,14 @@ void TestFailedSourceRowWithoutSnapshotIsDisabledAndRemovable()
         ImGui::NewFrame();
         ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_Always);
-        panel.RenderFiles(interaction, specforge::UiLanguage::English, &open,
+        panel.RenderFiles(interaction, spectiary::UiLanguage::English, &open,
             []() -> std::optional<std::filesystem::path> { return {}; },
             []() -> std::optional<std::filesystem::path> { return {}; },
             [](const auto&) {}, {});
         ImGui::EndFrame();
     };
-    specforge::test::WidgetHarness ui{render_frame,
-        specforge::test::WidgetHarness::FrameMode::ExistingContext};
+    spectiary::test::WidgetHarness ui{render_frame,
+        spectiary::test::WidgetHarness::FrameMode::ExistingContext};
     ui.Frames(2);
     for (const auto* cell : {"source", "type", "state"}) {
         const auto widget = ui.Find(cell);

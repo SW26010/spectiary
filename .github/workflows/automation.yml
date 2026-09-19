@@ -1,4 +1,4 @@
-name: SpecForge automation
+name: Spectiary automation
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: specforge-automation-${{ github.workflow }}-${{ github.ref }}
+  group: spectiary-automation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
             throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
           }
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'spectiary-vcpkg-cache'
           New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
           "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -60,7 +60,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
             throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the hosted runner.'
           }
-          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SPECTIARY_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure Ninja/MSVC Debug
         shell: pwsh
@@ -68,7 +68,7 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Configure `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 600
           if ($LASTEXITCODE -ne 0) {
@@ -80,8 +80,8 @@ jobs:
         timeout-minutes: 20
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Target specforge_automation_headless_targets `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -Target spectiary_automation_headless_targets `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
@@ -92,7 +92,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 10
         run: |
-          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-ctest-temp'
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'spectiary-ctest-temp'
           New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
           $env:TEMP = $ctestTemp
           $env:TMP = $ctestTemp
@@ -109,7 +109,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: specforge-automation-headless-${{ github.run_id }}-${{ github.run_attempt }}
+          name: spectiary-automation-headless-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/native-headless/**
 
@@ -117,7 +117,7 @@ jobs:
     name: Real-GUI runner preflight
     needs: native-headless
     if: >-
-      ${{ always() && needs.native-headless.result == 'success' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
+      ${{ always() && needs.native-headless.result == 'success' && vars.SPECTIARY_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: windows-latest
     timeout-minutes: 5
     outputs:
@@ -130,7 +130,7 @@ jobs:
         id: runner_preflight
         shell: pwsh
         env:
-          RUNNER_API_TOKEN: ${{ secrets.SPECFORGE_RUNNER_API_TOKEN || github.token }}
+          RUNNER_API_TOKEN: ${{ secrets.SPECTIARY_RUNNER_API_TOKEN || github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $directory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts\real-gui-preflight'
@@ -184,7 +184,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: specforge-automation-real-gui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          name: spectiary-automation-real-gui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: ci-artifacts/real-gui-preflight/preflight.json
 
@@ -192,7 +192,7 @@ jobs:
     name: Real-GUI automation (self-hosted desktop)
     needs: [native-headless, real-gui-preflight]
     if: >-
-      ${{ always() && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
+      ${{ always() && vars.SPECTIARY_REAL_GUI_ENABLED == 'true' && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: [self-hosted, windows, desktop]
     environment:
       name: real-gui
@@ -226,7 +226,7 @@ jobs:
             throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
           }
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'spectiary-vcpkg-cache'
           New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
           "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -236,7 +236,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
             throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the self-hosted desktop runner.'
           }
-          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SPECTIARY_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure Ninja/MSVC Debug
         shell: pwsh
@@ -244,7 +244,7 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
             -Configure `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 600
 
@@ -253,8 +253,8 @@ jobs:
         timeout-minutes: 20
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-            -Target specforge_automation_real_gui_targets `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -Target spectiary_automation_real_gui_targets `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
             -TimeoutSec 1200
 
@@ -262,7 +262,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 20
         run: |
-          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-real-gui-ctest-temp'
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'spectiary-real-gui-ctest-temp'
           New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
           $env:TEMP = $ctestTemp
           $env:TMP = $ctestTemp
@@ -276,7 +276,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: specforge-automation-real-gui-${{ github.run_id }}-${{ github.run_attempt }}
+          name: spectiary-automation-real-gui-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/real-gui/**
 
@@ -284,7 +284,7 @@ jobs:
     name: Real-GUI queue watchdog
     needs: [native-headless, real-gui-preflight]
     if: >-
-      ${{ always() && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
+      ${{ always() && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && vars.SPECTIARY_REAL_GUI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true }}
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
@@ -432,14 +432,14 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: specforge-automation-real-gui-watchdog-${{ github.run_id }}-${{ github.run_attempt }}
+          name: spectiary-automation-real-gui-watchdog-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: ci-artifacts/real-gui-watchdog/watchdog.json
 
   real-gui-status-diagnostic:
     name: Real-GUI status diagnostic
     if: >-
-      ${{ always() && (vars.SPECFORGE_REAL_GUI_ENABLED != 'true' || !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true) || needs.native-headless.result != 'success' || needs.real-gui-preflight.result != 'success' || needs.real-gui-preflight.outputs.runner_available != 'true' || needs.real-gui-watchdog.result != 'success' || needs.real-gui.result != 'success') }}
+      ${{ always() && (vars.SPECTIARY_REAL_GUI_ENABLED != 'true' || !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true) || needs.native-headless.result != 'success' || needs.real-gui-preflight.result != 'success' || needs.real-gui-preflight.outputs.runner_available != 'true' || needs.real-gui-watchdog.result != 'success' || needs.real-gui.result != 'success') }}
     needs: [native-headless, real-gui-preflight, real-gui-watchdog, real-gui]
     runs-on: windows-latest
     timeout-minutes: 5
@@ -447,7 +447,7 @@ jobs:
       - name: Record real-GUI status and diagnostic
         shell: pwsh
         env:
-          REAL_GUI_ENABLED: ${{ vars.SPECFORGE_REAL_GUI_ENABLED }}
+          REAL_GUI_ENABLED: ${{ vars.SPECTIARY_REAL_GUI_ENABLED }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref }}
           REF_PROTECTED: ${{ github.ref_protected }}
@@ -473,7 +473,7 @@ jobs:
           $reason = 'Real-GUI did not reach a recognized terminal state.'
           if ($env:REAL_GUI_ENABLED -ne 'true') {
             $status = 'skipped'
-            $reason = 'Repository variable SPECFORGE_REAL_GUI_ENABLED is not true.'
+            $reason = 'Repository variable SPECTIARY_REAL_GUI_ENABLED is not true.'
           }
           elseif (-not $policyAuthorized) {
             $status = 'skipped'
@@ -541,7 +541,7 @@ jobs:
             "ref: $($env:REF_NAME)"
             "ref_protected: $($env:REF_PROTECTED)"
             "base_ref: $($env:BASE_REF)"
-            "repository_variable: SPECFORGE_REAL_GUI_ENABLED=$($env:REAL_GUI_ENABLED)"
+            "repository_variable: SPECTIARY_REAL_GUI_ENABLED=$($env:REAL_GUI_ENABLED)"
             "workflow_input_run_real_gui: $($env:RUN_REAL_GUI)"
             "authorization_policy: workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true"
             "headless_gate_result: $($env:HEADLESS_RESULT)"
@@ -561,7 +561,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: specforge-automation-real-gui-status-${{ github.run_id }}-${{ github.run_attempt }}
+          name: spectiary-automation-real-gui-status-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
             ci-artifacts/real-gui-status/status.json

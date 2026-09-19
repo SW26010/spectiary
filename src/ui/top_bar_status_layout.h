@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct TopBarStatusWidths {
     float operation = 0.0f;
@@ -126,4 +126,4 @@ TryMakeTopBarFrameTimingSample(
     return layout;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

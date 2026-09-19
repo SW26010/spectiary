@@ -1,6 +1,6 @@
 # Automation CI
 
-SpecForge's automation workflow selects two CTest groups:
+Spectiary's automation workflow selects two CTest groups:
 
 | Group | CTest label | Environment | CI behavior |
 | --- | --- | --- | --- |
@@ -32,7 +32,7 @@ performance estimate:
 | Phase | Before ownership split | After ownership split |
 | --- | ---: | ---: |
 | Configure | 7.90s (Debug + static Release) | 3.10s (Debug only) |
-| Build | 3.40s (Debug `all` + benchmark + Release `all`) | 1.10s (`specforge_automation_headless_targets`) |
+| Build | 3.40s (Debug `all` + benchmark + Release `all`) | 1.10s (`spectiary_automation_headless_targets`) |
 | CTest | 298.53s (24 Debug + 24 Release `ci-headless` tests) | 4.01s (5 Debug `automation-headless` tests) |
 | Measured total | 309.83s | 8.21s |
 
@@ -47,7 +47,7 @@ still configured Debug, static Release, and the pinned ASDF tree; built the two
 `all` targets plus the specialized ASDF targets; and ran both `ci-headless`
 suites plus the pinned ASDF oracle. The post-merge
 [after run 33573250819](https://github.com/SW26010/SpecForge/actions/runs/33573250819/job/100071558764)
-configured only Debug, built `specforge_automation_headless_targets`, and ran
+configured only Debug, built `spectiary_automation_headless_targets`, and ran
 the five-test `automation-headless` selector:
 
 | Hosted phase | Before ownership split | After ownership split |
@@ -70,7 +70,7 @@ includes checkout, runner setup, evidence preparation, and artifact handling.
 branch check: ordinary commits do not create that status. Start the workflow
 explicitly with `workflow_dispatch`. Every dispatch runs the hosted
 native/headless job. Real-GUI additionally requires protected `master`,
-`run_real_gui=true`, and `SPECFORGE_REAL_GUI_ENABLED=true`; an unprotected
+`run_real_gui=true`, and `SPECTIARY_REAL_GUI_ENABLED=true`; an unprotected
 manual `master` dispatch records `unprotected_ref` without scheduling the
 self-hosted job. The CTest `required` label remains a local selection property,
 not a GitHub branch-protection policy.
@@ -82,7 +82,7 @@ Configure and build with the repository wrapper:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-    -Target specforge_automation_headless_targets
+    -Target spectiary_automation_headless_targets
 ```
 
 Run the required gate and retain its bounded log:
@@ -98,7 +98,7 @@ On a desktop session, run the interactive group explicitly:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
-    -Target specforge_automation_real_gui_targets
+    -Target spectiary_automation_real_gui_targets
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
     -Mode RealGui `
     -BuildDirectory build\ninja-msvc-debug `
@@ -113,7 +113,7 @@ are excluded. The workflow uploads the run root at
 `ci-artifacts/<run_id>-<run_attempt>/<job>/`, which also contains the sample
 runner's known failure artifacts under `automation-samples/`. It does not upload
 the shared build `logs/build` or the entire build-tree `Testing/Temporary`.
-The runner sets `SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS` only for the current
+The runner sets `SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS` only for the current
 CTest process and restores the caller's value afterward.
 The CTest wrapper captures the launched process's start ticks in a held
 `System.Diagnostics.Process` handle and places it in the shared kill-on-close
@@ -137,7 +137,7 @@ consume that broader label.
 The real-GUI job is opt-in because an ordinary hosted Windows runner does not
 provide a stable interactive desktop contract for this D3D11 path. The job
 never runs for `pull_request`, even when
-`SPECFORGE_REAL_GUI_ENABLED=true`; this prevents untrusted PR code from being
+`SPECTIARY_REAL_GUI_ENABLED=true`; this prevents untrusted PR code from being
 checked out, built, or executed on the self-hosted desktop. The repository
 variable is only one prerequisite: the workflow event/ref authorization must
 also match the protected `master` policy and GitHub's `github.ref_protected`

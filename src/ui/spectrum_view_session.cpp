@@ -9,7 +9,7 @@
 #include <memory>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool LimitsAreUsable(const PlotViewLimits& limits)
@@ -258,7 +258,7 @@ SpectrumViewSessionView SpectrumViewSession::View() const
 
 int SpectrumViewSession::EffectiveMedianKernelSize(std::size_t point_count) const
 {
-    return specforge::EffectiveMedianKernelSize(
+    return spectiary::EffectiveMedianKernelSize(
         state_->plot.smoothing_parameters.median_kernel_size,
         point_count);
 }
@@ -488,4 +488,4 @@ void BindSourceCollectionActivationPresentationLifecycle(
         std::move(deferred_restore_finished));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

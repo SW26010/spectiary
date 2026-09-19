@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <memory>
 
-namespace specforge {
+namespace spectiary {
 
 PanPacingConfiguration ResolvePanPacing(
     std::optional<std::string_view> requested)
@@ -33,7 +33,7 @@ PanPacingConfiguration ResolvePanPacingEnvironment()
     if (_dupenv_s(
             &requested_buffer,
             &requested_size,
-            "SPECFORGE_PAN_PACING") != 0) {
+            "SPECTIARY_PAN_PACING") != 0) {
         return {};
     }
     const std::unique_ptr<char, decltype(&std::free)> requested(
@@ -58,4 +58,4 @@ bool ShouldBoostForImGuiDrag(
     return want_capture_mouse && left_mouse_dragging && !uncapped_pan_active;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

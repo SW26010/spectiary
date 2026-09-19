@@ -9,7 +9,7 @@
 
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class D3D11PresentationBackend {
     None,
@@ -164,4 +164,4 @@ private:
     bool frame_active_ = false;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

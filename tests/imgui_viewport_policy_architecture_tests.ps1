@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $appSource = Get-Content -Raw (
-    Join-Path $RepoRoot 'src/app/specforge_app.cpp')
+    Join-Path $RepoRoot 'src/app/spectiary_app.cpp')
 
 if ($appSource -notmatch
     'io\.ConfigFlags\s*\|=\s*ImGuiConfigFlags_ViewportsEnable') {

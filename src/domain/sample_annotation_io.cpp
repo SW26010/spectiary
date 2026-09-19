@@ -32,10 +32,12 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kMetadataFormatKind = "spectiary.sample_label_result.metadata";
+// Historical NPY/CSV sidecars remain read-only inputs to legacy migration.
+constexpr const char* kLegacyMetadataFormatKind = "specforge.sample_label_result.metadata";
 constexpr int kMetadataSchemaVersion = 1;
 constexpr std::string_view kInt32DtypeText = "int32";
 constexpr std::string_view kCsvTextDtypeText = "utf8";
@@ -325,7 +327,8 @@ SampleLabelResultMetadataLoadResult ReadLabelMetadata(
 
     const std::optional<std::string> format_kind = ReadJsonStringMember(*root, "format_kind");
     const std::optional<int> schema_version = ReadIntMember(*root, "schema_version");
-    if (!format_kind || *format_kind != kMetadataFormatKind ||
+    if (!format_kind || (*format_kind != kMetadataFormatKind &&
+                        *format_kind != kLegacyMetadataFormatKind) ||
         !schema_version || *schema_version != kMetadataSchemaVersion) {
         result.warning = "unsupported sample label result metadata";
         return result;
@@ -1257,4 +1260,4 @@ std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind)
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

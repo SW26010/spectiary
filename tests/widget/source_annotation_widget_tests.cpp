@@ -33,7 +33,7 @@ class AnnotationPanelFixture {
 public:
     AnnotationPanelFixture()
     {
-        snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+        snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
         snapshot->source.path = "source-a.npy";
         snapshot->collection.spectrum_count = 1;
         snapshot->collection.current_index = 0;
@@ -65,29 +65,29 @@ public:
             ImGui::LogToBuffer();
         }
         bool open = true;
-        specforge::PanelSessionInteraction interaction(
+        spectiary::PanelSessionInteraction interaction(
             [this](
-                specforge::SourceCollectionSessionIntent intent,
+                spectiary::SourceCollectionSessionIntent intent,
                 std::optional<
-                    specforge::NavigationLatencyInputKind>) {
+                    spectiary::NavigationLatencyInputKind>) {
                 if (intent.intent_kind() ==
-                    specforge::SourceCollectionSessionIntentKind::
+                    spectiary::SourceCollectionSessionIntentKind::
                         SourceCollection) {
                     ++submit_count;
                     if (after_submit) {
                         after_submit();
                     }
                 }
-                specforge::SourceCollectionSessionResult result;
+                spectiary::SourceCollectionSessionResult result;
                 result.loaded = submit_loaded;
                 return result;
             },
-            [this]() -> const specforge::SourceCollectionSessionView& {
+            [this]() -> const spectiary::SourceCollectionSessionView& {
                 return view;
             });
         panel.RenderAnnotations(
             interaction,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             &open,
             [this]() {
                 ++choose_file_count;
@@ -108,10 +108,10 @@ public:
     }
 
     AnnotationPanelFrameObservation observation;
-    specforge::test::WidgetHarness ui{[this] { Render(); }};
-    std::shared_ptr<specforge::SpectrumSnapshot> snapshot;
-    specforge::SourceCollectionSessionView view;
-    specforge::SourceCollectionPanelUi panel;
+    spectiary::test::WidgetHarness ui{[this] { Render(); }};
+    std::shared_ptr<spectiary::SpectrumSnapshot> snapshot;
+    spectiary::SourceCollectionSessionView view;
+    spectiary::SourceCollectionPanelUi panel;
     std::optional<std::filesystem::path> selected_path;
     std::function<void()> after_submit;
     bool submit_loaded = false;
@@ -133,13 +133,13 @@ std::size_t CountOccurrences(
     return count;
 }
 
-specforge::SourceCollectionManifestDiagnostic
+spectiary::SourceCollectionManifestDiagnostic
 MakeAnnotationImportFailure(
     std::filesystem::path path,
     std::string detail)
 {
     return {
-        .kind = specforge::
+        .kind = spectiary::
             SourceCollectionManifestDiagnosticKind::
                 AnnotationIgnored,
         .path = std::move(path),
@@ -183,12 +183,12 @@ void TestMissingLocalAnnotationRemovalRequiresConfirmation()
     fixture.view.navigation.current_annotations.push_back({
         .name = "Quality review",
         .path = missing_path,
-        .relationship = specforge::
+        .relationship = spectiary::
             SampleAnnotationWorkflowRelationship::
                 LocalLabelingTask,
         .output_missing = true,
         .can_remove_annotation = true,
-        .labeling_owner_format = specforge::
+        .labeling_owner_format = spectiary::
             SampleLabelingOutputArtifactFormat::
                 CanonicalAsdf,
     });
@@ -221,12 +221,12 @@ void TestSourceSwitchDismissesMissingLocalRemovalWarning()
     fixture.view.navigation.current_annotations.push_back({
         .name = "Old source review",
         .path = "old-source-labels.asdf",
-        .relationship = specforge::
+        .relationship = spectiary::
             SampleAnnotationWorkflowRelationship::
                 LocalLabelingTask,
         .output_missing = true,
         .can_remove_annotation = true,
-        .labeling_owner_format = specforge::
+        .labeling_owner_format = spectiary::
             SampleLabelingOutputArtifactFormat::
                 CanonicalAsdf,
     });

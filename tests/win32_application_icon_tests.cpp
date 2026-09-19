@@ -85,7 +85,7 @@ void TestImGuiPlatformWindowIcons(HWND main_hwnd)
             backend_initialized,
             "Dear ImGui Win32 backend should initialize for icon integration test");
         Require(
-            specforge::InstallImGuiPlatformWindowIconHook(),
+            spectiary::InstallImGuiPlatformWindowIconHook(),
             "application icon hook should wrap Platform_CreateWindow");
 
         ImGuiViewport* main_viewport =
@@ -134,11 +134,11 @@ void TestImGuiPlatformWindowIcons(HWND main_hwnd)
 int main()
 {
     try {
-        specforge::Win32Window main_window;
+        spectiary::Win32Window main_window;
         Require(
             main_window.Create(
                 GetModuleHandleW(nullptr),
-                L"SpecForge application icon integration test",
+                L"Spectiary application icon integration test",
                 640,
                 480,
                 [](HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {

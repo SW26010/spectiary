@@ -163,7 +163,7 @@ function Remove-TestDirectoryJunction {
         [string]$Path
     )
 
-    if (-not [SpecForgeAutomationWindowTestNative]::
+    if (-not [SpectiaryAutomationWindowTestNative]::
             RemoveDirectory($Path)) {
         throw (
             'Could not remove test directory junction. Win32 error: ' +
@@ -207,7 +207,7 @@ function Get-LauncherProcessId {
     )
 
     foreach ($line in $Output) {
-        if ([string]$line -match '^SpecForge PID: ([0-9]+)$') {
+        if ([string]$line -match '^Spectiary PID: ([0-9]+)$') {
             return [int]$Matches[1]
         }
     }
@@ -592,13 +592,13 @@ function Send-InteractiveLauncherBatch {
 }
 
 if ($null -eq (
-        'SpecForgeAutomationWindowTestNative' -as [type])) {
+        'SpectiaryAutomationWindowTestNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class SpecForgeAutomationWindowTestNative
+public static class SpectiaryAutomationWindowTestNative
 {
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(
@@ -819,7 +819,7 @@ function Invoke-UnrenderablePanelQuitScenario {
         while ($true) {
             $line =
                 Read-LauncherLine -Process $launcherProcess
-            if ($line -match '^SpecForge PID: ([0-9]+)$') {
+            if ($line -match '^Spectiary PID: ([0-9]+)$') {
                 $guiPid = [int]$Matches[1]
             }
             if ($line -eq (
@@ -845,9 +845,9 @@ function Invoke-UnrenderablePanelQuitScenario {
                     [IntPtr]$guiProcess.MainWindowHandle
             }
             if ($windowHandle -ne [IntPtr]::Zero -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     IsWindowVisible($windowHandle) -and
-                -not [SpecForgeAutomationWindowTestNative]::
+                -not [SpectiaryAutomationWindowTestNative]::
                     IsIconic($windowHandle)) {
                 break
             }
@@ -861,7 +861,7 @@ function Invoke-UnrenderablePanelQuitScenario {
         if ($Mode -eq 'immersive') {
             Assert-True `
                 -Condition (
-                    [SpecForgeAutomationWindowTestNative]::
+                    [SpectiaryAutomationWindowTestNative]::
                         PostMessageW(
                             $windowHandle,
                             0x0100,
@@ -883,18 +883,18 @@ function Invoke-UnrenderablePanelQuitScenario {
         }
         else {
             $showCommand = if ($Mode -eq 'hidden') { 0 } else { 7 }
-            [void][SpecForgeAutomationWindowTestNative]::
+            [void][SpectiaryAutomationWindowTestNative]::
                 ShowWindowAsync($windowHandle, $showCommand)
             $unrenderableDeadline =
                 [DateTime]::UtcNow.AddSeconds(5)
             while ([DateTime]::UtcNow -lt $unrenderableDeadline) {
                 $isUnrenderable =
                     if ($Mode -eq 'hidden') {
-                        -not [SpecForgeAutomationWindowTestNative]::
+                        -not [SpectiaryAutomationWindowTestNative]::
                             IsWindowVisible($windowHandle)
                     }
                     else {
-                        [SpecForgeAutomationWindowTestNative]::
+                        [SpectiaryAutomationWindowTestNative]::
                             IsIconic($windowHandle)
                     }
                 if ($isUnrenderable) {
@@ -1047,7 +1047,7 @@ function Start-InteractiveAutomationLauncher {
     $guiPid = 0
     while ($true) {
         $line = Read-LauncherLine -Process $process
-        if ($line -match '^SpecForge PID: ([0-9]+)$') {
+        if ($line -match '^Spectiary PID: ([0-9]+)$') {
             $guiPid = [int]$Matches[1]
         }
         if ($line -eq (
@@ -1084,9 +1084,9 @@ function Wait-ForMainGuiWindow {
                 [IntPtr]$guiProcess.MainWindowHandle
         }
         if ($windowHandle -ne [IntPtr]::Zero -and
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 IsWindowVisible($windowHandle) -and
-            -not [SpecForgeAutomationWindowTestNative]::
+            -not [SpectiaryAutomationWindowTestNative]::
                 IsIconic($windowHandle)) {
             return $windowHandle
         }
@@ -1136,7 +1136,7 @@ function Invoke-PanelShutdownRollbackScenario {
             Wait-ForMainGuiWindow -ProcessId $guiPid
 
         $uiThreadId =
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 WindowThreadId($windowHandle)
         $uiThreadWaiting = $false
         $uiThreadWaitDeadline =
@@ -1169,7 +1169,7 @@ function Invoke-PanelShutdownRollbackScenario {
             -Condition $uiThreadWaiting `
             -Message 'Shutdown rollback scenario should observe the real HWND UI thread idle before suspension.'
         $suspendedUiThreadId =
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 SuspendWindowThread($windowHandle)
         Assert-True `
             -Condition ($suspendedUiThreadId -ne 0) `
@@ -1206,7 +1206,7 @@ function Invoke-PanelShutdownRollbackScenario {
         }
         Assert-True `
             -Condition (
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     PostMessageW(
                         $windowHandle,
                         0x0010,
@@ -1215,7 +1215,7 @@ function Invoke-PanelShutdownRollbackScenario {
             -Message 'Shutdown rollback scenario should post WM_CLOSE to the real GUI HWND.'
         Assert-True `
             -Condition (
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     ResumeWindowThread(
                         $suspendedUiThreadId)) `
             -Message 'Shutdown rollback scenario should resume the real HWND UI thread.'
@@ -1285,7 +1285,7 @@ function Invoke-PanelShutdownRollbackScenario {
     }
     finally {
         if ($suspendedUiThreadId -ne 0) {
-            [void][SpecForgeAutomationWindowTestNative]::
+            [void][SpectiaryAutomationWindowTestNative]::
                 ResumeWindowThread(
                     $suspendedUiThreadId)
             $suspendedUiThreadId = [uint32]0
@@ -1330,7 +1330,7 @@ $resolvedStateFixture =
 
 $fixtureParent = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-automation-launcher-tests-' +
+    ('spectiary-automation-launcher-tests-' +
         [Guid]::NewGuid().ToString('N'))
 $portableAppRoot =
     Join-Path $fixtureParent 'portable-app'
@@ -1342,10 +1342,10 @@ $fixtureExecutable =
 $stateRoot = Join-Path $fixtureParent 'state'
 [System.IO.Directory]::CreateDirectory($fixtureParent) | Out-Null
 $incompatibleEnvironmentVariables = @(
-    'SPECFORGE_PROFILE',
-    'SPECFORGE_PROFILE_DIR',
-    'SPECFORGE_RUNTIME_RESOURCE_WORKLOAD',
-    'SPECFORGE_RUNTIME_RESOURCE_STATE_DIR'
+    'SPECTIARY_PROFILE',
+    'SPECTIARY_PROFILE_DIR',
+    'SPECTIARY_RUNTIME_RESOURCE_WORKLOAD',
+    'SPECTIARY_RUNTIME_RESOURCE_STATE_DIR'
 )
 $originalAutomationEnvironment = @{}
 foreach ($name in $incompatibleEnvironmentVariables) {
@@ -1355,13 +1355,13 @@ foreach ($name in $incompatibleEnvironmentVariables) {
             [System.EnvironmentVariableTarget]::Process)
 }
 $cleanupFixtureEnvironment =
-    'SPECFORGE_AUTOMATION_LAUNCHER_FIXTURE'
+    'SPECTIARY_AUTOMATION_LAUNCHER_FIXTURE'
 $originalCleanupFixtureEnvironment =
     [System.Environment]::GetEnvironmentVariable(
         $cleanupFixtureEnvironment,
         [System.EnvironmentVariableTarget]::Process)
 $timeoutFixtureEnvironment =
-    'SPECFORGE_AUTOMATION_TIMEOUT_FIXTURE'
+    'SPECTIARY_AUTOMATION_TIMEOUT_FIXTURE'
 $originalTimeoutFixtureEnvironment =
     [System.Environment]::GetEnvironmentVariable(
         $timeoutFixtureEnvironment,
@@ -1507,19 +1507,19 @@ try {
     $externalBefore =
         Get-TreeFingerprint -Path $externalSentinelRoot
     [System.Environment]::SetEnvironmentVariable(
-        'SPECFORGE_PROFILE',
+        'SPECTIARY_PROFILE',
         '1',
         [System.EnvironmentVariableTarget]::Process)
     [System.Environment]::SetEnvironmentVariable(
-        'SPECFORGE_PROFILE_DIR',
+        'SPECTIARY_PROFILE_DIR',
         $externalSentinelRoot,
         [System.EnvironmentVariableTarget]::Process)
     [System.Environment]::SetEnvironmentVariable(
-        'SPECFORGE_RUNTIME_RESOURCE_WORKLOAD',
+        'SPECTIARY_RUNTIME_RESOURCE_WORKLOAD',
         $poisonedWorkload,
         [System.EnvironmentVariableTarget]::Process)
     [System.Environment]::SetEnvironmentVariable(
-        'SPECFORGE_RUNTIME_RESOURCE_STATE_DIR',
+        'SPECTIARY_RUNTIME_RESOURCE_STATE_DIR',
         $externalSentinelRoot,
         [System.EnvironmentVariableTarget]::Process)
 
@@ -2480,7 +2480,7 @@ try {
     $profileDirectoryBlockerCreated = $false
     $successfulProfileDirectoryMoved = $false
     $foregroundBefore =
-        [SpecForgeAutomationWindowTestNative]::
+        [SpectiaryAutomationWindowTestNative]::
             GetForegroundWindow()
     try {
         $start = [System.Diagnostics.ProcessStartInfo]::new()
@@ -2509,7 +2509,7 @@ try {
                 Read-LauncherLine `
                     -Process $interactiveLauncher
             $initialOutput += $line
-            if ($line -match '^SpecForge PID: ([0-9]+)$') {
+            if ($line -match '^Spectiary PID: ([0-9]+)$') {
                 $interactiveGuiPid =
                     [int]$Matches[1]
             }
@@ -2537,32 +2537,32 @@ try {
                     [IntPtr]$guiProcess.MainWindowHandle
             }
             if ($windowHandle -ne [IntPtr]::Zero -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     IsWindowVisible($windowHandle)) {
                 break
             }
             Start-Sleep -Milliseconds 25
         }
         $foregroundAfterLaunch =
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 GetForegroundWindow()
         Assert-True `
             -Condition (
                 $windowHandle -ne [IntPtr]::Zero -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     IsWindowVisible($windowHandle) -and
-                -not [SpecForgeAutomationWindowTestNative]::
+                -not [SpectiaryAutomationWindowTestNative]::
                     IsIconic($windowHandle) -and
                 $foregroundAfterLaunch -ne $windowHandle -and
                 ($foregroundBefore -eq [IntPtr]::Zero -or
                  $foregroundAfterLaunch -eq
                     $foregroundBefore)) `
-            -Message 'The real SpecForge HWND must become visible and renderable without activation or foreground theft.'
+            -Message 'The real Spectiary HWND must become visible and renderable without activation or foreground theft.'
 
         $movedWindowRoot =
             Join-Path $fixtureParent 'window-contract-state-moved'
         $rootMoved =
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 MoveFile(
                     $windowContractRoot,
                     $movedWindowRoot)
@@ -2645,16 +2645,16 @@ try {
                     [uint32]$visibleCaptureTerminal.result.width -and
                 [uint32]$visibleIhdr.Height -eq
                     [uint32]$visibleCaptureTerminal.result.height -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     GetForegroundWindow() -ne $windowHandle) `
             -Message 'A visible but non-activated real HWND should produce an application-rendered PNG whose IHDR matches its terminal.'
 
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 0)
         $visibilityDeadline =
             [DateTime]::UtcNow.AddSeconds(5)
         while (
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 IsWindowVisible($windowHandle) -and
             [DateTime]::UtcNow -lt $visibilityDeadline) {
             Start-Sleep -Milliseconds 25
@@ -2670,35 +2670,35 @@ try {
         )
         Assert-True `
             -Condition (
-                -not [SpecForgeAutomationWindowTestNative]::
+                -not [SpectiaryAutomationWindowTestNative]::
                     IsWindowVisible($windowHandle) -and
                 [string]$hiddenCaptureMessages[1].status -eq
                     'failed' -and
                 [string]$hiddenCaptureMessages[1].error.code -eq
                     'window_not_renderable' -and
                 -not (Test-Path -LiteralPath $hiddenCapturePath) -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     GetForegroundWindow() -ne $windowHandle) `
             -Message 'A hidden real HWND must fail capture without restoring, activating, or publishing a PNG.'
 
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 4)
         $restoreDeadline =
             [DateTime]::UtcNow.AddSeconds(5)
         while (
-            (-not [SpecForgeAutomationWindowTestNative]::
+            (-not [SpectiaryAutomationWindowTestNative]::
                 IsWindowVisible($windowHandle) -or
-             [SpecForgeAutomationWindowTestNative]::
+             [SpectiaryAutomationWindowTestNative]::
                 IsIconic($windowHandle)) -and
             [DateTime]::UtcNow -lt $restoreDeadline) {
             Start-Sleep -Milliseconds 25
         }
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 7)
         $minimizeDeadline =
             [DateTime]::UtcNow.AddSeconds(5)
         while (
-            -not [SpecForgeAutomationWindowTestNative]::
+            -not [SpectiaryAutomationWindowTestNative]::
                 IsIconic($windowHandle) -and
             [DateTime]::UtcNow -lt $minimizeDeadline) {
             Start-Sleep -Milliseconds 25
@@ -2714,18 +2714,18 @@ try {
         )
         Assert-True `
             -Condition (
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     IsIconic($windowHandle) -and
                 [string]$minimizedCaptureMessages[1].status -eq
                     'failed' -and
                 [string]$minimizedCaptureMessages[1].error.code -eq
                     'window_not_renderable' -and
                 -not (Test-Path -LiteralPath $minimizedCapturePath) -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     GetForegroundWindow() -ne $windowHandle) `
             -Message 'A minimized real HWND must fail capture without restoring, activating, or publishing a PNG.'
 
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 4)
         $uiScaleWriteBlocker =
             Join-Path $windowContractRoot 'config\ui-scale.json'
@@ -3039,12 +3039,12 @@ try {
             $profileDirectoryBlocker)
         $successfulProfileDirectoryMoved = $false
 
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 7)
         $titleMinimizeDeadline =
             [DateTime]::UtcNow.AddSeconds(5)
         while (
-            -not [SpecForgeAutomationWindowTestNative]::
+            -not [SpectiaryAutomationWindowTestNative]::
                 IsIconic($windowHandle) -and
             [DateTime]::UtcNow -lt
                 $titleMinimizeDeadline) {
@@ -3062,7 +3062,7 @@ try {
             [DateTime]::UtcNow.AddSeconds(10)
         while ([DateTime]::UtcNow -lt $titleDeadline) {
             $minimizedTitle =
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     WindowTitle($windowHandle)
             if ($minimizedTitle.EndsWith(
                     $expectedTitleSuffix,
@@ -3075,7 +3075,7 @@ try {
             -Condition (
                 [string]$titleOpenAccepted.status -eq
                     'accepted' -and
-                [SpecForgeAutomationWindowTestNative]::
+                [SpectiaryAutomationWindowTestNative]::
                     IsIconic($windowHandle) -and
                 $minimizedTitle.EndsWith(
                     $expectedTitleSuffix,
@@ -3084,12 +3084,12 @@ try {
                 'A minimized HWND must reconcile a completed source load into its taskbar/Alt-Tab title before rendering resumes. Actual title: ' +
                 $minimizedTitle)
 
-        [void][SpecForgeAutomationWindowTestNative]::
+        [void][SpectiaryAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 4)
         $titleRestoreDeadline =
             [DateTime]::UtcNow.AddSeconds(5)
         while (
-            [SpecForgeAutomationWindowTestNative]::
+            [SpectiaryAutomationWindowTestNative]::
                 IsIconic($windowHandle) -and
             [DateTime]::UtcNow -lt
                 $titleRestoreDeadline) {
@@ -3620,7 +3620,7 @@ try {
                 Split-Path `
                     -Parent `
                     $disconnectCapturePath) `
-            -Filter '.specforge-capture-*.tmp' `
+            -Filter '.spectiary-capture-*.tmp' `
             -Force `
             -ErrorAction SilentlyContinue
     )
@@ -4158,7 +4158,7 @@ try {
         -Condition (
             $invalidSeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath $invalidSeedRoot) -and
-            -not (@($invalidSeedOutput) -match '^SpecForge PID:')) `
+            -not (@($invalidSeedOutput) -match '^Spectiary PID:')) `
         -Message 'Invalid production seed data must fail before creating the GUI process or retaining a partial root.'
 
     $ordinarySeedRoot =
@@ -4184,7 +4184,7 @@ try {
         -Condition (
             $ordinarySeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath $ordinarySeedRoot) -and
-            -not (@($ordinarySeedOutput) -match '^SpecForge PID:')) `
+            -not (@($ordinarySeedOutput) -match '^Spectiary PID:')) `
         -Message 'Launcher must reject a seed inside the ordinary user state root before GUI startup.'
 
     $ordinaryOutputSeed =
@@ -4225,7 +4225,7 @@ try {
         -Condition (
             $ordinaryOutputSeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath $ordinaryOutputSeedRoot) -and
-            -not (@($ordinaryOutputSeedOutput) -match '^SpecForge PID:') -and
+            -not (@($ordinaryOutputSeedOutput) -match '^Spectiary PID:') -and
             -not (Test-Path -LiteralPath $ordinaryOutputPath) -and
             (Get-TreeFingerprint -Path $ordinaryRoot) -ceq
                 $ordinaryBeforeOutputSeed -and
@@ -4270,7 +4270,7 @@ try {
             $internalOutputSeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath $internalOutputSeedRoot) -and
             -not (Test-Path -LiteralPath $internalOutputPath) -and
-            -not (@($internalOutputSeedOutput) -match '^SpecForge PID:') -and
+            -not (@($internalOutputSeedOutput) -match '^Spectiary PID:') -and
             (@($internalOutputSeedOutput) -match
                 'Persistent labeling output paths are not permitted').Count -gt
                     0 -and
@@ -4316,7 +4316,7 @@ try {
         -Condition (
             $externalOutputSeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath $externalOutputSeedRoot) -and
-            -not (@($externalOutputSeedOutput) -match '^SpecForge PID:') -and
+            -not (@($externalOutputSeedOutput) -match '^Spectiary PID:') -and
             -not (Test-Path -LiteralPath $externalOutputPath) -and
             (Get-TreeFingerprint -Path $externalSentinelRoot) -ceq
                 $externalBeforeOutputSeed -and
@@ -4375,7 +4375,7 @@ try {
             $reparseSeedExitCode -ne 0 -and
             -not (Test-Path -LiteralPath (
                 Join-Path $reparseTarget 'state')) -and
-            -not (@($reparseSeedOutput) -match '^SpecForge PID:') -and
+            -not (@($reparseSeedOutput) -match '^Spectiary PID:') -and
             (Get-TreeFingerprint -Path $reparseTarget) -ceq
                 $reparseTargetBefore) `
         -Message 'A reparse-point state parent must reject seeded persistent output references before GUI startup or target writes.'
@@ -4410,7 +4410,7 @@ try {
         -Condition (
             $existingRootExitCode -ne 0 -and
             (Get-Content -Raw -LiteralPath $existingMarker) -ceq 'preserve' -and
-            -not (@($existingRootOutput) -match '^SpecForge PID:')) `
+            -not (@($existingRootOutput) -match '^Spectiary PID:')) `
         -Message 'Launcher must reject every existing target root without modifying it or starting the GUI.'
 
     $outsideCapture =
@@ -4948,7 +4948,7 @@ finally {
         }
         $ownedFixtureProcesses = @(
             Get-Process `
-                -Name 'SpecForge','SpecForgeAutomation' `
+                -Name 'Spectiary','SpectiaryAutomation' `
                 -ErrorAction SilentlyContinue |
                 Where-Object {
                     $null -ne $_.Path -and

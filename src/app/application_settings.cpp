@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -1053,7 +1053,7 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         ProfileOutputDirectorySource::Environment) {
         const std::string detail =
             "The output directory is controlled by "
-            "SPECFORGE_PROFILE_DIR.";
+            "SPECTIARY_PROFILE_DIR.";
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
@@ -1537,4 +1537,4 @@ void ApplicationSettings::SetPersistenceFailureStatus(
         std::move(detail));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

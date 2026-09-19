@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <system_error>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 // Read-only pre-1.0 compatibility for application-owned JSON. Canonical ASDF
@@ -441,4 +441,4 @@ bool WriteVersionedJsonCacheDocument(
         error_message);
 }
 
-} // namespace specforge
+} // namespace spectiary

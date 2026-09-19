@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleNavigationStateCache {
     std::unordered_map<std::string, std::size_t> last_indices_by_source_identity;
@@ -28,4 +28,4 @@ LoadSampleNavigationStateCache(const std::filesystem::path& path);
     const std::filesystem::path& path,
     const SampleNavigationStateCache& cache);
 
-}  // namespace specforge
+}  // namespace spectiary

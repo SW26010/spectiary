@@ -31,7 +31,7 @@ param(
     [string]$GeneratedBuildIdentity,
 
     [Parameter(Mandatory = $true)]
-    [string]$SpecForgeVersion,
+    [string]$SpectiaryVersion,
 
     [Parameter(Mandatory = $true)]
     [string]$Configuration,
@@ -81,7 +81,7 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-public static class SpecForgeReleaseArtifactResources
+public static class SpectiaryReleaseArtifactResources
 {
     [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadLibraryExW(string fileName, IntPtr file, uint flags);
@@ -173,7 +173,7 @@ function Get-ExecutableResourceBytes {
 
     $loadLibraryAsDataFile = 0x00000002
     $loadLibraryAsImageResource = 0x00000020
-    $module = [SpecForgeReleaseArtifactResources]::LoadLibraryExW(
+    $module = [SpectiaryReleaseArtifactResources]::LoadLibraryExW(
         $ExecutablePath,
         [IntPtr]::Zero,
         $loadLibraryAsDataFile -bor $loadLibraryAsImageResource)
@@ -182,21 +182,21 @@ function Get-ExecutableResourceBytes {
     }
 
     try {
-        $resource = [SpecForgeReleaseArtifactResources]::FindResourceW(
+        $resource = [SpectiaryReleaseArtifactResources]::FindResourceW(
             $module,
             [IntPtr]$ResourceId,
             [IntPtr]10)
         if ($resource -eq [IntPtr]::Zero) {
             throw "Executable resource $ResourceId is missing."
         }
-        $size = [SpecForgeReleaseArtifactResources]::SizeofResource(
+        $size = [SpectiaryReleaseArtifactResources]::SizeofResource(
             $module,
             $resource)
-        $loaded = [SpecForgeReleaseArtifactResources]::LoadResource(
+        $loaded = [SpectiaryReleaseArtifactResources]::LoadResource(
             $module,
             $resource)
         $data = if ($loaded -ne [IntPtr]::Zero) {
-            [SpecForgeReleaseArtifactResources]::LockResource($loaded)
+            [SpectiaryReleaseArtifactResources]::LockResource($loaded)
         }
         else {
             [IntPtr]::Zero
@@ -214,7 +214,7 @@ function Get-ExecutableResourceBytes {
         return ,$bytes
     }
     finally {
-        [void][SpecForgeReleaseArtifactResources]::FreeLibrary($module)
+        [void][SpectiaryReleaseArtifactResources]::FreeLibrary($module)
     }
 }
 
@@ -487,7 +487,7 @@ function Assert-ScriptFails {
         [int]$TimeoutSec = $script:FastExternalCaseTimeoutSec
     )
 
-    $null = Invoke-SpecForgeBoundedValidationCase `
+    $null = Invoke-SpectiaryBoundedValidationCase `
         -CaseId $CaseId `
         -Description $Description `
         -FilePath 'powershell.exe' `
@@ -512,7 +512,7 @@ function Assert-ScriptSucceeds {
         [int]$TimeoutSec = $script:DeepArchiveCaseTimeoutSec
     )
 
-    $null = Invoke-SpecForgeBoundedValidationCase `
+    $null = Invoke-SpectiaryBoundedValidationCase `
         -CaseId $CaseId `
         -Description $Description `
         -FilePath 'powershell.exe' `
@@ -630,13 +630,13 @@ function Assert-BuildSourceCMakeContract {
     )
 
     $expectedOutcome = if ($ShouldSucceed) { 'Success' } else { 'Failure' }
-    $null = Invoke-SpecForgeBoundedValidationCase `
+    $null = Invoke-SpectiaryBoundedValidationCase `
         -CaseId $CaseId `
         -Description $Description `
         -FilePath 'cmake.exe' `
         -Arguments @(
-            "-DSPECFORGE_BUILD_SOURCE_MODE=$Mode",
-            "-DSPECFORGE_BUILD_SOURCE_REVISION=$Revision",
+            "-DSPECTIARY_BUILD_SOURCE_MODE=$Mode",
+            "-DSPECTIARY_BUILD_SOURCE_REVISION=$Revision",
             '-P',
             $ContractPath
         ) `
@@ -658,7 +658,7 @@ function Assert-BuildIdentityHeader {
         [Parameter(Mandatory = $true)] [string]$Description
     )
 
-    $null = Invoke-SpecForgeBoundedValidationCase `
+    $null = Invoke-SpectiaryBoundedValidationCase `
         -CaseId $CaseId `
         -Description $Description `
         -FilePath 'cmake.exe' `
@@ -771,8 +771,8 @@ foreach ($expectedProperty in $expectedBuildMetadata.GetEnumerator()) {
     }
 }
 if ($buildMetadata.product.name -cne 'Spectiary' -or
-    $buildMetadata.product.version -cne $SpecForgeVersion) {
-    throw "Built executable product metadata does not match SpecForge $SpecForgeVersion."
+    $buildMetadata.product.version -cne $SpectiaryVersion) {
+    throw "Built executable product metadata does not match Spectiary $SpectiaryVersion."
 }
 if ($Configuration -ceq 'Release') {
     Assert-StaticCfitsioPeImports `
@@ -793,17 +793,17 @@ $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $vcpkgManifestPath = Join-Path $RepoRoot 'vcpkg.json'
 $metadataEnsureScriptPath = Join-Path `
     $RepoRoot `
-    'cmake\ensure_specforge_metadata.cmake'
-$buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
-$buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
+    'cmake\ensure_spectiary_metadata.cmake'
+$buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\spectiary_build_identity.h.in'
+$buildSourceContractPath = Join-Path $RepoRoot 'cmake\spectiary_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
 $manifestTemplatePath = Join-Path $RepoRoot 'src\platform\spectiary.exe.manifest.in'
-$resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
-$resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
+$resourceHeaderPath = Join-Path $RepoRoot 'src\platform\spectiary_resource.h'
+$resourceTemplatePath = Join-Path $RepoRoot 'src\platform\spectiary_resources.rc.in'
 $embeddedLegalSourcePath = Join-Path $RepoRoot 'src\app\embedded_legal_documents.cpp'
 $metadataBuildRegressionTestPath = Join-Path `
     $RepoRoot `
-    'tests\specforge_metadata_build_regression_tests.ps1'
+    'tests\spectiary_metadata_build_regression_tests.ps1'
 
 foreach ($requiredPath in @(
     $noticesPath,
@@ -877,8 +877,8 @@ foreach ($documentName in @(
 }
 
 $embeddedDocuments = @(
-    [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = 101; Symbol = 'SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES' },
-    [pscustomobject]@{ Name = 'DATA_SOURCES.txt'; Id = 102; Symbol = 'SPECFORGE_RESOURCE_DATA_SOURCES' }
+    [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = 101; Symbol = 'SPECTIARY_RESOURCE_THIRD_PARTY_NOTICES' },
+    [pscustomobject]@{ Name = 'DATA_SOURCES.txt'; Id = 102; Symbol = 'SPECTIARY_RESOURCE_DATA_SOURCES' }
 )
 foreach ($document in $embeddedDocuments) {
     $expectedBytes = [Convert]::ToBase64String(
@@ -995,7 +995,7 @@ if (@($catalog | Where-Object { $_.source_ref -match '(?i)nist' }).Count -ne 0) 
 
 $sr = @($catalog | Where-Object { $_.id -eq 'sr_ii_4078' })
 if ($sr.Count -ne 1 -or $sr[0].vacuum_angstrom -ne '4078.9' -or
-    $sr[0].source_ref -ne 'specforge_curated_approximate') {
+    $sr[0].source_ref -ne 'spectiary_curated_approximate') {
     throw 'Sr II must remain the curated approximate 4078.9 Angstrom marker.'
 }
 
@@ -1045,7 +1045,7 @@ $embeddedLegalSource = Get-Content -Raw -LiteralPath $embeddedLegalSourcePath
 $generatedManifestText = Get-Content -Raw -LiteralPath $GeneratedManifest
 [xml]$generatedManifest = $generatedManifestText
 $generatedAssemblyVersion = [string]$generatedManifest.assembly.assemblyIdentity.version
-$expectedAssemblyVersion = "$SpecForgeVersion.0"
+$expectedAssemblyVersion = "$SpectiaryVersion.0"
 if ($generatedAssemblyVersion -cne $expectedAssemblyVersion) {
     throw "Generated manifest assembly version expected '$expectedAssemblyVersion'; found '$generatedAssemblyVersion'."
 }
@@ -1060,52 +1060,52 @@ if (Test-Path -LiteralPath (Join-Path $RepoRoot 'src\platform\spectiary.exe.mani
     throw 'Tracked final manifest still exists beside the manifest template.'
 }
 Assert-Contains $cmakeSource `
-    'set(SPECFORGE_MANIFEST_TEMPLATE' `
+    'set(SPECTIARY_MANIFEST_TEMPLATE' `
     'CMake manifest template binding'
 Assert-Contains $cmakeSource `
-    '"${CMAKE_BINARY_DIR}/generated/specforge/spectiary.exe.manifest"' `
+    '"${CMAKE_BINARY_DIR}/generated/spectiary/spectiary.exe.manifest"' `
     'CMake generated manifest path'
 Assert-Contains $cmakeSource `
-    '"${SPECFORGE_MANIFEST_TEMPLATE}"' `
+    '"${SPECTIARY_MANIFEST_TEMPLATE}"' `
     'CMake manifest configure input'
 Assert-Contains $cmakeSource `
-    '"${SPECFORGE_MANIFEST}"' `
+    '"${SPECTIARY_MANIFEST}"' `
     'CMake manifest configure output and target source'
 $nativeTargetStart = $cmakeSource.IndexOf(
-    'add_executable(specforge_native WIN32',
+    'add_executable(spectiary_native WIN32',
     [StringComparison]::Ordinal)
 if ($nativeTargetStart -lt 0) {
-    throw 'Could not locate the specforge_native source declaration.'
+    throw 'Could not locate the spectiary_native source declaration.'
 }
 $nativeTargetEnd = $cmakeSource.IndexOf(
-    'specforge_configure_production_target(specforge_native)',
+    'spectiary_configure_production_target(spectiary_native)',
     $nativeTargetStart,
     [StringComparison]::Ordinal)
 if ($nativeTargetEnd -lt 0) {
-    throw 'Could not locate the specforge_native source declaration.'
+    throw 'Could not locate the spectiary_native source declaration.'
 }
 $nativeTargetSources = $cmakeSource.Substring(
     $nativeTargetStart,
     $nativeTargetEnd - $nativeTargetStart)
-Assert-Contains $nativeTargetSources '${SPECFORGE_MANIFEST}' 'specforge_native sources'
+Assert-Contains $nativeTargetSources '${SPECTIARY_MANIFEST}' 'spectiary_native sources'
 Assert-NotContains `
     $nativeTargetSources `
     'src/platform/spectiary.exe.manifest' `
-    'specforge_native sources'
-Assert-Contains $nativeTargetSources '${SPECFORGE_WINDOWS_RESOURCES}' 'specforge_native resources'
+    'spectiary_native sources'
+Assert-Contains $nativeTargetSources '${SPECTIARY_WINDOWS_RESOURCES}' 'spectiary_native resources'
 Assert-NotContains $packageScript '$releaseDocumentDirectoryName' 'Portable packaging script'
 Assert-NotContains $packageScript '$releaseDocumentPackageRoot' 'Portable packaging script'
 Assert-Contains $packageScript `
     "`$sourceExecutableDirectory = Split-Path -Parent `$sourceExecutable" `
     'Portable packaging executable binding'
 Assert-Contains $packageScript `
-    '& cmake --build --preset $Preset --config $Configuration --target specforge_metadata' `
+    '& cmake --build --preset $Preset --config $Configuration --target spectiary_metadata' `
     'Portable packaging configuration binding'
 Assert-Contains $packageScript `
-    '"-DSPECFORGE_BUILD_SOURCE_MODE=$SourceMode"' `
+    '"-DSPECTIARY_BUILD_SOURCE_MODE=$SourceMode"' `
     'Portable packaging source-mode binding'
 Assert-Contains $packageScript `
-    '"-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"' `
+    '"-DSPECTIARY_BUILD_SOURCE_REVISION=$SourceRevision"' `
     'Portable packaging source-revision binding'
 Assert-Contains $packageScript `
     'Join-Path $sourceExecutableDirectory $MetadataFileName' `
@@ -1138,29 +1138,29 @@ Assert-Contains $packageScript `
     '[switch]$PackageUnverifiedTestFixture' `
     'Portable packaging test seam'
 Assert-NotContains $packageScript `
-    "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
+    "Join-Path `$buildRoot 'generated\spectiary\third_party_versions.json'" `
     'Portable packaging script'
 Assert-Contains $cmakeSource '${PROJECT_metadata_filename}' 'CMake metadata'
 Assert-NotContains $cmakeSource 'spectiary_metadata.json.in' 'CMake obsolete pre-link metadata template'
-Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
+Assert-Contains $cmakeSource 'spectiary_build_identity.h.in' 'CMake build identity'
 Assert-NotContains `
     $cmakeSource `
     'third_party_versions.h.in' `
     'CMake obsolete compile-time dependency versions'
 Assert-Contains $cmakeSource `
-    'generated/$<CONFIG>/specforge/specforge_build_identity.h' `
+    'generated/$<CONFIG>/spectiary/spectiary_build_identity.h' `
     'CMake generated build identity'
 Assert-Contains $cmakeSource `
-    'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
+    'include("${CMAKE_SOURCE_DIR}/cmake/spectiary_build_source.cmake")' `
     'CMake build-source contract entry'
 Assert-Contains $cmakeSource `
     'find_package(cfitsio CONFIG REQUIRED)' `
     'CMake CFITSIO package discovery'
 Assert-Contains $cmakeSource `
-    'specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)' `
+    'spectiary_read_vcpkg_package_version(cfitsio SPECTIARY_CFITSIO_VERSION)' `
     'CMake CFITSIO package version resolution'
 Assert-Contains $cmakeSource `
-    'specforge_read_vcpkg_package_version(pthreads SPECFORGE_PTHREADS_VERSION)' `
+    'spectiary_read_vcpkg_package_version(pthreads SPECTIARY_PTHREADS_VERSION)' `
     'CMake PThreads4W package version resolution'
 Assert-Contains $cmakeSource `
     'CFITSIO::cfitsio ZLIB::ZLIB' `
@@ -1169,13 +1169,13 @@ Assert-Contains $cmakeSource `
     'OBJECT_DEPENDS' `
     'CMake embedded legal-document dependencies'
 Assert-Contains $cmakeSource `
-    '${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER}' `
+    '${SPECTIARY_LEGAL_DOCUMENTS};${SPECTIARY_RESOURCE_HEADER}' `
     'CMake embedded legal-document source dependencies'
 Assert-NotContains $cmakeSource `
-    'specforge_release_documents' `
+    'spectiary_release_documents' `
     'CMake obsolete release-document copy target'
 Assert-Contains $cmakeSource `
-    'add_dependencies(specforge_native specforge_metadata_finalizer_tool)' `
+    'add_dependencies(spectiary_native spectiary_metadata_finalizer_tool)' `
     'CMake post-link finalizer dependency'
 Assert-Contains $cmakeSource `
     '/Brepro' `
@@ -1187,19 +1187,19 @@ Assert-Contains $cmakeSource `
     '$<$<CONFIG:Debug>:/DEBUG:FASTLINK>' `
     'CMake deterministic debug PDB link'
 Assert-Contains $cmakeSource `
-    'add_custom_command(TARGET specforge_native PRE_LINK' `
+    'add_custom_command(TARGET spectiary_native PRE_LINK' `
     'CMake pre-link metadata invalidation'
 Assert-Contains $cmakeSource `
-    'Invalidating stale SpecForge metadata before linking' `
+    'Invalidating stale Spectiary metadata before linking' `
     'CMake stale-sidecar invalidation command'
 Assert-Contains $cmakeSource `
-    'ensure_specforge_metadata.cmake' `
+    'ensure_spectiary_metadata.cmake' `
     'CMake metadata freshness verifier'
 Assert-Contains $cmakeSource `
     'BYPRODUCTS' `
     'CMake metadata byproduct declaration'
 Assert-Contains $cmakeSource `
-    '-BuildTarget specforge_metadata' `
+    '-BuildTarget spectiary_metadata' `
     'CMake metadata regression target binding'
 Assert-Contains $metadataEnsureScript `
     'file(SHA256' `
@@ -1208,7 +1208,7 @@ Assert-Contains $metadataEnsureScript `
     'execute_process(' `
     'Metadata freshness finalizer invocation'
 Assert-Contains $cmakeSource `
-    'specforge_metadata_build_regression_tests' `
+    'spectiary_metadata_build_regression_tests' `
     'CMake repeated/no-op metadata build regression test'
 Assert-Contains $cmakeSource `
     '-BuildDirectory "${CMAKE_BINARY_DIR}"' `
@@ -1220,16 +1220,16 @@ Assert-Contains $cmakeSource `
     'Finalizing schema 6 Spectiary metadata' `
     'CMake post-link finalizer command'
 Assert-Contains $cmakeSource `
-    'DEPENDS specforge_native' `
+    'DEPENDS spectiary_native' `
     'CMake metadata target dependency'
 $portableMetadataTargetStart = $cmakeSource.IndexOf(
-    'add_custom_target(specforge_portable_test_metadata',
+    'add_custom_target(spectiary_portable_test_metadata',
     [StringComparison]::Ordinal)
 if ($portableMetadataTargetStart -lt 0) {
     throw 'Could not locate the Portable metadata fixture target.'
 }
 $portableMetadataTargetEnd = $cmakeSource.IndexOf(
-    'function(specforge_add_test',
+    'function(spectiary_add_test',
     $portableMetadataTargetStart,
     [StringComparison]::Ordinal)
 if ($portableMetadataTargetEnd -lt 0) {
@@ -1239,14 +1239,14 @@ $portableMetadataTargetSource = $cmakeSource.Substring(
     $portableMetadataTargetStart,
     $portableMetadataTargetEnd - $portableMetadataTargetStart)
 if ($portableMetadataTargetSource -notmatch
-    '(?ms)DEPENDS\s+specforge_metadata(?:\s|$)') {
-    throw 'Portable metadata fixture must depend on specforge_metadata freshness target.'
+    '(?ms)DEPENDS\s+spectiary_metadata(?:\s|$)') {
+    throw 'Portable metadata fixture must depend on spectiary_metadata freshness target.'
 }
 if ($portableMetadataTargetSource -match
-    '(?ms)DEPENDS\s+specforge_native(?:\s|$)') {
-    throw 'Portable metadata fixture must not bypass specforge_metadata freshness target.'
+    '(?ms)DEPENDS\s+spectiary_native(?:\s|$)') {
+    throw 'Portable metadata fixture must not bypass spectiary_metadata freshness target.'
 }
-Assert-NotContains $cmakeSource 'SPECFORGE_RELEASE_PROFILE' 'CMake unified executable'
+Assert-NotContains $cmakeSource 'SPECTIARY_RELEASE_PROFILE' 'CMake unified executable'
 Assert-NotContains $buildIdentityTemplate 'ReleaseProfile' 'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
     '@PROJECT_VERSION@' `
@@ -1255,13 +1255,13 @@ Assert-Contains $buildIdentityTemplate `
     '$<CONFIG>' `
     'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
-    '@SPECFORGE_BUILD_TARGET_ARCHITECTURE@' `
+    '@SPECTIARY_BUILD_TARGET_ARCHITECTURE@' `
     'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
-    '@SPECFORGE_BUILD_SOURCE_MODE@' `
+    '@SPECTIARY_BUILD_SOURCE_MODE@' `
     'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
-    '@SPECFORGE_BUILD_SOURCE_REVISION@' `
+    '@SPECTIARY_BUILD_SOURCE_REVISION@' `
     'Build identity header template'
 Assert-Contains $aboutSource `
     'build_info::kBuildSourceMode' `
@@ -1277,7 +1277,7 @@ Assert-Contains $aboutSource 'metadata.zlib_version' 'About zlib metadata versio
 
 $generatedBuildIdentityText = Get-Content -Raw -LiteralPath $GeneratedBuildIdentity
 foreach ($expectedIdentityText in @(
-    "kSpecForgeVersion[] = `"$SpecForgeVersion`"",
+    "kSpectiaryVersion[] = `"$SpectiaryVersion`"",
     "kBuildConfiguration[] = `"$Configuration`"",
     "kTargetArchitecture[] = `"$TargetArchitecture`"",
     "kBuildSourceMode[] = `"$SourceMode`"",
@@ -1313,7 +1313,7 @@ Assert-Contains $aboutSource 'EmbeddedLegalDocumentContent' 'About embedded lega
 Assert-NotContains $aboutSource 'Legal/' 'About external legal path'
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    "specforge-release-artifacts-$PID-$([Guid]::NewGuid().ToString('N'))"
+    "spectiary-release-artifacts-$PID-$([Guid]::NewGuid().ToString('N'))"
 $testDistRoot = Join-Path $testRoot 'dist'
 try {
     $headRevision = '0123456789abcdef0123456789abcdef01234567'
@@ -1338,7 +1338,7 @@ try {
         -OutputPath (Join-Path $testRoot 'working-tree-build-identity.h') `
         -Mode 'working_tree' `
         -Revision '' `
-        -Version $SpecForgeVersion `
+        -Version $SpectiaryVersion `
         -Configuration $Configuration `
         -Architecture $TargetArchitecture `
         -Description 'Working-tree compile-time build identity'
@@ -1349,7 +1349,7 @@ try {
         -OutputPath (Join-Path $testRoot 'head-build-identity.h') `
         -Mode 'head' `
         -Revision $headRevision `
-        -Version $SpecForgeVersion `
+        -Version $SpectiaryVersion `
         -Configuration $Configuration `
         -Architecture $TargetArchitecture `
         -Description 'HEAD compile-time build identity'
@@ -1864,7 +1864,7 @@ try {
             Description = 'Foreign machine application identity'
             PropertyName = 'application_id'
             Remove = $false
-            Value = 'SpecForge'
+            Value = 'Spectiary'
             ExpectedMessage = 'application_id does not match the founding identity'
         },
         [pscustomobject]@{

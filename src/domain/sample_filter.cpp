@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -407,4 +407,4 @@ SampleFilterSource BuildLabelingFilterSource(
     return source;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

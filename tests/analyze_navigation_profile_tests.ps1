@@ -134,7 +134,7 @@ function Write-ProfileFixture {
         [string[]]@($Events | ForEach-Object { $_ | ConvertTo-Json -Compress }))
 }
 
-$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("specforge_navigation_profile_tests_" + [guid]::NewGuid())
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("spectiary_navigation_profile_tests_" + [guid]::NewGuid())
 [System.IO.Directory]::CreateDirectory($temporaryDirectory) | Out-Null
 
 try {

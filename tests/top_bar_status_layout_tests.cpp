@@ -16,7 +16,7 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-constexpr specforge::TopBarStatusWidths kWidths{
+constexpr spectiary::TopBarStatusWidths kWidths{
     .operation = 10.0f,
     .frame = 10.0f,
     .dimensions = 10.0f,
@@ -32,26 +32,26 @@ constexpr std::string_view kChineseFrameRateFormat =
 void TestFrameTimingSampleGatingAndFormatting()
 {
     constexpr float kNormalDeltaTime = 1.0f / 60.0f;
-    const auto first_frame = specforge::TryMakeTopBarFrameTimingSample(
+    const auto first_frame = spectiary::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         true);
     Require(!first_frame, "the first frame should not display a timing sample");
 
-    const auto valid_sample = specforge::TryMakeTopBarFrameTimingSample(
+    const auto valid_sample = spectiary::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         false);
     Require(
         valid_sample.has_value(),
         "a normal post-first-frame sample should be accepted");
 
-    const auto english = specforge::FormatTopBarFrameRate(
+    const auto english = spectiary::FormatTopBarFrameRate(
         *valid_sample,
         kEnglishFrameRateFormat);
     Require(
         english && *english == "16.667 ms/frame · 60.0 FPS",
         "valid application frame rate should use the compact English format");
 
-    const auto chinese = specforge::FormatTopBarFrameRate(
+    const auto chinese = spectiary::FormatTopBarFrameRate(
         *valid_sample,
         kChineseFrameRateFormat);
     Require(
@@ -70,30 +70,30 @@ void TestInvalidAndGapTimingSamplesAreHidden()
     };
     for (const float delta_time : invalid_delta_times) {
         Require(
-            !specforge::TryMakeTopBarFrameTimingSample(
+            !spectiary::TryMakeTopBarFrameTimingSample(
                 delta_time,
                 false),
             "invalid DeltaTime must not produce a timing sample");
     }
 
-    const auto gap = specforge::TryMakeTopBarFrameTimingSample(1.0f, false);
+    const auto gap = spectiary::TryMakeTopBarFrameTimingSample(1.0f, false);
     Require(!gap, "an idle or minimized gap must not become a timing sample");
 
     Require(
-        !specforge::FormatTopBarFrameRate(
-            specforge::TopBarFrameTimingSample{.delta_time_seconds = 1.0f},
+        !spectiary::FormatTopBarFrameRate(
+            spectiary::TopBarFrameTimingSample{.delta_time_seconds = 1.0f},
             kEnglishFrameRateFormat),
         "a timing gap must not produce status text");
 
-    const auto valid_sample = specforge::TryMakeTopBarFrameTimingSample(
+    const auto valid_sample = spectiary::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         false);
-    std::optional<specforge::TopBarFrameTimingSample> last_valid_sample =
+    std::optional<spectiary::TopBarFrameTimingSample> last_valid_sample =
         valid_sample;
     if (gap) {
         last_valid_sample = gap;
     }
-    const auto retained = specforge::FormatTopBarFrameRate(
+    const auto retained = spectiary::FormatTopBarFrameRate(
         *last_valid_sample,
         kEnglishFrameRateFormat);
     Require(
@@ -103,8 +103,8 @@ void TestInvalidAndGapTimingSamplesAreHidden()
 
 void TestWideBarOmitsInactiveProfileStatus()
 {
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(46.0f, kWidths, false, false);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(46.0f, kWidths, false, false);
 
     Require(layout.show_operation, "wide bar should show the operation state");
     Require(layout.show_frame, "wide bar should show the frame-rate indicator");
@@ -115,8 +115,8 @@ void TestWideBarOmitsInactiveProfileStatus()
 
 void TestRoutineStatusDropsLowPriorityDetailsFirst()
 {
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(22.0f, kWidths, false, false);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(22.0f, kWidths, false, false);
 
     Require(layout.show_operation, "routine operation state should remain visible");
     Require(layout.show_dimensions, "dimensions should survive before lower-priority diagnostics");
@@ -126,10 +126,10 @@ void TestRoutineStatusDropsLowPriorityDetailsFirst()
 
 void TestUnavailableFrameRateDoesNotConsumeWidth()
 {
-    specforge::TopBarStatusWidths widths = kWidths;
+    spectiary::TopBarStatusWidths widths = kWidths;
     widths.frame = 0.0f;
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(46.0f, widths, false, false);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(46.0f, widths, false, false);
 
     Require(layout.show_operation, "operation state should remain visible");
     Require(layout.show_dimensions, "dimensions should remain visible");
@@ -139,8 +139,8 @@ void TestUnavailableFrameRateDoesNotConsumeWidth()
 
 void TestActiveRecordingOutranksRoutineReadyState()
 {
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(10.0f, kWidths, false, true);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(10.0f, kWidths, false, true);
 
     Require(layout.show_profile, "active recording should remain visible");
     Require(!layout.show_operation, "routine Ready state should yield to active recording");
@@ -150,8 +150,8 @@ void TestActiveRecordingOutranksRoutineReadyState()
 
 void TestLoadFailureOutranksActiveRecording()
 {
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(10.0f, kWidths, true, true);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(10.0f, kWidths, true, true);
 
     Require(layout.show_operation, "load failure should remain visible");
     Require(!layout.show_profile, "recording should yield when only the failure fits");
@@ -159,8 +159,8 @@ void TestLoadFailureOutranksActiveRecording()
 
 void TestStatusDisappearsInsteadOfOverlappingMenus()
 {
-    const specforge::TopBarStatusLayout layout =
-        specforge::ResolveTopBarStatusLayout(9.0f, kWidths, true, true);
+    const spectiary::TopBarStatusLayout layout =
+        spectiary::ResolveTopBarStatusLayout(9.0f, kWidths, true, true);
 
     Require(!layout.show_operation, "oversized operation state should not overlap menus");
     Require(!layout.show_profile, "oversized profile state should not overlap menus");

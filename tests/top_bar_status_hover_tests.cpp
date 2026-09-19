@@ -73,9 +73,9 @@ HoverObservation RenderFrame(bool cover_top_bar)
             ImGui::IsMouseHoveringRect(status_min, status_max, true);
         observation.host_hovered = ImGui::IsWindowHovered();
         observation.status_hovered =
-            specforge::IsTopBarStatusHoverTarget(status_min, status_max);
+            spectiary::IsTopBarStatusHoverTarget(status_min, status_max);
         observation.status_clicked =
-            specforge::IsTopBarStatusLeftClickTarget(
+            spectiary::IsTopBarStatusLeftClickTarget(
                 status_min,
                 status_max);
         ImGui::EndMenuBar();

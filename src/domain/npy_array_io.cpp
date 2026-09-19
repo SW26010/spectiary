@@ -12,7 +12,7 @@
 #include <string>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string TrimAscii(std::string value)
@@ -394,4 +394,4 @@ void WriteNpyInt32Values(std::ostream& stream, std::span<const int> values)
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

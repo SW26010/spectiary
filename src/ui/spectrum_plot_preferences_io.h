@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct SpectrumPlotPreferences {
     SpectrumPlotColors plot_colors;
@@ -35,4 +35,4 @@ LoadSpectrumPlotPreferences(
     const SpectrumPlotPreferences& state,
     std::string* error_message = nullptr);
 
-}  // namespace specforge
+}  // namespace spectiary

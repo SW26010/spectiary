@@ -1,6 +1,6 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    [string]$PackageName = 'SpecForge-portable'
+    [string]$PackageName = 'Spectiary-portable'
 )
 
 $ErrorActionPreference = 'Stop'

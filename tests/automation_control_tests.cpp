@@ -31,7 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct AutomationNamedPipeServerTestAccess {
     static bool WaitForReaderExit(AutomationNamedPipeServer& server)
@@ -62,7 +62,7 @@ struct AutomationProfileOutputFactoryTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -140,10 +140,10 @@ struct RunningServer {
     std::string instance_id = UniqueInstanceId();
     std::string nonce = std::string(64U, 'a');
     std::wstring pipe_name =
-        specforge::AutomationPipeNameForInstance(
+        spectiary::AutomationPipeNameForInstance(
             instance_id);
     std::atomic_uint32_t notification_count = 0;
-    specforge::AutomationNamedPipeServer server{
+    spectiary::AutomationNamedPipeServer server{
         pipe_name,
         nonce,
         instance_id};
@@ -324,7 +324,7 @@ int RunLauncherCleanupFixture(
         return 90;
     }
 
-    specforge::AutomationNamedPipeServer server(
+    spectiary::AutomationNamedPipeServer server(
         *pipe_name,
         NarrowAscii(*nonce),
         NarrowAscii(*instance_id));
@@ -342,11 +342,11 @@ int RunLauncherCleanupFixture(
              server.TakePendingCommands()) {
             if (mode == L"pipeline-limit") {
                 if (command.command ==
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 AppQuit &&
                     server.TryBeginAppQuit(command) ==
-                        specforge::
+                        spectiary::
                             AutomationNamedPipeServer::
                                 AppQuitClaimResult::
                                     Claimed) {
@@ -370,7 +370,7 @@ int RunLauncherCleanupFixture(
                     std::ios::binary |
                         std::ios::trunc);
                 violation
-                    << specforge::
+                    << spectiary::
                            AutomationCommandName(
                            command.command)
                     << '\n';
@@ -383,7 +383,7 @@ int RunLauncherCleanupFixture(
             }
             if (!command_failed) {
                 if (command.command !=
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             StateGet) {
                     server.Fail(
@@ -408,11 +408,11 @@ int RunLauncherCleanupFixture(
             }
 
             if (command.command ==
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             AppQuit &&
                 server.TryBeginAppQuit(command) ==
-                    specforge::
+                    spectiary::
                         AutomationNamedPipeServer::
                             AppQuitClaimResult::
                                 Claimed) {
@@ -439,8 +439,8 @@ int RunLauncherCleanupFixture(
     return 94;
 }
 
-specforge::AutomationServerMessage ReceiveParsed(
-    specforge::AutomationNamedPipeClient& client,
+spectiary::AutomationServerMessage ReceiveParsed(
+    spectiary::AutomationNamedPipeClient& client,
     const std::source_location location = std::source_location::current())
 {
     std::string message;
@@ -448,7 +448,7 @@ specforge::AutomationServerMessage ReceiveParsed(
     const bool received = client.Receive(message, error);
     Require(received, error, location);
     const auto parsed =
-        specforge::ParseAutomationServerMessage(
+        spectiary::ParseAutomationServerMessage(
             message);
     Require(
         parsed.message.has_value(),
@@ -458,7 +458,7 @@ specforge::AutomationServerMessage ReceiveParsed(
 
 void ConnectAndHandshake(
     RunningServer& fixture,
-    specforge::AutomationNamedPipeClient& client)
+    spectiary::AutomationNamedPipeClient& client)
 {
     std::string error;
     Require(
@@ -469,7 +469,7 @@ void ConnectAndHandshake(
         error);
     Require(
         client.Send(
-            specforge::SerializeAutomationHelloRequest(
+            spectiary::SerializeAutomationHelloRequest(
                 "hello-1",
                 fixture.nonce),
         error),
@@ -479,7 +479,7 @@ void ConnectAndHandshake(
         hello.type == "hello" &&
             hello.status == "completed" &&
             hello.protocol_version ==
-                specforge::
+                spectiary::
                     kAutomationProtocolVersion &&
             hello.instance_id ==
                 fixture.instance_id,
@@ -503,14 +503,14 @@ void WaitForClientDisconnect(
 }
 
 void SendRequest(
-    specforge::AutomationNamedPipeClient& client,
+    spectiary::AutomationNamedPipeClient& client,
     std::string_view request_id,
-    specforge::AutomationCommandKind command)
+    spectiary::AutomationCommandKind command)
 {
     std::string error;
     Require(
         client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     request_id,
                     command),
@@ -523,7 +523,7 @@ const nlohmann::json& RequireObjectMember(
     std::string_view name)
 {
     const nlohmann::json* member =
-        specforge::JsonObjectMember(object, name);
+        spectiary::JsonObjectMember(object, name);
     Require(
         member != nullptr &&
             member->type() ==
@@ -534,7 +534,7 @@ const nlohmann::json& RequireObjectMember(
 
 void TestTypedCommandResultProtocol()
 {
-    using namespace specforge;
+    using namespace spectiary;
     Require(SerializeAutomationTerminalResponse("r", AutomationCommandKind::SettingGet, "completed",
                 AutomationCommandResult{AutomationSettingResult{"a\"b", std::string{"x\n\\y"}, std::nullopt}}) ==
             R"({"type":"response","request_id":"r","command":"setting.get","status":"completed","result":{"name":"a\"b","value":"x\n\\y"}})",
@@ -597,11 +597,11 @@ void TestTypedCommandResultProtocol()
 void TestProtocolAndStableState()
 {
     const auto write_failure_policy =
-        specforge::AutomationProfileStopPolicy(
-            specforge::ProfileSink::StopReason::WriteFailure);
+        spectiary::AutomationProfileStopPolicy(
+            spectiary::ProfileSink::StopReason::WriteFailure);
     const auto missing_reason_policy =
-        specforge::AutomationProfileStopPolicy(
-            specforge::ProfileSink::StopReason::None);
+        spectiary::AutomationProfileStopPolicy(
+            spectiary::ProfileSink::StopReason::None);
     Require(
         !write_failure_policy.succeeded &&
             write_failure_policy.error_code ==
@@ -609,80 +609,80 @@ void TestProtocolAndStableState()
             !missing_reason_policy.succeeded &&
             missing_reason_policy.error_code ==
                 "profile_stop_failed" &&
-            specforge::AutomationProfileStopPolicy(
-                specforge::ProfileSink::StopReason::Explicit)
+            spectiary::AutomationProfileStopPolicy(
+                spectiary::ProfileSink::StopReason::Explicit)
                 .succeeded &&
-            specforge::AutomationProfileStopPolicy(
-                specforge::ProfileSink::StopReason::DurationLimit)
+            spectiary::AutomationProfileStopPolicy(
+                spectiary::ProfileSink::StopReason::DurationLimit)
                 .succeeded &&
-            specforge::AutomationProfileStopPolicy(
-                specforge::ProfileSink::StopReason::FileSizeLimit)
+            spectiary::AutomationProfileStopPolicy(
+                spectiary::ProfileSink::StopReason::FileSizeLimit)
                 .succeeded,
         "profile stop terminal policy should reserve success for finalized production outcomes and expose write failure stably");
 
     const auto hello =
-        specforge::ParseAutomationClientMessage(
-            specforge::SerializeAutomationHelloRequest(
+        spectiary::ParseAutomationClientMessage(
+            spectiary::SerializeAutomationHelloRequest(
                 "hello.valid-1",
                 std::string(64U, 'b')));
     Require(
         hello.message &&
             hello.message->kind ==
-                specforge::AutomationClientMessage::
+                spectiary::AutomationClientMessage::
                     Kind::Hello &&
             hello.message->protocol_version ==
-                specforge::
+                spectiary::
                     kAutomationProtocolVersion,
         "hello request should round-trip through UTF-8 JSON");
 
     const auto request =
-        specforge::ParseAutomationClientMessage(
-            specforge::
+        spectiary::ParseAutomationClientMessage(
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "request-1",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             WaitIdle));
     Require(
         request.message &&
             request.message->command ==
-                specforge::
+                spectiary::
                     AutomationCommandKind::
                         WaitIdle,
         "wait.idle should parse as a structured command");
     const auto profile_start_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::
+        spectiary::ParseAutomationClientMessage(
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "profile-start-1",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             ProfileStart));
     const auto profile_stop_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::
+        spectiary::ParseAutomationClientMessage(
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "profile-stop-1",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             ProfileStop));
     const auto profile_start_with_empty_params =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"profile-start-empty","command":"profile.start","params":{}})");
     const auto profile_start_with_members =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"profile-start-members","command":"profile.start","params":{"ignored":true}})");
     const auto profile_stop_with_members =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"profile-stop-members","command":"profile.stop","params":{"path":"C:\\outside.jsonl"}})");
     Require(
         profile_start_request.message &&
             profile_start_request.message->command ==
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     ProfileStart &&
             profile_stop_request.message &&
             profile_stop_request.message->command ==
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     ProfileStop &&
             profile_start_with_empty_params.message &&
             profile_start_with_members.error_code ==
@@ -691,34 +691,34 @@ void TestProtocolAndStableState()
                 "invalid_params",
         "profile.start and profile.stop should accept omitted or empty params and reject every member of a fixed parameterless command");
     const auto setting_get_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::
+        spectiary::ParseAutomationClientMessage(
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "setting-get-1",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SettingGet,
-                    specforge::
+                    spectiary::
                         AutomationSettingGetParameters{
                             .name = "ui.language",
                         }));
     const auto* setting_get_parameters =
         setting_get_request.message
         ? std::get_if<
-              specforge::
+              spectiary::
                   AutomationSettingGetParameters>(
               &setting_get_request.message
                    ->parameters)
         : nullptr;
     const auto setting_set_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::
+        spectiary::ParseAutomationClientMessage(
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "setting-set-1",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SettingSet,
-                    specforge::
+                    spectiary::
                         AutomationSettingSetParameters{
                             .name = "ui.scale",
                             .value =
@@ -727,7 +727,7 @@ void TestProtocolAndStableState()
     const auto* setting_set_parameters =
         setting_set_request.message
         ? std::get_if<
-              specforge::
+              spectiary::
                   AutomationSettingSetParameters>(
               &setting_set_request.message
                    ->parameters)
@@ -744,7 +744,7 @@ void TestProtocolAndStableState()
                 125,
         "setting.get and setting.set should round-trip their bounded name and scalar value parameters");
     Require(
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"bad-setting-value","command":"setting.set","params":{"name":"ui.scale","value":{"nested":true}}})")
                 .error_code == "invalid_params",
         "setting.set should reject non-scalar values before dispatch");
@@ -752,38 +752,38 @@ void TestProtocolAndStableState()
         const std::string request =
             R"({"type":"request","request_id":"invalid-integer","command":"setting.set","params":{"name":"ui.scale","value":)" +
             std::string(value) + "}}";
-        Require(specforge::ParseAutomationClientMessage(request).error_code == "invalid_params",
+        Require(spectiary::ParseAutomationClientMessage(request).error_code == "invalid_params",
                 "setting.set must reject floating-point values and unsigned overflow at the schema boundary");
     }
     const auto panel_get_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::SerializeAutomationCommandRequest(
+        spectiary::ParseAutomationClientMessage(
+            spectiary::SerializeAutomationCommandRequest(
                 "panel-get-1",
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     PanelGet,
-                specforge::AutomationPanelGetParameters{
+                spectiary::AutomationPanelGetParameters{
                     .name = "files",
                 }));
     const auto* panel_get_parameters =
         panel_get_request.message
         ? std::get_if<
-              specforge::AutomationPanelGetParameters>(
+              spectiary::AutomationPanelGetParameters>(
               &panel_get_request.message->parameters)
         : nullptr;
     const auto panel_set_request =
-        specforge::ParseAutomationClientMessage(
-            specforge::SerializeAutomationCommandRequest(
+        spectiary::ParseAutomationClientMessage(
+            spectiary::SerializeAutomationCommandRequest(
                 "panel-set-1",
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     PanelSet,
-                specforge::AutomationPanelSetParameters{
+                spectiary::AutomationPanelSetParameters{
                     .name = "spectral_lines",
                     .visible = false,
                 }));
     const auto* panel_set_parameters =
         panel_set_request.message
         ? std::get_if<
-              specforge::AutomationPanelSetParameters>(
+              spectiary::AutomationPanelSetParameters>(
               &panel_set_request.message->parameters)
         : nullptr;
     Require(
@@ -795,12 +795,12 @@ void TestProtocolAndStableState()
             !panel_set_parameters->visible,
         "panel.get and panel.set should round-trip their stable name and explicit visibility parameters");
     Require(
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"bad-panel-visible","command":"panel.set","params":{"name":"files","visible":1}})")
                 .error_code == "invalid_params",
         "panel.set should reject a non-boolean visible value before dispatch");
     const auto& capabilities =
-        specforge::AutomationCapabilityNames();
+        spectiary::AutomationCapabilityNames();
     Require(
         capabilities.size() == 13 &&
             std::find(
@@ -835,12 +835,12 @@ void TestProtocolAndStableState()
                 capabilities.end(),
         "fixed capabilities should advertise bounded settings, panel visibility and production profile controls");
     const auto source_request =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"source-1","command":"source.open","params":{"path":"C:\\fixtures\\source.npy"}})");
     const auto* source_parameters =
         source_request.message
         ? std::get_if<
-              specforge::
+              spectiary::
                   AutomationSourceOpenParameters>(
               &source_request.message->parameters)
         : nullptr;
@@ -850,12 +850,12 @@ void TestProtocolAndStableState()
                 "C:\\fixtures\\source.npy",
         "source.open should retain its UTF-8 absolute path parameter");
     const auto label_request =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"label-1","command":"label.assign","params":{"code":5,"target":{"name":"alpha"}}})");
     const auto* label_parameters =
         label_request.message
         ? std::get_if<
-              specforge::
+              spectiary::
                   AutomationLabelAssignParameters>(
               &label_request.message->parameters)
         : nullptr;
@@ -867,13 +867,13 @@ void TestProtocolAndStableState()
                 "alpha",
         "label.assign should parse a code and optional exact spectrum target");
     Require(
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"bad-target","command":"spectrum.goto","params":{"target":{"index":1,"name":"alpha"}}})")
                 .error_code == "invalid_params",
         "spectrum targets should require exactly one stable identifier");
 
     const auto invalid_id =
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"bad id","command":"state.get"})");
     Require(
         !invalid_id.message &&
@@ -881,42 +881,42 @@ void TestProtocolAndStableState()
                 "invalid_request_id",
         "request IDs outside the bounded ASCII contract should fail");
     for (const std::string text : {"", "ASCII", "\xc2\xa2\xe4\xb8\xad\xf0\x9f\x98\x80"}) {
-        const auto parsed = specforge::ParseAutomationServerMessage(
-            specforge::SerializeAutomationFailureResponse("utf8", "state.get", "test", text));
+        const auto parsed = spectiary::ParseAutomationServerMessage(
+            spectiary::SerializeAutomationFailureResponse("utf8", "state.get", "test", text));
         Require(parsed.message && parsed.message->error_message == text,
                 "server text should preserve empty, ASCII and multibyte UTF-8");
-        Require(specforge::ParseAutomationClientMessage(
-                    specforge::SerializeAutomationHelloRequest("utf8", text)).error_code != "invalid_utf8",
+        Require(spectiary::ParseAutomationClientMessage(
+                    spectiary::SerializeAutomationHelloRequest("utf8", text)).error_code != "invalid_utf8",
                 "valid client UTF-8 should reach protocol validation");
     }
     for (const std::string text : {"\xc3", "\xc0\xaf", "\xed\xa0\x80", "\xf4\x90\x80\x80"}) {
         const std::string json = "{\"text\":\"" + text + "\"}";
-        Require(specforge::ParseAutomationClientMessage(json).error_code == "invalid_utf8",
+        Require(spectiary::ParseAutomationClientMessage(json).error_code == "invalid_utf8",
                 "client should reject truncated, overlong, surrogate and out-of-range UTF-8");
-        Require(!specforge::ParseAutomationServerMessage(json).message,
+        Require(!spectiary::ParseAutomationServerMessage(json).message,
                 "server should reject malformed UTF-8");
     }
-    Require(specforge::ParseAutomationClientMessage("").error_code == "invalid_json" &&
-                !specforge::ParseAutomationServerMessage("").message,
+    Require(spectiary::ParseAutomationClientMessage("").error_code == "invalid_json" &&
+                !spectiary::ParseAutomationServerMessage("").message,
             "empty protocol documents remain invalid");
     const std::string invalid_utf8 =
         std::string(
             "{\"type\":\"hello\",\"request_id\":\"x\",\"nonce\":\"") +
         static_cast<char>(0xff) + "\"}";
     Require(
-        specforge::ParseAutomationClientMessage(
+        spectiary::ParseAutomationClientMessage(
             invalid_utf8)
                 .error_code == "invalid_utf8",
         "invalid UTF-8 should fail before JSON dispatch");
     const std::string unicode_command =
-        specforge::WideToUtf8(
+        spectiary::WideToUtf8(
             L"source open C:\\数据\\光谱");
     Require(
         unicode_command ==
                 "source open C:\\数据\\光谱" &&
-            specforge::IsValidUtf8(
+            spectiary::IsValidUtf8(
                 unicode_command) &&
-            !specforge::IsValidUtf8(
+            !spectiary::IsValidUtf8(
                 std::string_view(
                     invalid_utf8.data() +
                         invalid_utf8.find(
@@ -925,7 +925,7 @@ void TestProtocolAndStableState()
                     1)),
         "launcher text helpers should establish a strict UTF-16 console to UTF-8 protocol boundary");
 
-    specforge::AutomationStateSnapshot state;
+    spectiary::AutomationStateSnapshot state;
     state.instance_id =
         "0123456789abcdef0123456789abcdef";
     state.control = {
@@ -1010,13 +1010,13 @@ void TestProtocolAndStableState()
     };
     std::string parse_error;
     const std::string state_body =
-        specforge::SerializeAutomationStateBody(state);
+        spectiary::SerializeAutomationStateBody(state);
     Require(
         state_body.find(
             "\"task_ids\":[\"quality\",\"temporary\"]") !=
             std::string::npos,
         "state.get body should expose all labeling task ids");
-    const auto state_json = specforge::ParseJson(
+    const auto state_json = spectiary::ParseJson(
         "{" +
             state_body +
             "}",
@@ -1063,104 +1063,104 @@ void TestProtocolAndStableState()
             state_object,
             "profile");
     Require(
-        specforge::ReadJsonBoolMember(
+        spectiary::ReadJsonBoolMember(
             shell,
             "idle",
             false) &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 source,
                 "id") == "source-id" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 source,
                 "path")
                 ->find("source.csv") !=
                 std::string::npos &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 presented_source,
                 "id") ==
                 "presented-source-id" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 presented_source,
                 "path")
                 ->find("presented.csv") !=
                 std::string::npos &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 settings,
                 "language") == "zh-Hans" &&
-            specforge::ReadJsonIntMember(
+            spectiary::ReadJsonIntMember(
                 settings,
                 "ui_scale_percentage") ==
                 125 &&
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 panels,
                 "files",
                 true) &&
-            specforge::ReadJsonBoolMember(
+            spectiary::ReadJsonBoolMember(
                 panels,
                 "navigation",
                 false) &&
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 panels,
                 "annotations",
                 true) &&
-            specforge::ReadJsonBoolMember(
+            spectiary::ReadJsonBoolMember(
                 panels,
                 "labeling",
                 false) &&
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 panels,
                 "filters",
                 true) &&
-            specforge::ReadJsonBoolMember(
+            spectiary::ReadJsonBoolMember(
                 panels,
                 "sorting",
                 false) &&
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 panels,
                 "smoothing",
                 true) &&
-            specforge::ReadJsonBoolMember(
+            spectiary::ReadJsonBoolMember(
                 panels,
                 "information",
                 false) &&
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 panels,
                 "spectral_lines",
                 true) &&
-            specforge::ReadJsonSizeMember(
+            spectiary::ReadJsonSizeMember(
                 spectrum,
                 "index") == 2U &&
-            specforge::ReadJsonIntMember(
+            spectiary::ReadJsonIntMember(
                 current_label,
                 "code") == 5 &&
-            specforge::ReadJsonBoolMember(
+            spectiary::ReadJsonBoolMember(
                 capture,
                 "pending",
                 false) &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 capture,
                 "last_result") ==
                 "failed" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 capture,
                 "current_path")
                 ->find("pending.png") !=
                 std::string::npos &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 capture,
                 "last_path")
                 ->find("failed.png") !=
                 std::string::npos &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 profile,
                 "status") == "stopping" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 profile,
                 "stop_reason") == "explicit" &&
-            specforge::ReadJsonSizeMember(
+            spectiary::ReadJsonSizeMember(
                 profile,
                 "dropped_events") == 3U &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 profile,
                 "path")
                 ->find("profile.jsonl") !=
@@ -1175,11 +1175,11 @@ void TestProtocolAndStableState()
                 L"C:\\automation\\captured.png"),
     };
     const std::string succeeded_capture_state =
-        specforge::SerializeAutomationStateBody(
+        spectiary::SerializeAutomationStateBody(
             state);
     state.capture.last_result = "canceled";
     const std::string canceled_capture_state =
-        specforge::SerializeAutomationStateBody(
+        spectiary::SerializeAutomationStateBody(
             state);
     Require(
         succeeded_capture_state.find(
@@ -1199,12 +1199,12 @@ void TestProtocolAndStableState()
         .dropped_events = 0,
     };
     const std::string succeeded_profile_state =
-        specforge::SerializeAutomationStateBody(
+        spectiary::SerializeAutomationStateBody(
             state);
     state.profile.status = "failed";
     state.profile.stop_reason = "write_failure";
     const std::string failed_profile_state =
-        specforge::SerializeAutomationStateBody(
+        spectiary::SerializeAutomationStateBody(
             state);
     Require(
         succeeded_profile_state.find(
@@ -1229,7 +1229,7 @@ void TestStartupAndNoActivationContract()
     const std::string nonce(64U, 'c');
     const std::filesystem::path state_root =
         std::filesystem::temp_directory_path() /
-        ("specforge-automation-startup-" +
+        ("spectiary-automation-startup-" +
          std::to_string(GetCurrentProcessId()));
     std::error_code error;
     std::filesystem::create_directories(
@@ -1240,7 +1240,7 @@ void TestStartupAndNoActivationContract()
     const std::vector<std::wstring> arguments = {
         L"Spectiary.exe",
         L"--automation-pipe",
-        specforge::AutomationPipeNameForInstance(
+        spectiary::AutomationPipeNameForInstance(
             instance_id),
         L"--automation-nonce",
         std::wstring(nonce.begin(), nonce.end()),
@@ -1252,7 +1252,7 @@ void TestStartupAndNoActivationContract()
         state_root.wstring(),
     };
     const auto parsed =
-        specforge::ParseSpecForgeCommandLine(
+        spectiary::ParseSpectiaryCommandLine(
             arguments);
     Require(
         parsed.automation &&
@@ -1269,7 +1269,7 @@ void TestStartupAndNoActivationContract()
     persistent_output_fixture_arguments.push_back(
         L"--automation-allow-persistent-labeling-outputs");
     const auto persistent_output_fixture_parsed =
-        specforge::ParseSpecForgeCommandLine(
+        spectiary::ParseSpectiaryCommandLine(
             persistent_output_fixture_arguments);
     Require(
         persistent_output_fixture_parsed.automation &&
@@ -1282,7 +1282,7 @@ void TestStartupAndNoActivationContract()
     repeated_persistent_output_fixture_arguments.push_back(
         L"--automation-allow-persistent-labeling-outputs");
     const auto repeated_persistent_output_fixture_parsed =
-        specforge::ParseSpecForgeCommandLine(
+        spectiary::ParseSpectiaryCommandLine(
             repeated_persistent_output_fixture_arguments);
     Require(
         !repeated_persistent_output_fixture_parsed.automation &&
@@ -1295,7 +1295,7 @@ void TestStartupAndNoActivationContract()
         arguments;
     incomplete.resize(incomplete.size() - 2U);
     Require(
-        !specforge::ParseSpecForgeCommandLine(
+        !spectiary::ParseSpectiaryCommandLine(
              incomplete)
              .error_message.empty(),
         "partial automation startup should fail closed");
@@ -1305,31 +1305,31 @@ void TestStartupAndNoActivationContract()
     const std::filesystem::path sibling_root =
         state_root / "automation-sibling";
     Require(
-        !specforge::AutomationStateRootIsIndependent(
+        !spectiary::AutomationStateRootIsIndependent(
             ordinary_root,
             ordinary_root) &&
-            !specforge::AutomationStateRootIsIndependent(
+            !spectiary::AutomationStateRootIsIndependent(
                 ordinary_root / "child",
                 ordinary_root) &&
-            !specforge::AutomationStateRootIsIndependent(
+            !spectiary::AutomationStateRootIsIndependent(
                 state_root,
                 ordinary_root) &&
-            specforge::AutomationStateRootIsIndependent(
+            spectiary::AutomationStateRootIsIndependent(
                 sibling_root,
                 ordinary_root),
         "automation state root should reject same/parent/child and accept a sibling");
     const auto capture_inside =
-        specforge::ValidateAutomationCapturePath(
+        spectiary::ValidateAutomationCapturePath(
             state_root,
             state_root / "artifacts" /
                 "frame.png");
     const auto capture_outside =
-        specforge::ValidateAutomationCapturePath(
+        spectiary::ValidateAutomationCapturePath(
             state_root,
             state_root.parent_path() /
                 "outside.png");
     const auto capture_wrong_extension =
-        specforge::ValidateAutomationCapturePath(
+        spectiary::ValidateAutomationCapturePath(
             state_root,
             state_root / "artifacts" /
                 "frame.jpg");
@@ -1342,20 +1342,20 @@ void TestStartupAndNoActivationContract()
         stream << "preserve";
     }
     const auto capture_existing =
-        specforge::ValidateAutomationCapturePath(
+        spectiary::ValidateAutomationCapturePath(
             state_root,
             existing_capture);
     const auto owned_inside =
-        specforge::ValidateAutomationStateOwnedPath(
+        spectiary::ValidateAutomationStateOwnedPath(
             state_root,
             state_root / "labels" /
                 "quality.csv");
     const auto owned_root =
-        specforge::ValidateAutomationStateOwnedPath(
+        spectiary::ValidateAutomationStateOwnedPath(
             state_root,
             state_root);
     const auto owned_outside =
-        specforge::ValidateAutomationStateOwnedPath(
+        spectiary::ValidateAutomationStateOwnedPath(
             state_root,
             state_root.parent_path() /
                 "ordinary" / "quality.csv");
@@ -1377,28 +1377,28 @@ void TestStartupAndNoActivationContract()
             !owned_outside.valid,
         "persisted automation output references should remain strictly below the isolated state root");
     Require(
-        specforge::
+        spectiary::
             IsIncompatibleAutomationEnvironmentVariable(
-                L"SPECFORGE_PROFILE") &&
-            specforge::
+                L"SPECTIARY_PROFILE") &&
+            spectiary::
                 IsIncompatibleAutomationEnvironmentVariable(
-                    L"specforge_profile_dir") &&
-            specforge::
+                    L"spectiary_profile_dir") &&
+            spectiary::
                 IsIncompatibleAutomationEnvironmentVariable(
-                    L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD") &&
-            specforge::
+                    L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD") &&
+            spectiary::
                 IsIncompatibleAutomationEnvironmentVariable(
-                    L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR") &&
-            !specforge::
+                    L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR") &&
+            !spectiary::
                 IsIncompatibleAutomationEnvironmentVariable(
                     L"LOCALAPPDATA"),
         "automation should identify only the incompatible legacy workload/profile environment");
     constexpr std::array<const wchar_t*, 4>
         incompatible_environment = {
-            L"SPECFORGE_PROFILE",
-            L"SPECFORGE_PROFILE_DIR",
-            L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD",
-            L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR",
+            L"SPECTIARY_PROFILE",
+            L"SPECTIARY_PROFILE_DIR",
+            L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD",
+            L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR",
         };
     std::array<std::optional<std::wstring>, 4>
         saved_environment;
@@ -1431,12 +1431,12 @@ void TestStartupAndNoActivationContract()
     }
     Require(
         SetEnvironmentVariableW(
-            L"SPECFORGE_PROFILE_DIR",
+            L"SPECTIARY_PROFILE_DIR",
             L"C:\\poisoned-profile-output") !=
             FALSE &&
-            specforge::
+            spectiary::
                 ActiveIncompatibleAutomationEnvironmentVariable() ==
-                L"SPECFORGE_PROFILE_DIR",
+                L"SPECTIARY_PROFILE_DIR",
         "direct automation startup should detect inherited legacy environment before App construction");
     for (std::size_t index = 0;
          index < incompatible_environment.size();
@@ -1449,9 +1449,9 @@ void TestStartupAndNoActivationContract()
     }
 
     const auto no_activate =
-        specforge::ResolveWin32WindowShowPlan(
+        spectiary::ResolveWin32WindowShowPlan(
             SW_SHOWDEFAULT,
-            specforge::
+            spectiary::
                 Win32WindowActivation::NoActivate);
     Require(
         no_activate.show_command ==
@@ -1462,9 +1462,9 @@ void TestStartupAndNoActivationContract()
              SWP_SHOWWINDOW) != 0,
         "automation show plan should be explicitly non-activating");
     Require(
-        specforge::ResolveWin32WindowShowPlan(
+        spectiary::ResolveWin32WindowShowPlan(
             SW_SHOWMAXIMIZED,
-            specforge::
+            spectiary::
                 Win32WindowActivation::Default)
                 .show_command ==
             SW_SHOWMAXIMIZED,
@@ -1480,7 +1480,7 @@ void TestStartupAndNoActivationContract()
     }
     std::string lease_error;
     auto seed_lease =
-        specforge::PinAutomationReadOnlyFile(
+        spectiary::PinAutomationReadOnlyFile(
             pinned_seed,
             lease_error);
     Require(
@@ -1499,7 +1499,7 @@ void TestStartupAndNoActivationContract()
     const std::filesystem::path pinned_root =
         state_root / "pinned-root";
     auto root_lease =
-        specforge::
+        spectiary::
             CreatePinnedAutomationStateRoot(
                 pinned_root,
                 lease_error);
@@ -1516,7 +1516,7 @@ void TestStartupAndNoActivationContract()
                 pinned_root),
         "the launcher must retain an identity lease that prevents state-root replacement before seeding and through the child lifetime");
     Require(
-        specforge::
+        spectiary::
             MaterializePinnedAutomationSeed(
                 root_lease,
                 seed_lease,
@@ -1553,7 +1553,7 @@ void TestStartupAndNoActivationContract()
                     .c_str()) != FALSE,
         "the root identity lease must permit sibling cache rename operations used by production atomic persistence");
     auto lease_bound_profile =
-        specforge::AutomationProfileOutputFactory::Create(
+        spectiary::AutomationProfileOutputFactory::Create(
             pinned_root,
             pinned_root / "logs");
     Require(
@@ -1580,7 +1580,7 @@ void TestStartupAndNoActivationContract()
             error) &&
             !error,
         "the lease-bound profile fixture should remove its empty output directory before root cleanup");
-    specforge::
+    spectiary::
         RemovePinnedAutomationStateRootBeforeLaunch(
             root_lease);
     Require(
@@ -1588,7 +1588,7 @@ void TestStartupAndNoActivationContract()
             pinned_root),
         "a prelaunch failure should remove only the pinned automation root and its known materialized seed");
     seed_lease =
-        specforge::
+        spectiary::
             AutomationReadOnlyFileLease{};
     std::filesystem::remove(
         pinned_seed,
@@ -1603,7 +1603,7 @@ void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
 {
     const std::filesystem::path fixture_parent =
         std::filesystem::temp_directory_path() /
-        ("specforge-profile-output-security-" +
+        ("spectiary-profile-output-security-" +
          UniqueInstanceId());
     const std::filesystem::path state_root =
         fixture_parent / "state";
@@ -1636,7 +1636,7 @@ void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
     bool dangling_symlink_created = false;
     bool dangling_junction_created = false;
     auto dangling =
-        specforge::AutomationProfileOutputFactoryTestAccess::
+        spectiary::AutomationProfileOutputFactoryTestAccess::
             Create(
                 state_root,
                 output_directory,
@@ -1693,7 +1693,7 @@ void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
         state_root / "logs-before-swap";
     bool directory_swapped = false;
     auto swapped =
-        specforge::AutomationProfileOutputFactoryTestAccess::
+        spectiary::AutomationProfileOutputFactoryTestAccess::
             Create(
                 state_root,
                 output_directory,
@@ -1728,7 +1728,7 @@ void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
         "profile directory-swap fixture should restore the isolated output directory");
 
     auto prepared =
-        specforge::AutomationProfileOutputFactory::Create(
+        spectiary::AutomationProfileOutputFactory::Create(
             state_root,
             output_directory);
     Require(
@@ -1760,7 +1760,7 @@ void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
         "successful profile output should remain bound to the isolated final handle");
 
     auto discarded =
-        specforge::AutomationProfileOutputFactory::Create(
+        spectiary::AutomationProfileOutputFactory::Create(
             state_root,
             output_directory);
     Require(
@@ -1865,12 +1865,12 @@ void TestPipeAclIsCurrentUserOnly(HANDLE pipe)
 void TestSingleClientQueueAndLifecycle()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
     TestPipeAclIsCurrentUserOnly(
         client.native_handle());
 
-    specforge::AutomationNamedPipeClient second;
+    spectiary::AutomationNamedPipeClient second;
     std::string second_error;
     Require(
         !second.Connect(
@@ -1885,7 +1885,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "wait-1",
-        specforge::AutomationCommandKind::WaitIdle);
+        spectiary::AutomationCommandKind::WaitIdle);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -1895,7 +1895,7 @@ void TestSingleClientQueueAndLifecycle()
     Require(
         commands.size() == 1 &&
             commands.front().command ==
-                specforge::
+                spectiary::
                     AutomationCommandKind::
                         WaitIdle,
         "UI owner should receive the structured wait command");
@@ -1909,7 +1909,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "duplicate-1",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -1917,7 +1917,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "duplicate-1",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto duplicate = ReceiveParsed(client);
     Require(
         duplicate.status == "failed" &&
@@ -1930,7 +1930,7 @@ void TestSingleClientQueueAndLifecycle()
         commands.size() == 1,
         "duplicate request must not enter the UI queue");
     fixture.server.CompleteState(
-        commands.front(), specforge::AutomationStateSnapshot{});
+        commands.front(), spectiary::AutomationStateSnapshot{});
     Require(
         ReceiveParsed(client).status ==
             "completed",
@@ -1952,7 +1952,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "reuse-1",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto reused =
         ReceiveParsed(client);
     Require(
@@ -1967,7 +1967,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "wait-before-quit",
-        specforge::AutomationCommandKind::WaitIdle);
+        spectiary::AutomationCommandKind::WaitIdle);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -1975,7 +1975,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "quit-1",
-        specforge::AutomationCommandKind::AppQuit);
+        spectiary::AutomationCommandKind::AppQuit);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -1983,7 +1983,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "state-after-quit-queued",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -1994,7 +1994,7 @@ void TestSingleClientQueueAndLifecycle()
     Require(
         commands.size() == 1 &&
             commands.front().command ==
-                specforge::
+                spectiary::
                     AutomationCommandKind::
                         WaitIdle,
         "wait.idle should stop UI dispatch before the queued app.quit");
@@ -2011,7 +2011,7 @@ void TestSingleClientQueueAndLifecycle()
         commands.end(),
         [](const auto& command) {
             return command.command ==
-                   specforge::
+                   spectiary::
                        AutomationCommandKind::
                            AppQuit;
         });
@@ -2021,12 +2021,12 @@ void TestSingleClientQueueAndLifecycle()
         "the UI queue should expose app.quit and its later request only after the wait barrier");
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
-            specforge::AutomationNamedPipeServer::
+            spectiary::AutomationNamedPipeServer::
                 AppQuitClaimResult::Claimed,
         "active app.quit should be claimed atomically");
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
-            specforge::AutomationNamedPipeServer::
+            spectiary::AutomationNamedPipeServer::
                 AppQuitClaimResult::Inactive,
         "app.quit atomic claim should be one-shot");
     fixture.server.Complete(*quit);
@@ -2054,7 +2054,7 @@ void TestSingleClientQueueAndLifecycle()
     SendRequest(
         client,
         "after-shutdown",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto shutting_down =
         ReceiveParsed(client);
     Require(
@@ -2067,13 +2067,13 @@ void TestSingleClientQueueAndLifecycle()
 void TestProfileWriteFailureUsesStopTerminalResponsePath()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     SendRequest(
         client,
         "profile-write-failure",
-        specforge::AutomationCommandKind::ProfileStop);
+        spectiary::AutomationCommandKind::ProfileStop);
     Require(
         ReceiveParsed(client).status == "accepted",
         "profile.stop write-failure fixture should first be accepted");
@@ -2082,16 +2082,16 @@ void TestProfileWriteFailureUsesStopTerminalResponsePath()
     Require(
         commands.size() == 1 &&
             commands.front().command ==
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     ProfileStop &&
             fixture.server.TryClaimExecution(
                 commands.front()),
         "profile.stop write-failure fixture should claim the real queued command");
 
-    specforge::CompleteAutomationProfileStopTerminal(
+    spectiary::CompleteAutomationProfileStopTerminal(
         fixture.server,
         commands.front(),
-        specforge::ProfileSink::StopReason::
+        spectiary::ProfileSink::StopReason::
             WriteFailure,
         "unpublished-write-failure.jsonl",
         7);
@@ -2110,13 +2110,13 @@ void TestProfileWriteFailureUsesStopTerminalResponsePath()
 void TestIdleWaitIsAnEarlierOnlySequenceBarrier()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     SendRequest(
         client,
         "wait-earlier",
-        specforge::AutomationCommandKind::WaitIdle);
+        spectiary::AutomationCommandKind::WaitIdle);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -2124,7 +2124,7 @@ void TestIdleWaitIsAnEarlierOnlySequenceBarrier()
     SendRequest(
         client,
         "wait-later",
-        specforge::AutomationCommandKind::WaitIdle);
+        spectiary::AutomationCommandKind::WaitIdle);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -2167,7 +2167,7 @@ void TestIdleWaitIsAnEarlierOnlySequenceBarrier()
 void TestIdleWaitStopsLaterBusinessDispatch()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     const auto send_open =
@@ -2176,13 +2176,13 @@ void TestIdleWaitStopsLaterBusinessDispatch()
             std::string error;
             Require(
                 client.Send(
-                    specforge::
+                    spectiary::
                         SerializeAutomationCommandRequest(
                             request_id,
-                            specforge::
+                            spectiary::
                                 AutomationCommandKind::
                                     SourceOpen,
-                            specforge::
+                            spectiary::
                                 AutomationSourceOpenParameters{
                                     std::move(path)}),
                     error),
@@ -2198,7 +2198,7 @@ void TestIdleWaitStopsLaterBusinessDispatch()
     SendRequest(
         client,
         "wait-after-open",
-        specforge::AutomationCommandKind::WaitIdle);
+        spectiary::AutomationCommandKind::WaitIdle);
     Require(
         ReceiveParsed(client).status ==
             "accepted",
@@ -2266,18 +2266,18 @@ void TestPreHandshakeFailureSurvivesServerClose()
 {
     for (const std::size_t extra_bytes : {1U, 4096U}) {
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         std::string error;
         Require(client.Connect(fixture.pipe_name, 1s, error), error);
         const std::string oversized(
-            specforge::kAutomationMaxMessageBytes + extra_bytes, 'x');
+            spectiary::kAutomationMaxMessageBytes + extra_bytes, 'x');
         Require(WriteOverlappedPipeMessage(client.native_handle(), oversized),
             "oversized request should reach the server");
 
         // Do not issue a read until the server has finished closing its end.
         // This makes disconnect-before-read deterministic and also catches a
         // blocking FlushFileBuffers even when its write fits in the buffer.
-        Require(specforge::AutomationNamedPipeServerTestAccess::
+        Require(spectiary::AutomationNamedPipeServerTestAccess::
                 WaitForReaderExit(fixture.server),
             "pre-handshake rejection must finish without a client read");
         const auto shutdown_started = std::chrono::steady_clock::now();
@@ -2301,7 +2301,7 @@ void TestQueueCapacityVersionAndDisconnect()
 {
     {
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         std::string error;
         Require(
             client.Connect(
@@ -2310,7 +2310,7 @@ void TestQueueCapacityVersionAndDisconnect()
                 error),
             error);
         const std::vector<char> oversized(
-            specforge::kAutomationMaxMessageBytes +
+            spectiary::kAutomationMaxMessageBytes +
                 1U,
             'x');
         Require(
@@ -2331,17 +2331,17 @@ void TestQueueCapacityVersionAndDisconnect()
 
     {
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         ConnectAndHandshake(fixture, client);
         for (std::size_t index = 0;
              index <
-             specforge::kAutomationQueueCapacity;
+             spectiary::kAutomationQueueCapacity;
              ++index) {
             SendRequest(
                 client,
                 "queue-" +
                     std::to_string(index),
-                specforge::
+                spectiary::
                     AutomationCommandKind::
                         WaitIdle);
             Require(
@@ -2352,7 +2352,7 @@ void TestQueueCapacityVersionAndDisconnect()
         SendRequest(
             client,
             "queue-overflow",
-            specforge::AutomationCommandKind::WaitIdle);
+            spectiary::AutomationCommandKind::WaitIdle);
         const auto full = ReceiveParsed(client);
         Require(
             full.status == "failed" &&
@@ -2362,7 +2362,7 @@ void TestQueueCapacityVersionAndDisconnect()
 
     {
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         std::string error;
         Require(
             client.Connect(
@@ -2387,12 +2387,12 @@ void TestQueueCapacityVersionAndDisconnect()
 
     {
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         ConnectAndHandshake(fixture, client);
         SendRequest(
             client,
             "disconnect-quit",
-            specforge::AutomationCommandKind::AppQuit);
+            spectiary::AutomationCommandKind::AppQuit);
         Require(
             ReceiveParsed(client).status ==
                 "accepted",
@@ -2417,7 +2417,7 @@ void TestQueueCapacityVersionAndDisconnect()
                 "disconnect-quit") &&
                 fixture.server.TryBeginAppQuit(
                     dequeued.front()) ==
-                    specforge::
+                    spectiary::
                         AutomationNamedPipeServer::
                             AppQuitClaimResult::
                                 Inactive &&
@@ -2431,7 +2431,7 @@ void TestQueueCapacityVersionAndDisconnect()
 void TestPreHandshakeJsonNestingIsBounded()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     std::string error;
     Require(
         client.Connect(
@@ -2453,7 +2453,7 @@ void TestPreHandshakeJsonNestingIsBounded()
         ']');
     Require(
         deeply_nested_json.size() <=
-            specforge::kAutomationMaxMessageBytes,
+            spectiary::kAutomationMaxMessageBytes,
         "deep JSON fixture must remain within max_message_bytes");
 
     Require(
@@ -2487,13 +2487,13 @@ void TestPreHandshakeJsonNestingIsBounded()
 void TestOversizedTerminalResponseIsBounded()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     SendRequest(
         client,
         "oversized-state",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     Require(
         ReceiveParsed(client).status == "accepted",
         "oversized response fixture should first accept state.get");
@@ -2502,8 +2502,8 @@ void TestOversizedTerminalResponseIsBounded()
     Require(
         commands.size() == 1,
         "oversized response fixture should dequeue state.get");
-    specforge::AutomationStateSnapshot oversized_state;
-    oversized_state.shell.current_source_path = std::string(specforge::kAutomationMaxMessageBytes, 'x');
+    spectiary::AutomationStateSnapshot oversized_state;
+    oversized_state.shell.current_source_path = std::string(spectiary::kAutomationMaxMessageBytes, 'x');
     fixture.server.CompleteState(commands.front(), oversized_state);
 
     const auto bounded = ReceiveParsed(client);
@@ -2518,7 +2518,7 @@ void TestOversizedTerminalResponseIsBounded()
     SendRequest(
         client,
         "after-oversized-state",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     Require(
         ReceiveParsed(client).status == "accepted",
         "the connection should remain usable after a bounded oversized response");
@@ -2527,7 +2527,7 @@ void TestOversizedTerminalResponseIsBounded()
         commands.size() == 1,
         "the post-oversize request should still reach the UI queue");
     fixture.server.CompleteState(
-        commands.front(), specforge::AutomationStateSnapshot{});
+        commands.front(), spectiary::AutomationStateSnapshot{});
     const auto completed = ReceiveParsed(client);
     Require(
         completed.request_id ==
@@ -2540,7 +2540,7 @@ void TestExecutionClaimsAndQuitBarrier()
 {
     {
         RunningServer setting_fixture;
-        specforge::AutomationNamedPipeClient
+        spectiary::AutomationNamedPipeClient
             setting_client;
         ConnectAndHandshake(
             setting_fixture,
@@ -2548,13 +2548,13 @@ void TestExecutionClaimsAndQuitBarrier()
         std::string setting_send_error;
         Require(
             setting_client.Send(
-                specforge::
+                spectiary::
                     SerializeAutomationCommandRequest(
                         "claimed-setting",
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 SettingSet,
-                        specforge::
+                        spectiary::
                             AutomationSettingSetParameters{
                                 .name = "ui.scale",
                                 .value =
@@ -2577,7 +2577,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "setting.set should enter the synchronized mutation claim");
         setting_fixture.server.Complete(
             setting_commands.front(),
-            specforge::AutomationCommandResult{});
+            spectiary::AutomationCommandResult{});
         Require(
             ReceiveParsed(setting_client).status ==
                 "completed",
@@ -2586,7 +2586,7 @@ void TestExecutionClaimsAndQuitBarrier()
 
     {
         RunningServer panel_fixture;
-        specforge::AutomationNamedPipeClient
+        spectiary::AutomationNamedPipeClient
             panel_client;
         ConnectAndHandshake(
             panel_fixture,
@@ -2594,13 +2594,13 @@ void TestExecutionClaimsAndQuitBarrier()
         std::string panel_send_error;
         Require(
             panel_client.Send(
-                specforge::
+                spectiary::
                     SerializeAutomationCommandRequest(
                         "claimed-panel",
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 PanelSet,
-                        specforge::
+                        spectiary::
                             AutomationPanelSetParameters{
                                 .name = "files",
                                 .visible = false,
@@ -2622,7 +2622,7 @@ void TestExecutionClaimsAndQuitBarrier()
             "panel.set should enter the synchronized mutation claim");
         panel_fixture.server.Complete(
             panel_commands.front(),
-            specforge::AutomationCommandResult{});
+            spectiary::AutomationCommandResult{});
         Require(
             ReceiveParsed(panel_client).status ==
                 "completed",
@@ -2630,19 +2630,19 @@ void TestExecutionClaimsAndQuitBarrier()
     }
 
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     std::string send_error;
     Require(
         client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "claimed-label",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             LabelAssign,
-                    specforge::
+                    spectiary::
                         AutomationLabelAssignParameters{
                             .code = 5}),
             send_error),
@@ -2653,14 +2653,14 @@ void TestExecutionClaimsAndQuitBarrier()
     SendRequest(
         client,
         "barrier-quit",
-        specforge::AutomationCommandKind::AppQuit);
+        spectiary::AutomationCommandKind::AppQuit);
     Require(
         ReceiveParsed(client).status == "accepted",
         "quit barrier fixture should be accepted");
     SendRequest(
         client,
         "after-barrier",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     Require(
         ReceiveParsed(client).status == "accepted",
         "later command should be accepted before the UI claims quit");
@@ -2675,7 +2675,7 @@ void TestExecutionClaimsAndQuitBarrier()
         commands.end(),
         [](const auto& command) {
             return command.command ==
-                   specforge::AutomationCommandKind::
+                   spectiary::AutomationCommandKind::
                        LabelAssign;
         });
     const auto quit = std::find_if(
@@ -2683,7 +2683,7 @@ void TestExecutionClaimsAndQuitBarrier()
         commands.end(),
         [](const auto& command) {
             return command.command ==
-                   specforge::AutomationCommandKind::
+                   spectiary::AutomationCommandKind::
                        AppQuit;
         });
     Require(
@@ -2693,7 +2693,7 @@ void TestExecutionClaimsAndQuitBarrier()
         "the earlier mutating command should claim its execution boundary");
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
-            specforge::AutomationNamedPipeServer::
+            spectiary::AutomationNamedPipeServer::
                 AppQuitClaimResult::
                     WaitingForEarlierExecution,
         "app.quit should wait for an earlier claimed mutation");
@@ -2710,10 +2710,10 @@ void TestExecutionClaimsAndQuitBarrier()
 
     fixture.server.Complete(
         *label,
-        specforge::AutomationCommandResult{});
+        spectiary::AutomationCommandResult{});
     Require(
         fixture.server.TryBeginAppQuit(*quit) ==
-            specforge::AutomationNamedPipeServer::
+            spectiary::AutomationNamedPipeServer::
                 AppQuitClaimResult::Claimed,
         "app.quit should claim after the earlier mutation reaches terminal");
     fixture.server.Complete(*quit);
@@ -2733,20 +2733,20 @@ void TestExecutionClaimsAndQuitBarrier()
         "a claimed mutation must terminal successfully before app.quit");
 
     RunningServer disconnected_fixture;
-    specforge::AutomationNamedPipeClient
+    spectiary::AutomationNamedPipeClient
         disconnected_client;
     ConnectAndHandshake(
         disconnected_fixture,
         disconnected_client);
     Require(
         disconnected_client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "claimed-open",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SourceOpen,
-                    specforge::
+                    spectiary::
                         AutomationSourceOpenParameters{
                             "C:\\automation\\source"}),
             send_error),
@@ -2792,7 +2792,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
 {
     const std::filesystem::path fixture_root =
         std::filesystem::temp_directory_path() /
-        ("specforge-panel-disconnect-" +
+        ("spectiary-panel-disconnect-" +
          UniqueInstanceId());
     std::error_code filesystem_error;
     std::filesystem::create_directories(
@@ -2804,7 +2804,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
 
     const auto make_storage =
         [](const std::filesystem::path& root) {
-            return specforge::ApplicationSettingsStorage{
+            return spectiary::ApplicationSettingsStorage{
                 .language_settings_path =
                     root / "ui-language.json",
                 .appearance_settings_path =
@@ -2824,18 +2824,18 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
             };
         };
     const auto send_panel_set =
-        [](specforge::AutomationNamedPipeClient& client,
+        [](spectiary::AutomationNamedPipeClient& client,
            std::string_view request_id) {
             std::string error;
             Require(
                 client.Send(
-                    specforge::
+                    spectiary::
                         SerializeAutomationCommandRequest(
                             request_id,
-                            specforge::
+                            spectiary::
                                 AutomationCommandKind::
                                     PanelSet,
-                            specforge::
+                            spectiary::
                                 AutomationPanelSetParameters{
                                     .name = "files",
                                     .visible = false,
@@ -2853,9 +2853,9 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
             fixture_root / "before-claim";
         std::filesystem::create_directories(root);
         const auto storage = make_storage(root);
-        specforge::ApplicationSettings settings(storage);
+        spectiary::ApplicationSettings settings(storage);
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         ConnectAndHandshake(fixture, client);
         send_panel_set(
             client,
@@ -2880,7 +2880,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
                 !std::filesystem::exists(
                     storage.panel_visibility_path),
             "disconnect after dequeue but before claim must retire panel.set without touching the production cache");
-        const specforge::ApplicationSettings reloaded(
+        const spectiary::ApplicationSettings reloaded(
             storage);
         Require(
             reloaded.View().panel_visibility.files,
@@ -2892,10 +2892,10 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
             fixture_root / "after-claim";
         std::filesystem::create_directories(root);
         const auto storage = make_storage(root);
-        specforge::ApplicationSettings settings(storage);
-        specforge::AutomationPanelMutationChain chain;
+        spectiary::ApplicationSettings settings(storage);
+        spectiary::AutomationPanelMutationChain chain;
         RunningServer fixture;
-        specforge::AutomationNamedPipeClient client;
+        spectiary::AutomationNamedPipeClient client;
         ConnectAndHandshake(fixture, client);
         send_panel_set(
             client,
@@ -2903,7 +2903,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
         SendRequest(
             client,
             "panel-disconnect-wait",
-            specforge::AutomationCommandKind::
+            spectiary::AutomationCommandKind::
                 WaitIdle);
         Require(
             ReceiveParsed(client).status ==
@@ -2912,7 +2912,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
         SendRequest(
             client,
             "panel-disconnect-quit",
-            specforge::AutomationCommandKind::
+            spectiary::AutomationCommandKind::
                 AppQuit);
         Require(
             ReceiveParsed(client).status ==
@@ -2924,10 +2924,10 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
         Require(
             commands.size() == 2 &&
                 commands.front().command ==
-                    specforge::AutomationCommandKind::
+                    spectiary::AutomationCommandKind::
                         PanelSet &&
                 commands.back().command ==
-                    specforge::AutomationCommandKind::
+                    spectiary::AutomationCommandKind::
                         WaitIdle &&
                 fixture.server.TryClaimExecution(
                     commands.front()),
@@ -2935,9 +2935,9 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
         const bool previous_visible =
             settings.View().panel_visibility.files;
         const auto applied = settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     false),
             {});
         Require(
@@ -2968,9 +2968,9 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
             "disconnect must retain only the claimed panel mutation while clearing wait.idle and app.quit");
 
         const auto rollback = settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     chain.baseline_visible()),
             {});
         chain.Clear();
@@ -2991,7 +2991,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
         Require(
             settings.Flush().all_saved(),
             "the disconnected panel rollback should flush through the production cache owner");
-        const specforge::ApplicationSettings reloaded(
+        const spectiary::ApplicationSettings reloaded(
             storage);
         Require(
             reloaded.View().panel_visibility.files,
@@ -3010,7 +3010,7 @@ void TestFrameCaptureFinalizationLease()
 {
     {
         RunningServer terminal_fixture;
-        specforge::AutomationNamedPipeClient
+        spectiary::AutomationNamedPipeClient
             terminal_client;
         ConnectAndHandshake(
             terminal_fixture,
@@ -3020,13 +3020,13 @@ void TestFrameCaptureFinalizationLease()
             [&](std::string_view request_id) {
                 Require(
                     terminal_client.Send(
-                        specforge::
+                        spectiary::
                             SerializeAutomationCommandRequest(
                                 request_id,
-                                specforge::
+                                spectiary::
                                     AutomationCommandKind::
                                         FrameCapture,
-                                specforge::
+                                spectiary::
                                     AutomationFrameCaptureParameters{
                                         "C:\\automation\\capture.png"}),
                         terminal_error),
@@ -3051,7 +3051,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     completed_command,
-                    specforge::AutomationCommandResult{},
+                    spectiary::AutomationCommandResult{},
                     []() {
                         return S_OK;
                     });
@@ -3059,7 +3059,7 @@ void TestFrameCaptureFinalizationLease()
             ReceiveParsed(terminal_client);
         Require(
             completed.state ==
-                    specforge::
+                    spectiary::
                         AutomationNamedPipeServer::
                             FrameCaptureFinalizationState::
                                 Completed &&
@@ -3073,7 +3073,7 @@ void TestFrameCaptureFinalizationLease()
             terminal_fixture.server
                 .TryFinalizeFrameCapture(
                     failed_command,
-                    specforge::AutomationCommandResult{},
+                    spectiary::AutomationCommandResult{},
                     []() {
                         return HRESULT_FROM_WIN32(
                             ERROR_FILE_EXISTS);
@@ -3082,7 +3082,7 @@ void TestFrameCaptureFinalizationLease()
             ReceiveParsed(terminal_client);
         Require(
             failed.state ==
-                    specforge::
+                    spectiary::
                         AutomationNamedPipeServer::
                             FrameCaptureFinalizationState::
                                 Failed &&
@@ -3094,7 +3094,7 @@ void TestFrameCaptureFinalizationLease()
 
     {
         RunningServer lease_first_fixture;
-        specforge::AutomationNamedPipeClient
+        spectiary::AutomationNamedPipeClient
             lease_first_client;
         ConnectAndHandshake(
             lease_first_fixture,
@@ -3103,13 +3103,13 @@ void TestFrameCaptureFinalizationLease()
         std::string lease_first_error;
         Require(
             lease_first_client.Send(
-                specforge::
+                spectiary::
                     SerializeAutomationCommandRequest(
                         "capture-lease-first",
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 FrameCapture,
-                        specforge::
+                        spectiary::
                             AutomationFrameCaptureParameters{
                                 "C:\\automation\\capture.png"}),
                 lease_first_error),
@@ -3131,7 +3131,7 @@ void TestFrameCaptureFinalizationLease()
         std::atomic_bool disconnect_started = false;
         std::atomic_bool disconnect_finished = false;
         std::atomic_uint32_t publish_count = 0;
-        specforge::AutomationNamedPipeServer::
+        spectiary::AutomationNamedPipeServer::
             FrameCaptureFinalizationResult
                 lease_first_finalization;
         std::thread finalizer([&]() {
@@ -3139,7 +3139,7 @@ void TestFrameCaptureFinalizationLease()
                 lease_first_fixture.server
                     .TryFinalizeFrameCapture(
                         lease_first_commands.front(),
-                        specforge::AutomationCommandResult{},
+                        spectiary::AutomationCommandResult{},
                         [&]() {
                             ++publish_count;
                             publish_entered = true;
@@ -3163,7 +3163,7 @@ void TestFrameCaptureFinalizationLease()
 
         std::thread disconnect([&]() {
             disconnect_started = true;
-            specforge::
+            spectiary::
                 AutomationNamedPipeServerTestAccess::
                     HandleDisconnect(
                         lease_first_fixture.server);
@@ -3193,7 +3193,7 @@ void TestFrameCaptureFinalizationLease()
                 .queue_snapshot();
         Require(
             lease_first_finalization.state ==
-                    specforge::
+                    spectiary::
                         AutomationNamedPipeServer::
                             FrameCaptureFinalizationState::
                                 Completed &&
@@ -3209,19 +3209,19 @@ void TestFrameCaptureFinalizationLease()
     }
 
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     std::string error;
     Require(
         client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     "capture-lease",
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             FrameCapture,
-                    specforge::
+                    spectiary::
                         AutomationFrameCaptureParameters{
                             "C:\\automation\\capture.png"}),
             error),
@@ -3239,7 +3239,7 @@ void TestFrameCaptureFinalizationLease()
     std::atomic_bool release_finalizer = false;
     std::atomic_bool worker_ready = false;
     std::atomic_bool publish_called = false;
-    specforge::AutomationNamedPipeServer::
+    spectiary::AutomationNamedPipeServer::
         FrameCaptureFinalizationResult
             finalization;
     std::thread worker([&]() {
@@ -3250,7 +3250,7 @@ void TestFrameCaptureFinalizationLease()
         finalization =
             fixture.server.TryFinalizeFrameCapture(
                 commands.front(),
-                specforge::AutomationCommandResult{},
+                spectiary::AutomationCommandResult{},
                 [&]() {
                     publish_called = true;
                     return S_OK;
@@ -3275,7 +3275,7 @@ void TestFrameCaptureFinalizationLease()
     worker.join();
     Require(
         finalization.state ==
-                specforge::
+                spectiary::
                     AutomationNamedPipeServer::
                         FrameCaptureFinalizationState::
                             Inactive &&
@@ -3286,18 +3286,18 @@ void TestFrameCaptureFinalizationLease()
 void TestDistinctRequestIdLimit()
 {
     RunningServer fixture;
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
 
     // The successful hello already consumed one distinct request ID.
     std::size_t next_index = 1;
     while (next_index <
-           specforge::kAutomationMaxRequestsPerConnection) {
+           spectiary::kAutomationMaxRequestsPerConnection) {
         constexpr std::size_t kBatchSize = 32;
         const std::size_t batch_end =
             (std::min)(
                 next_index + kBatchSize,
-                specforge::
+                spectiary::
                     kAutomationMaxRequestsPerConnection);
         std::string error;
         for (std::size_t index = next_index;
@@ -3331,7 +3331,7 @@ void TestDistinctRequestIdLimit()
     SendRequest(
         client,
         "limit-overflow",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto first_overflow = ReceiveParsed(client);
     Require(
         first_overflow.status == "failed" &&
@@ -3344,7 +3344,7 @@ void TestDistinctRequestIdLimit()
     SendRequest(
         client,
         "limit-overflow",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto repeated_overflow = ReceiveParsed(client);
     Require(
         repeated_overflow.status == "failed" &&
@@ -3355,7 +3355,7 @@ void TestDistinctRequestIdLimit()
     SendRequest(
         client,
         "limit-1",
-        specforge::AutomationCommandKind::StateGet);
+        spectiary::AutomationCommandKind::StateGet);
     const auto duplicate = ReceiveParsed(client);
     Require(
         duplicate.status == "failed" &&
@@ -3371,7 +3371,7 @@ int wmain(int argc, wchar_t** argv)
 {
     const auto fixture_mode =
         EnvironmentValue(
-            L"SPECFORGE_AUTOMATION_LAUNCHER_FIXTURE");
+            L"SPECTIARY_AUTOMATION_LAUNCHER_FIXTURE");
     if (fixture_mode) {
         return RunLauncherCleanupFixture(
             argc,

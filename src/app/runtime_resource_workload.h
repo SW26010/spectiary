@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class ShellUi;
 struct ShellRuntimeResourceObservation;
@@ -196,4 +196,4 @@ private:
     friend struct RuntimeResourceWorkloadTestAccess;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

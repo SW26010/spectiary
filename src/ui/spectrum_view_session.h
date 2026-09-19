@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class SourceCollectionActivationTransaction;
 enum class SourceCollectionSnapshotChangeReason;
@@ -160,4 +160,4 @@ void BindSourceCollectionActivationPresentationLifecycle(
     std::function<void(std::optional<std::string>)>
         deferred_restore_finished = {});
 
-}  // namespace specforge
+}  // namespace spectiary

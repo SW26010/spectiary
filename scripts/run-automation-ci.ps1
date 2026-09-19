@@ -441,7 +441,7 @@ $sampleArtifactsDirectory = Join-Path $resolvedArtifactsDirectory 'automation-sa
 $ctestTemporaryDirectory = Join-Path $resolvedBuildDirectory 'Testing\Temporary'
 $ctestTemporarySnapshot = @{}
 $previousSampleArtifactsDirectory =
-    [Environment]::GetEnvironmentVariable('SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS')
+    [Environment]::GetEnvironmentVariable('SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS')
 Write-Utf8File -Path $logPath -Contents ''
 $startedUtc = [DateTime]::UtcNow
 $ctestExitCode = 1
@@ -453,7 +453,7 @@ try {
     $ctestTemporarySnapshot = Get-CTestTemporaryFileSnapshot `
         -TemporaryDirectory $ctestTemporaryDirectory
     [Environment]::SetEnvironmentVariable(
-        'SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS',
+        'SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS',
         $sampleArtifactsDirectory,
         'Process')
     Write-Host (
@@ -491,7 +491,7 @@ finally {
         $ctestExitCode = 1
     }
     [Environment]::SetEnvironmentVariable(
-        'SPECFORGE_AUTOMATION_SAMPLES_ARTIFACTS',
+        'SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS',
         $previousSampleArtifactsDirectory,
         'Process')
     if ($ctestExitCode -ne 0 -and

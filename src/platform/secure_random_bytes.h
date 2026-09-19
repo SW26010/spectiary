@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <span>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] bool FillSecureRandomBytes(
     std::span<std::uint8_t> destination) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

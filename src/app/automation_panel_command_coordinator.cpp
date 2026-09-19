@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <ranges>
 
-namespace specforge {
+namespace spectiary {
 
 namespace {
 
@@ -450,4 +450,4 @@ bool AutomationPanelCommandCoordinator::Idle() const noexcept
                });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

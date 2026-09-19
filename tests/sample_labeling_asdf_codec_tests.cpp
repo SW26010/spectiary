@@ -33,14 +33,14 @@ void Require(bool condition, std::string_view message)
 
 std::filesystem::path FixturePath(std::string_view name)
 {
-    return std::filesystem::path(SPECFORGE_ASDF_LABELING_FIXTURE_DIR) /
+    return std::filesystem::path(SPECTIARY_ASDF_LABELING_FIXTURE_DIR) /
         std::string(name);
 }
 
 std::filesystem::path TempPath(std::string_view suffix)
 {
     std::filesystem::path path = std::filesystem::temp_directory_path();
-    path /= "specforge_sample_labeling_asdf_codec_";
+    path /= "spectiary_sample_labeling_asdf_codec_";
     path += std::to_string(
         std::chrono::steady_clock::now().time_since_epoch().count());
     path += std::string(suffix);
@@ -80,7 +80,7 @@ nlohmann::json ReadJsonFile(const std::filesystem::path& path)
         reinterpret_cast<const char*>(bytes.data()), bytes.size());
     std::string error;
     std::optional<nlohmann::json> parsed =
-        specforge::ParseJson(text, error);
+        spectiary::ParseJson(text, error);
     Require(parsed.has_value(), "JSON fixture should parse");
     return std::move(*parsed);
 }
@@ -91,7 +91,7 @@ bool JsonEquals(const nlohmann::json& left, const nlohmann::json& right)
 }
 
 nlohmann::json SemanticSummary(
-    const specforge::SampleLabelingDocument& document)
+    const spectiary::SampleLabelingDocument& document)
 {
     nlohmann::json sample_names = nlohmann::json::array();
     sample_names.get_ref<nlohmann::json::array_t&>().reserve(document.source.roster.sample_names.size());
@@ -101,7 +101,7 @@ nlohmann::json SemanticSummary(
 
     nlohmann::json labels = nlohmann::json::array();
     labels.get_ref<nlohmann::json::array_t&>().reserve(document.labeling.labels.size());
-    for (const specforge::SampleLabelingDocumentLabel& label :
+    for (const spectiary::SampleLabelingDocumentLabel& label :
         document.labeling.labels) {
         labels.push_back(nlohmann::json::object({
             {"code", nlohmann::json(label.code)},
@@ -118,7 +118,7 @@ nlohmann::json SemanticSummary(
 
     nlohmann::json origin_annotation = nlohmann::json();
     if (document.labeling.canonical_metadata.origin.annotation) {
-        const specforge::SampleLabelingAnnotationOrigin& annotation =
+        const spectiary::SampleLabelingAnnotationOrigin& annotation =
             *document.labeling.canonical_metadata.origin.annotation;
         origin_annotation = nlohmann::json::object({
             {"name", nlohmann::json(annotation.name)},
@@ -129,7 +129,7 @@ nlohmann::json SemanticSummary(
         });
     }
     nlohmann::json authors = nlohmann::json::array();
-    for (const specforge::SampleLabelingAuthor& author :
+    for (const spectiary::SampleLabelingAuthor& author :
         document.labeling.canonical_metadata.authors) {
         nlohmann::json summary = nlohmann::json::object({
             {"name", nlohmann::json(author.name)},
@@ -174,10 +174,10 @@ nlohmann::json SemanticSummary(
         {"task_id", nlohmann::json(document.labeling.id)},
         {"task_name", nlohmann::json(document.labeling.name)},
         {"created_at", nlohmann::json(
-             specforge::FormatCanonicalTimestamp(
+             spectiary::FormatCanonicalTimestamp(
                  document.labeling.canonical_metadata.created_at))},
         {"modified_at", nlohmann::json(
-             specforge::FormatCanonicalTimestamp(
+             spectiary::FormatCanonicalTimestamp(
                  document.labeling.canonical_metadata.modified_at))},
         {"origin_kind", nlohmann::json(
              document.labeling.canonical_metadata.origin.kind)},
@@ -441,9 +441,9 @@ void CorruptFirstBlockPayload(const std::filesystem::path& path)
     Require(file.good(), "source-mutation fixture payload should be patchable");
 }
 
-specforge::SampleLabelingDocument ProductionDocument(bool explicit_roster = true)
+spectiary::SampleLabelingDocument ProductionDocument(bool explicit_roster = true)
 {
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = "sha256-v1:production-source";
     document.source.kind = "folder";
     document.source.name = "巡天样本";
@@ -451,7 +451,7 @@ specforge::SampleLabelingDocument ProductionDocument(bool explicit_roster = true
     document.source.sample_count = 3;
     if (explicit_roster) {
         document.source.roster.identity_kind =
-            std::string{specforge::kSampleLabelingDocumentExplicitNamesRoster};
+            std::string{spectiary::kSampleLabelingDocumentExplicitNamesRoster};
         document.source.roster.sample_names =
             {"alpha.fits", "星系-β.fits", "échelle-γ.fits"};
     }
@@ -459,7 +459,7 @@ specforge::SampleLabelingDocument ProductionDocument(bool explicit_roster = true
     document.labeling.id =
         "00000000-0000-4000-8000-000000000001";
     document.labeling.name = "天体分类";
-    const auto timestamp = specforge::ParseCanonicalTimestamp(
+    const auto timestamp = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:00.000Z");
     Require(timestamp.has_value(), "production timestamp fixture should parse");
     document.labeling.canonical_metadata.created_at = *timestamp;
@@ -488,8 +488,8 @@ std::string BuildSourceYaml(
 
 std::string CurrentBuildSourceYaml()
 {
-    const specforge::SampleLabelingDocumentBuildSource current =
-        specforge::CurrentSampleLabelingDocumentBuildSource();
+    const spectiary::SampleLabelingDocumentBuildSource current =
+        spectiary::CurrentSampleLabelingDocumentBuildSource();
     return BuildSourceYaml(current.source_mode,
         current.source_revision
             ? std::optional<std::string_view>{*current.source_revision}
@@ -529,22 +529,22 @@ std::string YamlSpecialCharacterMatrix()
     return result;
 }
 
-specforge::SampleLabelingAsdfWriteResult WriteDocument(
+spectiary::SampleLabelingAsdfWriteResult WriteDocument(
     const std::filesystem::path& path,
-    const specforge::SampleLabelingDocument& document)
+    const spectiary::SampleLabelingDocument& document)
 {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "test output should open");
-    const specforge::SampleLabelingAsdfWriteResult result =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult result =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     output.close();
     return result;
 }
 
 std::string_view CodecErrorKindName(
-    specforge::SampleLabelingAsdfErrorKind kind)
+    spectiary::SampleLabelingAsdfErrorKind kind)
 {
-    using Kind = specforge::SampleLabelingAsdfErrorKind;
+    using Kind = spectiary::SampleLabelingAsdfErrorKind;
     switch (kind) {
     case Kind::None:
         return "None";
@@ -565,9 +565,9 @@ std::string_view CodecErrorKindName(
 }
 
 std::string_view StoreErrorKindName(
-    specforge::SampleLabelingAsdfStoreErrorKind kind)
+    spectiary::SampleLabelingAsdfStoreErrorKind kind)
 {
-    using Kind = specforge::SampleLabelingAsdfStoreErrorKind;
+    using Kind = spectiary::SampleLabelingAsdfStoreErrorKind;
     switch (kind) {
     case Kind::None:
         return "None";
@@ -592,9 +592,9 @@ void WriteJsonField(std::ostream& output,
     std::string_view value,
     bool trailing_comma = true)
 {
-    specforge::WriteJsonString(output, name);
+    spectiary::WriteJsonString(output, name);
     output << ':';
-    specforge::WriteJsonString(output, value);
+    spectiary::WriteJsonString(output, value);
     if (trailing_comma) {
         output << ',';
     }
@@ -602,9 +602,9 @@ void WriteJsonField(std::ostream& output,
 
 int RunReadProductionChecksumOracle(const std::filesystem::path& path)
 {
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
-    specforge::SampleLabelingDocument expected = ProductionDocument();
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
+    spectiary::SampleLabelingDocument expected = ProductionDocument();
     if (read.succeeded()) {
         expected.build_source = read.document->build_source;
     }
@@ -637,8 +637,8 @@ int RunReadProductionChecksumOracle(const std::filesystem::path& path)
 
 int RunOverwriteProductionChecksumOracle(const std::filesystem::path& path)
 {
-    const specforge::SampleLabelingAsdfStoreWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+    const spectiary::SampleLabelingAsdfStoreWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(
             path, ProductionDocument());
     std::cout << '{';
     std::cout << "\"succeeded\":" << (write.succeeded() ? "true" : "false")
@@ -751,16 +751,16 @@ void TestYamlScalarMaterializationUsesResidentPreflight()
     const std::filesystem::path path = TempPath("_yaml_alias_budget.asdf");
     WriteYamlAliasAmplificationFixture(
         path, label_count, label_name_bytes);
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::sample_labeling_asdf_test_seam::ReadWithResidentBudget(
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::sample_labeling_asdf_test_seam::ReadWithResidentBudget(
             path, reader_budget);
     Require(
         !read.succeeded() &&
             read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+                spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "YAML alias-expanded canonical text must obey the shared resident budget");
 
-    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    spectiary::SampleLabelingDocument document = ProductionDocument(false);
     document.labeling.labels.clear();
     document.labeling.labels.reserve(label_count);
     for (std::size_t index = 0; index < label_count; ++index) {
@@ -772,8 +772,8 @@ void TestYamlScalarMaterializationUsesResidentPreflight()
     document.annotation.values = {0, 1, 2};
     g_metadata_build_observed = false;
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::sample_labeling_asdf_test_seam::WriteWithResidentBudget(
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::sample_labeling_asdf_test_seam::WriteWithResidentBudget(
             output,
             document,
             writer_budget,
@@ -781,7 +781,7 @@ void TestYamlScalarMaterializationUsesResidentPreflight()
     Require(
         !write.succeeded() &&
             write.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+                spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer canonical text and escaped metadata must obey the shared resident budget");
     Require(
         !g_metadata_build_observed && output.str().empty(),
@@ -817,12 +817,12 @@ void TestRejectsDuplicateYamlMappingKeys()
         ReplaceTextOnce(bytes, duplicate.old_text, duplicate.new_text);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             !read.succeeded() && !read.durable_base.has_value() &&
                 read.error.kind ==
-                    specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+                    spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
             "duplicate YAML mapping keys must be rejected before a durable "
             "base is created");
 
@@ -842,21 +842,21 @@ protected:
 void TestExactReadDistinguishesTruncationFromIoFailure()
 {
     std::istringstream truncated("ab", std::ios::binary);
-    const specforge::SampleLabelingAsdfError truncated_error =
-        specforge::sample_labeling_asdf_test_seam::ProbeExactRead(
+    const spectiary::SampleLabelingAsdfError truncated_error =
+        spectiary::sample_labeling_asdf_test_seam::ProbeExactRead(
             truncated, 4);
     Require(
         truncated_error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+            spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
         "clean EOF should remain a malformed truncated document");
 
     ThrowingReadBuffer failing_buffer;
     std::istream failing_input(&failing_buffer);
-    const specforge::SampleLabelingAsdfError io_error =
-        specforge::sample_labeling_asdf_test_seam::ProbeExactRead(
+    const spectiary::SampleLabelingAsdfError io_error =
+        spectiary::sample_labeling_asdf_test_seam::ProbeExactRead(
             failing_input, 4);
     Require(
-        io_error.kind == specforge::SampleLabelingAsdfErrorKind::IoFailure,
+        io_error.kind == spectiary::SampleLabelingAsdfErrorKind::IoFailure,
         "badbit short reads should be reported as I/O failures");
 }
 
@@ -865,18 +865,18 @@ void TestReadsApprovedPythonFixtures()
     const nlohmann::json manifest =
         ReadJsonFile(FixturePath("manifest.json"));
     const nlohmann::json* reference =
-        specforge::JsonObjectMember(manifest, "reference");
+        spectiary::JsonObjectMember(manifest, "reference");
     Require(
         reference != nullptr &&
-            specforge::ReadJsonStringMember(*reference, "asdf") == "5.3.1" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(*reference, "asdf") == "5.3.1" &&
+            spectiary::ReadJsonStringMember(
                 *reference, "asdf_standard_version") == "1.5.0" &&
-            specforge::ReadJsonStringMember(
+            spectiary::ReadJsonStringMember(
                 *reference, "schema_version") ==
-                specforge::kSampleLabelingDocumentSchemaVersion,
+                spectiary::kSampleLabelingDocumentSchemaVersion,
         "fixture manifest should pin the approved ASDF oracle and standard");
     const nlohmann::json* fixtures =
-        specforge::JsonObjectMember(manifest, "fixtures");
+        spectiary::JsonObjectMember(manifest, "fixtures");
     Require(
         fixtures != nullptr &&
             fixtures->type() == nlohmann::json::value_t::array,
@@ -885,39 +885,39 @@ void TestReadsApprovedPythonFixtures()
     std::size_t approved_count = 0;
     for (const nlohmann::json& fixture : (*fixtures)) {
         const std::optional<std::string> path =
-            specforge::ReadJsonStringMember(fixture, "path");
+            spectiary::ReadJsonStringMember(fixture, "path");
         const std::optional<std::string> expected_hash =
-            specforge::ReadJsonStringMember(fixture, "sha256");
+            spectiary::ReadJsonStringMember(fixture, "sha256");
         Require(
             path.has_value() && expected_hash.has_value() &&
                 expected_hash->size() == 64U,
             "every ASDF fixture should carry a manifest SHA-256");
         std::string hash_error;
         const std::optional<std::string> actual_hash =
-            specforge::ComputeFileSha256(FixturePath(*path), &hash_error);
+            spectiary::ComputeFileSha256(FixturePath(*path), &hash_error);
         Require(
             actual_hash.has_value() && *actual_hash == *expected_hash,
             std::string("ASDF fixture bytes must match the manifest SHA-256: ") +
                 *path + (hash_error.empty() ? std::string{}
                                             : " (" + hash_error + ")"));
 
-        if (!specforge::ReadJsonBoolMember(
+        if (!spectiary::ReadJsonBoolMember(
                 fixture, "structurally_valid", false) ||
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 fixture, "semantically_valid", false) ||
-            !specforge::ReadJsonBoolMember(
+            !spectiary::ReadJsonBoolMember(
                 fixture, "native_profile_supported", false)) {
             continue;
         }
         const std::optional<std::string> semantic_path =
-            specforge::ReadJsonStringMember(fixture, "semantic_path");
+            spectiary::ReadJsonStringMember(fixture, "semantic_path");
         Require(
             path.has_value() && semantic_path.has_value() &&
                 !semantic_path->empty(),
             "approved fixture should name its ASDF and semantic oracle");
 
-        const specforge::SampleLabelingAsdfReadResult result =
-            specforge::ReadSampleLabelingAsdfDocument(FixturePath(*path));
+        const spectiary::SampleLabelingAsdfReadResult result =
+            spectiary::ReadSampleLabelingAsdfDocument(FixturePath(*path));
         Require(result.succeeded(), "approved Python ASDF fixture should read");
         const nlohmann::json expected =
             ReadJsonFile(FixturePath(*semantic_path));
@@ -935,7 +935,7 @@ void TestRejectsManifestSemanticViolationsWithControlledErrors()
     const nlohmann::json manifest =
         ReadJsonFile(FixturePath("manifest.json"));
     const nlohmann::json* fixtures =
-        specforge::JsonObjectMember(manifest, "fixtures");
+        spectiary::JsonObjectMember(manifest, "fixtures");
     Require(
         fixtures != nullptr &&
             fixtures->type() == nlohmann::json::value_t::array,
@@ -944,9 +944,9 @@ void TestRejectsManifestSemanticViolationsWithControlledErrors()
     std::size_t semantic_invalid_count = 0;
     for (const nlohmann::json& fixture : (*fixtures)) {
         const nlohmann::json* structurally_valid_member =
-            specforge::JsonObjectMember(fixture, "structurally_valid");
+            spectiary::JsonObjectMember(fixture, "structurally_valid");
         const nlohmann::json* semantically_valid_member =
-            specforge::JsonObjectMember(fixture, "semantically_valid");
+            spectiary::JsonObjectMember(fixture, "semantically_valid");
         Require(
             structurally_valid_member != nullptr &&
                 structurally_valid_member->type() ==
@@ -970,23 +970,23 @@ void TestRejectsManifestSemanticViolationsWithControlledErrors()
         }
 
         const std::optional<std::string> path =
-            specforge::ReadJsonStringMember(fixture, "path");
+            spectiary::ReadJsonStringMember(fixture, "path");
         const std::optional<std::string> expected_error =
-            specforge::ReadJsonStringMember(fixture, "expected_error");
+            spectiary::ReadJsonStringMember(fixture, "expected_error");
         Require(
             path.has_value() && !path->empty() &&
                 expected_error.has_value() && !expected_error->empty(),
             "semantic-invalid fixture should name its ASDF and expected error");
 
-        const specforge::SampleLabelingAsdfReadResult result =
-            specforge::ReadSampleLabelingAsdfDocument(FixturePath(*path));
+        const spectiary::SampleLabelingAsdfReadResult result =
+            spectiary::ReadSampleLabelingAsdfDocument(FixturePath(*path));
         Require(
             !result.succeeded(),
             std::string("semantic-invalid fixture should be rejected: ") +
                 *path);
         Require(
             result.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                spectiary::SampleLabelingAsdfErrorKind::SemanticValidationFailed,
             std::string(
                 "semantic-invalid fixture should return a typed semantic error: ") +
                 *path);
@@ -1015,9 +1015,9 @@ void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
         "current writer must emit only Spectiary producer contracts");
     ReplaceTextOnce(legacy_bytes, "spectiary.sample_labeling", "specforge.sample_labeling");
     WriteAllBytes(legacy_brand_path, legacy_bytes);
-    const auto legacy_brand = specforge::ReadSampleLabelingAsdfDocument(legacy_brand_path);
+    const auto legacy_brand = spectiary::ReadSampleLabelingAsdfDocument(legacy_brand_path);
     Require(!legacy_brand.succeeded() && legacy_brand.error.kind ==
-        specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+        spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
         "legacy brand canonical documents must be rejected explicitly");
     Require(ReadAllBytes(legacy_brand_path) == legacy_bytes,
         "rejecting a legacy document must not modify it");
@@ -1034,12 +1034,12 @@ void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
         "schema_version: \"2.0.0\"",
         "schema_version: \"1.0.0\"");
     WriteAllBytes(legacy_schema_path, bytes);
-    const specforge::SampleLabelingAsdfReadResult legacy_schema =
-        specforge::ReadSampleLabelingAsdfDocument(legacy_schema_path);
+    const spectiary::SampleLabelingAsdfReadResult legacy_schema =
+        spectiary::ReadSampleLabelingAsdfDocument(legacy_schema_path);
     Require(
         !legacy_schema.succeeded() &&
             legacy_schema.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+                spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
         "schema 1.0 documents must be rejected after the schema 2 cutover");
 
     const std::filesystem::path reserved_name_path =
@@ -1053,12 +1053,12 @@ void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
         "\nannotation:\n  kind: ",
         "\nannotation:\n  name: \"legacy annotation\"\n  kind: ");
     WriteAllBytes(reserved_name_path, bytes);
-    const specforge::SampleLabelingAsdfReadResult reserved_name =
-        specforge::ReadSampleLabelingAsdfDocument(reserved_name_path);
+    const spectiary::SampleLabelingAsdfReadResult reserved_name =
+        spectiary::ReadSampleLabelingAsdfDocument(reserved_name_path);
     Require(
         !reserved_name.succeeded() &&
             reserved_name.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed,
         "annotation.name must be rejected as a reserved schema 2 path");
 
@@ -1104,12 +1104,12 @@ void TestSchemaTwoRequiresFixedAnnotationAlignment()
         ReplaceTextOnce(bytes, canonical_alignment, test_case.replacement);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             !read.succeeded() &&
                 read.error.kind ==
-                    specforge::SampleLabelingAsdfErrorKind::
+                    spectiary::SampleLabelingAsdfErrorKind::
                         SemanticValidationFailed,
             std::string("invalid annotation alignment should return a controlled semantic error: ") +
                 std::string(test_case.name));
@@ -1154,8 +1154,8 @@ void TestReaderEnforcesBuildSourceIdentity()
         ReplaceTextOnce(bytes, CurrentBuildSourceYaml(), test_case.yaml);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         if (test_case.valid) {
             Require(
                 read.succeeded() &&
@@ -1171,7 +1171,7 @@ void TestReaderEnforcesBuildSourceIdentity()
             Require(
                 !read.succeeded() &&
                     read.error.kind ==
-                        specforge::SampleLabelingAsdfErrorKind::
+                        spectiary::SampleLabelingAsdfErrorKind::
                             SemanticValidationFailed,
                 "reader should return a controlled semantic error for an invalid build source tuple");
         }
@@ -1185,8 +1185,8 @@ void TestRewritesRefreshBuildSourceIdentity()
 {
     constexpr std::string_view old_revision =
         "0123456789abcdef0123456789abcdef01234567";
-    const specforge::SampleLabelingDocumentBuildSource current =
-        specforge::CurrentSampleLabelingDocumentBuildSource();
+    const spectiary::SampleLabelingDocumentBuildSource current =
+        spectiary::CurrentSampleLabelingDocumentBuildSource();
     const std::string old_build = current.source_mode == "working_tree"
         ? BuildSourceYaml("head", old_revision)
         : BuildSourceYaml("working_tree", std::nullopt);
@@ -1203,24 +1203,24 @@ void TestRewritesRefreshBuildSourceIdentity()
     ReplaceTextOnce(bytes, CurrentBuildSourceYaml(), old_build);
     WriteAllBytes(input_path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(opened.succeeded() && opened.durable_base,
         "old-build generation should provide a rewrite base");
     Require(
         opened.document->build_source.source_mode != current.source_mode,
         "rewrite fixture should represent a different producer build");
 
-    specforge::SampleLabelingDocument values_edited = *opened.document;
+    spectiary::SampleLabelingDocument values_edited = *opened.document;
     values_edited.annotation.values = {0, 0, 1};
     std::ofstream values_output(
         values_path, std::ios::binary | std::ios::trunc);
-    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult values_rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *opened.durable_base, values_output, values_edited);
     values_output.close();
-    const specforge::SampleLabelingAsdfReadResult values_read =
-        specforge::ReadSampleLabelingAsdfDocument(values_path);
+    const spectiary::SampleLabelingAsdfReadResult values_read =
+        spectiary::ReadSampleLabelingAsdfDocument(values_path);
     Require(
         values_rewrite.succeeded() && values_read.succeeded() &&
             values_read.document->build_source.source_mode ==
@@ -1229,16 +1229,16 @@ void TestRewritesRefreshBuildSourceIdentity()
                 current.source_revision,
         "values rewrite must stamp the current producer build identity");
 
-    specforge::SampleLabelingDocument metadata_edited = *opened.document;
+    spectiary::SampleLabelingDocument metadata_edited = *opened.document;
     metadata_edited.labeling.name = "Current-build metadata generation";
     std::ofstream metadata_output(
         metadata_path, std::ios::binary | std::ios::trunc);
-    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult metadata_rewrite =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *opened.durable_base, metadata_output, metadata_edited);
     metadata_output.close();
-    const specforge::SampleLabelingAsdfReadResult metadata_read =
-        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    const spectiary::SampleLabelingAsdfReadResult metadata_read =
+        spectiary::ReadSampleLabelingAsdfDocument(metadata_path);
     Require(
         metadata_rewrite.succeeded() && metadata_read.succeeded() &&
             metadata_read.document->build_source.source_mode ==
@@ -1261,21 +1261,21 @@ void TestRejectsMalformedCorruptAndUnsupportedInputs()
         "malformed_truncated_block.asdf",
         "malformed_zlib_payload.asdf"};
     for (const std::string_view fixture : malformed) {
-        const specforge::SampleLabelingAsdfReadResult result =
-            specforge::ReadSampleLabelingAsdfDocument(FixturePath(fixture));
+        const spectiary::SampleLabelingAsdfReadResult result =
+            spectiary::ReadSampleLabelingAsdfDocument(FixturePath(fixture));
         Require(!result.succeeded(), "malformed fixture should be rejected");
         Require(
-            result.error.kind != specforge::SampleLabelingAsdfErrorKind::None,
+            result.error.kind != spectiary::SampleLabelingAsdfErrorKind::None,
             "malformed fixture should return a controlled typed error");
     }
 
-    const specforge::SampleLabelingAsdfReadResult checksum =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult checksum =
+        spectiary::ReadSampleLabelingAsdfDocument(
             FixturePath("profile_checksum.asdf"));
     Require(!checksum.succeeded(), "checksummed profile should be rejected");
     Require(
         checksum.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+            spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
         "nonzero checksum should be an unsupported-profile error");
     Require(
         checksum.error.message ==
@@ -1283,12 +1283,12 @@ void TestRejectsMalformedCorruptAndUnsupportedInputs()
             "production profile",
         "checksum rejection should describe the production wire profile");
 
-    const specforge::SampleLabelingAsdfReadResult missing =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult missing =
+        spectiary::ReadSampleLabelingAsdfDocument(
             TempPath("_missing.asdf"));
     Require(!missing.succeeded(), "missing input should fail without throwing");
     Require(
-        missing.error.kind == specforge::SampleLabelingAsdfErrorKind::OpenFailed,
+        missing.error.kind == spectiary::SampleLabelingAsdfErrorKind::OpenFailed,
         "missing input should return an open error");
 }
 
@@ -1312,12 +1312,12 @@ void TestRejectsNdarrayMaskProfile()
         }
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(!read.succeeded(), "v1 must reject every ndarray mask");
         Require(
             read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+                spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
             "ndarray mask should return a controlled profile error");
         Require(
             !read.durable_base,
@@ -1341,21 +1341,21 @@ void TestRejectsUnreferencedAndOutOfOrderBlocks()
         AppendCorruptZlibBlock(bytes);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             !read.succeeded(),
             "fixed ASDF profile must reject every unreferenced extra block");
         Require(
             read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+                spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
             "extra blocks should return a controlled unsupported-profile error");
 
         std::error_code cleanup_error;
         std::filesystem::remove(path, cleanup_error);
     }
 
-    specforge::SampleLabelingDocument document = ProductionDocument();
+    spectiary::SampleLabelingDocument document = ProductionDocument();
     document.source.roster.sample_names = {"A", "B", "C"};
     document.annotation.values = {65, 66, 67};
     document.labeling.labels = {
@@ -1382,14 +1382,14 @@ void TestRejectsUnreferencedAndOutOfOrderBlocks()
     bytes[values_source + source_value_offset] = '0';
     WriteAllBytes(order_path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult out_of_order =
-        specforge::ReadSampleLabelingAsdfDocument(order_path);
+    const spectiary::SampleLabelingAsdfReadResult out_of_order =
+        spectiary::ReadSampleLabelingAsdfDocument(order_path);
     Require(
         !out_of_order.succeeded(),
         "fixed ASDF profile must reject out-of-order block sources");
     Require(
         out_of_order.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+            spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
         "out-of-order sources should return a controlled profile error");
 
     std::error_code cleanup_error;
@@ -1406,7 +1406,7 @@ void TestRejectsMalformedBlockIndexes()
     AppendText(valid_bytes, StandardBlockIndex(ParseRawAsdf(valid_bytes)));
     WriteAllBytes(valid_path, valid_bytes);
     Require(
-        specforge::ReadSampleLabelingAsdfDocument(valid_path).succeeded(),
+        spectiary::ReadSampleLabelingAsdfDocument(valid_path).succeeded(),
         "a standard block index should remain readable");
 
     const std::array malformed_indexes{
@@ -1423,12 +1423,12 @@ void TestRejectsMalformedBlockIndexes()
         AppendText(bytes, malformed_indexes[index]);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(!read.succeeded(), "malformed block index must be rejected");
         Require(
             read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+                spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
             "malformed block index should return a controlled format error");
         std::error_code cleanup_error;
         std::filesystem::remove(path, cleanup_error);
@@ -1444,8 +1444,8 @@ void TestDurableBaseUsesTheValidatedPrefixSnapshot()
     Require(
         WriteDocument(path, ProductionDocument()).succeeded(),
         "source-mutation input should be written");
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::sample_labeling_asdf_test_seam::ReadWithBeforePrefixCapture(
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::sample_labeling_asdf_test_seam::ReadWithBeforePrefixCapture(
             path, CorruptFirstBlockPayload);
     Require(
         !read.succeeded(),
@@ -1479,12 +1479,12 @@ void TestReaderEnforcesCombinedResidentMemoryBudget()
         8);
     WriteAllBytes(path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(!read.succeeded(), "stacked reader allocations must be bounded");
     Require(
         read.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "combined allocation pressure should return a resource-limit error");
 
     std::error_code cleanup_error;
@@ -1493,8 +1493,8 @@ void TestReaderEnforcesCombinedResidentMemoryBudget()
 
 void TestSharedProfilePreflightBoundaryMatrix()
 {
-    using specforge::SampleLabelingAsdfErrorKind;
-    using specforge::sample_labeling_asdf_test_seam::ProfilePreflightProbe;
+    using spectiary::SampleLabelingAsdfErrorKind;
+    using spectiary::sample_labeling_asdf_test_seam::ProfilePreflightProbe;
 
     constexpr std::size_t metadata_limit = 8ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t resident_limit = 512ULL * 1024ULL * 1024ULL;
@@ -1615,8 +1615,8 @@ void TestSharedProfilePreflightBoundaryMatrix()
     };
 
     for (const BoundaryCase& boundary : cases) {
-        const specforge::SampleLabelingAsdfError error =
-            specforge::sample_labeling_asdf_test_seam::ProbeProfilePreflight(
+        const spectiary::SampleLabelingAsdfError error =
+            spectiary::sample_labeling_asdf_test_seam::ProbeProfilePreflight(
                 boundary.probe);
         Require(
             error.kind == boundary.expected,
@@ -1631,17 +1631,17 @@ void TestWriterRejectsRosterNulBeforeOutput()
         std::string("a\0b", 3),
         std::string("a\0", 2)};
     for (const std::string& name : names) {
-        specforge::SampleLabelingDocument document = ProductionDocument();
+        spectiary::SampleLabelingDocument document = ProductionDocument();
         document.source.roster.sample_names[0] = name;
         std::ostringstream output(std::ios::binary);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(output, document);
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(output, document);
         Require(
             !write.succeeded(),
             "U+0000 roster names must be rejected instead of lossy encoding");
         Require(
             write.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                spectiary::SampleLabelingAsdfErrorKind::SemanticValidationFailed,
             "unrepresentable roster NUL should return a semantic error");
         Require(
             output.str().empty(),
@@ -1651,15 +1651,15 @@ void TestWriterRejectsRosterNulBeforeOutput()
 
 void TestWriterRejectsInvalidUtf8BeforeOutput()
 {
-    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    spectiary::SampleLabelingDocument document = ProductionDocument(false);
     document.source.name = std::string(1, static_cast<char>(0xc3));
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(!write.succeeded(), "invalid canonical UTF-8 must be rejected");
     Require(
         write.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+            spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
         "invalid canonical UTF-8 should return a controlled text error");
     Require(
         output.str().empty(),
@@ -1670,21 +1670,21 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
 {
     struct WriterCase {
         std::string email;
-        specforge::SampleLabelingAsdfErrorKind expected;
+        spectiary::SampleLabelingAsdfErrorKind expected;
     };
     const std::array writer_cases{
         WriterCase{std::string(1, static_cast<char>(0xc3)),
-            specforge::SampleLabelingAsdfErrorKind::MalformedDocument},
+            spectiary::SampleLabelingAsdfErrorKind::MalformedDocument},
         WriterCase{" \t ",
-            specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed},
+            spectiary::SampleLabelingAsdfErrorKind::SemanticValidationFailed},
     };
     for (const WriterCase& writer_case : writer_cases) {
-        specforge::SampleLabelingDocument document = ProductionDocument(false);
+        spectiary::SampleLabelingDocument document = ProductionDocument(false);
         document.labeling.canonical_metadata.authors = {
             {.name = "Author", .email = writer_case.email}};
         std::ostringstream output(std::ios::binary);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(output, document);
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(output, document);
         Require(
             !write.succeeded() && write.error.kind == writer_case.expected &&
                 output.str().empty(),
@@ -1692,7 +1692,7 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
     }
 
     const std::filesystem::path path = TempPath("_invalid_author_email.asdf");
-    specforge::SampleLabelingDocument valid = ProductionDocument(false);
+    spectiary::SampleLabelingDocument valid = ProductionDocument(false);
     valid.labeling.canonical_metadata.authors = {
         {.name = "Author", .email = "a@b"}};
     Require(
@@ -1719,8 +1719,8 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
         ReplaceTextOnce(
             string_bytes, "    email: \"a@b\"", reader_case.replacement);
         WriteAllBytes(path, string_bytes);
-        const specforge::SampleLabelingAsdfReadResult string_read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult string_read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             string_read.succeeded() &&
                 string_read.document->labeling.canonical_metadata
@@ -1733,12 +1733,12 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
     ReplaceTextOnce(
         whitespace_bytes, "    email: \"a@b\"", "    email: \"   \"");
     WriteAllBytes(path, whitespace_bytes);
-    const specforge::SampleLabelingAsdfReadResult whitespace_read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult whitespace_read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         !whitespace_read.succeeded() &&
             whitespace_read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed,
         "native reader must reject a present whitespace-only author email");
 
@@ -1762,12 +1762,12 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
         ReplaceTextOnce(
             typed_bytes, "    email: \"a@b\"", reader_case.replacement);
         WriteAllBytes(path, typed_bytes);
-        const specforge::SampleLabelingAsdfReadResult typed_read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult typed_read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             !typed_read.succeeded() &&
                 typed_read.error.kind ==
-                    specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+                    spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
             std::string("native reader must reject a present ") +
                 std::string(reader_case.description) +
                 " author email");
@@ -1788,12 +1788,12 @@ void TestAuthorEmailValidationIsControlledBeforeOutputAndHydration()
         "author email value should exist before UTF-8 corruption");
     email[static_cast<std::ptrdiff_t>(email_value_offset)] = 0xc3U;
     WriteAllBytes(path, invalid_utf8_bytes);
-    const specforge::SampleLabelingAsdfReadResult invalid_utf8_read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult invalid_utf8_read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         !invalid_utf8_read.succeeded() &&
             invalid_utf8_read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+                spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
         "native reader must reject invalid UTF-8 in a present author email");
 
     std::error_code cleanup_error;
@@ -1818,12 +1818,12 @@ void TestReaderRejectsInvalidUtf8InUnknownYamlBeforeHydration()
     bytes.insert(marker, invalid_comment.begin(), invalid_comment.end());
     WriteAllBytes(path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         !read.succeeded() &&
             read.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+                spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
         "invalid UTF-8 anywhere in YAML metadata must be rejected");
 
     std::error_code cleanup_error;
@@ -1833,11 +1833,11 @@ void TestReaderRejectsInvalidUtf8InUnknownYamlBeforeHydration()
 void TestWriterEscapesYamlSpecialCharacterMatrixLosslessly()
 {
     const std::string special_characters = YamlSpecialCharacterMatrix();
-    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    spectiary::SampleLabelingDocument document = ProductionDocument(false);
     document.source.name = special_characters;
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(
         write.succeeded(),
         "every YAML special character should be writable losslessly");
@@ -1859,8 +1859,8 @@ void TestWriterEscapesYamlSpecialCharacterMatrixLosslessly()
         std::span<const unsigned char>(
             reinterpret_cast<const unsigned char*>(bytes.data()),
             bytes.size()));
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     if (!read.succeeded()) {
         throw std::runtime_error(
             "YAML special matrix read failed: " + read.error.message);
@@ -1903,7 +1903,7 @@ void TestWriterRejectsDocumentsOutsideReaderResidentBudget()
 {
     constexpr std::size_t sample_count = 68;
     constexpr std::size_t roster_width = 1'000'000;
-    specforge::SampleLabelingDocument document = ProductionDocument();
+    spectiary::SampleLabelingDocument document = ProductionDocument();
     document.source.sample_count = sample_count;
     document.source.roster.sample_names.clear();
     document.source.roster.sample_names.reserve(sample_count);
@@ -1914,17 +1914,17 @@ void TestWriterRejectsDocumentsOutsideReaderResidentBudget()
         document.source.roster.sample_names.push_back(std::move(name));
     }
     document.annotation.values.assign(
-        sample_count, specforge::kSampleLabelingDocumentUnlabeledValue);
+        sample_count, spectiary::kSampleLabelingDocumentUnlabeledValue);
 
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(
         !write.succeeded(),
         "writer must reject a document that the reader resident budget rejects");
     Require(
         write.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer/reader capacity mismatch should be a resource-limit error");
     Require(
         output.str().empty(),
@@ -1934,8 +1934,8 @@ void TestWriterRejectsDocumentsOutsideReaderResidentBudget()
 void TestWriterEmitsFixedProductionProfileAndRoundTrips()
 {
     const std::filesystem::path path = TempPath("_profile.asdf");
-    const specforge::SampleLabelingDocument document = ProductionDocument();
-    const specforge::SampleLabelingAsdfWriteResult write =
+    const spectiary::SampleLabelingDocument document = ProductionDocument();
+    const spectiary::SampleLabelingAsdfWriteResult write =
         WriteDocument(path, document);
     Require(write.succeeded(), "production ASDF writer should succeed");
 
@@ -1959,8 +1959,8 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
             "    mode: \"by_index\"\n"
             "    target: \"sample_roster\"\n") != std::string::npos,
         "writer should explicitly declare by-index alignment against the sample roster");
-    const specforge::SampleLabelingDocumentBuildSource current_build =
-        specforge::CurrentSampleLabelingDocumentBuildSource();
+    const spectiary::SampleLabelingDocumentBuildSource current_build =
+        spectiary::CurrentSampleLabelingDocumentBuildSource();
     Require(
         text.find(CurrentBuildSourceYaml() + "format_kind:") !=
             std::string::npos,
@@ -1968,8 +1968,8 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
     Require(
         text.find(
             "asdf_library: !core/software-1.0.0 {name: Spectiary, version: "
-            SPECFORGE_EXPECTED_VERSION "}") != std::string::npos,
-        "writer provenance should use the configured SpecForge project version");
+            SPECTIARY_EXPECTED_VERSION "}") != std::string::npos,
+        "writer provenance should use the configured Spectiary project version");
 
     const RawAsdf raw = ParseRawAsdf(bytes);
     Require(raw.blocks.size() == 2, "explicit roster output should use two blocks");
@@ -1988,8 +1988,8 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
             "production blocks should use zero checksum bytes");
     }
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(read.succeeded(), "production writer output should be readable");
     Require(
         read.document->build_source.source_mode ==
@@ -2031,8 +2031,8 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
                 authors_position + empty_authors.size()));
         WriteAllBytes(absent_path, absent_bytes);
     }
-    const specforge::SampleLabelingAsdfReadResult absent_read =
-        specforge::ReadSampleLabelingAsdfDocument(absent_path);
+    const spectiary::SampleLabelingAsdfReadResult absent_read =
+        spectiary::ReadSampleLabelingAsdfDocument(absent_path);
     Require(
         absent_read.succeeded() &&
             absent_read.document->labeling.canonical_metadata.authors.empty(),
@@ -2051,9 +2051,9 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
         fresh_metadata.find("\n  authors:") == std::string_view::npos,
         "fresh writer should omit an unset authors field completely");
 
-    specforge::SampleLabelingDocument authored = ProductionDocument();
+    spectiary::SampleLabelingDocument authored = ProductionDocument();
     authored.labeling.canonical_metadata.authors = {
-        {.name = "SpecForge maintainer",
+        {.name = "Spectiary maintainer",
             .identifier = "https://example.invalid/maintainer",
             .email = "Maintainer@Example.INVALID"},
         {.name = "验证者", .identifier = std::nullopt, .email = std::nullopt}};
@@ -2078,43 +2078,43 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
         "\n  authors:\n",
         "\n  future_author_container: \"preserved\"\n  authors:\n");
     WriteAllBytes(authored_path, authored_bytes);
-    const specforge::SampleLabelingAsdfReadResult authored_read =
-        specforge::ReadSampleLabelingAsdfDocument(authored_path);
+    const spectiary::SampleLabelingAsdfReadResult authored_read =
+        spectiary::ReadSampleLabelingAsdfDocument(authored_path);
     Require(
         authored_read.succeeded() && authored_read.durable_base &&
             authored_read.document->labeling.canonical_metadata.authors ==
                 authored.labeling.canonical_metadata.authors,
         "non-empty authors should round-trip without loss");
 
-    const auto values_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto values_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:01.000Z");
-    const auto metadata_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto metadata_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:02.000Z");
     Require(
         values_modified_at && metadata_modified_at,
         "author rewrite timestamps should parse");
-    specforge::SampleLabelingDocument email_mismatch = *authored_read.document;
+    spectiary::SampleLabelingDocument email_mismatch = *authored_read.document;
     email_mismatch.labeling.canonical_metadata.authors[0].email =
         "changed@example.invalid";
     email_mismatch.labeling.canonical_metadata.modified_at =
         *values_modified_at;
     std::ostringstream mismatch_output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult mismatch =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult mismatch =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *authored_read.durable_base,
             mismatch_output,
             email_mismatch);
     Require(
         !mismatch.succeeded() &&
             mismatch.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed &&
             mismatch_output.str().empty(),
         "values-only rewrite identity must include author email");
 
     const std::filesystem::path values_path =
         TempPath("_authors_values_rewrite.asdf");
-    specforge::SampleLabelingDocument values_replacement =
+    spectiary::SampleLabelingDocument values_replacement =
         *authored_read.document;
     values_replacement.annotation.values = {0, 0, 1};
     values_replacement.labeling.canonical_metadata.modified_at =
@@ -2122,8 +2122,8 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
     std::ofstream values_output(
         values_path, std::ios::binary | std::ios::trunc);
     Require(values_output.good(), "author values rewrite output should open");
-    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult values_rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *authored_read.durable_base,
             values_output,
             values_replacement);
@@ -2141,7 +2141,7 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
 
     const std::filesystem::path metadata_path =
         TempPath("_authors_metadata_rewrite.asdf");
-    specforge::SampleLabelingDocument metadata_replacement = values_replacement;
+    spectiary::SampleLabelingDocument metadata_replacement = values_replacement;
     metadata_replacement.labeling.canonical_metadata.authors[0].email =
         "updated@example.invalid";
     metadata_replacement.labeling.canonical_metadata.modified_at =
@@ -2149,8 +2149,8 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
     std::ofstream metadata_output(
         metadata_path, std::ios::binary | std::ios::trunc);
     Require(metadata_output.good(), "author metadata rewrite output should open");
-    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult metadata_rewrite =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *values_rewrite.durable_base,
             metadata_output,
             metadata_replacement);
@@ -2162,8 +2162,8 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
             : metadata_rewrite.error.message);
     const std::vector<unsigned char> metadata_bytes =
         ReadAllBytes(metadata_path);
-    const specforge::SampleLabelingAsdfReadResult metadata_read =
-        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    const spectiary::SampleLabelingAsdfReadResult metadata_read =
+        spectiary::ReadSampleLabelingAsdfDocument(metadata_path);
     Require(
         metadata_read.succeeded() &&
             metadata_read.document->labeling.canonical_metadata.authors ==
@@ -2182,7 +2182,7 @@ void TestAuthorsAreOptionalAndRoundTripOnlyWhenPresent()
 void TestWriterEmitsSourceIndexProductionProfileAndRoundTrips()
 {
     const std::filesystem::path path = TempPath("_source_index_profile.asdf");
-    const specforge::SampleLabelingDocument document =
+    const spectiary::SampleLabelingDocument document =
         ProductionDocument(false);
     Require(
         WriteDocument(path, document).succeeded(),
@@ -2208,8 +2208,8 @@ void TestWriterEmitsSourceIndexProductionProfileAndRoundTrips()
             metadata.find("    source: 1\n") == std::string_view::npos,
         "source-index metadata should bind values to the only block");
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         read.succeeded() &&
             JsonEquals(
@@ -2231,31 +2231,31 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
     const RawAsdf before_raw = ParseRawAsdf(before);
     Require(before_raw.blocks.size() == 2, "block-reuse fixture should have two blocks");
 
-    const specforge::SampleLabelingAsdfReadResult validated =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult validated =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(validated.succeeded(), "block-reuse input should validate once");
     Require(
         validated.durable_base && validated.durable_base->valid(),
         "validated production input should expose a durable rewrite base");
-    const auto advanced_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto advanced_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:01.000Z");
     Require(advanced_modified_at.has_value(),
         "advanced modified timestamp fixture should parse");
     std::ostringstream rejected_output(std::ios::binary);
-    specforge::SampleLabelingDocument invalid_replacement =
+    spectiary::SampleLabelingDocument invalid_replacement =
         *validated.document;
     invalid_replacement.annotation.values = {42, 0, 1};
     invalid_replacement.labeling.canonical_metadata.modified_at =
         *advanced_modified_at;
-    const specforge::SampleLabelingAsdfWriteResult rejected =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rejected =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             rejected_output,
             invalid_replacement);
     Require(
         !rejected.succeeded() &&
             rejected.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::SemanticValidationFailed &&
+                spectiary::SampleLabelingAsdfErrorKind::SemanticValidationFailed &&
             rejected_output.str().empty(),
         "rewrite preflight must reject invalid values before output begins");
     std::error_code cleanup_error;
@@ -2266,13 +2266,13 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "block-reuse output should open");
     const std::array<std::int32_t, 3> replacement_values{0, 0, 1};
-    specforge::SampleLabelingDocument replacement = *validated.document;
+    spectiary::SampleLabelingDocument replacement = *validated.document;
     replacement.annotation.values.assign(
         replacement_values.begin(), replacement_values.end());
     replacement.labeling.canonical_metadata.modified_at =
         *advanced_modified_at;
-    const specforge::SampleLabelingAsdfWriteResult rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
             replacement);
@@ -2292,10 +2292,10 @@ void TestLabelRewriteReusesRosterBlockVerbatim()
                 before.begin() + static_cast<std::ptrdiff_t>(before_raw.blocks[0].offset + before_raw.blocks[0].size),
                 after.begin() + static_cast<std::ptrdiff_t>(after_raw.blocks[0].offset)),
         "encoded roster block must be copied byte-for-byte");
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
     Require(read.succeeded(), "rewritten production document should read");
-    specforge::SampleLabelingDocument expected = ProductionDocument();
+    spectiary::SampleLabelingDocument expected = ProductionDocument();
     expected.annotation.values.assign(
         replacement_values.begin(), replacement_values.end());
     expected.labeling.canonical_metadata.modified_at =
@@ -2349,39 +2349,39 @@ void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
     AppendText(before, StandardBlockIndex(before_raw));
     WriteAllBytes(input_path, before);
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         opened.succeeded() && opened.durable_base,
         "forward-unknown fixture should expose a durable block-reuse base");
-    specforge::SampleLabelingDocument replacement = *opened.document;
+    spectiary::SampleLabelingDocument replacement = *opened.document;
     replacement.build_source =
-        specforge::CurrentSampleLabelingDocumentBuildSource();
+        spectiary::CurrentSampleLabelingDocumentBuildSource();
     replacement.annotation.values = {1, 0};
     replacement.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:01.000Z");
 
-    specforge::SampleLabelingDocument metadata_mismatch = replacement;
+    spectiary::SampleLabelingDocument metadata_mismatch = replacement;
     metadata_mismatch.labeling.name = "metadata changes need a full rewrite";
     std::ostringstream rejected_output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult rejected =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rejected =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *opened.durable_base,
             rejected_output,
             metadata_mismatch);
     Require(
         !rejected.succeeded() &&
             rejected.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed &&
             rejected_output.str().empty(),
         "values codec must reject non-value canonical changes before emitting output");
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "forward-unknown values output should open");
-    const specforge::SampleLabelingAsdfWriteResult rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *opened.durable_base,
             output,
             replacement);
@@ -2433,8 +2433,8 @@ void TestTimestampedValuesRewriteRebuildsForwardMetadataAndReusesOnlyRoster()
                 },
         "timestamped values rewrite must rebuild metadata, retain root/build/task unknown mappings, drop input padding, and emit a recomputed block index");
 
-    const specforge::SampleLabelingAsdfReadResult reopened =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    const spectiary::SampleLabelingAsdfReadResult reopened =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
     Require(
         reopened.succeeded() &&
             JsonEquals(
@@ -2454,25 +2454,25 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     Require(
         WriteDocument(input_path, ProductionDocument(false)).succeeded(),
         "source-index input should be written");
-    const specforge::SampleLabelingAsdfReadResult validated =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult validated =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         validated.succeeded() && validated.durable_base,
         "source-index input should expose a durable rewrite base");
-    const auto advanced_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto advanced_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:01.000Z");
     Require(advanced_modified_at.has_value(),
         "source-index modified timestamp fixture should parse");
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     const std::array<std::int32_t, 3> replacement_values{-1, 1, 1};
-    specforge::SampleLabelingDocument replacement = *validated.document;
+    spectiary::SampleLabelingDocument replacement = *validated.document;
     replacement.annotation.values.assign(
         replacement_values.begin(), replacement_values.end());
     replacement.labeling.canonical_metadata.modified_at =
         *advanced_modified_at;
-    const specforge::SampleLabelingAsdfWriteResult rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *validated.durable_base,
             output,
             replacement);
@@ -2484,9 +2484,9 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     Require(
         ParseRawAsdf(ReadAllBytes(output_path)).blocks.size() == 1,
         "source-index output should retain a single values block");
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
-    specforge::SampleLabelingDocument expected = ProductionDocument(false);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
+    spectiary::SampleLabelingDocument expected = ProductionDocument(false);
     expected.annotation.values.assign(
         replacement_values.begin(), replacement_values.end());
     expected.labeling.canonical_metadata.modified_at =
@@ -2511,11 +2511,11 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
     const std::filesystem::path metadata_path =
         TempPath("_promotion_values_metadata_output.asdf");
 
-    specforge::SampleLabelingDocument promoted = ProductionDocument();
+    spectiary::SampleLabelingDocument promoted = ProductionDocument();
     promoted.labeling.canonical_metadata.origin.kind =
         "annotation_promotion";
     promoted.labeling.canonical_metadata.origin.annotation =
-        specforge::SampleLabelingAnnotationOrigin{
+        spectiary::SampleLabelingAnnotationOrigin{
             .name = "labels.csv",
             .format = "csv",
             .fingerprint = "sha256:" + std::string(64, 'a')};
@@ -2523,13 +2523,13 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
         WriteDocument(input_path, promoted).succeeded(),
         "promotion chain input should be written");
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         opened.succeeded() && opened.durable_base,
         "promotion chain input should expose a durable base");
 
-    const auto values_modified_at = specforge::ParseCanonicalTimestamp(
+    const auto values_modified_at = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:01.000Z");
     Require(values_modified_at.has_value(),
         "promotion values timestamp should parse");
@@ -2538,13 +2538,13 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
         values_path, std::ios::binary | std::ios::trunc);
     Require(values_output.good(),
         "promotion values output should open");
-    specforge::SampleLabelingDocument values_replacement = *opened.document;
+    spectiary::SampleLabelingDocument values_replacement = *opened.document;
     values_replacement.annotation.values.assign(
         replacement_values.begin(), replacement_values.end());
     values_replacement.labeling.canonical_metadata.modified_at =
         *values_modified_at;
-    const specforge::SampleLabelingAsdfWriteResult values_rewrite =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult values_rewrite =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             *opened.durable_base,
             values_output,
             values_replacement);
@@ -2555,8 +2555,8 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
             ? "promotion values rewrite should return a refreshed durable base"
             : values_rewrite.error.message);
 
-    const specforge::SampleLabelingAsdfReadResult values_generation =
-        specforge::ReadSampleLabelingAsdfDocument(values_path);
+    const spectiary::SampleLabelingAsdfReadResult values_generation =
+        spectiary::ReadSampleLabelingAsdfDocument(values_path);
     Require(
         values_generation.succeeded() &&
             values_generation.document->labeling.canonical_metadata.origin ==
@@ -2566,19 +2566,19 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
                     replacement_values.begin(), replacement_values.end()),
         "values rewrite should preserve promotion provenance in the written generation");
 
-    specforge::SampleLabelingDocument metadata_edited =
+    spectiary::SampleLabelingDocument metadata_edited =
         *values_generation.document;
     metadata_edited.labeling.name = "Renamed promoted task";
     metadata_edited.labeling.labels[0].name = "Renamed Galaxy";
     metadata_edited.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:02.000Z");
     std::ofstream metadata_output(
         metadata_path, std::ios::binary | std::ios::trunc);
     Require(metadata_output.good(),
         "promotion metadata output should open");
-    const specforge::SampleLabelingAsdfWriteResult metadata_rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult metadata_rewrite =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *values_rewrite.durable_base,
             metadata_output,
             metadata_edited);
@@ -2589,8 +2589,8 @@ void TestPromotionValuesRewriteRefreshesMetadataRewriteBase()
             ? "metadata rewrite after promotion values rewrite should succeed"
             : metadata_rewrite.error.message);
 
-    const specforge::SampleLabelingAsdfReadResult reopened =
-        specforge::ReadSampleLabelingAsdfDocument(metadata_path);
+    const spectiary::SampleLabelingAsdfReadResult reopened =
+        spectiary::ReadSampleLabelingAsdfDocument(metadata_path);
     Require(
         reopened.succeeded() &&
             JsonEquals(
@@ -2610,11 +2610,11 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         TempPath("_forward_metadata_input.asdf");
     const std::filesystem::path output_path =
         TempPath("_forward_metadata_output.asdf");
-    specforge::SampleLabelingDocument original = ProductionDocument();
+    spectiary::SampleLabelingDocument original = ProductionDocument();
     original.labeling.canonical_metadata.origin.kind =
         "annotation_promotion";
     original.labeling.canonical_metadata.origin.annotation =
-        specforge::SampleLabelingAnnotationOrigin{
+        spectiary::SampleLabelingAnnotationOrigin{
             .name = "labels.csv",
             .format = "csv",
              .fingerprint =
@@ -2667,41 +2667,41 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         "    shortcut: \"g\"\n    future_label: \"label-survives\"\n");
     WriteAllBytes(input_path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         opened.succeeded() && opened.durable_base,
         "forward-metadata input should expose a durable base");
-    specforge::SampleLabelingDocument edited = *opened.document;
+    spectiary::SampleLabelingDocument edited = *opened.document;
     edited.annotation.values = {1, 1, 0};
     edited.labeling.name = "Edited task";
     edited.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:01.000Z");
     edited.labeling.labels[0].name = "Edited Galaxy";
     edited.labeling.labels[0].shortcut = "1";
     edited.labeling.canonical_metadata.authors.clear();
 
-    specforge::SampleLabelingDocument unrelated = edited;
+    spectiary::SampleLabelingDocument unrelated = edited;
     unrelated.labeling.id = "another-task";
     std::ostringstream mismatch_output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult identity_mismatch =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult identity_mismatch =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *opened.durable_base,
             mismatch_output,
             unrelated);
     Require(
         !identity_mismatch.succeeded() &&
             identity_mismatch.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed &&
             mismatch_output.str().empty(),
         "public metadata rewrite must reject a durable base from another document identity before output");
 
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "forward-metadata output should open");
-    const specforge::SampleLabelingAsdfWriteResult rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult rewrite =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *opened.durable_base,
             output,
             edited);
@@ -2745,8 +2745,8 @@ void TestMetadataRewritePreservesForwardUnknownFields()
         rewritten.find("authors:") == std::string::npos,
         "metadata rewrite should remove authors when the canonical list is empty");
 
-    const specforge::SampleLabelingAsdfReadResult reopened =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    const spectiary::SampleLabelingAsdfReadResult reopened =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
     Require(
         reopened.succeeded() &&
             JsonEquals(
@@ -2763,26 +2763,26 @@ void TestMetadataRewriteEnforcesImmutableCanonicalProvenance()
 {
     const std::filesystem::path input_path =
         TempPath("_immutable_metadata_input.asdf");
-    specforge::SampleLabelingDocument original = ProductionDocument();
+    spectiary::SampleLabelingDocument original = ProductionDocument();
     original.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:10.000Z");
     Require(
         WriteDocument(input_path, original).succeeded(),
         "immutable-metadata input should be written");
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         opened.succeeded() && opened.durable_base,
         "immutable-metadata input should expose a durable base");
 
     const auto RequireRejectedBeforeOutput =
-        [&](const specforge::SampleLabelingDocument& edited,
+        [&](const spectiary::SampleLabelingDocument& edited,
             std::string_view expectation) {
             std::ostringstream output(std::ios::binary);
-            const specforge::SampleLabelingAsdfWriteResult rewrite =
-                specforge::
+            const spectiary::SampleLabelingAsdfWriteResult rewrite =
+                spectiary::
                     RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
                         *opened.durable_base,
                         output,
@@ -2790,25 +2790,25 @@ void TestMetadataRewriteEnforcesImmutableCanonicalProvenance()
             Require(
                 !rewrite.succeeded() &&
                     rewrite.error.kind ==
-                        specforge::SampleLabelingAsdfErrorKind::
+                        spectiary::SampleLabelingAsdfErrorKind::
                             SemanticValidationFailed &&
                     output.str().empty(),
                 expectation);
         };
 
-    specforge::SampleLabelingDocument changed_created_at = original;
+    spectiary::SampleLabelingDocument changed_created_at = original;
     changed_created_at.labeling.canonical_metadata.created_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:01.000Z");
     RequireRejectedBeforeOutput(
         changed_created_at,
         "metadata rewrite must not replace the durable created_at");
 
-    specforge::SampleLabelingDocument changed_origin = original;
+    spectiary::SampleLabelingDocument changed_origin = original;
     changed_origin.labeling.canonical_metadata.origin.kind =
         "annotation_promotion";
     changed_origin.labeling.canonical_metadata.origin.annotation =
-        specforge::SampleLabelingAnnotationOrigin{
+        spectiary::SampleLabelingAnnotationOrigin{
             .name = "labels.csv",
             .format = "csv",
             .fingerprint = "sha256:" + std::string(64, 'a')};
@@ -2816,9 +2816,9 @@ void TestMetadataRewriteEnforcesImmutableCanonicalProvenance()
         changed_origin,
         "metadata rewrite must not replace the durable origin provenance");
 
-    specforge::SampleLabelingDocument regressed_modified_at = original;
+    spectiary::SampleLabelingDocument regressed_modified_at = original;
     regressed_modified_at.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:09.000Z");
     RequireRejectedBeforeOutput(
         regressed_modified_at,
@@ -2830,15 +2830,15 @@ void TestMetadataRewriteEnforcesImmutableCanonicalProvenance()
 
 void TestWriterOriginPolicyPreservesReaderForwardCompatibility()
 {
-    specforge::SampleLabelingDocument future = ProductionDocument();
+    spectiary::SampleLabelingDocument future = ProductionDocument();
     future.labeling.canonical_metadata.origin.kind = "future";
     std::ostringstream fresh_output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult fresh_write =
-        specforge::WriteSampleLabelingAsdfDocument(fresh_output, future);
+    const spectiary::SampleLabelingAsdfWriteResult fresh_write =
+        spectiary::WriteSampleLabelingAsdfDocument(fresh_output, future);
     Require(
         !fresh_write.succeeded() &&
             fresh_write.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed &&
             fresh_output.str().empty(),
         "the current fresh writer must reject a reader-only future origin kind before output");
@@ -2854,23 +2854,23 @@ void TestWriterOriginPolicyPreservesReaderForwardCompatibility()
     ReplaceTextOnce(bytes, "kind: \"manual\"", "kind: \"future\"");
     WriteAllBytes(input_path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult opened =
-        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    const spectiary::SampleLabelingAsdfReadResult opened =
+        spectiary::ReadSampleLabelingAsdfDocument(input_path);
     Require(
         opened.succeeded() && opened.durable_base &&
             opened.document->labeling.canonical_metadata.origin.kind ==
                 "future",
         "the reader should continue accepting valid lowercase future origin tokens");
 
-    specforge::SampleLabelingDocument edited = *opened.document;
+    spectiary::SampleLabelingDocument edited = *opened.document;
     edited.labeling.name = "Forward-preserved future origin";
     edited.labeling.canonical_metadata.modified_at =
-        *specforge::ParseCanonicalTimestamp(
+        *spectiary::ParseCanonicalTimestamp(
             "2026-08-30T08:00:01.000Z");
     std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
     Require(output.good(), "future-origin rewrite output should open");
-    const specforge::SampleLabelingAsdfWriteResult rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const spectiary::SampleLabelingAsdfWriteResult rewrite =
+        spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
             *opened.durable_base,
             output,
             edited);
@@ -2881,8 +2881,8 @@ void TestWriterOriginPolicyPreservesReaderForwardCompatibility()
             ? "an unchanged future origin should survive a forward-compatible rewrite"
             : rewrite.error.message);
 
-    const specforge::SampleLabelingAsdfReadResult reopened =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    const spectiary::SampleLabelingAsdfReadResult reopened =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
     Require(
         reopened.succeeded() &&
             reopened.document->labeling.canonical_metadata.origin.kind ==
@@ -2897,17 +2897,17 @@ void TestWriterOriginPolicyPreservesReaderForwardCompatibility()
 
 void TestCodecRequiresPortableAnnotationOriginName()
 {
-    specforge::SampleLabelingDocument promoted = ProductionDocument();
+    spectiary::SampleLabelingDocument promoted = ProductionDocument();
     promoted.labeling.canonical_metadata.origin.kind =
         "annotation_promotion";
     promoted.labeling.canonical_metadata.origin.annotation =
-        specforge::SampleLabelingAnnotationOrigin{
+        spectiary::SampleLabelingAnnotationOrigin{
             .name = "初始标签.csv",
             .format = "csv",
             .fingerprint = "sha256:" + std::string(64, 'b')};
     std::ostringstream portable_output(std::ios::binary);
     Require(
-        specforge::WriteSampleLabelingAsdfDocument(
+        spectiary::WriteSampleLabelingAsdfDocument(
             portable_output, promoted).succeeded(),
         "a Unicode basename should remain valid portable annotation provenance");
 
@@ -2919,17 +2919,17 @@ void TestCodecRequiresPortableAnnotationOriginName()
              "\\\\server\\share\\labels.csv",
              "C:labels.csv",
          }) {
-        specforge::SampleLabelingDocument nonportable = promoted;
+        spectiary::SampleLabelingDocument nonportable = promoted;
         nonportable.labeling.canonical_metadata.origin.annotation->name =
             nonportable_name;
         std::ostringstream rejected_output(std::ios::binary);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 rejected_output, nonportable);
         Require(
             !write.succeeded() &&
                 write.error.kind ==
-                    specforge::SampleLabelingAsdfErrorKind::
+                    spectiary::SampleLabelingAsdfErrorKind::
                         SemanticValidationFailed &&
                 rejected_output.str().empty(),
             "fresh writer must reject rooted or directory-bearing annotation provenance names before output");
@@ -2948,12 +2948,12 @@ void TestCodecRequiresPortableAnnotationOriginName()
         "name: \"/tmp/labels.csv\"");
     WriteAllBytes(absolute_origin_path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult absolute_origin =
-        specforge::ReadSampleLabelingAsdfDocument(absolute_origin_path);
+    const spectiary::SampleLabelingAsdfReadResult absolute_origin =
+        spectiary::ReadSampleLabelingAsdfDocument(absolute_origin_path);
     Require(
         !absolute_origin.succeeded() && !absolute_origin.durable_base &&
             absolute_origin.error.kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed,
         "production reader must reject an absolute local annotation provenance path");
 
@@ -2963,16 +2963,16 @@ void TestCodecRequiresPortableAnnotationOriginName()
 
 void TestRewriteRejectsUnverifiedRosterBlocks()
 {
-    const specforge::SampleLabelingAsdfReadResult corrupt =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult corrupt =
+        spectiary::ReadSampleLabelingAsdfDocument(
             FixturePath("malformed_zlib_payload.asdf"));
     Require(!corrupt.succeeded(), "corrupt roster zlib must fail initial validation");
     Require(
         !corrupt.durable_base,
         "corrupt roster must never produce a durable rewrite base");
 
-    const specforge::SampleLabelingAsdfReadResult uncompressed =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult uncompressed =
+        spectiary::ReadSampleLabelingAsdfDocument(
             FixturePath("folder_roster.asdf"));
     Require(uncompressed.succeeded(), "read path may accept uncompressed ASDF");
     Require(
@@ -3000,8 +3000,8 @@ void TestRewriteRejectsUnverifiedRosterBlocks()
         file.write("big   ", 6);
         Require(file.good(), "roster byteorder fixture should be patched");
     }
-    const specforge::SampleLabelingAsdfReadResult big_endian =
-        specforge::ReadSampleLabelingAsdfDocument(big_endian_input);
+    const spectiary::SampleLabelingAsdfReadResult big_endian =
+        spectiary::ReadSampleLabelingAsdfDocument(big_endian_input);
     Require(
         !big_endian.succeeded() || !big_endian.durable_base,
         "big-endian roster must never produce a production rewrite base");
@@ -3044,8 +3044,8 @@ void TestReaderCompatibilityProfileCannotBecomeDurableVerbatim()
         bytes, "    byteorder: little\n", "    byteorder: big   \n");
     WriteAllBytes(path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     const nlohmann::json expected =
         ReadJsonFile(FixturePath("folder_roster.semantic.json"));
     Require(
@@ -3077,8 +3077,8 @@ void TestDurableRosterRequiresDefaultZlibFlevel()
         SetZlibFlevel(bytes, raw.blocks[0], flevel);
         WriteAllBytes(path, bytes);
 
-        const specforge::SampleLabelingAsdfReadResult read =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult read =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(
             read.succeeded() &&
                 JsonEquals(SemanticSummary(*read.document),
@@ -3095,18 +3095,18 @@ void TestDurableRosterRequiresDefaultZlibFlevel()
 
 void TestWriterRejectsUnreadableRosterWidth()
 {
-    specforge::SampleLabelingDocument document = ProductionDocument();
+    spectiary::SampleLabelingDocument document = ProductionDocument();
     document.source.sample_count = 1;
     document.source.roster.sample_names = {
         std::string(1'000'001, 'x')};
     document.annotation.values = {0};
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(!write.succeeded(), "writer must reject an unreadable roster width");
     Require(
         write.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer and reader should share the roster-width resource limit");
 }
 
@@ -3129,14 +3129,14 @@ void TestCanonicalReaderRequiresExplicitSourceIdentity()
         bytes.begin() + static_cast<std::ptrdiff_t>(line_end + 1U));
     WriteAllBytes(path, bytes);
 
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(
         !read.succeeded(),
-        "SpecForge sample-labeling schema 2.0.0 must require source identity");
+        "Spectiary sample-labeling schema 2.0.0 must require source identity");
     Require(
         read.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::MalformedDocument,
+            spectiary::SampleLabelingAsdfErrorKind::MalformedDocument,
         "missing canonical source identity should be a malformed document");
 
     std::error_code cleanup_error;
@@ -3145,7 +3145,7 @@ void TestCanonicalReaderRequiresExplicitSourceIdentity()
 
 void TestWriterRejectsUnreadableLabelCount()
 {
-    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    spectiary::SampleLabelingDocument document = ProductionDocument(false);
     document.labeling.labels.clear();
     document.labeling.labels.reserve(100'001);
     for (std::int32_t code = 0; code < 100'001; ++code) {
@@ -3153,27 +3153,27 @@ void TestWriterRejectsUnreadableLabelCount()
     }
     document.annotation.values = {0, 0, 0};
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(!write.succeeded(), "writer must reject an unreadable label count");
     Require(
         write.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer and reader should share the label-count resource limit");
 }
 
 void TestWriterRejectsUnreadableAuthorCountBeforeOutput()
 {
-    specforge::SampleLabelingDocument document = ProductionDocument(false);
+    spectiary::SampleLabelingDocument document = ProductionDocument(false);
     document.labeling.canonical_metadata.authors.assign(
         10'001, {.name = "Author", .identifier = std::nullopt});
     std::ostringstream output(std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult write =
-        specforge::WriteSampleLabelingAsdfDocument(output, document);
+    const spectiary::SampleLabelingAsdfWriteResult write =
+        spectiary::WriteSampleLabelingAsdfDocument(output, document);
     Require(!write.succeeded(), "writer must reject an unreadable author count");
     Require(
         write.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "writer and reader should share the author-count resource limit");
     Require(
         output.str().empty(),
@@ -3193,12 +3193,12 @@ void TestMetadataReadIsBounded()
         }
         output << "...\n";
     }
-    const specforge::SampleLabelingAsdfReadResult result =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult result =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(!result.succeeded(), "oversized metadata should be rejected");
     Require(
         result.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "oversized metadata should hit the bounded streaming limit");
     std::error_code cleanup_error;
     std::filesystem::remove(path, cleanup_error);
@@ -3214,12 +3214,12 @@ void TestMetadataReadIsBounded()
             output << chunk;
         }
     }
-    const specforge::SampleLabelingAsdfReadResult long_line_result =
-        specforge::ReadSampleLabelingAsdfDocument(long_line_path);
+    const spectiary::SampleLabelingAsdfReadResult long_line_result =
+        spectiary::ReadSampleLabelingAsdfDocument(long_line_path);
     Require(!long_line_result.succeeded(), "oversized YAML line should be rejected");
     Require(
         long_line_result.error.kind ==
-            specforge::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            spectiary::SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
         "a single YAML line should not bypass the streaming metadata limit");
     std::filesystem::remove(long_line_path, cleanup_error);
 }
@@ -3231,10 +3231,10 @@ int main(int argc, char* argv[])
     try {
         if (argc == 3 &&
             std::string_view(argv[1]) == "write-yaml-specials-oracle") {
-            specforge::SampleLabelingDocument document =
+            spectiary::SampleLabelingDocument document =
                 ProductionDocument(false);
             document.source.name = YamlSpecialCharacterMatrix();
-            const specforge::SampleLabelingAsdfWriteResult write =
+            const spectiary::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], document);
             if (!write.succeeded()) {
                 std::cerr << "production YAML-special oracle write failed: "
@@ -3245,13 +3245,13 @@ int main(int argc, char* argv[])
         }
         if (argc == 3 &&
             std::string_view(argv[1]) == "write-author-email-oracle") {
-            specforge::SampleLabelingDocument document = ProductionDocument();
+            spectiary::SampleLabelingDocument document = ProductionDocument();
             document.labeling.canonical_metadata.authors = {
                 {.name = "Alice",
                     .identifier = "https://orcid.org/0000-0001-2345-6789",
                     .email = "alice@example.org"},
                 {.name = "验证者"}};
-            const specforge::SampleLabelingAsdfWriteResult write =
+            const spectiary::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], document);
             if (!write.succeeded()) {
                 std::cerr << "production author-email oracle write failed: "
@@ -3262,7 +3262,7 @@ int main(int argc, char* argv[])
         }
         if (argc == 3 &&
             std::string_view(argv[1]) == "write-explicit-roster-oracle") {
-            const specforge::SampleLabelingAsdfWriteResult write =
+            const spectiary::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], ProductionDocument());
             if (!write.succeeded()) {
                 std::cerr << "production explicit-roster oracle write failed: "
@@ -3273,7 +3273,7 @@ int main(int argc, char* argv[])
         }
         if (argc == 3 &&
             std::string_view(argv[1]) == "write-source-index-oracle") {
-            const specforge::SampleLabelingAsdfWriteResult write =
+            const spectiary::SampleLabelingAsdfWriteResult write =
                 WriteDocument(argv[2], ProductionDocument(false));
             if (!write.succeeded()) {
                 std::cerr << "production source-index oracle write failed: "
@@ -3293,8 +3293,8 @@ int main(int argc, char* argv[])
         }
         if (argc == 4 &&
             std::string_view(argv[1]) == "rewrite-explicit-roster-oracle") {
-            const specforge::SampleLabelingAsdfReadResult read =
-                specforge::ReadSampleLabelingAsdfDocument(argv[2]);
+            const spectiary::SampleLabelingAsdfReadResult read =
+                spectiary::ReadSampleLabelingAsdfDocument(argv[2]);
             if (!read.succeeded() || !read.durable_base) {
                 std::cerr << "production explicit-roster oracle input did not "
                              "produce a durable base\n";
@@ -3307,10 +3307,10 @@ int main(int argc, char* argv[])
                              "to open\n";
                 return 1;
             }
-            specforge::SampleLabelingDocument replacement = *read.document;
+            spectiary::SampleLabelingDocument replacement = *read.document;
             replacement.annotation.values = {0, 0, 1};
-            const specforge::SampleLabelingAsdfWriteResult rewrite =
-                specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            const spectiary::SampleLabelingAsdfWriteResult rewrite =
+                spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
                     replacement);
@@ -3324,14 +3324,14 @@ int main(int argc, char* argv[])
         }
         if (argc == 4 &&
             std::string_view(argv[1]) == "rewrite-metadata-oracle") {
-            const specforge::SampleLabelingAsdfReadResult read =
-                specforge::ReadSampleLabelingAsdfDocument(argv[2]);
+            const spectiary::SampleLabelingAsdfReadResult read =
+                spectiary::ReadSampleLabelingAsdfDocument(argv[2]);
             if (!read.succeeded() || !read.durable_base) {
                 std::cerr << "production metadata oracle input did not produce "
                              "a durable base\n";
                 return 1;
             }
-            specforge::SampleLabelingDocument edited = *read.document;
+            spectiary::SampleLabelingDocument edited = *read.document;
             edited.labeling.name = "Forward metadata edited";
             edited.labeling.labels[0].name = "Edited Galaxy";
             edited.labeling.labels[0].shortcut = "1";
@@ -3341,8 +3341,8 @@ int main(int argc, char* argv[])
                 std::cerr << "production metadata oracle output failed to open\n";
                 return 1;
             }
-            const specforge::SampleLabelingAsdfWriteResult rewrite =
-                specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            const spectiary::SampleLabelingAsdfWriteResult rewrite =
+                spectiary::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
                     *read.durable_base,
                     output,
                     edited);
@@ -3360,8 +3360,8 @@ int main(int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[4]));
             const std::int32_t replacement =
                 static_cast<std::int32_t>(std::stol(argv[5]));
-            const specforge::SampleLabelingAsdfReadResult read =
-                specforge::ReadSampleLabelingAsdfDocument(argv[2]);
+            const spectiary::SampleLabelingAsdfReadResult read =
+                spectiary::ReadSampleLabelingAsdfDocument(argv[2]);
             if (!read.succeeded() || !read.durable_base ||
                 index >= read.document->annotation.values.size()) {
                 std::cerr << "production oracle rewrite input is not a valid "
@@ -3371,7 +3371,7 @@ int main(int argc, char* argv[])
             std::vector<std::int32_t> values =
                 read.document->annotation.values;
             values[index] = replacement;
-            specforge::SampleLabelingDocument replacement_document =
+            spectiary::SampleLabelingDocument replacement_document =
                 *read.document;
             replacement_document.annotation.values = std::move(values);
             std::ofstream output(
@@ -3380,8 +3380,8 @@ int main(int argc, char* argv[])
                 std::cerr << "production oracle rewrite output failed to open\n";
                 return 1;
             }
-            const specforge::SampleLabelingAsdfWriteResult rewrite =
-                specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+            const spectiary::SampleLabelingAsdfWriteResult rewrite =
+                spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
                     *read.durable_base,
                     output,
                     replacement_document);

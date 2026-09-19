@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 std::string PathToUtf8(const std::filesystem::path& path)
 {
@@ -553,4 +553,4 @@ AutomationExecution::NextDeadline() const
 {
     return Idle() ? std::nullopt : poll_deadline_;
 }
-} // namespace specforge
+} // namespace spectiary

@@ -20,7 +20,7 @@
 #include <thread>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kBatchTargetBytes = 64U * 1024U;
@@ -41,7 +41,7 @@ std::optional<std::string> ReadEnvironmentVariable(const char* name)
 
 bool IsProfileEnabled()
 {
-    std::optional<std::string> value = ReadEnvironmentVariable("SPECFORGE_PROFILE");
+    std::optional<std::string> value = ReadEnvironmentVariable("SPECTIARY_PROFILE");
     if (!value) {
         return false;
     }
@@ -394,7 +394,7 @@ bool ProfileSink::StartDefaultWithNameFactory(
     }
 
     const std::string stem =
-        "specforge-profile-" + name_factory();
+        "spectiary-profile-" + name_factory();
     for (unsigned int suffix = 0;
          suffix < kMaximumDefaultProfileNameAttempts;
          ++suffix) {
@@ -1186,4 +1186,4 @@ ProfileTimer::~ProfileTimer()
     sink_.WriteDuration(event_name_, frame_index_, milliseconds);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

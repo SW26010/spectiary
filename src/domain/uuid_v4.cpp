@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 
 std::optional<std::string> GenerateUuidV4()
 {
@@ -58,4 +58,4 @@ bool IsCanonicalUuidV4(std::string_view value) noexcept
         value[19] == 'b';
 }
 
-}  // namespace specforge
+}  // namespace spectiary

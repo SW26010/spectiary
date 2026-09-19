@@ -26,7 +26,7 @@ namespace {
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::string_view scope = {})
 {
-    const auto item = specforge::test::WidgetHarness::Current().Observe(label, scope);
+    const auto item = spectiary::test::WidgetHarness::Current().Observe(label, scope);
     if (!item) return std::nullopt;
     return std::array<float, 4>{item->bounds.Min.x, item->bounds.Min.y,
         item->bounds.Max.x, item->bounds.Max.y};
@@ -34,7 +34,7 @@ std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::st
 #endif
 }
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionPanelUiTestAccess {
     [[nodiscard]] static ActiveSampleWorkflowIntentKind
@@ -234,7 +234,7 @@ struct SampleWorkflowPanelUiTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
@@ -248,10 +248,10 @@ std::optional<std::array<float, 4>> OutputWidgetBounds()
 
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 std::optional<std::array<float, 4>> RecoveryWidgetBounds(
-    const specforge::SourceCollectionSessionView& view, std::size_t draft_index,
+    const spectiary::SourceCollectionSessionView& view, std::size_t draft_index,
     std::string_view stable_id)
 {
-    const auto scope = specforge::SampleWorkflowPanelUiTestAccess::RecoveryDraftRowToken(view, draft_index) + "#row";
+    const auto scope = spectiary::SampleWorkflowPanelUiTestAccess::RecoveryDraftRowToken(view, draft_index) + "#row";
     return WidgetBounds(stable_id, scope);
 }
 #endif
@@ -279,9 +279,9 @@ public:
         io.Fonts->GetTexDataAsRGBA32(&font_pixels, &font_width, &font_height);
         Require(font_pixels != nullptr && font_width > 0 && font_height > 0, "ImGui font atlas should build");
 #ifdef IMGUI_ENABLE_TEST_ENGINE
-        harness_ = std::make_unique<specforge::test::WidgetHarness>(
+        harness_ = std::make_unique<spectiary::test::WidgetHarness>(
             [] { throw std::runtime_error("No frame driver installed"); },
-            specforge::test::WidgetHarness::FrameMode::ExistingContext);
+            spectiary::test::WidgetHarness::FrameMode::ExistingContext);
 #endif
         ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
         platform_io.Platform_ClipboardUserData = &clipboard_text_;
@@ -309,7 +309,7 @@ public:
 private:
     std::string clipboard_text_;
 #ifdef IMGUI_ENABLE_TEST_ENGINE
-    std::unique_ptr<specforge::test::WidgetHarness> harness_;
+    std::unique_ptr<spectiary::test::WidgetHarness> harness_;
 #endif
 };
 
@@ -324,13 +324,13 @@ void BeginFrame()
 struct WorkflowFrameObservation {
     bool first_focused = false;
     bool second_focused = false;
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
 };
 
 WorkflowFrameObservation RenderWorkflowFrame(
     bool request_initial_focus,
-    const specforge::SampleWorkflowShortcutContext& capabilities,
-    const specforge::SampleLabelSet& label_set = {},
+    const spectiary::SampleWorkflowShortcutContext& capabilities,
+    const spectiary::SampleLabelSet& label_set = {},
     bool focus_second = false)
 {
     BeginFrame();
@@ -351,26 +351,26 @@ WorkflowFrameObservation RenderWorkflowFrame(
     ImGui::Button("Second");
     observation.second_focused = ImGui::IsItemFocused();
 
-    specforge::SampleWorkflowShortcutContext context = capabilities;
+    spectiary::SampleWorkflowShortcutContext context = capabilities;
     context.focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     context.hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    observation.shortcut = specforge::RouteSampleWorkflowShortcut(context, label_set);
+    observation.shortcut = spectiary::RouteSampleWorkflowShortcut(context, label_set);
     ImGui::End();
     ImGui::EndFrame();
     return observation;
 }
 
-specforge::SampleLabelShortcutCapture RenderCaptureFrame()
+spectiary::SampleLabelShortcutCapture RenderCaptureFrame()
 {
     BeginFrame();
     ImGui::Begin("Label shortcut capture integration");
-    const specforge::SampleLabelShortcutCapture capture = specforge::CaptureSampleLabelShortcut();
+    const spectiary::SampleLabelShortcutCapture capture = spectiary::CaptureSampleLabelShortcut();
     ImGui::End();
     ImGui::EndFrame();
     return capture;
 }
 
-specforge::SampleWorkflowShortcut RenderTextInputFrame(
+spectiary::SampleWorkflowShortcut RenderTextInputFrame(
     bool request_initial_focus,
     char* text,
     std::size_t text_size)
@@ -384,7 +384,7 @@ specforge::SampleWorkflowShortcut RenderTextInputFrame(
         ImGui::SetKeyboardFocusHere();
     }
     ImGui::InputText("Label name", text, text_size);
-    const specforge::SampleWorkflowShortcut shortcut = specforge::RouteSampleWorkflowShortcut({
+    const spectiary::SampleWorkflowShortcut shortcut = spectiary::RouteSampleWorkflowShortcut({
         .focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows),
         .hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows),
         .navigation_enabled = true,
@@ -394,14 +394,14 @@ specforge::SampleWorkflowShortcut RenderTextInputFrame(
     return shortcut;
 }
 
-specforge::SampleWorkflowShortcut RenderForcedTextBlockFrame(bool text_input_blocked)
+spectiary::SampleWorkflowShortcut RenderForcedTextBlockFrame(bool text_input_blocked)
 {
     BeginFrame();
     ImGui::Begin("Workflow text block integration");
     ImGuiIO& io = ImGui::GetIO();
     const bool previous_want_text_input = io.WantTextInput;
     io.WantTextInput = text_input_blocked;
-    const specforge::SampleWorkflowShortcut shortcut = specforge::RouteSampleWorkflowShortcut({
+    const spectiary::SampleWorkflowShortcut shortcut = spectiary::RouteSampleWorkflowShortcut({
         .focused = true,
         .navigation_enabled = true,
         .labeling_enabled = true});
@@ -413,7 +413,7 @@ specforge::SampleWorkflowShortcut RenderForcedTextBlockFrame(bool text_input_blo
 
 struct PopupFrameObservation {
     bool popup_open = false;
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
 };
 
 PopupFrameObservation RenderPopupFrame(bool open_popup, bool close_before_routing = false)
@@ -433,7 +433,7 @@ PopupFrameObservation RenderPopupFrame(bool open_popup, bool close_before_routin
         }
         ImGui::EndPopup();
     }
-    observation.shortcut = specforge::RouteSampleWorkflowShortcut({
+    observation.shortcut = spectiary::RouteSampleWorkflowShortcut({
         .focused = true,
         .navigation_enabled = true,
         .labeling_enabled = true});
@@ -445,7 +445,7 @@ PopupFrameObservation RenderPopupFrame(bool open_popup, bool close_before_routin
 struct CrossWindowObservation {
     bool other_panel_focused = false;
     bool plot_hovered = false;
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
 };
 
 CrossWindowObservation RenderPlotHoverWithOtherPanelFocus(bool request_initial_focus)
@@ -470,7 +470,7 @@ CrossWindowObservation RenderPlotHoverWithOtherPanelFocus(bool request_initial_f
     ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::TextUnformatted("Plot");
     observation.plot_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    observation.shortcut = specforge::RouteSampleWorkflowShortcut({
+    observation.shortcut = spectiary::RouteSampleWorkflowShortcut({
         .focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows),
         .hovered = observation.plot_hovered,
         .allow_hover_fallback = true,
@@ -481,7 +481,7 @@ CrossWindowObservation RenderPlotHoverWithOtherPanelFocus(bool request_initial_f
     return observation;
 }
 
-specforge::SampleWorkflowShortcut RenderHoverOnlyFrame(bool allow_hover_fallback)
+spectiary::SampleWorkflowShortcut RenderHoverOnlyFrame(bool allow_hover_fallback)
 {
     BeginFrame();
     ImGui::SetWindowFocus(nullptr);
@@ -489,7 +489,7 @@ specforge::SampleWorkflowShortcut RenderHoverOnlyFrame(bool allow_hover_fallback
     ImGui::SetNextWindowSize(ImVec2(360.0f, 260.0f), ImGuiCond_Always);
     ImGui::Begin("Hover-only workflow context", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::TextUnformatted("Context");
-    const specforge::SampleWorkflowShortcut shortcut = specforge::RouteSampleWorkflowShortcut({
+    const spectiary::SampleWorkflowShortcut shortcut = spectiary::RouteSampleWorkflowShortcut({
         .focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows),
         .hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows),
         .allow_hover_fallback = allow_hover_fallback,
@@ -499,9 +499,9 @@ specforge::SampleWorkflowShortcut RenderHoverOnlyFrame(bool allow_hover_fallback
     return shortcut;
 }
 
-specforge::SourceCollectionSessionView MakeLabelingPanelView(int label_code, char shortcut)
+spectiary::SourceCollectionSessionView MakeLabelingPanelView(int label_code, char shortcut)
 {
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.labeling.has_active_source = true;
     view.labeling.source_identity = "source";
     view.labeling.source_kind = "npy";
@@ -515,14 +515,14 @@ specforge::SourceCollectionSessionView MakeLabelingPanelView(int label_code, cha
     view.labeling.can_deactivate_task = true;
     view.labeling.can_delete_task = true;
     view.labeling.label_set.labels.push_back(
-        specforge::SampleLabelDefinition{label_code, "Quality", shortcut});
+        spectiary::SampleLabelDefinition{label_code, "Quality", shortcut});
     return view;
 }
 
-specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& frame_view,
-    const specforge::SourceCollectionSessionView& latest_view,
+spectiary::SampleWorkflowShortcut RenderLabelingPanelFrame(
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& frame_view,
+    const spectiary::SourceCollectionSessionView& latest_view,
     bool request_initial_focus)
 {
     BeginFrame();
@@ -532,16 +532,16 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
     ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(520.0f, 500.0f), ImGuiCond_Always);
     bool open = true;
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
     int view_reads = 0;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [](
-            specforge::SourceCollectionSessionIntent,
+            spectiary::SourceCollectionSessionIntent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
-            return specforge::SourceCollectionSessionResult{};
+                spectiary::NavigationLatencyInputKind>) {
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             return view_reads++ == 0
                 ? frame_view
                 : latest_view;
@@ -554,7 +554,7 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat, std::string_view)
+        [](spectiary::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -565,7 +565,7 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
 
 struct LabelingTaskNameFrameObservation {
     int submission_count = 0;
-    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+    std::optional<spectiary::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
     std::string submitted_task_id;
     std::string submitted_name;
@@ -573,8 +573,8 @@ struct LabelingTaskNameFrameObservation {
 };
 
 LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view,
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view,
     bool capture_text = false,
     bool collapsed = false,
     ImVec2 window_size = ImVec2(620.0f, 700.0f))
@@ -594,34 +594,34 @@ LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
     if (capture_text) {
         ImGui::LogToBuffer();
     }
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&observation](
-            specforge::SourceCollectionSessionIntent intent,
+            spectiary::SourceCollectionSessionIntent intent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
+                spectiary::NavigationLatencyInputKind>) {
             ++observation.submission_count;
             if (intent.intent_kind() ==
-                specforge::SourceCollectionSessionIntentKind::
+                spectiary::SourceCollectionSessionIntentKind::
                     ActiveSampleWorkflow) {
                 observation.submitted_workflow_kind =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowKind(intent);
                 observation.submitted_task_id =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowTaskId(intent);
                 observation.submitted_name =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowRequestedName(intent);
             }
-            specforge::SourceCollectionSessionResult result;
+            spectiary::SourceCollectionSessionResult result;
             result.changed = true;
             result.action.workflow_changed = true;
             return result;
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
     panel.RenderLabeling(
         interaction,
         &open,
@@ -629,7 +629,7 @@ LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat, std::string_view)
+        [](spectiary::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -643,40 +643,40 @@ LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
 }
 
 LabelingTaskNameFrameObservation FinalizeLabelingTaskNameEdit(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view)
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view)
 {
     LabelingTaskNameFrameObservation observation;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&observation](
-            specforge::SourceCollectionSessionIntent intent,
+            spectiary::SourceCollectionSessionIntent intent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
+                spectiary::NavigationLatencyInputKind>) {
             ++observation.submission_count;
             if (intent.intent_kind() ==
-                specforge::SourceCollectionSessionIntentKind::
+                spectiary::SourceCollectionSessionIntentKind::
                     ActiveSampleWorkflow) {
                 observation.submitted_workflow_kind =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowKind(intent);
                 observation.submitted_task_id =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowTaskId(intent);
                 observation.submitted_name =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowRequestedName(intent);
             }
-            specforge::SourceCollectionSessionResult result;
+            spectiary::SourceCollectionSessionResult result;
             result.changed = true;
             result.action.workflow_changed = true;
             return result;
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
     panel.FinalizeTaskNameEdit(
         interaction,
-        specforge::UiLanguage::English);
+        spectiary::UiLanguage::English);
     return observation;
 }
 
@@ -689,19 +689,19 @@ ImVec2 RectCenter(const std::array<float, 4>& rect)
 
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void FocusLabelingTaskNameField(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view)
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view)
 {
     (void)RenderLabelingTaskNameFrame(panel, view);
-    specforge::test::WidgetHarness::Current().Click("##labeling_task_name", [&] {
+    spectiary::test::WidgetHarness::Current().Click("##labeling_task_name", [&] {
         (void)RenderLabelingTaskNameFrame(panel, view);
     });
 }
 #endif
 
 void ReplaceFocusedText(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view,
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view,
     std::string_view replacement)
 {
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
@@ -719,20 +719,20 @@ void ReplaceFocusedText(
 struct LabelingExportFrameObservation {
     int output_path_request_count = 0;
     int export_path_request_count = 0;
-    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+    std::optional<spectiary::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
-    std::optional<specforge::SampleLabelExportFormat>
+    std::optional<spectiary::SampleLabelExportFormat>
         requested_export_format;
     std::string requested_suggested_filename;
     std::string requested_output_suggested_filename;
     std::filesystem::path submitted_path;
-    std::optional<specforge::SampleLabelExportFormat>
+    std::optional<spectiary::SampleLabelExportFormat>
         submitted_export_format;
 };
 
 LabelingExportFrameObservation RenderLabelingExportFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view)
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view)
 {
     BeginFrame();
     ImGui::SetNextWindowPos(
@@ -743,26 +743,26 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
         ImGuiCond_Always);
     bool open = true;
     LabelingExportFrameObservation observation;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&observation](
-            specforge::SourceCollectionSessionIntent intent,
+            spectiary::SourceCollectionSessionIntent intent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
+                spectiary::NavigationLatencyInputKind>) {
             observation.submitted_workflow_kind =
-                specforge::SourceCollectionPanelUiTestAccess::
+                spectiary::SourceCollectionPanelUiTestAccess::
                     ActiveWorkflowKind(intent);
             observation.submitted_export_format =
-                specforge::SourceCollectionPanelUiTestAccess::
+                spectiary::SourceCollectionPanelUiTestAccess::
                     ActiveWorkflowExportFormat(intent);
             observation.submitted_path =
-                specforge::SourceCollectionPanelUiTestAccess::
+                spectiary::SourceCollectionPanelUiTestAccess::
                     ActiveWorkflowPath(intent);
-            return specforge::SourceCollectionSessionResult{};
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&view]() -> const specforge::SourceCollectionSessionView& {
+        [&view]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
     panel.RenderLabeling(
         interaction,
         &open,
@@ -774,14 +774,14 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
             return std::filesystem::path{"user-entered.final"};
         },
         [&observation](
-            specforge::SampleLabelExportFormat format,
+            spectiary::SampleLabelExportFormat format,
             std::string_view suggested_filename)
             -> std::optional<std::filesystem::path> {
             ++observation.export_path_request_count;
             observation.requested_export_format = format;
             observation.requested_suggested_filename =
                 suggested_filename;
-            return format == specforge::SampleLabelExportFormat::Csv
+            return format == spectiary::SampleLabelExportFormat::Csv
                 ? std::filesystem::path{"export.csv"}
                 : std::filesystem::path{"export.npy"};
         },
@@ -792,9 +792,9 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
 
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void SelectLabelExportFormatThroughUi(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view,
-    specforge::SampleLabelExportFormat format)
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view,
+    spectiary::SampleLabelExportFormat format)
 {
     int unexpected_actions = 0;
     const auto render = [&] {
@@ -802,21 +802,21 @@ void SelectLabelExportFormatThroughUi(
         if (observation.requested_export_format || observation.submitted_workflow_kind)
             ++unexpected_actions;
     };
-    auto& ui = specforge::test::WidgetHarness::Current();
+    auto& ui = spectiary::test::WidgetHarness::Current();
     ui.Click("##LabelExportFormat", render);
-    ui.Click(format == specforge::SampleLabelExportFormat::Csv
+    ui.Click(format == spectiary::SampleLabelExportFormat::Csv
         ? "CSV##LabelExportFormatCsv" : "NPY##LabelExportFormatNpy", render);
     Require(unexpected_actions == 0 &&
-        specforge::SampleWorkflowPanelUiTestAccess::LabelingExportFormat(panel) == format,
+        spectiary::SampleWorkflowPanelUiTestAccess::LabelingExportFormat(panel) == format,
         "choosing an export format must update the preference without exporting");
 }
 #endif
 
 struct LabelingTaskSwitchFrameObservation {
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
     int submission_count = 0;
     std::string operation_message;
-    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+    std::optional<spectiary::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
     std::string submitted_source_identity;
     std::string submitted_task_id;
@@ -832,7 +832,7 @@ struct RecoveryFrameObservation {
     bool popup_open = false;
     ImGuiID hovered_id = 0;
     ImGuiID popup_confirm_id = 0;
-    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+    std::optional<spectiary::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
     std::string submitted_source_identity;
     std::string submitted_task_id;
@@ -840,9 +840,9 @@ struct RecoveryFrameObservation {
     float cursor_max_y = 0.0f;
 };
 
-specforge::SourceCollectionSessionView MakeRecoveryPanelView()
+spectiary::SourceCollectionSessionView MakeRecoveryPanelView()
 {
-    specforge::SourceCollectionSessionView view;
+    spectiary::SourceCollectionSessionView view;
     view.labeling.has_active_source = true;
     view.labeling.source_identity = "source/recovery";
     view.labeling.current_index = 0;
@@ -852,16 +852,16 @@ specforge::SourceCollectionSessionView MakeRecoveryPanelView()
         {
             .task_id = "draft-1",
             .task_name = "Recovered draft",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Recoverable,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Recoverable,
             .labeled_count = 2,
             .sample_count = 5,
         });
     return view;
 }
 
-specforge::SourceCollectionSessionView MakeActiveTemporaryRecoveryPanelView()
+spectiary::SourceCollectionSessionView MakeActiveTemporaryRecoveryPanelView()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     view.labeling.has_active_task = true;
     view.labeling.active_task_is_temporary = true;
@@ -872,13 +872,13 @@ specforge::SourceCollectionSessionView MakeActiveTemporaryRecoveryPanelView()
     view.labeling.can_deactivate_task = true;
     view.labeling.can_delete_task = true;
     view.labeling.recovery_drafts.front().status =
-        specforge::SampleLabelingRecoveryDraftStatus::Current;
+        spectiary::SampleLabelingRecoveryDraftStatus::Current;
     return view;
 }
 
-specforge::SourceCollectionSessionView MakeFormalTaskWithRecoveryDraftView()
+spectiary::SourceCollectionSessionView MakeFormalTaskWithRecoveryDraftView()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     view.labeling.has_active_task = true;
     view.labeling.active_task_is_temporary = false;
@@ -889,10 +889,10 @@ specforge::SourceCollectionSessionView MakeFormalTaskWithRecoveryDraftView()
     return view;
 }
 
-specforge::SourceCollectionSessionView
+spectiary::SourceCollectionSessionView
 MakeFormalTaskWithAmbiguousRecoveryDraftView()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeFormalTaskWithRecoveryDraftView();
     constexpr std::string_view shared_task_id = "shared-task";
     view.labeling.task_id = std::string(shared_task_id);
@@ -905,22 +905,22 @@ MakeFormalTaskWithAmbiguousRecoveryDraftView()
     return view;
 }
 
-specforge::SourceCollectionSessionView MakeDuplicateRecoveryPanelView()
+spectiary::SourceCollectionSessionView MakeDuplicateRecoveryPanelView()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     view.labeling.recovery_drafts = {
         {
             .task_id = "duplicate-draft",
             .task_name = "Recovered draft A",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Stale,
             .labeled_count = 1,
             .sample_count = 5,
         },
         {
             .task_id = "duplicate-draft",
             .task_name = "Recovered draft B",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Stale,
             .labeled_count = 4,
             .sample_count = 5,
         },
@@ -928,42 +928,42 @@ specforge::SourceCollectionSessionView MakeDuplicateRecoveryPanelView()
     return view;
 }
 
-specforge::SourceCollectionSessionView MakeFailedRecoveryPanelView()
+spectiary::SourceCollectionSessionView MakeFailedRecoveryPanelView()
 {
-    specforge::SourceCollectionSessionView view =
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     auto& save_state =
         view.labeling.recovery_drafts.front().save_state;
-    save_state.kind = specforge::SampleLabelSaveStateKind::Failed;
+    save_state.kind = spectiary::SampleLabelSaveStateKind::Failed;
     save_state.pending_count = 1;
     save_state.message_kind =
-        specforge::SampleLabelSaveMessageKind::SystemDetail;
+        spectiary::SampleLabelSaveMessageKind::SystemDetail;
     save_state.message = "Save to failed for the paused draft";
     return view;
 }
 
 RecoveryFrameObservation RenderRecoveryFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& frame_view,
-    specforge::SourceCollectionSessionView& latest_view,
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& frame_view,
+    spectiary::SourceCollectionSessionView& latest_view,
     bool request_initial_focus,
-    specforge::UiLanguage language = specforge::UiLanguage::English,
+    spectiary::UiLanguage language = spectiary::UiLanguage::English,
     ImVec2 window_size = ImVec2(900.0f, 500.0f),
-    specforge::SampleLabelingOperationResult::Issue submitted_issue =
-        specforge::SampleLabelingOperationResult::Issue::None,
+    spectiary::SampleLabelingOperationResult::Issue submitted_issue =
+        spectiary::SampleLabelingOperationResult::Issue::None,
     bool capture_text = false,
-    const specforge::SourceCollectionSessionView* submitted_view = nullptr);
+    const spectiary::SourceCollectionSessionView* submitted_view = nullptr);
 
 RecoveryFrameObservation RenderRecoveryFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& frame_view,
-    specforge::SourceCollectionSessionView& latest_view,
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& frame_view,
+    spectiary::SourceCollectionSessionView& latest_view,
     bool request_initial_focus,
-    specforge::UiLanguage language,
+    spectiary::UiLanguage language,
     ImVec2 window_size,
-    specforge::SampleLabelingOperationResult::Issue submitted_issue,
+    spectiary::SampleLabelingOperationResult::Issue submitted_issue,
     bool capture_text,
-    const specforge::SourceCollectionSessionView* submitted_view)
+    const spectiary::SourceCollectionSessionView* submitted_view)
 {
     BeginFrame();
     if (request_initial_focus) {
@@ -977,39 +977,39 @@ RecoveryFrameObservation RenderRecoveryFrame(
         ImGui::LogToBuffer();
     }
     int view_reads = 0;
-    specforge::PanelSessionInteraction interaction(
-        [&](specforge::SourceCollectionSessionIntent intent,
-            std::optional<specforge::NavigationLatencyInputKind>) {
+    spectiary::PanelSessionInteraction interaction(
+        [&](spectiary::SourceCollectionSessionIntent intent,
+            std::optional<spectiary::NavigationLatencyInputKind>) {
             ++observation.submission_count;
             if (intent.intent_kind() ==
-                specforge::SourceCollectionSessionIntentKind::
+                spectiary::SourceCollectionSessionIntentKind::
                     ActiveSampleWorkflow) {
                 observation.submitted_workflow_kind =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowKind(intent);
                 observation.submitted_source_identity =
                     std::string(
-                        specforge::SourceCollectionPanelUiTestAccess::
+                        spectiary::SourceCollectionPanelUiTestAccess::
                             ActiveWorkflowSourceIdentity(intent));
                 observation.submitted_task_id =
                     std::string(
-                        specforge::SourceCollectionPanelUiTestAccess::
+                        spectiary::SourceCollectionPanelUiTestAccess::
                             ActiveWorkflowTaskId(intent));
             }
             latest_view = submitted_view != nullptr
                 ? *submitted_view
                 : frame_view;
-            specforge::SourceCollectionSessionResult result;
+            spectiary::SourceCollectionSessionResult result;
             result.changed = submitted_issue ==
-                specforge::SampleLabelingOperationResult::Issue::None;
+                spectiary::SampleLabelingOperationResult::Issue::None;
             result.action.workflow_changed = result.changed;
             result.labeling_issue = submitted_issue;
             return result;
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             return view_reads++ == 0 ? frame_view : latest_view;
         });
-    specforge::SampleWorkflowShortcut shortcut;
+    spectiary::SampleWorkflowShortcut shortcut;
     panel.RenderLabeling(
         interaction,
         language,
@@ -1018,7 +1018,7 @@ RecoveryFrameObservation RenderRecoveryFrame(
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat, std::string_view)
+        [](spectiary::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -1039,7 +1039,7 @@ RecoveryFrameObservation RenderRecoveryFrame(
         }
     }
     if (ImGuiWindow* window = ImGui::FindWindowByName(
-            specforge::SampleWorkflowPanelUi::LabelingWindowName())) {
+            spectiary::SampleWorkflowPanelUi::LabelingWindowName())) {
         observation.cursor_max_y = window->DC.CursorMaxPos.y;
     }
     ImGui::EndFrame();
@@ -1047,15 +1047,15 @@ RecoveryFrameObservation RenderRecoveryFrame(
 }
 
 LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& frame_view,
-    specforge::SourceCollectionSessionView& latest_view,
-    const specforge::SourceCollectionSessionView& activated_view,
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& frame_view,
+    spectiary::SourceCollectionSessionView& latest_view,
+    const spectiary::SourceCollectionSessionView& activated_view,
     bool request_initial_focus,
     std::string result_message = {},
-    specforge::SampleLabelingOperationResult::Issue submitted_issue =
-        specforge::SampleLabelingOperationResult::Issue::None,
-    const specforge::SourceCollectionSessionView* rejected_view = nullptr)
+    spectiary::SampleLabelingOperationResult::Issue submitted_issue =
+        spectiary::SampleLabelingOperationResult::Issue::None,
+    const spectiary::SourceCollectionSessionView* rejected_view = nullptr)
 {
     BeginFrame();
     if (request_initial_focus) {
@@ -1066,32 +1066,32 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     bool open = true;
     LabelingTaskSwitchFrameObservation observation;
     int view_reads = 0;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&](
-            specforge::SourceCollectionSessionIntent intent,
+            spectiary::SourceCollectionSessionIntent intent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
+                spectiary::NavigationLatencyInputKind>) {
             ++observation.submission_count;
             if (intent.intent_kind() ==
-                specforge::SourceCollectionSessionIntentKind::
+                spectiary::SourceCollectionSessionIntentKind::
                     ActiveSampleWorkflow) {
                 observation.submitted_workflow_kind =
-                    specforge::SourceCollectionPanelUiTestAccess::
+                    spectiary::SourceCollectionPanelUiTestAccess::
                         ActiveWorkflowKind(intent);
                 observation.submitted_source_identity =
                     std::string(
-                        specforge::SourceCollectionPanelUiTestAccess::
+                        spectiary::SourceCollectionPanelUiTestAccess::
                             ActiveWorkflowSourceIdentity(intent));
                 observation.submitted_task_id =
                     std::string(
-                        specforge::SourceCollectionPanelUiTestAccess::
+                        spectiary::SourceCollectionPanelUiTestAccess::
                             ActiveWorkflowTaskId(intent));
             }
-            specforge::SourceCollectionSessionResult result;
+            spectiary::SourceCollectionSessionResult result;
             if (result_message.empty()) {
                 result.labeling_issue = submitted_issue;
                 result.changed = submitted_issue ==
-                    specforge::SampleLabelingOperationResult::Issue::None;
+                    spectiary::SampleLabelingOperationResult::Issue::None;
                 result.action.workflow_changed = result.changed;
                 latest_view = result.changed
                     ? activated_view
@@ -1101,7 +1101,7 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
             }
             return result;
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             return view_reads++ == 0
                 ? frame_view
                 : latest_view;
@@ -1114,18 +1114,18 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [](specforge::SampleLabelExportFormat, std::string_view)
+        [](spectiary::SampleLabelExportFormat, std::string_view)
             -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
         observation.shortcut);
     observation.operation_message =
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             LabelingOperationMessage(panel);
     observation.popup_open = ImGui::IsPopupOpen(
         nullptr,
         ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-    if (ImGuiWindow* window = ImGui::FindWindowByName(specforge::SampleWorkflowPanelUi::LabelingWindowName())) {
+    if (ImGuiWindow* window = ImGui::FindWindowByName(spectiary::SampleWorkflowPanelUi::LabelingWindowName())) {
         observation.content_start = window->DC.CursorStartPos;
         observation.selector_hovered = GImGui->HoveredId == window->GetID("##labeling_task_selector");
     }
@@ -1148,8 +1148,8 @@ struct SortingPopupFrameObservation {
 };
 
 SortingPopupFrameObservation RenderSortingPopupFrame(
-    specforge::SampleWorkflowPanelUi& panel,
-    const specforge::SourceCollectionSessionView& view)
+    spectiary::SampleWorkflowPanelUi& panel,
+    const spectiary::SourceCollectionSessionView& view)
 {
     BeginFrame();
     ImGui::SetNextWindowPos(
@@ -1160,23 +1160,23 @@ SortingPopupFrameObservation RenderSortingPopupFrame(
         ImGuiCond_Always);
     bool open = true;
     SortingPopupFrameObservation observation;
-    specforge::PanelSessionInteraction interaction(
+    spectiary::PanelSessionInteraction interaction(
         [&](
-            specforge::SourceCollectionSessionIntent,
+            spectiary::SourceCollectionSessionIntent,
             std::optional<
-                specforge::NavigationLatencyInputKind>) {
+                spectiary::NavigationLatencyInputKind>) {
             ++observation.submission_count;
-            return specforge::SourceCollectionSessionResult{};
+            return spectiary::SourceCollectionSessionResult{};
         },
-        [&]() -> const specforge::SourceCollectionSessionView& {
+        [&]() -> const spectiary::SourceCollectionSessionView& {
             return view;
         });
     panel.RenderSorting(
         interaction,
-        specforge::UiLanguage::SimplifiedChinese,
+        spectiary::UiLanguage::SimplifiedChinese,
         &open);
     if (ImGuiWindow* window = ImGui::FindWindowByName(
-            specforge::SampleWorkflowPanelUi::
+            spectiary::SampleWorkflowPanelUi::
                 SortingWindowName())) {
         observation.add_source_button_id =
             window->GetID("+##AddSampleSortSource");
@@ -1191,10 +1191,10 @@ SortingPopupFrameObservation RenderSortingPopupFrame(
             const ImGuiID source_id =
                 popup_window->GetID("sample-name");
             const std::string_view localized_name =
-                specforge::UiText(
-                    specforge::UiLanguage::
+                spectiary::UiText(
+                    spectiary::UiLanguage::
                         SimplifiedChinese,
-                    specforge::UiTextId::
+                    spectiary::UiTextId::
                         SampleNameSortSource);
             observation.localized_sample_name_item_id =
                 ImHashStr(
@@ -1209,100 +1209,100 @@ SortingPopupFrameObservation RenderSortingPopupFrame(
 
 void TestCanonicalAnnotationActivationUsesSingleFileConfirmation()
 {
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionAnnotationValueView canonical;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionAnnotationValueView canonical;
     canonical.name = "Canonical quality";
     canonical.path = "quality.asdf";
     canonical.relationship =
-        specforge::SampleAnnotationWorkflowRelationship::
+        spectiary::SampleAnnotationWorkflowRelationship::
             ExternalLabelResult;
     canonical.labeling_owner_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    specforge::SampleWorkflowPanelUiTestAccess::
+    spectiary::SampleWorkflowPanelUiTestAccess::
         SetPendingAnnotationActivation(
             panel,
             canonical);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 PendingAnnotationActivationOwnerFormat(panel) ==
-            specforge::SampleLabelingOutputArtifactFormat::
+            spectiary::SampleLabelingOutputArtifactFormat::
                 CanonicalAsdf,
         "canonical annotation activation should retain its owner format in pending confirmation state");
 
-    const specforge::SampleWorkflowAnnotationActivationTextIds
+    const spectiary::SampleWorkflowAnnotationActivationTextIds
         canonical_text =
-            specforge::SampleWorkflowAnnotationActivationText(
+            spectiary::SampleWorkflowAnnotationActivationText(
                 canonical.relationship,
                 canonical.labeling_owner_format);
     Require(
         canonical_text.editable_message ==
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     AdoptCanonicalAsdfEditableMessage &&
             !canonical_text.detail_message,
         "canonical adoption confirmation should describe one ASDF file without legacy sidecar detail");
 
-    const specforge::SampleWorkflowAnnotationActivationTextIds
+    const spectiary::SampleWorkflowAnnotationActivationTextIds
         legacy_external =
-            specforge::SampleWorkflowAnnotationActivationText(
-                specforge::
+            spectiary::SampleWorkflowAnnotationActivationText(
+                spectiary::
                     SampleAnnotationWorkflowRelationship::
                         ExternalLabelResult,
-                specforge::
+                spectiary::
                     SampleLabelingOutputArtifactFormat::
                         LegacyNpyWithSidecar);
     Require(
         legacy_external.editable_message ==
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     UseAnnotationEditableMessage &&
             legacy_external.detail_message ==
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     ExistingLabelMetadataReused,
         "legacy external annotation confirmation should retain its existing metadata-sidecar wording");
 
-    const specforge::SampleWorkflowAnnotationActivationTextIds
+    const spectiary::SampleWorkflowAnnotationActivationTextIds
         plain_annotation =
-            specforge::SampleWorkflowAnnotationActivationText(
-                specforge::
+            spectiary::SampleWorkflowAnnotationActivationText(
+                spectiary::
                     SampleAnnotationWorkflowRelationship::
                         PlainAnnotation,
-                specforge::
+                spectiary::
                     SampleLabelingOutputArtifactFormat::
                         None);
     Require(
         plain_annotation.editable_message ==
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     UseAnnotationEditableMessage &&
             plain_annotation.detail_message ==
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     ImportedTaskSaveAsHint,
         "ownerless plain annotation confirmation should retain its existing sidecar-creation wording");
 }
 
 void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
 {
-    specforge::SourceCollectionLabelingView view;
+    spectiary::SourceCollectionLabelingView view;
     view.has_active_task = true;
     view.active_task_is_temporary = true;
     Require(
-        specforge::SampleWorkflowCanonicalOutputActionTextId(
-            view) == specforge::UiTextId::SaveTo,
+        spectiary::SampleWorkflowCanonicalOutputActionTextId(
+            view) == spectiary::UiTextId::SaveTo,
         "temporary task should retain the existing Save to action");
 
     view.active_task_is_temporary = false;
     view.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             LegacyNpyWithSidecar;
     Require(
-        specforge::SampleWorkflowCanonicalOutputActionTextId(
-            view) == specforge::UiTextId::MigrateToAsdf,
+        spectiary::SampleWorkflowCanonicalOutputActionTextId(
+            view) == spectiary::UiTextId::MigrateToAsdf,
         "legacy owner should expose an explicit ASDF migration action");
 
     view.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     Require(
-        !specforge::SampleWorkflowCanonicalOutputActionTextId(
+        !spectiary::SampleWorkflowCanonicalOutputActionTextId(
             view),
         "canonical owner should not expose another ownership migration action");
 }
@@ -1311,8 +1311,8 @@ void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
 void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(7, 'q');
     view.labeling.active_task_is_temporary = true;
     view.labeling.task_name = "a/b:c*";
@@ -1345,7 +1345,7 @@ void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
             submitted.requested_output_suggested_filename ==
                 "a_b_c_.asdf" &&
             submitted.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     SetActiveLabelingOutputPath &&
             submitted.submitted_path == "user-entered.final",
         "Save to should suggest a safe ASDF name while forwarding the user's chosen path unchanged");
@@ -1356,8 +1356,8 @@ void TestLabelingPanelSuggestsCanonicalFilenameWithoutRewritingChosenPath()
 void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    const specforge::SourceCollectionSessionView active_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    const spectiary::SourceCollectionSessionView active_view =
         MakeLabelingPanelView(7, 'q');
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
@@ -1367,9 +1367,9 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     Require(
         export_rect.has_value() &&
             WidgetBounds("##LabelExportFormat") &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-                specforge::SampleLabelExportFormat::Npy,
+                spectiary::SampleLabelExportFormat::Npy,
         "an active NPY labeling source should expose Export Labels with the NPY selector default");
     const ImVec2 export_position(
         ((*export_rect)[0] + (*export_rect)[2]) * 0.5f,
@@ -1390,17 +1390,17 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
     Require(
         submitted.export_path_request_count == 1 &&
             submitted.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     ExportActiveLabels &&
             submitted.requested_export_format ==
-                specforge::SampleLabelExportFormat::Npy &&
+                spectiary::SampleLabelExportFormat::Npy &&
             submitted.requested_suggested_filename ==
                 "Quality.npy" &&
             submitted.submitted_export_format ==
-                specforge::SampleLabelExportFormat::Npy,
+                spectiary::SampleLabelExportFormat::Npy,
         "Export Labels should request and submit the selected stateless NPY export format");
 
-    specforge::SourceCollectionSessionView inactive_view =
+    spectiary::SourceCollectionSessionView inactive_view =
         active_view;
     inactive_view.labeling.has_active_task = false;
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
@@ -1409,10 +1409,10 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
         !WidgetBounds("ExportLabels"),
         "Export Labels should be hidden when no editable task is active");
 
-    specforge::SourceCollectionSessionView structural_view =
+    spectiary::SourceCollectionSessionView structural_view =
         active_view;
     structural_view.labeling.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+        spectiary::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
     structural_view.labeling.can_export_label_values = false;
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     const LabelingExportFrameObservation structural =
@@ -1429,48 +1429,48 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
 void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView npy_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView npy_view =
         MakeLabelingPanelView(7, 'q');
 
     (void)RenderLabelingExportFrame(panel, npy_view);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-            specforge::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Npy,
         "NPY source should default label export to NPY");
 
     SelectLabelExportFormatThroughUi(
         panel,
         npy_view,
-        specforge::SampleLabelExportFormat::Csv);
+        spectiary::SampleLabelExportFormat::Csv);
     (void)RenderLabelingExportFrame(panel, npy_view);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-            specforge::SampleLabelExportFormat::Csv,
+            spectiary::SampleLabelExportFormat::Csv,
         "same-source rendering must preserve a manual CSV override");
     panel.ResetForSampleWorkflow();
     (void)RenderLabelingExportFrame(panel, npy_view);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-            specforge::SampleLabelExportFormat::Csv,
+            spectiary::SampleLabelExportFormat::Csv,
         "same-source workflow resets must not discard the export override");
 
-    specforge::SourceCollectionSessionView next_npy_view =
+    spectiary::SourceCollectionSessionView next_npy_view =
         npy_view;
     next_npy_view.labeling.source_identity = "next-npy-source";
     (void)RenderLabelingExportFrame(
         panel,
         next_npy_view);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-            specforge::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Npy,
         "source identity changes should reapply the NPY recommendation");
 
-    specforge::SourceCollectionSessionView folder_view =
+    spectiary::SourceCollectionSessionView folder_view =
         npy_view;
     folder_view.labeling.source_identity = "folder-source";
     folder_view.labeling.source_kind = "folder";
@@ -1480,9 +1480,9 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
         WidgetBounds("ExportLabels");
     Require(
         export_rect &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                     LabelingExportFormat(panel) ==
-                specforge::SampleLabelExportFormat::Csv,
+                spectiary::SampleLabelExportFormat::Csv,
         "folder source should default label export to CSV");
 
     const ImVec2 export_position(
@@ -1504,23 +1504,23 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
     Require(
         submitted.export_path_request_count == 1 &&
             submitted.requested_export_format ==
-                specforge::SampleLabelExportFormat::Csv &&
+                spectiary::SampleLabelExportFormat::Csv &&
             submitted.requested_suggested_filename ==
                 "Quality.csv" &&
             submitted.submitted_export_format ==
-                specforge::SampleLabelExportFormat::Csv,
+                spectiary::SampleLabelExportFormat::Csv,
         "folder default should drive both the chooser and export intent as CSV");
 
     SelectLabelExportFormatThroughUi(
         panel,
         folder_view,
-        specforge::SampleLabelExportFormat::Npy);
+        spectiary::SampleLabelExportFormat::Npy);
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, folder_view);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingExportFormat(panel) ==
-            specforge::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Npy,
         "same folder source should preserve a manual NPY override");
     ImGui::GetIO().AddMousePosEvent(
         export_position.x,
@@ -1538,11 +1538,11 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
     Require(
         overridden.export_path_request_count == 1 &&
             overridden.requested_export_format ==
-                specforge::SampleLabelExportFormat::Npy &&
+                spectiary::SampleLabelExportFormat::Npy &&
             overridden.requested_suggested_filename ==
                 "Quality.npy" &&
             overridden.submitted_export_format ==
-                specforge::SampleLabelExportFormat::Npy,
+                spectiary::SampleLabelExportFormat::Npy,
         "folder NPY override should drive both the chooser and export intent");
 }
 #endif
@@ -1552,32 +1552,32 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
 {
     struct MatrixCase {
         std::string_view source_kind;
-        std::optional<specforge::SampleLabelExportFormat>
+        std::optional<spectiary::SampleLabelExportFormat>
             override_format;
-        specforge::SampleLabelExportFormat expected_default;
-        specforge::SampleLabelExportFormat expected_export;
+        spectiary::SampleLabelExportFormat expected_default;
+        spectiary::SampleLabelExportFormat expected_export;
     };
     constexpr std::array kCases = {
         MatrixCase{
             "npy",
             std::nullopt,
-            specforge::SampleLabelExportFormat::Npy,
-            specforge::SampleLabelExportFormat::Npy},
+            spectiary::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Npy},
         MatrixCase{
             "folder",
             std::nullopt,
-            specforge::SampleLabelExportFormat::Csv,
-            specforge::SampleLabelExportFormat::Csv},
+            spectiary::SampleLabelExportFormat::Csv,
+            spectiary::SampleLabelExportFormat::Csv},
         MatrixCase{
             "npy",
-            specforge::SampleLabelExportFormat::Csv,
-            specforge::SampleLabelExportFormat::Npy,
-            specforge::SampleLabelExportFormat::Csv},
+            spectiary::SampleLabelExportFormat::Csv,
+            spectiary::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Csv},
         MatrixCase{
             "folder",
-            specforge::SampleLabelExportFormat::Npy,
-            specforge::SampleLabelExportFormat::Csv,
-            specforge::SampleLabelExportFormat::Npy},
+            spectiary::SampleLabelExportFormat::Npy,
+            spectiary::SampleLabelExportFormat::Csv,
+            spectiary::SampleLabelExportFormat::Npy},
     };
 
     for (std::size_t case_index = 0;
@@ -1585,8 +1585,8 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
          ++case_index) {
         const MatrixCase& matrix_case = kCases[case_index];
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView view =
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView view =
             MakeLabelingPanelView(7, 'q');
         view.labeling.source_identity =
             "export-matrix-" +
@@ -1600,7 +1600,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
         Require(
             !initialized.requested_export_format &&
                 !initialized.submitted_workflow_kind &&
-                specforge::SampleWorkflowPanelUiTestAccess::
+                spectiary::SampleWorkflowPanelUiTestAccess::
                         LabelingExportFormat(panel) ==
                     matrix_case.expected_default,
             "rendering an export format recommendation must not execute an export");
@@ -1615,7 +1615,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
             Require(
                 !overridden.requested_export_format &&
                     !overridden.submitted_workflow_kind &&
-                    specforge::SampleWorkflowPanelUiTestAccess::
+                    spectiary::SampleWorkflowPanelUiTestAccess::
                             LabelingExportFormat(panel) ==
                         matrix_case.expected_export,
                 "switching the export format must remain a session-only preference until export is requested");
@@ -1646,7 +1646,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
             RenderLabelingExportFrame(panel, view);
         const std::string expected_suggested_filename =
             matrix_case.expected_export ==
-                    specforge::SampleLabelExportFormat::Csv
+                    spectiary::SampleLabelExportFormat::Csv
                 ? "Quality.csv"
                 : "Quality.npy";
         Require(
@@ -1656,7 +1656,7 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
                 exported.requested_suggested_filename ==
                     expected_suggested_filename &&
                 exported.submitted_workflow_kind ==
-                    specforge::
+                    spectiary::
                         ActiveSampleWorkflowIntentKind::
                             ExportActiveLabels &&
                 exported.submitted_export_format ==
@@ -1669,44 +1669,44 @@ void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
 void TestLabelExportFormatControlsDefaultExtension()
 {
     Require(
-        specforge::RecommendedSampleLabelExportFormat(
+        spectiary::RecommendedSampleLabelExportFormat(
             "folder") ==
-                specforge::SampleLabelExportFormat::Csv &&
-            specforge::RecommendedSampleLabelExportFormat(
+                spectiary::SampleLabelExportFormat::Csv &&
+            spectiary::RecommendedSampleLabelExportFormat(
                 "npy") ==
-                specforge::SampleLabelExportFormat::Npy,
+                spectiary::SampleLabelExportFormat::Npy,
         "source-aware recommendations should select CSV only for folder sources");
     Require(
-        specforge::EnsureSampleLabelExportPathExtension(
+        spectiary::EnsureSampleLabelExportPathExtension(
             "labels",
-            specforge::SampleLabelExportFormat::Npy) ==
+            spectiary::SampleLabelExportFormat::Npy) ==
                 std::filesystem::path{"labels.npy"} &&
-            specforge::EnsureSampleLabelExportPathExtension(
+            spectiary::EnsureSampleLabelExportPathExtension(
                 "labels",
-                specforge::SampleLabelExportFormat::Csv) ==
+                spectiary::SampleLabelExportFormat::Csv) ==
                 std::filesystem::path{"labels.csv"},
         "missing export extensions should follow the selected format");
     Require(
-        specforge::EnsureSampleLabelExportPathExtension(
+        spectiary::EnsureSampleLabelExportPathExtension(
             "labels.txt",
-            specforge::SampleLabelExportFormat::Csv) ==
+            spectiary::SampleLabelExportFormat::Csv) ==
             std::filesystem::path{"labels.txt"},
         "an explicit extension should not be silently rewritten");
 }
 
 void TestShortcutDisplayUsesKeyboardLegends()
 {
-    Require(specforge::FormatSampleLabelShortcut('q') == "Q", "lowercase shortcut should display as Q");
-    Require(specforge::FormatSampleLabelShortcut('Q') == "Q", "uppercase input should display canonically");
-    Require(specforge::FormatSampleLabelShortcut('3') == "3", "digit shortcut should retain its legend");
-    Require(specforge::FormatSampleLabelShortcut('\0') == "None", "unbound shortcut should display as None");
+    Require(spectiary::FormatSampleLabelShortcut('q') == "Q", "lowercase shortcut should display as Q");
+    Require(spectiary::FormatSampleLabelShortcut('Q') == "Q", "uppercase input should display canonically");
+    Require(spectiary::FormatSampleLabelShortcut('3') == "3", "digit shortcut should retain its legend");
+    Require(spectiary::FormatSampleLabelShortcut('\0') == "None", "unbound shortcut should display as None");
 }
 
 void TestAddSortSourcePopupLocalizesBuiltInSampleName()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view;
     view.sorting.has_active_source = true;
     view.sorting.available_sources.push_back(
         {
@@ -1740,9 +1740,9 @@ void TestShortcutCaptureAcceptsLettersAndKeypadDigits()
     ScopedImGuiContext context;
     (void)RenderCaptureFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-    specforge::SampleLabelShortcutCapture capture = RenderCaptureFrame();
+    spectiary::SampleLabelShortcutCapture capture = RenderCaptureFrame();
     Require(
-        capture.kind == specforge::SampleLabelShortcutCaptureKind::Captured && capture.shortcut == 'q',
+        capture.kind == spectiary::SampleLabelShortcutCaptureKind::Captured && capture.shortcut == 'q',
         "Q should capture as canonical lowercase q");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, false);
     (void)RenderCaptureFrame();
@@ -1750,7 +1750,7 @@ void TestShortcutCaptureAcceptsLettersAndKeypadDigits()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Keypad3, true);
     capture = RenderCaptureFrame();
     Require(
-        capture.kind == specforge::SampleLabelShortcutCaptureKind::Captured && capture.shortcut == '3',
+        capture.kind == spectiary::SampleLabelShortcutCaptureKind::Captured && capture.shortcut == '3',
         "keypad 3 should capture as the portable digit binding");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Keypad3, false);
     (void)RenderCaptureFrame();
@@ -1763,8 +1763,8 @@ void TestShortcutCaptureRejectsModifiedAndReservedKeys()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-    specforge::SampleLabelShortcutCapture capture = RenderCaptureFrame();
-    Require(capture.kind == specforge::SampleLabelShortcutCaptureKind::Unsupported, "Ctrl+Q should be rejected");
+    spectiary::SampleLabelShortcutCapture capture = RenderCaptureFrame();
+    Require(capture.kind == spectiary::SampleLabelShortcutCaptureKind::Unsupported, "Ctrl+Q should be rejected");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, false);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
@@ -1772,7 +1772,7 @@ void TestShortcutCaptureRejectsModifiedAndReservedKeys()
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     capture = RenderCaptureFrame();
-    Require(capture.kind == specforge::SampleLabelShortcutCaptureKind::Unsupported, "Right Arrow should be reserved");
+    Require(capture.kind == spectiary::SampleLabelShortcutCaptureKind::Unsupported, "Right Arrow should be reserved");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
     (void)RenderCaptureFrame();
 }
@@ -1782,69 +1782,69 @@ void TestShortcutCaptureSupportsClearAndCancel()
     ScopedImGuiContext context;
     (void)RenderCaptureFrame();
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Backspace, true);
-    specforge::SampleLabelShortcutCapture capture = RenderCaptureFrame();
-    Require(capture.kind == specforge::SampleLabelShortcutCaptureKind::Cleared, "Backspace should clear capture");
+    spectiary::SampleLabelShortcutCapture capture = RenderCaptureFrame();
+    Require(capture.kind == spectiary::SampleLabelShortcutCaptureKind::Cleared, "Backspace should clear capture");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Backspace, false);
     (void)RenderCaptureFrame();
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
     capture = RenderCaptureFrame();
-    Require(capture.kind == specforge::SampleLabelShortcutCaptureKind::Cancelled, "Escape should cancel capture");
+    Require(capture.kind == spectiary::SampleLabelShortcutCaptureKind::Cancelled, "Escape should cancel capture");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
     (void)RenderCaptureFrame();
 }
 
 void TestShortcutConflictRequiresTheSameKeyTwice()
 {
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{1, "bad", 'q'});
-    labels.labels.push_back(specforge::SampleLabelDefinition{2, "good", 'g'});
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{1, "bad", 'q'});
+    labels.labels.push_back(spectiary::SampleLabelDefinition{2, "good", 'g'});
 
-    specforge::SampleLabelShortcutSelection selection = specforge::ResolveSampleLabelShortcutSelection(
+    spectiary::SampleLabelShortcutSelection selection = spectiary::ResolveSampleLabelShortcutSelection(
         'q',
         2,
         '\0',
         labels);
     Require(
-        selection.kind == specforge::SampleLabelShortcutSelectionKind::ConflictRequiresRepeat &&
+        selection.kind == spectiary::SampleLabelShortcutSelectionKind::ConflictRequiresRepeat &&
             selection.conflicting_label_code == 1,
         "first Q should identify the existing owner without accepting the transfer");
 
-    selection = specforge::ResolveSampleLabelShortcutSelection('q', 2, 'q', labels);
+    selection = spectiary::ResolveSampleLabelShortcutSelection('q', 2, 'q', labels);
     Require(
-        selection.kind == specforge::SampleLabelShortcutSelectionKind::Accepted &&
+        selection.kind == spectiary::SampleLabelShortcutSelectionKind::Accepted &&
             selection.conflicting_label_code == 1,
         "second Q should accept the transfer from the existing owner");
 
-    selection = specforge::ResolveSampleLabelShortcutSelection('g', 2, 'q', labels);
+    selection = spectiary::ResolveSampleLabelShortcutSelection('g', 2, 'q', labels);
     Require(
-        selection.kind == specforge::SampleLabelShortcutSelectionKind::Accepted &&
-            selection.conflicting_label_code == specforge::kUnlabeledSampleLabelCode,
+        selection.kind == spectiary::SampleLabelShortcutSelectionKind::Accepted &&
+            selection.conflicting_label_code == spectiary::kUnlabeledSampleLabelCode,
         "pressing the edited label's existing key should not be treated as a conflict");
 }
 
 void TestNavigationAndLabelCommandsShareOneRouter()
 {
     ScopedImGuiContext context;
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{7, "quality", 'q'});
-    const specforge::SampleWorkflowShortcutContext capabilities{
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{7, "quality", 'q'});
+    const spectiary::SampleWorkflowShortcutContext capabilities{
         .navigation_enabled = true,
         .labeling_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities, labels);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
+    spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
         "Q should route to its active task label");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, false);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
-    Require(shortcut.kind == specforge::SampleWorkflowShortcutKind::NextSample, "Right Arrow should route next");
+    Require(shortcut.kind == spectiary::SampleWorkflowShortcutKind::NextSample, "Right Arrow should route next");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 }
@@ -1852,17 +1852,17 @@ void TestNavigationAndLabelCommandsShareOneRouter()
 void TestLabelingPanelRoutesTheLatestSessionProjection()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    const specforge::SourceCollectionSessionView stale_view = MakeLabelingPanelView(7, 'q');
-    const specforge::SourceCollectionSessionView latest_view = MakeLabelingPanelView(8, 'g');
+    spectiary::SampleWorkflowPanelUi panel;
+    const spectiary::SourceCollectionSessionView stale_view = MakeLabelingPanelView(7, 'q');
+    const spectiary::SourceCollectionSessionView latest_view = MakeLabelingPanelView(8, 'g');
     (void)RenderLabelingPanelFrame(panel, stale_view, latest_view, true);
     (void)RenderLabelingPanelFrame(panel, stale_view, latest_view, false);
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_G, true);
-    const specforge::SampleWorkflowShortcut shortcut =
+    const spectiary::SampleWorkflowShortcut shortcut =
         RenderLabelingPanelFrame(panel, stale_view, latest_view, false);
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 8,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 8,
         "Labeling Panel should register shortcuts from the latest session projection after a mutation");
 }
 
@@ -1870,13 +1870,13 @@ void TestLabelingPanelRoutesTheLatestSessionProjection()
 void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView inactive_view;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView inactive_view;
     inactive_view.labeling.has_active_source = true;
     inactive_view.labeling.current_index = 0;
     inactive_view.labeling.sample_count = 1;
-    specforge::SourceCollectionSessionView latest_view = inactive_view;
-    const specforge::SourceCollectionSessionView activated_view = MakeLabelingPanelView(8, 'g');
+    spectiary::SourceCollectionSessionView latest_view = inactive_view;
+    const spectiary::SourceCollectionSessionView activated_view = MakeLabelingPanelView(8, 'g');
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     LabelingTaskSwitchFrameObservation observation =
@@ -1929,7 +1929,7 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_G, true);
     observation = RenderLabelingTaskSwitchFrame(panel, activated_view, latest_view, activated_view, false);
     Require(
-        observation.shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel &&
+        observation.shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel &&
             observation.shortcut.label_code == 8,
         "the first new shortcut after a task switch should be routed without a settling frame");
 }
@@ -1938,9 +1938,9 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelUsesIdentityForSingleDraftResume()
 {
-    const specforge::SourceCollectionSessionView stale_view =
+    const spectiary::SourceCollectionSessionView stale_view =
         MakeRecoveryPanelView();
-    specforge::SourceCollectionSessionView activated_view = stale_view;
+    spectiary::SourceCollectionSessionView activated_view = stale_view;
     activated_view.labeling.has_active_task = true;
     activated_view.labeling.active_task_is_temporary = true;
     activated_view.labeling.task_id =
@@ -1951,11 +1951,11 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
     const auto submit_single_draft_resume = [
         &stale_view,
         &activated_view](
-        const specforge::SourceCollectionSessionView& rejected_view,
-        specforge::SampleLabelingOperationResult::Issue issue) {
+        const spectiary::SourceCollectionSessionView& rejected_view,
+        spectiary::SampleLabelingOperationResult::Issue issue) {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = stale_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = stale_view;
 
         ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
         LabelingTaskSwitchFrameObservation observation =
@@ -2058,18 +2058,18 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
         return observation;
     };
 
-    specforge::SourceCollectionSessionView missing_view = stale_view;
+    spectiary::SourceCollectionSessionView missing_view = stale_view;
     missing_view.labeling.has_temporary_task = false;
     missing_view.labeling.recovery_drafts.clear();
     const LabelingTaskSwitchFrameObservation missing =
         submit_single_draft_resume(
             missing_view,
-            specforge::SampleLabelingOperationResult::Issue::
+            spectiary::SampleLabelingOperationResult::Issue::
                 EditTargetChanged);
     Require(
         missing.submission_count == 1 &&
             missing.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RecoverTemporaryLabelingTask &&
             missing.submitted_source_identity ==
                 stale_view.labeling.source_identity &&
@@ -2077,7 +2077,7 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
                 stale_view.labeling.recovery_drafts.front().task_id,
         "a missing single draft must submit identity-checked recovery");
 
-    specforge::SourceCollectionSessionView formalized_view =
+    spectiary::SourceCollectionSessionView formalized_view =
         MakeLabelingPanelView(8, 'g');
     formalized_view.labeling.source_identity =
         stale_view.labeling.source_identity;
@@ -2086,12 +2086,12 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
     const LabelingTaskSwitchFrameObservation formalized =
         submit_single_draft_resume(
             formalized_view,
-            specforge::SampleLabelingOperationResult::Issue::
+            spectiary::SampleLabelingOperationResult::Issue::
                 EditTargetChanged);
     Require(
         formalized.submission_count == 1 &&
             formalized.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RecoverTemporaryLabelingTask &&
             formalized.submitted_source_identity ==
                 stale_view.labeling.source_identity &&
@@ -2104,20 +2104,20 @@ void TestLabelingPanelUsesIdentityForSingleDraftResume()
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
 {
-    const specforge::SourceCollectionSessionView recovery_view =
+    const spectiary::SourceCollectionSessionView recovery_view =
         MakeRecoveryPanelView();
     const ImVec2 compact_window_size(650.0f, 700.0f);
 
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = recovery_view;
         (void)RenderRecoveryFrame(
             panel,
             recovery_view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         const auto recover_rect =
             RecoveryWidgetBounds(
@@ -2149,7 +2149,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         const RecoveryFrameObservation observation =
@@ -2158,12 +2158,12 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
                 recovery_view,
                 latest_view,
                 false,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 compact_window_size);
         Require(
             observation.submission_count == 1 &&
                 observation.submitted_workflow_kind ==
-                    specforge::ActiveSampleWorkflowIntentKind::
+                    spectiary::ActiveSampleWorkflowIntentKind::
                         RecoverTemporaryLabelingTask &&
                 observation.submitted_source_identity ==
                     recovery_view.labeling.source_identity &&
@@ -2174,14 +2174,14 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
 
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = recovery_view;
         (void)RenderRecoveryFrame(
             panel,
             recovery_view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         const auto keep_rect =
             RecoveryWidgetBounds(
@@ -2203,7 +2203,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         const RecoveryFrameObservation observation =
@@ -2212,17 +2212,17 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
                 recovery_view,
                 latest_view,
                 false,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 compact_window_size);
         Require(
             observation.submission_count == 0 &&
-                specforge::SampleWorkflowPanelUiTestAccess::
+                spectiary::SampleWorkflowPanelUiTestAccess::
                     IsRecoveryDraftRetained(
                         panel,
                         recovery_view.labeling.source_identity,
                         recovery_view.labeling.recovery_drafts.front().task_id),
             "Keep draft should acknowledge the recovery row locally without a workflow mutation");
-        specforge::SourceCollectionSessionView other_source_view =
+        spectiary::SourceCollectionSessionView other_source_view =
             recovery_view;
         other_source_view.labeling.source_identity = "source/other";
         (void)RenderRecoveryFrame(
@@ -2230,10 +2230,10 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             other_source_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
@@ -2245,23 +2245,23 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
                     recovery_view.labeling.recovery_drafts.front().task_id),
             "resetting workflow presentation must not end the UI session acknowledgement");
-        specforge::SourceCollectionSessionView unrelated_view = recovery_view;
+        spectiary::SourceCollectionSessionView unrelated_view = recovery_view;
         unrelated_view.labeling.recovery_revision =
             recovery_view.labeling.recovery_revision + 1;
         unrelated_view.labeling.recovery_drafts.push_back(
             {
                 .task_id = "draft-2",
                 .task_name = "Unrelated draft",
-                .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+                .status = spectiary::SampleLabelingRecoveryDraftStatus::Stale,
                 .labeled_count = 0,
                 .sample_count = 5,
             });
@@ -2270,42 +2270,42 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             unrelated_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
                     recovery_view.labeling.recovery_drafts.front().task_id),
             "an unrelated recovery revision should not clear this draft's Keep acknowledgement");
-        specforge::SourceCollectionSessionView changed_view = recovery_view;
+        spectiary::SourceCollectionSessionView changed_view = recovery_view;
         changed_view.labeling.recovery_drafts.front().labeled_count = 3;
         (void)RenderRecoveryFrame(
             panel,
             changed_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            !specforge::SampleWorkflowPanelUiTestAccess::
+            !spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
                     recovery_view.labeling.recovery_drafts.front().task_id),
             "a changed recovery row should clear its Keep acknowledgement");
-        specforge::SourceCollectionSessionView empty_view = recovery_view;
+        spectiary::SourceCollectionSessionView empty_view = recovery_view;
         empty_view.labeling.recovery_drafts.clear();
         (void)RenderRecoveryFrame(
             panel,
             empty_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            !specforge::SampleWorkflowPanelUiTestAccess::
+            !spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
@@ -2316,10 +2316,10 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         Require(
-            !specforge::SampleWorkflowPanelUiTestAccess::
+            !spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetained(
                     panel,
                     recovery_view.labeling.source_identity,
@@ -2329,14 +2329,14 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
 
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = recovery_view;
         (void)RenderRecoveryFrame(
             panel,
             recovery_view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         const auto delete_rect =
             RecoveryWidgetBounds(
@@ -2358,7 +2358,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         RecoveryFrameObservation observation =
@@ -2367,7 +2367,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
                 recovery_view,
                 latest_view,
                 false,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 compact_window_size);
         Require(
             observation.submission_count == 0 && observation.popup_open,
@@ -2382,7 +2382,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size);
         const auto confirm_rect =
             WidgetBounds("ConfirmDeleteLabelingTask");
@@ -2401,7 +2401,7 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
                 recovery_view,
                 latest_view,
                 false,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 compact_window_size);
         Require(
             confirm_hovered.popup_open &&
@@ -2417,22 +2417,22 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size,
-            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged);
+            spectiary::SampleLabelingOperationResult::Issue::EditTargetChanged);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         const RecoveryFrameObservation confirmed = RenderRecoveryFrame(
             panel,
             recovery_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             compact_window_size,
-            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged);
+            spectiary::SampleLabelingOperationResult::Issue::EditTargetChanged);
         Require(
             confirmed.submission_count == 1 &&
                 confirmed.submitted_workflow_kind ==
-                    specforge::ActiveSampleWorkflowIntentKind::
+                    spectiary::ActiveSampleWorkflowIntentKind::
                         DeleteTemporaryLabelingTask &&
                 confirmed.submitted_source_identity ==
                     recovery_view.labeling.source_identity &&
@@ -2440,11 +2440,11 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
                     recovery_view.labeling.recovery_drafts.front().task_id,
             "Delete draft confirmation should submit the exact source and task identity");
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingOperationMessage(panel) ==
-                specforge::UiText(
-                    specforge::UiLanguage::English,
-                    specforge::UiTextId::LabelingDeleteTargetChanged),
+                spectiary::UiText(
+                    spectiary::UiLanguage::English,
+                    spectiary::UiTextId::LabelingDeleteTargetChanged),
             "Delete target changes should use delete-specific feedback");
     }
 }
@@ -2454,10 +2454,10 @@ void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
 void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    const specforge::SourceCollectionSessionView duplicate_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    const spectiary::SourceCollectionSessionView duplicate_view =
         MakeDuplicateRecoveryPanelView();
-    specforge::SourceCollectionSessionView latest_view = duplicate_view;
+    spectiary::SourceCollectionSessionView latest_view = duplicate_view;
     const ImVec2 compact_window_size(650.0f, 900.0f);
 
     (void)RenderRecoveryFrame(
@@ -2465,7 +2465,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     const auto second_keep_rect =
         RecoveryWidgetBounds(
@@ -2489,7 +2489,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2499,22 +2499,22 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetainedAt(
                     panel,
                     duplicate_view,
                     1) &&
-            !specforge::SampleWorkflowPanelUiTestAccess::
+            !spectiary::SampleWorkflowPanelUiTestAccess::
                 IsRecoveryDraftRetainedAt(
                     panel,
                     duplicate_view,
                     0),
         "Keep should acknowledge only the selected duplicate task row");
 
-    specforge::SourceCollectionSessionView changed_view = duplicate_view;
+    spectiary::SourceCollectionSessionView changed_view = duplicate_view;
     changed_view.labeling.recovery_drafts[1].labeled_count = 3;
     latest_view = changed_view;
     (void)RenderRecoveryFrame(
@@ -2522,10 +2522,10 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         changed_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::
+        !spectiary::SampleWorkflowPanelUiTestAccess::
             IsRecoveryDraftRetainedAt(panel, changed_view, 1),
         "changing a kept duplicate row should clear only its row token");
 
@@ -2535,7 +2535,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     const auto first_keep_rect =
         RecoveryWidgetBounds(
@@ -2559,7 +2559,7 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2569,14 +2569,14 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         duplicate_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             IsRecoveryDraftRetainedAt(panel, duplicate_view, 0),
         "the other duplicate row should remain independently retainable");
 
-    specforge::SourceCollectionSessionView removed_view = duplicate_view;
+    spectiary::SourceCollectionSessionView removed_view = duplicate_view;
     removed_view.labeling.recovery_drafts.erase(
         removed_view.labeling.recovery_drafts.begin());
     latest_view = removed_view;
@@ -2585,10 +2585,10 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
         removed_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::
+        !spectiary::SampleWorkflowPanelUiTestAccess::
             IsRecoveryDraftRetainedAt(panel, duplicate_view, 0),
         "a removed duplicate row should clear its own acknowledgement");
 }
@@ -2597,9 +2597,9 @@ void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
 {
-    const specforge::SourceCollectionSessionView duplicate_view =
+    const spectiary::SourceCollectionSessionView duplicate_view =
         MakeDuplicateRecoveryPanelView();
-    specforge::SourceCollectionSessionView repaired_view = duplicate_view;
+    spectiary::SourceCollectionSessionView repaired_view = duplicate_view;
     repaired_view.labeling.recovery_drafts.erase(
         repaired_view.labeling.recovery_drafts.begin() + 1);
     const ImVec2 compact_window_size(650.0f, 900.0f);
@@ -2608,14 +2608,14 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
         &repaired_view,
         &compact_window_size](std::string_view stable_id) {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = duplicate_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = duplicate_view;
         (void)RenderRecoveryFrame(
             panel,
             duplicate_view,
             latest_view,
             true,
-            specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiLanguage::SimplifiedChinese,
             compact_window_size);
         latest_view = repaired_view;
         const RecoveryFrameObservation initial = RenderRecoveryFrame(
@@ -2623,14 +2623,14 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
             duplicate_view,
             latest_view,
             false,
-            specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiLanguage::SimplifiedChinese,
             compact_window_size,
-            specforge::SampleLabelingOperationResult::Issue::None,
+            spectiary::SampleLabelingOperationResult::Issue::None,
             true,
             &repaired_view);
-        const std::string_view conflict_text = specforge::UiText(
-            specforge::UiLanguage::SimplifiedChinese,
-            specforge::UiTextId::TemporaryDraftDuplicateIdentity);
+        const std::string_view conflict_text = spectiary::UiText(
+            spectiary::UiLanguage::SimplifiedChinese,
+            spectiary::UiTextId::TemporaryDraftDuplicateIdentity);
         Require(
             initial.logged_text.find(std::string(conflict_text)) !=
                 std::string::npos,
@@ -2657,9 +2657,9 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
             duplicate_view,
             latest_view,
             false,
-            specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiLanguage::SimplifiedChinese,
             compact_window_size,
-            specforge::SampleLabelingOperationResult::Issue::None,
+            spectiary::SampleLabelingOperationResult::Issue::None,
             false,
             &repaired_view);
         ImGui::GetIO().AddMouseButtonEvent(
@@ -2670,9 +2670,9 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
             duplicate_view,
             latest_view,
             false,
-            specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiLanguage::SimplifiedChinese,
             compact_window_size,
-            specforge::SampleLabelingOperationResult::Issue::None,
+            spectiary::SampleLabelingOperationResult::Issue::None,
             false,
             &repaired_view);
         Require(
@@ -2692,8 +2692,8 @@ void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
 void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.source_identity = "source/multiple-drafts";
     view.labeling.task_id = "formal-task";
@@ -2704,17 +2704,17 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
         {
             .task_id = "draft-1",
             .task_name = "Draft one",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Recoverable,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Recoverable,
             .sample_count = 1,
         },
         {
             .task_id = "draft-2",
             .task_name = "Draft two",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Conflicting,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Conflicting,
             .sample_count = 1,
         },
     };
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     LabelingTaskSwitchFrameObservation observation =
@@ -2781,22 +2781,22 @@ void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
 #ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
 {
-    const specforge::SourceCollectionSessionView ambiguous_view =
+    const spectiary::SourceCollectionSessionView ambiguous_view =
         MakeFormalTaskWithAmbiguousRecoveryDraftView();
 
     const auto assert_row_action_disabled = [
         &ambiguous_view](std::string_view stable_id,
                          std::string_view message) {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = ambiguous_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = ambiguous_view;
         const ImVec2 window_size(650.0f, 700.0f);
         (void)RenderRecoveryFrame(
             panel,
             ambiguous_view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
         const auto action_rect =
             RecoveryWidgetBounds(
@@ -2820,7 +2820,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
             ambiguous_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
         ImGui::GetIO().AddMouseButtonEvent(
             ImGuiMouseButton_Left,
@@ -2830,7 +2830,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
             ambiguous_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
         Require(
             released.submission_count == 0 && !released.popup_open,
@@ -2845,15 +2845,15 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         "a formal/temp duplicate ID should disable deletion");
 
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView latest_view = ambiguous_view;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView latest_view = ambiguous_view;
     const ImVec2 window_size(650.0f, 700.0f);
     (void)RenderRecoveryFrame(
         panel,
         ambiguous_view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     const auto selector_rect =
         WidgetBounds("##labeling_task_selector");
@@ -2871,7 +2871,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2881,7 +2881,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2891,7 +2891,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     Require(
         selector_released.popup_open,
@@ -2902,7 +2902,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     const auto temporary_action_rect =
         WidgetBounds("TemporaryLabelingTaskAction");
@@ -2923,7 +2923,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2933,7 +2933,7 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
         ambiguous_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     Require(
         resume_released.submission_count == 0,
@@ -2945,24 +2945,24 @@ void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
 void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     view.labeling.recovery_drafts.push_back(
         {
             .task_id = "draft-2",
             .task_name = "Second draft",
-            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .status = spectiary::SampleLabelingRecoveryDraftStatus::Stale,
             .sample_count = 5,
     });
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
     const ImVec2 compact_window_size(650.0f, 700.0f);
     (void)RenderRecoveryFrame(
         panel,
         view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     const auto delete_rect =
         RecoveryWidgetBounds(
@@ -2986,7 +2986,7 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -2996,9 +2996,9 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         compact_window_size,
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         true);
     Require(
         opened.popup_open &&
@@ -3012,26 +3012,26 @@ void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
 void TestLabelingPanelPlacesSelectorBeforeRecoveryList()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    const specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    const spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
     const RecoveryFrameObservation observation = RenderRecoveryFrame(
         panel,
         view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         ImVec2(650.0f, 700.0f),
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         true);
     const std::size_t selector_position = observation.logged_text.find(
         "Select labeling task");
     const std::size_t recovery_position = observation.logged_text.find(
         std::string(
-            specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::TemporaryDraftRecovery)));
+            spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::TemporaryDraftRecovery)));
     Require(
         selector_position != std::string::npos &&
             recovery_position != std::string::npos &&
@@ -3048,18 +3048,18 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
     };
     const auto assert_selector_row_layout = [
         &window_sizes](
-        const specforge::SourceCollectionSessionView& view,
+        const spectiary::SourceCollectionSessionView& view,
         bool expect_recovery_action) {
         for (const ImVec2 window_size : window_sizes) {
             ScopedImGuiContext context;
-            specforge::SampleWorkflowPanelUi panel;
-            specforge::SourceCollectionSessionView latest_view = view;
+            spectiary::SampleWorkflowPanelUi panel;
+            spectiary::SourceCollectionSessionView latest_view = view;
             const RecoveryFrameObservation rendered = RenderRecoveryFrame(
                 panel,
                 view,
                 latest_view,
                 true,
-                specforge::UiLanguage::English,
+                spectiary::UiLanguage::English,
                 window_size);
             const auto selector_rect =
                 WidgetBounds("##labeling_task_selector");
@@ -3102,18 +3102,18 @@ void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
 void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView active_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView active_view =
         MakeLabelingPanelView(8, 'g');
     active_view.labeling.source_identity = "source/active";
-    specforge::SourceCollectionSessionView latest_view = active_view;
+    spectiary::SourceCollectionSessionView latest_view = active_view;
     const auto render_active_frame = [&](bool request_initial_focus) {
         return RenderRecoveryFrame(
             panel,
             active_view,
             latest_view,
             request_initial_focus,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             ImVec2(700.0f, 500.0f));
     };
 
@@ -3148,19 +3148,19 @@ void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
 void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView frame_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView frame_view =
         MakeLabelingPanelView(8, 'g');
     frame_view.labeling.source_identity = "source/old";
     frame_view.labeling.task_id = "task-old";
-    specforge::SourceCollectionSessionView latest_view = frame_view;
+    spectiary::SourceCollectionSessionView latest_view = frame_view;
     auto render_active_frame = [&]() {
         return RenderRecoveryFrame(
             panel,
             frame_view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             ImVec2(700.0f, 500.0f));
     };
 
@@ -3213,10 +3213,10 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
     const RecoveryFrameObservation confirmed = render_active_frame();
     Require(
         confirmed.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::LabelingOperationMessage(panel) ==
-                specforge::UiText(
-                    specforge::UiLanguage::English,
-                    specforge::UiTextId::LabelingDeleteTargetChanged),
+            spectiary::SampleWorkflowPanelUiTestAccess::LabelingOperationMessage(panel) ==
+                spectiary::UiText(
+                    spectiary::UiLanguage::English,
+                    spectiary::UiTextId::LabelingDeleteTargetChanged),
         "a current-task delete confirmation must reject a changed source/task identity");
 }
 #endif
@@ -3225,7 +3225,7 @@ void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
 void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
 {
     const auto make_view = []() {
-        specforge::SourceCollectionSessionView view =
+        spectiary::SourceCollectionSessionView view =
             MakeLabelingPanelView(8, 'g');
         view.labeling.source_identity = "source/shared";
         view.labeling.task_id = "formal-task";
@@ -3236,19 +3236,19 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
         return view;
     };
     const auto find_and_confirm_delete = [](
-                                           specforge::SampleWorkflowPanelUi& panel,
-                                           const specforge::SourceCollectionSessionView& view,
-                                           specforge::SourceCollectionSessionView& latest_view,
-                                           specforge::SampleLabelingOperationResult::Issue issue) {
+                                           spectiary::SampleWorkflowPanelUi& panel,
+                                           const spectiary::SourceCollectionSessionView& view,
+                                           spectiary::SourceCollectionSessionView& latest_view,
+                                           spectiary::SampleLabelingOperationResult::Issue issue) {
         const ImVec2 window_size(233.0f, 700.0f);
         (void)RenderRecoveryFrame(
             panel,
             view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
-        specforge::SampleWorkflowPanelUiTestAccess::SetActiveTaskId(
+        spectiary::SampleWorkflowPanelUiTestAccess::SetActiveTaskId(
             panel,
             view.labeling.task_id);
         const auto delete_rect =
@@ -3269,7 +3269,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         RecoveryFrameObservation opened = RenderRecoveryFrame(
@@ -3277,7 +3277,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
         Require(opened.popup_open, "editing-state fixture should open recovery deletion confirmation");
         ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
@@ -3286,12 +3286,12 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size);
-        specforge::SampleWorkflowPanelUiTestAccess::SetEditingLabelCode(
+        spectiary::SampleWorkflowPanelUiTestAccess::SetEditingLabelCode(
             panel,
             8);
-        specforge::SampleWorkflowPanelUiTestAccess::SetShortcutCaptureActive(
+        spectiary::SampleWorkflowPanelUiTestAccess::SetShortcutCaptureActive(
             panel,
             true);
 
@@ -3311,7 +3311,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size,
             issue);
         Require(
@@ -3326,7 +3326,7 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size,
             issue);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
@@ -3335,13 +3335,13 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
             view,
             latest_view,
             false,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             window_size,
             issue);
         Require(
             confirmed.submission_count == 1 &&
                 confirmed.submitted_workflow_kind ==
-                    specforge::ActiveSampleWorkflowIntentKind::
+                    spectiary::ActiveSampleWorkflowIntentKind::
                         DeleteTemporaryLabelingTask &&
                 confirmed.submitted_source_identity ==
                     view.labeling.source_identity &&
@@ -3353,33 +3353,33 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
 
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        const specforge::SourceCollectionSessionView view = make_view();
-        specforge::SourceCollectionSessionView latest_view = view;
+        spectiary::SampleWorkflowPanelUi panel;
+        const spectiary::SourceCollectionSessionView view = make_view();
+        spectiary::SourceCollectionSessionView latest_view = view;
         (void)find_and_confirm_delete(
             panel,
             view,
             latest_view,
-            specforge::SampleLabelingOperationResult::Issue::None);
+            spectiary::SampleLabelingOperationResult::Issue::None);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
-                specforge::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
+            spectiary::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
+                spectiary::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
             "deleting an unrelated recovery draft must preserve active-task editing state after success");
     }
 
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        const specforge::SourceCollectionSessionView view = make_view();
-        specforge::SourceCollectionSessionView latest_view = view;
+        spectiary::SampleWorkflowPanelUi panel;
+        const spectiary::SourceCollectionSessionView view = make_view();
+        spectiary::SourceCollectionSessionView latest_view = view;
         (void)find_and_confirm_delete(
             panel,
             view,
             latest_view,
-            specforge::SampleLabelingOperationResult::Issue::EditLeaseUnavailable);
+            spectiary::SampleLabelingOperationResult::Issue::EditLeaseUnavailable);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
-                specforge::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
+            spectiary::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
+                spectiary::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
             "a rejected unrelated recovery deletion must preserve active-task editing state");
     }
 }
@@ -3389,16 +3389,16 @@ void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
 void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    const specforge::SourceCollectionSessionView view = MakeRecoveryPanelView();
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SampleWorkflowPanelUi panel;
+    const spectiary::SourceCollectionSessionView view = MakeRecoveryPanelView();
+    spectiary::SourceCollectionSessionView latest_view = view;
     const ImVec2 default_labeling_dock_size(233.0f, 700.0f);
     const RecoveryFrameObservation rendered = RenderRecoveryFrame(
         panel,
         view,
         latest_view,
         true,
-        specforge::UiLanguage::SimplifiedChinese,
+        spectiary::UiLanguage::SimplifiedChinese,
         default_labeling_dock_size);
     const std::array<std::string_view, 3> action_ids = {
         "RecoverTemporaryDraft",
@@ -3431,8 +3431,8 @@ void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
 void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "28f66393-e877-400a-a748-563d623cbd47";
@@ -3448,11 +3448,11 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
                 .has_value(),
         "a formal task should always render the name editor and task ID copy control");
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) == view.labeling.task_id &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == view.labeling.task_name &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBaseline(panel) == view.labeling.task_name,
         "the name editor should initialize from the formal task projection");
 
@@ -3466,16 +3466,16 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
         draft.submission_count == 0 &&
             WidgetBounds("##labeling_task_name")
                 .has_value() &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == "Draft triage",
         "an outputless draft should use the same persistent task-name editor with its real name");
     Require(
         draft.logged_text.find("Draft triage") !=
                 std::string::npos &&
             draft.logged_text.find(
-                specforge::UiText(
-                    specforge::UiLanguage::English,
-                    specforge::UiTextId::TemporaryLabelingTask)) ==
+                spectiary::UiText(
+                    spectiary::UiLanguage::English,
+                    spectiary::UiTextId::TemporaryLabelingTask)) ==
                 std::string::npos,
         "the draft selector should show its persisted name rather than a fixed temporary-task label");
 }
@@ -3485,20 +3485,20 @@ void TestLabelingPanelKeepsTaskNameEditorForDraftAndFormalTasks()
 void TestLabelingPanelOpenSelectorUsesRealDraftName()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeActiveTemporaryRecoveryPanelView();
     view.labeling.task_name = "Review ## batch ### alpha";
     view.labeling.recovery_drafts.front().task_name =
         view.labeling.task_name;
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
     const ImVec2 window_size(650.0f, 700.0f);
     (void)RenderRecoveryFrame(
         panel,
         view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     const auto selector_rect =
         WidgetBounds("##labeling_task_selector");
@@ -3514,7 +3514,7 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMousePosEvent(
         selector_center.x,
@@ -3527,7 +3527,7 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -3537,9 +3537,9 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size,
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         true);
 
     const std::size_t preview_name = opened.logged_text.find(
@@ -3552,9 +3552,9 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
     Require(
         opened.popup_open &&
             selectable_name != std::string::npos &&
-            opened.logged_text.find(std::string(specforge::UiText(
-                specforge::UiLanguage::English,
-                specforge::UiTextId::TemporaryLabelingDraft))) !=
+            opened.logged_text.find(std::string(spectiary::UiText(
+                spectiary::UiLanguage::English,
+                spectiary::UiTextId::TemporaryLabelingDraft))) !=
                 std::string::npos,
         "the open selector should use the real draft name as its selectable label and show temporary ownership separately");
 }
@@ -3564,8 +3564,8 @@ void TestLabelingPanelOpenSelectorUsesRealDraftName()
 void TestLabelingPanelOpenSelectorUsesRealFormalName()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_name = "Formal ## review ### alpha";
     view.labeling.output_path = "formal-review.asdf";
@@ -3574,18 +3574,18 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
             .name = view.labeling.task_name,
             .path = *view.labeling.output_path,
             .relationship =
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     LocalLabelingTask,
             .can_activate_labeling = true,
         });
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
     const ImVec2 window_size(650.0f, 700.0f);
     (void)RenderRecoveryFrame(
         panel,
         view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     const auto selector_rect =
         WidgetBounds("##labeling_task_selector");
@@ -3601,7 +3601,7 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMousePosEvent(
         selector_center.x,
@@ -3614,7 +3614,7 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -3624,9 +3624,9 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
         view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         window_size,
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         true);
 
     const std::size_t preview_name = opened.logged_text.find(
@@ -3647,8 +3647,8 @@ void TestLabelingPanelOpenSelectorUsesRealFormalName()
 void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "5fd04692-4eb7-4b1c-b356-39db30b13799";
@@ -3663,7 +3663,7 @@ void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
         typed.submission_count == 0,
         "typing a task name must not submit a per-keystroke rename");
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             TaskNameEditBuffer(panel) == requested_name,
         "the task-name editor should preserve whitespace and UTF-8 text exactly");
 
@@ -3678,7 +3678,7 @@ void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
     Require(
         submitted.submission_count == 1 &&
             submitted.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RenameActiveLabelingTask &&
             submitted.submitted_task_id == view.labeling.task_id &&
             submitted.submitted_name == requested_name,
@@ -3694,8 +3694,8 @@ void TestLabelingPanelSubmitsTaskNameOnlyOnEnter()
 void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "825508a7-7e87-41c4-8d2b-5eecaa3b518b";
@@ -3746,8 +3746,8 @@ void TestLabelingPanelSubmitsTaskNameOnceOnBlurAndCopiesFullId()
 void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "b5402a3a-aef5-4cfe-8cb2-e58189602ea5";
@@ -3764,7 +3764,7 @@ void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
         typed.submission_count == 0 &&
             collapsed.submission_count == 1 &&
             collapsed.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RenameActiveLabelingTask &&
             collapsed.submitted_task_id == view.labeling.task_id &&
             collapsed.submitted_name == "Collapsed rename" &&
@@ -3777,8 +3777,8 @@ void TestLabelingPanelSettlesTaskNameWhenWindowCollapses()
 void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "84f767c2-f7b8-4f8c-8e03-367a9457c695";
@@ -3810,7 +3810,7 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
     const LabelingTaskNameFrameObservation pressed =
         RenderLabelingTaskNameFrame(panel, view);
 
-    specforge::SourceCollectionSessionView zero_match_view = view;
+    spectiary::SourceCollectionSessionView zero_match_view = view;
     zero_match_view.labeling.current_index.reset();
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -3831,7 +3831,7 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
                 released.submission_count ==
             1 &&
             released.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RenameActiveLabelingTask &&
             released.submitted_task_id == view.labeling.task_id &&
             released.submitted_name == requested_name &&
@@ -3842,10 +3842,10 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
                 .has_value() &&
             WidgetBounds("CopyLabelingTaskId")
                 .has_value() &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) ==
                 zero_match_view.labeling.task_id &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == requested_name,
         "an active task should retain its task-name and task-ID controls when filters match no samples");
 }
@@ -3855,8 +3855,8 @@ void TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter()
 void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "f33d04d4-c6b0-47d2-b92f-98cd1963308c";
@@ -3873,18 +3873,18 @@ void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
         typed.submission_count == 0 &&
             hidden.submission_count == 1 &&
             hidden.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RenameActiveLabelingTask &&
             hidden.submitted_task_id == view.labeling.task_id &&
             hidden.submitted_name == "Hidden panel rename" &&
             repeated.submission_count == 0,
         "stopping Labeling rendering should finalize one guarded rename without requiring the panel to reopen");
 
-    specforge::SampleWorkflowPanelUi stale_panel;
+    spectiary::SampleWorkflowPanelUi stale_panel;
     FocusLabelingTaskNameField(stale_panel, view);
     ReplaceFocusedText(stale_panel, view, "Stale hidden rename");
     (void)RenderLabelingTaskNameFrame(stale_panel, view);
-    specforge::SourceCollectionSessionView switched_view = view;
+    spectiary::SourceCollectionSessionView switched_view = view;
     switched_view.labeling.task_id =
         "743a894d-d942-4050-8e45-c5a766464d4d";
     switched_view.labeling.task_name = "Switched task";
@@ -3894,7 +3894,7 @@ void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
             switched_view);
     Require(
         stale.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(stale_panel).empty(),
         "hidden-panel finalization should discard the edit when the expected task ID is stale");
 }
@@ -3904,8 +3904,8 @@ void TestLabelingPanelFinalizesTaskNameWhenRenderingStops()
 void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeLabelingPanelView(8, 'g');
     view.labeling.task_id =
         "752d5d70-c699-4f39-9f32-e8b5b496e2e7";
@@ -3922,7 +3922,7 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
     const auto copy_rect =
         WidgetBounds("CopyLabelingTaskId");
     const auto copy_widget =
-        specforge::test::WidgetHarness::Current().Observe("CopyLabelingTaskId");
+        spectiary::test::WidgetHarness::Current().Observe("CopyLabelingTaskId");
     Require(
         copy_rect.has_value() && copy_widget.has_value() &&
             copy_widget->raw_bounds.Min.x >= window_x &&
@@ -3969,18 +3969,18 @@ void TestLabelingPanelKeepsCopyIdReachableInNarrowDock()
 void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView frame_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView frame_view =
         MakeFormalTaskWithRecoveryDraftView();
-    specforge::SourceCollectionSessionView latest_view = frame_view;
-    specforge::SourceCollectionSessionView recovered_view = frame_view;
+    spectiary::SourceCollectionSessionView latest_view = frame_view;
+    spectiary::SourceCollectionSessionView recovered_view = frame_view;
     recovered_view.labeling.active_task_is_temporary = true;
     recovered_view.labeling.task_id =
         frame_view.labeling.recovery_drafts.front().task_id;
     recovered_view.labeling.task_name =
         frame_view.labeling.recovery_drafts.front().task_name;
     recovered_view.labeling.recovery_drafts.front().status =
-        specforge::SampleLabelingRecoveryDraftStatus::Current;
+        spectiary::SampleLabelingRecoveryDraftStatus::Current;
 
     FocusLabelingTaskNameField(panel, frame_view);
     ReplaceFocusedText(panel, frame_view, "Must not rename formal task");
@@ -3996,7 +3996,7 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         frame_view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         recovery_window_size);
     Require(
         recovery_layout.submission_count == 0,
@@ -4019,7 +4019,7 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         frame_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         recovery_window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -4029,7 +4029,7 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         frame_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         recovery_window_size);
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -4039,9 +4039,9 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
         frame_view,
         latest_view,
         false,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         recovery_window_size,
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         false,
         &recovered_view);
 
@@ -4050,15 +4050,15 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
             pressed.submission_count == 0 &&
             released.submission_count == 1 &&
             released.submitted_workflow_kind ==
-                specforge::ActiveSampleWorkflowIntentKind::
+                spectiary::ActiveSampleWorkflowIntentKind::
                     RecoverTemporaryLabelingTask &&
             released.submitted_task_id ==
                 recovered_view.labeling.task_id,
         "clicking Recover should switch tasks without first renaming the blurred old task");
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) != frame_view.labeling.task_id &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) !=
                     "Must not rename formal task",
         "the switched task should discard the old task's pending edit buffer");
@@ -4069,8 +4069,8 @@ void TestLabelingPanelRecoverySwitchDiscardsBlurredTaskName()
 void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView first_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView first_view =
         MakeLabelingPanelView(8, 'g');
     first_view.labeling.task_id =
         "f18a69c5-408e-47df-8504-4803f9cc1634";
@@ -4087,15 +4087,15 @@ void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
     Require(
         typed.submission_count == 0 &&
             rejected.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == whitespace_name &&
-            !specforge::SampleWorkflowPanelUiTestAccess::
+            !spectiary::SampleWorkflowPanelUiTestAccess::
                  TaskNameValidationMessage(panel)
                  .empty(),
         "Unicode-whitespace-only names should remain visible with an inline error and no command");
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::ValidateTaskName(
-             specforge::UiLanguage::English,
+        !spectiary::SampleWorkflowPanelUiTestAccess::ValidateTaskName(
+             spectiary::UiLanguage::English,
              std::string("bad\xFF", 4))
              .empty(),
         "the task-name validator should reject malformed UTF-8 before submission");
@@ -4103,18 +4103,18 @@ void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
     FocusLabelingTaskNameField(panel, first_view);
     ReplaceFocusedText(panel, first_view, "Unsubmitted first task name");
     (void)RenderLabelingTaskNameFrame(panel, first_view);
-    specforge::SourceCollectionSessionView refreshed_view = first_view;
+    spectiary::SourceCollectionSessionView refreshed_view = first_view;
     refreshed_view.labeling.task_name = "Ordinary view refresh";
     const LabelingTaskNameFrameObservation refreshed =
         RenderLabelingTaskNameFrame(panel, refreshed_view);
     Require(
         refreshed.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) ==
                 "Unsubmitted first task name",
         "an ordinary same-task view refresh must not overwrite an edit in progress");
 
-    specforge::SourceCollectionSessionView second_view = first_view;
+    spectiary::SourceCollectionSessionView second_view = first_view;
     second_view.labeling.task_id =
         "237ba83f-814b-4a77-b814-8627f82cc884";
     second_view.labeling.task_name = "Second task";
@@ -4122,11 +4122,11 @@ void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
         RenderLabelingTaskNameFrame(panel, second_view);
     Require(
         switched.submission_count == 0 &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditTaskId(panel) == second_view.labeling.task_id &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBuffer(panel) == "Second task" &&
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 TaskNameEditBaseline(panel) == "Second task",
         "switching tasks should discard the old edit buffer without targeting either task");
 }
@@ -4134,15 +4134,15 @@ void TestLabelingPanelRejectsWhitespaceTaskNameAndAbortsOnSwitch()
 
 void TestLabelingPanelLocalizesBuiltInRecoveryPresentation()
 {
-    const std::string built_in_name(specforge::kTemporarySampleLabelingTaskName);
+    const std::string built_in_name(spectiary::kTemporarySampleLabelingTaskName);
     Require(
-        specforge::SampleWorkflowTemporaryDraftTaskName(
-            specforge::UiLanguage::SimplifiedChinese,
+        spectiary::SampleWorkflowTemporaryDraftTaskName(
+            spectiary::UiLanguage::SimplifiedChinese,
             built_in_name) == built_in_name,
         "recovery rows should show the draft's persisted name instead of replacing it from ownership state");
     Require(
-        specforge::SampleWorkflowTemporaryDraftTaskName(
-            specforge::UiLanguage::SimplifiedChinese,
+        spectiary::SampleWorkflowTemporaryDraftTaskName(
+            spectiary::UiLanguage::SimplifiedChinese,
             "Historical review") == "Historical review",
         "a historical custom recovery task name must remain unchanged");
 }
@@ -4150,14 +4150,14 @@ void TestLabelingPanelLocalizesBuiltInRecoveryPresentation()
 void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView view =
         MakeRecoveryPanelView();
     const std::string long_task_id =
         "historical-draft-task-id-with-a-long-stable-identity-"
         "0123456789abcdef0123456789abcdef0123456789abcdef";
     view.labeling.recovery_drafts.front().task_id = long_task_id;
-    specforge::SourceCollectionSessionView latest_view = view;
+    spectiary::SourceCollectionSessionView latest_view = view;
     const ImVec2 narrow_window_size(233.0f, 700.0f);
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
@@ -4166,7 +4166,7 @@ void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
         view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         narrow_window_size);
     bool full_tooltip = false;
     // Text has no ImGui widget ID. This bounded scan tests text hover geometry,
@@ -4175,8 +4175,8 @@ void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
         for (float x = 28; x < narrow_window_size.x && !full_tooltip; x += 24) {
             ImGui::GetIO().AddMousePosEvent(x, y);
             const auto hovered = RenderRecoveryFrame(panel, view, latest_view, false,
-                specforge::UiLanguage::English, narrow_window_size,
-                specforge::SampleLabelingOperationResult::Issue::None, true);
+                spectiary::UiLanguage::English, narrow_window_size,
+                spectiary::SampleLabelingOperationResult::Issue::None, true);
             const auto first = hovered.logged_text.find(long_task_id);
             full_tooltip = first != std::string::npos &&
                 hovered.logged_text.find(long_task_id, first + long_task_id.size()) != std::string::npos;
@@ -4187,15 +4187,15 @@ void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
 
 void TestLabelingPanelShowsPausedDraftSaveFailure()
 {
-    const specforge::SourceCollectionSessionView failed_view =
+    const spectiary::SourceCollectionSessionView failed_view =
         MakeFailedRecoveryPanelView();
     float healthy_height = 0.0f;
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        const specforge::SourceCollectionSessionView healthy_view =
+        spectiary::SampleWorkflowPanelUi panel;
+        const spectiary::SourceCollectionSessionView healthy_view =
             MakeRecoveryPanelView();
-        specforge::SourceCollectionSessionView latest_view = healthy_view;
+        spectiary::SourceCollectionSessionView latest_view = healthy_view;
         healthy_height = RenderRecoveryFrame(
             panel,
             healthy_view,
@@ -4208,16 +4208,16 @@ void TestLabelingPanelShowsPausedDraftSaveFailure()
     RecoveryFrameObservation failed_observation;
     {
         ScopedImGuiContext context;
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionView latest_view = failed_view;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionView latest_view = failed_view;
         failed_observation = RenderRecoveryFrame(
             panel,
             failed_view,
             latest_view,
             true,
-            specforge::UiLanguage::English,
+            spectiary::UiLanguage::English,
             ImVec2(900.0f, 500.0f),
-            specforge::SampleLabelingOperationResult::Issue::None,
+            spectiary::SampleLabelingOperationResult::Issue::None,
             true);
         failed_height = failed_observation.cursor_max_y;
     }
@@ -4225,26 +4225,26 @@ void TestLabelingPanelShowsPausedDraftSaveFailure()
     const auto& failed_state =
         failed_view.labeling.recovery_drafts.front().save_state;
     const std::string english_status =
-        specforge::SampleWorkflowSaveStateText(
-            specforge::UiLanguage::English,
+        spectiary::SampleWorkflowSaveStateText(
+            spectiary::UiLanguage::English,
             failed_state);
     const std::string chinese_status =
-        specforge::SampleWorkflowSaveStateText(
-            specforge::UiLanguage::SimplifiedChinese,
+        spectiary::SampleWorkflowSaveStateText(
+            spectiary::UiLanguage::SimplifiedChinese,
             failed_state);
     Require(
         failed_height > healthy_height &&
             english_status.find("1") != std::string::npos &&
             english_status.find(
-                specforge::UiText(
-                    specforge::UiLanguage::English,
-                    specforge::UiTextId::SaveFailedValue)) != std::string::npos &&
+                spectiary::UiText(
+                    spectiary::UiLanguage::English,
+                    spectiary::UiTextId::SaveFailedValue)) != std::string::npos &&
             chinese_status.find(
-                specforge::UiText(
-                    specforge::UiLanguage::SimplifiedChinese,
-                    specforge::UiTextId::SaveFailedValue)) != std::string::npos &&
-            specforge::SampleWorkflowSaveMessageText(
-                specforge::UiLanguage::English,
+                spectiary::UiText(
+                    spectiary::UiLanguage::SimplifiedChinese,
+                    spectiary::UiTextId::SaveFailedValue)) != std::string::npos &&
+            spectiary::SampleWorkflowSaveMessageText(
+                spectiary::UiLanguage::English,
                 failed_state) == failed_state.message &&
             failed_observation.logged_text.find(english_status) !=
                 std::string::npos &&
@@ -4253,21 +4253,21 @@ void TestLabelingPanelShowsPausedDraftSaveFailure()
         "a paused failed draft should render localized status, pending count, and its retained error detail");
 
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView warning_view =
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView warning_view =
         MakeRecoveryPanelView();
     warning_view.labeling.state_save_failed = true;
     warning_view.labeling.state_save_error = "save warning detail";
     warning_view.labeling.state_load_warning = "load warning detail";
-    specforge::SourceCollectionSessionView latest_view = warning_view;
+    spectiary::SourceCollectionSessionView latest_view = warning_view;
     const RecoveryFrameObservation warning = RenderRecoveryFrame(
         panel,
         warning_view,
         latest_view,
         true,
-        specforge::UiLanguage::English,
+        spectiary::UiLanguage::English,
         ImVec2(900.0f, 500.0f),
-        specforge::SampleLabelingOperationResult::Issue::None,
+        spectiary::SampleLabelingOperationResult::Issue::None,
         true);
     Require(
         warning.logged_text.find("save warning detail") != std::string::npos &&
@@ -4279,17 +4279,17 @@ void TestLabelingPanelShowsPausedDraftSaveFailure()
 void TestLabelingPanelSurfacesRejectedWorkflowMessage()
 {
     ScopedImGuiContext context;
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionView inactive_view;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionView inactive_view;
     inactive_view.labeling.has_active_source = true;
     inactive_view.labeling.current_index = 0;
     inactive_view.labeling.sample_count = 1;
-    specforge::SourceCollectionSessionView latest_view =
+    spectiary::SourceCollectionSessionView latest_view =
         inactive_view;
-    const specforge::SourceCollectionSessionView activated_view =
+    const spectiary::SourceCollectionSessionView activated_view =
         MakeLabelingPanelView(8, 'g');
     const std::string conflict_message =
-        "This labeling target is already being edited by another SpecForge instance.";
+        "This labeling target is already being edited by another Spectiary instance.";
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     LabelingTaskSwitchFrameObservation observation =
@@ -4405,34 +4405,34 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
 
 void TestLabelingPanelClearsNoticeAfterActionOnlySuccess()
 {
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionResult rejected;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionResult rejected;
     rejected.message =
-        "This labeling target is already being edited by another SpecForge instance.";
+        "This labeling target is already being edited by another Spectiary instance.";
     rejected.labeling_issue =
-        specforge::SampleLabelingOperationResult::Issue::
+        spectiary::SampleLabelingOperationResult::Issue::
             EditLeaseUnavailable;
-    specforge::SampleWorkflowPanelUiTestAccess::
+    spectiary::SampleWorkflowPanelUiTestAccess::
         CaptureLabelingOperationResult(
             panel,
             rejected,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
-        !specforge::SampleWorkflowPanelUiTestAccess::
+        !spectiary::SampleWorkflowPanelUiTestAccess::
              LabelingOperationMessage(panel)
              .empty(),
         "rejected operation should establish a visible notice");
 
-    specforge::SourceCollectionSessionResult succeeded;
+    spectiary::SourceCollectionSessionResult succeeded;
     succeeded.action.workflow_changed = true;
     succeeded.view_invalidated = true;
-    specforge::SampleWorkflowPanelUiTestAccess::
+    spectiary::SampleWorkflowPanelUiTestAccess::
         CaptureLabelingOperationResult(
             panel,
             succeeded,
-            specforge::UiLanguage::English);
+            spectiary::UiLanguage::English);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             LabelingOperationMessage(panel)
             .empty(),
         "a successful action-only labeling transition should clear the previous failure notice");
@@ -4440,57 +4440,57 @@ void TestLabelingPanelClearsNoticeAfterActionOnlySuccess()
 
 void TestLabelingPanelLocalizesLeaseNotices()
 {
-    specforge::SampleWorkflowPanelUi panel;
-    specforge::SourceCollectionSessionResult rejected;
+    spectiary::SampleWorkflowPanelUi panel;
+    spectiary::SourceCollectionSessionResult rejected;
     rejected.message =
-        "This labeling target is already being edited by another SpecForge instance.";
+        "This labeling target is already being edited by another Spectiary instance.";
     rejected.labeling_issue =
-        specforge::SampleLabelingOperationResult::Issue::
+        spectiary::SampleLabelingOperationResult::Issue::
             EditLeaseUnavailable;
-    specforge::SampleWorkflowPanelUiTestAccess::
+    spectiary::SampleWorkflowPanelUiTestAccess::
         CaptureLabelingOperationResult(
             panel,
             rejected,
-            specforge::UiLanguage::SimplifiedChinese);
+            spectiary::UiLanguage::SimplifiedChinese);
     Require(
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             LabelingOperationMessage(panel) ==
-        specforge::UiText(
-            specforge::UiLanguage::SimplifiedChinese,
-            specforge::UiTextId::
+        spectiary::UiText(
+            spectiary::UiLanguage::SimplifiedChinese,
+            spectiary::UiTextId::
                 LabelingEditLeaseUnavailable),
         "lease notices should use the selected UI language instead of coordinator-authored English text");
 }
 
 void TestLabelingPanelLocalizesMigrationNotices()
 {
-    using Issue = specforge::SampleLabelingOperationResult::Issue;
+    using Issue = spectiary::SampleLabelingOperationResult::Issue;
     constexpr std::array kCases = {
         std::pair{
             Issue::OutputPathAlreadyUsed,
-            specforge::UiTextId::OutputPathAlreadyUsed},
+            spectiary::UiTextId::OutputPathAlreadyUsed},
         std::pair{
             Issue::OutputMigrationPublicationFailed,
-            specforge::UiTextId::LabelingMigrationPublicationFailed},
+            spectiary::UiTextId::LabelingMigrationPublicationFailed},
         std::pair{
             Issue::OutputMigrationOwnerSwitchFailed,
-            specforge::UiTextId::LabelingMigrationOwnerSwitchFailed},
+            spectiary::UiTextId::LabelingMigrationOwnerSwitchFailed},
     };
     for (const auto& [issue, text_id] : kCases) {
-        specforge::SampleWorkflowPanelUi panel;
-        specforge::SourceCollectionSessionResult rejected;
+        spectiary::SampleWorkflowPanelUi panel;
+        spectiary::SourceCollectionSessionResult rejected;
         rejected.labeling_issue = issue;
         rejected.message = "unlocalized diagnostic must not be displayed";
-        specforge::SampleWorkflowPanelUiTestAccess::
+        spectiary::SampleWorkflowPanelUiTestAccess::
             CaptureLabelingOperationResult(
                 panel,
                 rejected,
-                specforge::UiLanguage::SimplifiedChinese);
+                spectiary::UiLanguage::SimplifiedChinese);
         Require(
-            specforge::SampleWorkflowPanelUiTestAccess::
+            spectiary::SampleWorkflowPanelUiTestAccess::
                 LabelingOperationMessage(panel) ==
-            specforge::UiText(
-                specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiText(
+                spectiary::UiLanguage::SimplifiedChinese,
                 text_id),
             "migration notices should use stable localized issue text instead of diagnostics");
     }
@@ -4499,31 +4499,31 @@ void TestLabelingPanelLocalizesMigrationNotices()
 void TestConsecutiveLabelCommandsDoNotNeedASettlingFrame()
 {
     ScopedImGuiContext context;
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{7, "quality", 'q'});
-    labels.labels.push_back(specforge::SampleLabelDefinition{8, "good", 'g'});
-    const specforge::SampleWorkflowShortcutContext capabilities{.labeling_enabled = true};
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{7, "quality", 'q'});
+    labels.labels.push_back(spectiary::SampleLabelDefinition{8, "good", 'g'});
+    const spectiary::SampleWorkflowShortcutContext capabilities{.labeling_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities, labels);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
+    spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
         "Q should route to the first label");
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_G, true);
     shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 8,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 8,
         "G on the immediately following frame should not be swallowed");
 }
 
 void TestUndoThenNavigationDoesNotNeedASettlingFrame()
 {
     ScopedImGuiContext context;
-    const specforge::SampleWorkflowShortcutContext capabilities{
+    const spectiary::SampleWorkflowShortcutContext capabilities{
         .navigation_enabled = true,
         .labeling_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities);
@@ -4532,8 +4532,8 @@ void TestUndoThenNavigationDoesNotNeedASettlingFrame()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities).shortcut;
-    Require(shortcut.kind == specforge::SampleWorkflowShortcutKind::UndoLabelWrite, "Ctrl+Z should route undo");
+    spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities).shortcut;
+    Require(shortcut.kind == spectiary::SampleWorkflowShortcutKind::UndoLabelWrite, "Ctrl+Z should route undo");
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, false);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
@@ -4541,44 +4541,44 @@ void TestUndoThenNavigationDoesNotNeedASettlingFrame()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     shortcut = RenderWorkflowFrame(false, capabilities).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::NextSample,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::NextSample,
         "Right Arrow immediately after undo should not be swallowed");
 }
 
 void TestTopRowThenKeypadDigitDoesNotNeedASettlingFrame()
 {
     ScopedImGuiContext context;
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{3, "three", '3'});
-    const specforge::SampleWorkflowShortcutContext capabilities{.labeling_enabled = true};
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{3, "three", '3'});
+    const spectiary::SampleWorkflowShortcutContext capabilities{.labeling_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities, labels);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_3, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
+    spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 3,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 3,
         "top-row 3 should route to the digit label");
 
     ImGui::GetIO().AddKeyEvent(ImGuiKey_3, false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Keypad3, true);
     shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 3,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 3,
         "keypad 3 immediately after top-row 3 should not be swallowed");
 }
 
 void TestCtrlZRequiresLabelingContextAndYieldsToTextEditing()
 {
     ScopedImGuiContext context;
-    const specforge::SampleWorkflowShortcutContext labeling_capability{.labeling_enabled = true};
+    const spectiary::SampleWorkflowShortcutContext labeling_capability{.labeling_enabled = true};
     (void)RenderWorkflowFrame(true, labeling_capability);
     (void)RenderWorkflowFrame(false, labeling_capability);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, labeling_capability).shortcut;
-    Require(shortcut.kind == specforge::SampleWorkflowShortcutKind::UndoLabelWrite, "Ctrl+Z should undo labeling");
+    spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, labeling_capability).shortcut;
+    Require(shortcut.kind == spectiary::SampleWorkflowShortcutKind::UndoLabelWrite, "Ctrl+Z should undo labeling");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, false);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
@@ -4591,7 +4591,7 @@ void TestCtrlZRequiresLabelingContextAndYieldsToTextEditing()
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, true);
     shortcut = RenderTextInputFrame(false, text, sizeof(text));
-    Require(shortcut.kind == specforge::SampleWorkflowShortcutKind::None, "text editing should retain Ctrl+Z");
+    Require(shortcut.kind == spectiary::SampleWorkflowShortcutKind::None, "text editing should retain Ctrl+Z");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, false);
     ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
@@ -4609,7 +4609,7 @@ void TestOpenPopupSuppressesWorkflowCommands()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     const PopupFrameObservation pressed = RenderPopupFrame(false);
     Require(
-        pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::None,
+        pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::None,
         "an open popup should suppress workflow navigation");
     Require(pressed.popup_open, "the popup should remain open after Right Arrow");
 }
@@ -4617,7 +4617,7 @@ void TestOpenPopupSuppressesWorkflowCommands()
 void TestModifiedArrowDoesNotNavigateSamples()
 {
     ScopedImGuiContext context;
-    const specforge::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
+    const spectiary::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities);
     (void)RenderWorkflowFrame(false, capabilities);
 
@@ -4626,13 +4626,13 @@ void TestModifiedArrowDoesNotNavigateSamples()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     const WorkflowFrameObservation pressed = RenderWorkflowFrame(false, capabilities);
     Require(
-        pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::None,
+        pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::None,
         "Ctrl+Right Arrow should not request sample navigation");
 }
 
 void TestArrowCommandsRetainControlFocus()
 {
-    const specforge::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
+    const spectiary::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
     {
         ScopedImGuiContext context;
         (void)RenderWorkflowFrame(true, capabilities);
@@ -4642,7 +4642,7 @@ void TestArrowCommandsRetainControlFocus()
         ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
         const WorkflowFrameObservation pressed = RenderWorkflowFrame(false, capabilities);
         Require(
-            pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::NextSample,
+            pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::NextSample,
             "Right Arrow should request the next sample");
         Require(pressed.first_focused, "Right Arrow should retain the first button focus");
         Require(!pressed.second_focused, "Right Arrow should not move focus to the second button");
@@ -4656,7 +4656,7 @@ void TestArrowCommandsRetainControlFocus()
         ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftArrow, true);
         const WorkflowFrameObservation pressed = RenderWorkflowFrame(false, capabilities);
         Require(
-            pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::PreviousSample,
+            pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::PreviousSample,
             "Left Arrow should request the previous sample");
         Require(pressed.second_focused, "Left Arrow should retain the second button focus");
         Require(!pressed.first_focused, "Left Arrow should not move focus to the first button");
@@ -4666,39 +4666,39 @@ void TestArrowCommandsRetainControlFocus()
 void TestCaptureBlocksWorkflowCommands()
 {
     ScopedImGuiContext context;
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{7, "quality", 'q'});
-    const specforge::SampleWorkflowShortcutContext capabilities{
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{7, "quality", 'q'});
+    const spectiary::SampleWorkflowShortcutContext capabilities{
         .labeling_enabled = true,
         .blocked = true};
     (void)RenderWorkflowFrame(true, capabilities, labels);
     (void)RenderWorkflowFrame(false, capabilities, labels);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-    const specforge::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
-    Require(shortcut.kind == specforge::SampleWorkflowShortcutKind::None, "shortcut capture should block assignment");
+    const spectiary::SampleWorkflowShortcut shortcut = RenderWorkflowFrame(false, capabilities, labels).shortcut;
+    Require(shortcut.kind == spectiary::SampleWorkflowShortcutKind::None, "shortcut capture should block assignment");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, false);
     (void)RenderWorkflowFrame(false, capabilities, labels);
 }
 
 void TestFirstCommandAfterBlockingIsNotSwallowed()
 {
-    specforge::SampleLabelSet labels;
-    labels.labels.push_back(specforge::SampleLabelDefinition{7, "quality", 'q'});
+    spectiary::SampleLabelSet labels;
+    labels.labels.push_back(spectiary::SampleLabelDefinition{7, "quality", 'q'});
 
     {
         ScopedImGuiContext context;
-        const specforge::SampleWorkflowShortcutContext blocked{
+        const spectiary::SampleWorkflowShortcutContext blocked{
             .labeling_enabled = true,
             .blocked = true};
         (void)RenderWorkflowFrame(true, blocked, labels);
         (void)RenderWorkflowFrame(false, blocked, labels);
 
         ImGui::GetIO().AddKeyEvent(ImGuiKey_Q, true);
-        const specforge::SampleWorkflowShortcutContext unblocked{.labeling_enabled = true};
-        const specforge::SampleWorkflowShortcut shortcut =
+        const spectiary::SampleWorkflowShortcutContext unblocked{.labeling_enabled = true};
+        const spectiary::SampleWorkflowShortcut shortcut =
             RenderWorkflowFrame(false, unblocked, labels).shortcut;
         Require(
-            shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
+            shortcut.kind == spectiary::SampleWorkflowShortcutKind::AssignLabel && shortcut.label_code == 7,
             "the first label key after shortcut capture should not be swallowed");
     }
     {
@@ -4706,9 +4706,9 @@ void TestFirstCommandAfterBlockingIsNotSwallowed()
         (void)RenderForcedTextBlockFrame(true);
         (void)RenderForcedTextBlockFrame(true);
         ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
-        const specforge::SampleWorkflowShortcut shortcut = RenderForcedTextBlockFrame(false);
+        const spectiary::SampleWorkflowShortcut shortcut = RenderForcedTextBlockFrame(false);
         Require(
-            shortcut.kind == specforge::SampleWorkflowShortcutKind::NextSample,
+            shortcut.kind == spectiary::SampleWorkflowShortcutKind::NextSample,
             "the first navigation key after text input releases ownership should not be swallowed");
     }
     {
@@ -4720,7 +4720,7 @@ void TestFirstCommandAfterBlockingIsNotSwallowed()
         ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftArrow, true);
         const PopupFrameObservation pressed = RenderPopupFrame(false);
         Require(
-            pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::PreviousSample,
+            pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::PreviousSample,
             "the first navigation key after a popup closes should not be swallowed");
     }
 }
@@ -4737,7 +4737,7 @@ void TestPlotHoverYieldsToAnotherPanelsFocus()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     const CrossWindowObservation pressed = RenderPlotHoverWithOtherPanelFocus(false);
     Require(
-        pressed.shortcut.kind == specforge::SampleWorkflowShortcutKind::None,
+        pressed.shortcut.kind == spectiary::SampleWorkflowShortcutKind::None,
         "Plot hover should not override another panel's keyboard focus");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
     (void)RenderPlotHoverWithOtherPanelFocus(false);
@@ -4749,9 +4749,9 @@ void TestHoverFallbackIsExplicitlyOptedIn()
     ImGui::GetIO().AddMousePosEvent(100.0f, 100.0f);
     (void)RenderHoverOnlyFrame(false);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
-    specforge::SampleWorkflowShortcut shortcut = RenderHoverOnlyFrame(false);
+    spectiary::SampleWorkflowShortcut shortcut = RenderHoverOnlyFrame(false);
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::None,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::None,
         "hover-only Labeling-style contexts should not own workflow keys");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
     (void)RenderHoverOnlyFrame(false);
@@ -4760,7 +4760,7 @@ void TestHoverFallbackIsExplicitlyOptedIn()
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
     shortcut = RenderHoverOnlyFrame(true);
     Require(
-        shortcut.kind == specforge::SampleWorkflowShortcutKind::NextSample,
+        shortcut.kind == spectiary::SampleWorkflowShortcutKind::NextSample,
         "Plot-style contexts should support the explicit hover fallback");
     ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
     (void)RenderHoverOnlyFrame(true);
@@ -4769,7 +4769,7 @@ void TestHoverFallbackIsExplicitlyOptedIn()
 void TestTabStillMovesControlFocus()
 {
     ScopedImGuiContext context;
-    const specforge::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
+    const spectiary::SampleWorkflowShortcutContext capabilities{.navigation_enabled = true};
     (void)RenderWorkflowFrame(true, capabilities);
     const WorkflowFrameObservation initial = RenderWorkflowFrame(false, capabilities);
     Require(initial.first_focused, "first action should begin focused");

@@ -35,18 +35,18 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
-class SpecForgeApp {
+class SpectiaryApp {
 public:
-    explicit SpecForgeApp(
-        const SpecForgeStartup& startup,
+    explicit SpectiaryApp(
+        const SpectiaryStartup& startup,
         std::optional<AutomationStartupConfiguration>
             automation = std::nullopt);
-    ~SpecForgeApp();
+    ~SpectiaryApp();
 
-    SpecForgeApp(const SpecForgeApp&) = delete;
-    SpecForgeApp& operator=(const SpecForgeApp&) = delete;
+    SpectiaryApp(const SpectiaryApp&) = delete;
+    SpectiaryApp& operator=(const SpectiaryApp&) = delete;
 
     int Run(
         HINSTANCE instance,
@@ -176,7 +176,7 @@ private:
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     void LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam);
 
-    SpecForgeStartup startup_;
+    SpectiaryStartup startup_;
     Win32Window window_;
     D3D11Renderer renderer_;
     D3D11ImGuiViewportRenderer viewport_renderer_;
@@ -244,4 +244,4 @@ private:
         runtime_resource_workload_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

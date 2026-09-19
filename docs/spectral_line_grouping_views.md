@@ -33,7 +33,7 @@ The glossary source for these terms is `CONTEXT.md`.
 Grouping state is scoped to a catalog identity, not to the currently selected
 tab or to a file path alone.
 
-- The built-in catalog uses a fixed identity, such as `specforge.public`.
+- The built-in catalog uses a fixed identity, such as `public-spectral-lines.v1`.
 - Imported catalogs should prefer a declared stable catalog id when available.
 - Imported catalogs without a declared id should receive a generated local
   identity. The original path and a content fingerprint may be recorded as
@@ -167,10 +167,10 @@ The cache should be normalized and versioned:
 
 ```json
 {
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 6,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "view-1",
       "marker_visibility": {
         "h_alpha": true
@@ -201,7 +201,7 @@ The cache should be normalized and versioned:
     }
   },
   "catalog_panel_state": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "expanded_group_ids": [
         "view-1/group-1"
       ]
@@ -248,7 +248,7 @@ invalid body is reported and is never rewritten merely by opening and closing
 the application.
 
 The first implementation should treat this as an internal writer-owned cache,
-not as a public exchange format. Its reader exists to load SpecForge's own
+not as a public exchange format. Its reader exists to load Spectiary's own
 versioned cache plus supported legacy cache versions. Future import/export can
 reuse the same core model, but should use a mature JSON library with stricter
 validation, conflict handling, and explicit user confirmation.

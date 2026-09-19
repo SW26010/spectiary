@@ -1,6 +1,6 @@
 #include "profile/profile_recording_status.h"
 
-namespace specforge {
+namespace spectiary {
 
 ProfileRecordingStatus DescribeProfileRecordingStop(
     ProfileSink::StopReason stop_reason,
@@ -35,4 +35,4 @@ ProfileRecordingStatus DescribeProfileRecordingStop(
     return status;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

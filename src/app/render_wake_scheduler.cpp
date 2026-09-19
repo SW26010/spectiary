@@ -3,7 +3,7 @@
 
 #include <algorithm>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void ConsiderEarlier(
@@ -202,4 +202,4 @@ std::optional<RenderWakeScheduler::TimePoint> RenderWakeScheduler::NextWakeDeadl
     return deadline;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

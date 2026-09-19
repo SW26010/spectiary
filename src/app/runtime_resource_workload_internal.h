@@ -6,7 +6,7 @@
 #include <functional>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct RuntimeResourceWorkloadOperations {
     std::function<ShellRuntimeResourceObservation()>
@@ -74,4 +74,4 @@ struct RuntimeResourceWorkloadTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary

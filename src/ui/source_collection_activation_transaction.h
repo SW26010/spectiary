@@ -21,7 +21,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 class SpectrumViewSession;
@@ -460,4 +460,4 @@ private:
             deferred_restore_finished);
 };
 
-}  // namespace specforge
+}  // namespace spectiary

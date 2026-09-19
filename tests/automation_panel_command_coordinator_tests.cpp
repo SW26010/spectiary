@@ -12,15 +12,15 @@
 
 namespace {
 
-using specforge::ApplicationPanel;
-using specforge::AutomationCommandKind;
-using specforge::AutomationPanelCommandCoordinator;
-using specforge::AutomationPanelGetParameters;
-using specforge::AutomationPanelSetParameters;
-using specforge::AutomationQueuedCommand;
-using specforge::PanelVisibilityState;
-using specforge::ShellAutomationPanelPresentation;
-using specforge::ShellAutomationPanelPresentationStatus;
+using spectiary::ApplicationPanel;
+using spectiary::AutomationCommandKind;
+using spectiary::AutomationPanelCommandCoordinator;
+using spectiary::AutomationPanelGetParameters;
+using spectiary::AutomationPanelSetParameters;
+using spectiary::AutomationQueuedCommand;
+using spectiary::PanelVisibilityState;
+using spectiary::ShellAutomationPanelPresentation;
+using spectiary::ShellAutomationPanelPresentationStatus;
 
 void Require(bool condition, std::string_view message)
 {
@@ -59,7 +59,7 @@ struct Fixture {
             },
             .apply_visibility = [this](ApplicationPanel panel, bool visible) {
                 const bool previous =
-                    specforge::ApplicationPanelVisible(visibility, panel);
+                    spectiary::ApplicationPanelVisible(visibility, panel);
                 if (previous == visible) {
                     return AutomationPanelCommandCoordinator::ApplyResult{
                         .outcome =
@@ -67,7 +67,7 @@ struct Fixture {
                                 Unchanged,
                     };
                 }
-                specforge::SetApplicationPanelVisible(
+                spectiary::SetApplicationPanelVisible(
                     visibility,
                     panel,
                     visible);
@@ -78,12 +78,12 @@ struct Fixture {
             },
             .complete = [this](
                             const AutomationQueuedCommand& command,
-                            const specforge::AutomationCommandResult& body) {
+                            const spectiary::AutomationCommandResult& body) {
                 active[command.request_id] = false;
                 terminals.push_back({
                     .request_id = command.request_id,
                     .status = "completed",
-                    .body = specforge::SerializeAutomationCommandResultBody(body),
+                    .body = spectiary::SerializeAutomationCommandResultBody(body),
                 });
             },
             .fail = [this](

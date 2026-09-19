@@ -67,16 +67,16 @@ function Assert-StaticTierDeclarations {
         '(?ims)\badd_test\s*\(\s*NAME\s+' +
         '(?<name>[A-Za-z0-9_.+-]+)')
     $helperRegistrationPattern = [regex]::new(
-        '(?ims)\b(?:specforge_add_test|' +
-        'specforge_add_portable_only_test)\s*\(\s*' +
+        '(?ims)\b(?:spectiary_add_test|' +
+        'spectiary_add_portable_only_test)\s*\(\s*' +
         '(?<name>[A-Za-z0-9_.+-]+)')
     $tierListPattern = [regex]::new(
-        '(?ims)\bset\s*\(\s*SPECFORGE_' +
+        '(?ims)\bset\s*\(\s*SPECTIARY_' +
         '(?<tier>FAST|EXTENDED)_TESTS(?<body>.*?)\)')
     $tierListEntryPattern = [regex]::new(
-        '(?m)^\s*(?<name>specforge_[A-Za-z0-9_.+-]+)\s*$')
+        '(?m)^\s*(?<name>spectiary_[A-Za-z0-9_.+-]+)\s*$')
     $tierHelperPattern = [regex]::new(
-        '(?ims)\bspecforge_set_test_tier\s*\(\s*' +
+        '(?ims)\bspectiary_set_test_tier\s*\(\s*' +
         '(?<name>[A-Za-z0-9_.+-]+)\s+' +
         '(?<tier>fast|extended)\s*\)')
 

@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::string_view kDigestPrefix = "sha256-v1:";
@@ -220,4 +220,4 @@ bool IsVersionedSha256Digest(std::string_view value)
     return true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -38,7 +38,7 @@ Set-Content `
     schema_version = 3
     source_mode = $SourceMode
     source_revision = $SourceRevision
-    specforge_version = 'fixture'
+    spectiary_version = 'fixture'
     release_profile = 'Portable'
     configuration = $Configuration
     compiler_id = 'MSVC'

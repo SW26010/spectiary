@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string NumberOrNull(std::int64_t value)
@@ -500,4 +500,4 @@ bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLaten
     return accepted && summary_accepted;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

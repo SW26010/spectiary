@@ -5,7 +5,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 
-namespace specforge::test_support {
+namespace spectiary::test_support {
 
 inline void SelectLegacyFixtureOutputPath(SampleLabelingTask& task, std::filesystem::path output_path)
 {
@@ -96,4 +96,4 @@ PublishLegacyFixture(
     return result;
 }
 
-}  // namespace specforge::test_support
+}  // namespace spectiary::test_support

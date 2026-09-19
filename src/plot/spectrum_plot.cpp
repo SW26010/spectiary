@@ -14,7 +14,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 PlotSeriesColor& SpectrumSeriesColor(
     SpectrumPlotColors& colors,
@@ -830,7 +830,7 @@ void RenderViewportLockOverlay(
         SpectrumViewportRangeMode::Locked;
     ImGui::SetCursorScreenPos(button_min);
     const bool clicked = ImGui::InvisibleButton(
-        "##SpecForgeViewportRangeLock",
+        "##ViewportRangeLock",
         ImVec2(side, side));
     const bool hovered = ImGui::IsItemHovered();
     const bool active = ImGui::IsItemActive();
@@ -1277,13 +1277,13 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
                 raw_spectrum_label = StableUiLabel(
                     language,
                     UiTextId::RawSpectrum,
-                    "SpecForgeRawSpectrum");
+                    "RawSpectrum");
                 raw_series_label = raw_spectrum_label.c_str();
             } else if (name.empty()) {
                 raw_spectrum_label = StableUiLabel(
                     language,
                     UiTextId::CurrentSpectrum,
-                    "SpecForgeCurrentSpectrum");
+                    "CurrentSpectrum");
                 raw_series_label = raw_spectrum_label.c_str();
             }
 
@@ -1341,13 +1341,13 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         if (GaussianSmoothingActive(state)) {
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Gaussian,
-                "SpecForgeGaussianSmoothedSpectrum",
+                "GaussianSmoothedSpectrum",
                 gaussian_color);
         }
         if (MedianSmoothingActive(state)) {
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Median,
-                "SpecForgeMedianSmoothedSpectrum",
+                "MedianSmoothedSpectrum",
                 median_color);
         }
 
@@ -1493,4 +1493,4 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

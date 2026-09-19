@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const wchar_t* kPersonalizeRegistryKey =
@@ -33,4 +33,4 @@ std::optional<ThemeId> ReadWindowsSystemTheme()
         static_cast<std::uint32_t>(apps_use_light_theme));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

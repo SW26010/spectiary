@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $PSScriptRoot 'build-ninja-msvc-debug.ps1'
 $Preset = 'ninja-msvc-release-static-asdf-labeling-hardening'
-$targetName = 'specforge_asdf_labeling_production_benchmark'
+$targetName = 'spectiary_asdf_labeling_production_benchmark'
 $executablePath = Join-Path $repoRoot (
     'build\' + $Preset + '\tools\' + $targetName + '.exe')
 

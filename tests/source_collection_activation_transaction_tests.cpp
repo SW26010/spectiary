@@ -22,7 +22,7 @@
 #include <thread>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionActivationTransactionTestAccess {
     static std::vector<NavigationLatencyReport>
@@ -89,15 +89,15 @@ struct SourceCollectionActivationTransactionTestAccess {
     }
 };
 
-}  // namespace specforge
+}  // namespace spectiary
 
 namespace {
 
 using namespace std::chrono_literals;
 using Activation =
-    specforge::SourceCollectionActivationTransaction;
+    spectiary::SourceCollectionActivationTransaction;
 using ActivationAccess =
-    specforge::
+    spectiary::
         SourceCollectionActivationTransactionTestAccess;
 
 void Require(bool condition, std::string_view message)
@@ -112,7 +112,7 @@ std::filesystem::path UniqueTempPath(
 {
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-        ("specforge_activation_lifecycle_" +
+        ("spectiary_activation_lifecycle_" +
          std::to_string(next_id.fetch_add(1)) +
          std::string(suffix));
 }
@@ -136,12 +136,12 @@ std::string ReadText(const std::filesystem::path& path)
         std::istreambuf_iterator<char>()};
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
     auto snapshot =
-        std::make_shared<specforge::SpectrumSnapshot>();
+        std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.id = "activation-fixture";
     snapshot->source.display_name =
         "activation-fixture";
@@ -159,26 +159,26 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
-specforge::SourceCollectionSession MakePreparedSession(
+spectiary::SourceCollectionSession MakePreparedSession(
     const std::filesystem::path& path,
     std::size_t spectrum_index = 0)
 {
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    const specforge::SpectrumSnapshotHandle snapshot =
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(path, spectrum_index);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity =
-        specforge::BuildSourceCollectionIdentity(
+        spectiary::BuildSourceCollectionIdentity(
             *snapshot,
-            specforge::
+            spectiary::
                 CaptureSourceCollectionSingleFileState(path));
     context.manifest.sample_names = {
         "alpha",
         "beta",
         "gamma",
     };
-    specforge::PreparedSampleWorkflowState workflow =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState workflow =
+        spectiary::PrepareSampleWorkflowState(
             *snapshot,
             context,
             spectrum_index,
@@ -196,16 +196,16 @@ specforge::SourceCollectionSession MakePreparedSession(
     return session;
 }
 
-specforge::SourceCollectionLoadDependencies
+spectiary::SourceCollectionLoadDependencies
 MakeDependencies(
-    specforge::SourceCollectionLoadDependencies::
+    spectiary::SourceCollectionLoadDependencies::
         SnapshotLoader snapshot_loader)
 {
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader =
         std::move(snapshot_loader);
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     return dependencies;
 }
 
@@ -248,11 +248,11 @@ void TestStatusReportsCurrentLoadingSourcePath()
             release.wait();
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(path, 0);
@@ -308,18 +308,18 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session =
+    spectiary::SourceCollectionSession session =
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     const auto first = activation.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())));
     Require(
         first.follow_up_spectrum_index == 1,
@@ -330,10 +330,10 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
         "first worker should start");
 
     const auto second = activation.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())));
     release_first_promise.set_value();
     const bool latest_activated = DrainUntil(
@@ -362,20 +362,20 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     const std::filesystem::path profile_path =
         UniqueTempPath("_failed.jsonl");
     WriteFixture(path);
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     auto dependencies = MakeDependencies(
         [](const std::filesystem::path&,
            std::size_t,
            const auto&)
-            -> specforge::SpectrumSnapshotHandle {
+            -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error(
                 "expected activation failure");
         });
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    specforge::ProfileSink profile(profile_path);
+    spectiary::ProfileSink profile(profile_path);
     profile.BeginFrame();
     activation.BeginFrame(true, 11, &profile);
     const Activation::SourceOpenOperation operation =
@@ -399,7 +399,7 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         status.failures.front().source_path ==
             path &&
         status.failures.front().error.kind ==
-            specforge::
+            spectiary::
                 SourceCollectionLoadErrorKind::
                     BackgroundLoadingFailed &&
         status.failures.front()
@@ -431,7 +431,7 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
                     Failed &&
             automation_outcome.source_path == path &&
             automation_outcome.error.kind ==
-                specforge::SourceCollectionLoadErrorKind::
+                spectiary::SourceCollectionLoadErrorKind::
                     BackgroundLoadingFailed,
         "automation should receive the same terminal failure from the real source loader");
     Require(
@@ -453,29 +453,29 @@ void TestActivationOwnsQueueServiceDeadline()
         [](const std::filesystem::path&,
            std::size_t,
            const auto&)
-            -> specforge::SpectrumSnapshotHandle {
+            -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error(
                 "synthetic service deadline failure");
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     const auto before_open =
-        specforge::LocalUserStateSaveScheduler::
+        spectiary::LocalUserStateSaveScheduler::
             Clock::now();
     (void)activation.OpenSource(path, 0);
     const auto scheduled =
         ActivationAccess::NextMaintenanceDeadline(
             activation);
     const auto after_open =
-        specforge::LocalUserStateSaveScheduler::
+        spectiary::LocalUserStateSaveScheduler::
             Clock::now();
     const bool failure_drained = DrainUntil(
         activation,
@@ -504,8 +504,8 @@ void TestLastWorkerIsReapedByScheduledServiceAfterCompletionDrain()
     std::promise<void> notified_promise, release_promise;
     auto notified = notified_promise.get_future();
     auto release = release_promise.get_future().share();
-    auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
-        MakeDependencies([](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+    auto queue = spectiary::MakeSourceCollectionLoadQueueForTesting(
+        MakeDependencies([](const auto&, std::size_t, const auto&) -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error("terminal fixture failure");
         }));
     // Hold RunTask inside its notification, after publishing the result but
@@ -514,7 +514,7 @@ void TestLastWorkerIsReapedByScheduledServiceAfterCompletionDrain()
         notified_promise.set_value();
         release.wait();
     });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(session, std::move(queue));
     (void)activation.OpenSource(path, 0);
     const bool notification_received = notified.wait_for(2s) == std::future_status::ready;
@@ -562,10 +562,10 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(failed_path, 0);
@@ -602,7 +602,7 @@ void TestConcurrentFailuresRemainVisible()
             const std::filesystem::path& source,
             std::size_t,
             const auto&)
-            -> specforge::SpectrumSnapshotHandle {
+            -> spectiary::SpectrumSnapshotHandle {
             if (source == first_path) {
                 throw std::runtime_error(
                     "first source failed");
@@ -610,10 +610,10 @@ void TestConcurrentFailuresRemainVisible()
             throw std::runtime_error(
                 "second source failed");
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(first_path, 0);
@@ -653,7 +653,7 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
             const std::filesystem::path& source,
             std::size_t,
             const auto&)
-            -> specforge::SpectrumSnapshotHandle {
+            -> spectiary::SpectrumSnapshotHandle {
             if (source == first_path) {
                 if (first_attempts.fetch_add(1) == 0) {
                     throw std::runtime_error(
@@ -665,10 +665,10 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
             throw std::runtime_error(
                 "second acknowledged failure");
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.BeginFrame(true, 13, nullptr);
 
@@ -711,7 +711,7 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
                 terminal_reports,
                 [](const auto& report) {
                     return report.outcome ==
-                        specforge::SourceLoadLatencyOutcome::
+                        spectiary::SourceLoadLatencyOutcome::
                             Failed;
                 }),
         "acknowledgment must not delete terminal failure outcomes");
@@ -750,10 +750,10 @@ void TestSuccessfulRetryClearsPreviousFailures()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(retry_path, 0);
@@ -809,10 +809,10 @@ void TestLaterSourceOpenReplacesHistoricalFailureStatus()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
     // All explicit-open entry points share the status lifecycle.
     for (int origin = 0; origin < 3; ++origin) {
@@ -860,12 +860,12 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
             const auto annotation_path = UniqueTempPath("_startup_annotation.csv");
             WriteFixture(good_path);
             WriteFixture(bad_path);
-            specforge::SourceCollectionSessionStateCache saved;
-            const specforge::SourceCollectionSavedSource good{good_path, 0, {}};
-            const specforge::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}};
+            spectiary::SourceCollectionSessionStateCache saved;
+            const spectiary::SourceCollectionSavedSource good{good_path, 0, {}};
+            const spectiary::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}};
             saved.sources = failure_first ? std::vector{bad, good} : std::vector{good, bad};
             saved.active_source_index = active_fails == failure_first ? 0 : 1;
-            Require(specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path, saved),
+            Require(spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, saved_path, saved),
                 "startup fixture should save");
 
             // Restart from the saved result as well: an unavailable active row
@@ -878,9 +878,9 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                         }
                         return MakeSnapshot(source, index);
                     });
-                specforge::SourceCollectionSession session(saved_path, navigation_path,
+                spectiary::SourceCollectionSession session(saved_path, navigation_path,
                     labeling_path, workflow_path);
-                Activation activation(session, specforge::MakeSourceCollectionLoadQueueForTesting(
+                Activation activation(session, spectiary::MakeSourceCollectionLoadQueueForTesting(
                     std::move(dependencies), {.foreground_limit = 1}));
                 activation.BeginDeferredRestore();
                 Require(DrainUntil(activation, [&]() { return !activation.status().loading; }),
@@ -891,7 +891,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                 const auto bad_index = view.sources[0].path == bad_path ? 0U : 1U;
                 const auto good_index = 1U - bad_index;
                 Require(view.sources[bad_index].load_error &&
-                        view.sources[bad_index].state == specforge::SourceCollectionSourceState::Unavailable &&
+                        view.sources[bad_index].state == spectiary::SourceCollectionSourceState::Unavailable &&
                         view.sources[bad_index].load_error->diagnostic_detail.find("startup source unavailable") != std::string::npos,
                     "failed row must retain an unavailable state and its hover diagnostic");
                 Require(view.sources[*view.current_source_index].path == (active_fails ? bad_path : good_path),
@@ -903,7 +903,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                         : (view.current_sample_snapshot && view.current_sample_snapshot->source.path == good_path),
                     "an unavailable active source must leave plot and sample workflow empty");
                 Require(session.FlushStateCaches(), "startup state should flush");
-                const auto persisted = specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path).cache;
+                const auto persisted = spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, saved_path).cache;
                 Require(persisted.sources.size() == 2 && persisted.active_source_index &&
                         persisted.sources[*persisted.active_source_index].path == (active_fails ? bad_path : good_path),
                     "shutdown must persist the same active source identity");
@@ -914,24 +914,24 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
 
                 if (restart == 1) {
                     if (!active_fails || failure_first) {
-                        (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                            specforge::SourceCollectionIntent::SwitchActive(good_index)));
-                        (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                            specforge::SourceCollectionIntent::SwitchActive(bad_index)));
+                        (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                            spectiary::SourceCollectionIntent::SwitchActive(good_index)));
+                        (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                            spectiary::SourceCollectionIntent::SwitchActive(bad_index)));
                         Require(session.CurrentSampleSnapshot() &&
                                 session.CurrentSampleSnapshot()->source.path == good_path &&
                                 activation.status().failures.empty(),
                             "unavailable rows cannot be selected and switching to a good row clears startup failure");
                     }
-                    (void)activation.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                        specforge::SourceCollectionIntent::Remove(bad_index)));
+                    (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                        spectiary::SourceCollectionIntent::Remove(bad_index)));
                     Require(session.View().sources.size() == 1 && !session.HasUnresolvedSourceIntent(bad_path) &&
                             session.CurrentSampleSnapshot() &&
                             session.CurrentSampleSnapshot()->source.path == good_path &&
                             activation.status().failures.empty(),
                         "removing the failed row must forget its unresolved restore intent");
                     Require(session.FlushStateCaches(), "removal should flush");
-                    const auto removed = specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, saved_path).cache;
+                    const auto removed = spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, saved_path).cache;
                     Require(removed.sources.size() == 1 && removed.sources.front().path == good_path,
                         "removed failures must not return at the next startup");
                 }
@@ -970,10 +970,10 @@ void TestCanceledGenerationDoesNotPublishFailure()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     const Activation::SourceOpenOperation
@@ -1023,22 +1023,22 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
            const auto&) {
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session =
+    spectiary::SourceCollectionSession session =
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.BeginFrame(true, 17, nullptr);
     const auto navigation = activation.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())),
         Activation::NavigationIntent{
-            specforge::NavigationLatencyInputKind::UiNext,
-            specforge::NavigationLatencyTrace::Now()});
+            spectiary::NavigationLatencyInputKind::UiNext,
+            spectiary::NavigationLatencyTrace::Now()});
     const bool activated = DrainUntil(
         activation,
         [&]() {
@@ -1048,10 +1048,10 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
                 snapshot->collection.current_index == 1 &&
                 !activation.status().loading;
         });
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         presentation{
             9,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     const auto before_draw =
         ActivationAccess::CompleteNavigationFrame(
             activation,
@@ -1078,7 +1078,7 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
     Require(
         after_draw.size() == 1 &&
             after_draw.front().outcome ==
-                specforge::NavigationLatencyOutcome::Presented,
+                spectiary::NavigationLatencyOutcome::Presented,
         "the exact drawn snapshot should finish the trace");
 }
 
@@ -1095,16 +1095,16 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
            const auto&) {
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    specforge::ProfileSink profile(profile_path);
+    spectiary::ProfileSink profile(profile_path);
     profile.BeginFrame();
     activation.BeginFrame(true, 23, &profile);
 
@@ -1118,10 +1118,10 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
                 snapshot->source.path == path &&
                 !activation.status().loading;
         });
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         presentation{
             7,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         23,
         std::span(&presentation, 1));
@@ -1132,10 +1132,10 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
         23,
         7,
         session.CurrentSampleSnapshot());
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         wrong_viewport_presentation{
             8,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         23,
         std::span(&wrong_viewport_presentation, 1));
@@ -1189,14 +1189,14 @@ void TestAutomationOpenCompletesAfterPresentationWithoutProfiling()
            const auto&) {
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.BeginFrame(false, 31, nullptr);
 
@@ -1221,19 +1221,19 @@ void TestAutomationOpenCompletesAfterPresentationWithoutProfiling()
     activation.PresentFrame(31, {});
     const auto after_present_retry =
         activation.presented_spectrum_observation();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         wrong_presentation{
             12,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         31,
         std::span(&wrong_presentation, 1));
     const auto after_wrong_viewport =
         activation.presented_spectrum_observation();
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         presentation{
             11,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         31,
         std::span(&presentation, 1));
@@ -1302,20 +1302,20 @@ void TestAutomationOpensSupersedeBeforeSingleCompletionDrain()
             release.wait();
             auto snapshot =
                 std::make_shared<
-                    specforge::SpectrumSnapshot>(
+                    spectiary::SpectrumSnapshot>(
                     *MakeSnapshot(source, index));
             snapshot->source.id =
                 source.filename().string();
             snapshot->current_spectrum.name =
                 source.filename().string();
-            return specforge::SpectrumSnapshotHandle(
+            return spectiary::SpectrumSnapshotHandle(
                 std::move(snapshot));
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.BeginFrame(false, 41, nullptr);
 
@@ -1360,10 +1360,10 @@ void TestAutomationOpensSupersedeBeforeSingleCompletionDrain()
         41,
         17,
         active_snapshot);
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         presentation{
             17,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         41,
         std::span(&presentation, 1));
@@ -1424,11 +1424,11 @@ void TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     const auto automation =
@@ -1484,11 +1484,11 @@ void TestSameIdentityOpenRequiresLatestActivationPresent()
            const auto&) {
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {}, {}, {}, {});
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     activation.BeginFrame(false, 51, nullptr);
@@ -1505,10 +1505,10 @@ void TestSameIdentityOpenRequiresLatestActivationPresent()
         51,
         23,
         session.CurrentSampleSnapshot());
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         first_presentation{
             23,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         51,
         std::span(&first_presentation, 1));
@@ -1530,10 +1530,10 @@ void TestSameIdentityOpenRequiresLatestActivationPresent()
         52,
         23,
         previous_snapshot);
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         stale_presentation{
             23,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         52,
         std::span(&stale_presentation, 1));
@@ -1554,10 +1554,10 @@ void TestSameIdentityOpenRequiresLatestActivationPresent()
         53,
         23,
         session.CurrentSampleSnapshot());
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         latest_presentation{
             23,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         53,
         std::span(&latest_presentation, 1));
@@ -1596,11 +1596,11 @@ void TestSamePathOpenTokenSurvivesProductionFollowUp()
            const auto&) {
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session =
+    spectiary::SourceCollectionSession session =
         MakePreparedSession(path, 2);
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     activation.BeginFrame(false, 61, nullptr);
@@ -1623,10 +1623,10 @@ void TestSamePathOpenTokenSurvivesProductionFollowUp()
         61,
         29,
         session.CurrentSampleSnapshot());
-    const specforge::NavigationLatencyPresentation
+    const spectiary::NavigationLatencyPresentation
         presentation{
             29,
-            specforge::NavigationLatencyTrace::Now()};
+            spectiary::NavigationLatencyTrace::Now()};
     activation.PresentFrame(
         61,
         std::span(&presentation, 1));
@@ -1670,20 +1670,20 @@ void TestIdlePrefetchReportsLifecycleCompletion()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session =
+    spectiary::SourceCollectionSession session =
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     (void)activation.Submit(
-        specforge::SourceCollectionSessionIntent::
+        spectiary::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::
                         SampleNavigationRequest::Next())),
         Activation::NavigationIntent{
-            specforge::NavigationLatencyInputKind::UiNext,
+            spectiary::NavigationLatencyInputKind::UiNext,
             std::nullopt});
 
     const bool prefetch_active = DrainUntil(
@@ -1707,7 +1707,7 @@ void TestIdlePrefetchReportsLifecycleCompletion()
                     activation);
             for (const auto& report : reports) {
                 if (report.outcome ==
-                    specforge::NavigationPrefetchOutcome::
+                    spectiary::NavigationPrefetchOutcome::
                         Completed) {
                     return true;
                 }

@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kPublicCatalogIdentity = "public-spectral-lines.v1";
@@ -1204,4 +1204,4 @@ std::string GroupExpansionKey(std::string_view view_id, std::string_view group_i
     return key;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -14,7 +14,7 @@
 #include <sstream>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr DWORD kPipeBufferBytes =
@@ -1598,4 +1598,4 @@ HANDLE AutomationNamedPipeClient::native_handle() const noexcept
     return pipe_;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

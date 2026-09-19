@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct CurrentExecutablePathResult {
     std::filesystem::path path;
@@ -52,4 +52,4 @@ LaunchExecutableWithSource(
 LaunchCurrentExecutableWithSource(
     const std::filesystem::path& source_path);
 
-}  // namespace specforge
+}  // namespace spectiary

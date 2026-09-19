@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionContext;
 struct SourceCollectionIdentity;
@@ -86,4 +86,4 @@ CheckSampleLabelingSourceCompatibility(
     const SampleLabelingSourceCompatibility& source,
     const SampleLabelingSourceCompatibilityCheckpoint& checkpoint = {});
 
-}  // namespace specforge
+}  // namespace spectiary

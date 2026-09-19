@@ -5,7 +5,7 @@
 #include <array>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 SemanticPalette DarkSemanticPalette()
@@ -177,7 +177,7 @@ void ApplyImGuiThemeColors(
         ImGui::StyleColorsDark(&style);
     }
 
-    // SpecForge always renders with platform viewports enabled. Keep their
+    // Spectiary always renders with platform viewports enabled. Keep their
     // background opaque after every official color-table reset so startup
     // and runtime theme switches produce the same compositor result.
     style.Colors[ImGuiCol_WindowBg].w = 1.0f;
@@ -288,4 +288,4 @@ WindowsSystemThemeIdFromAppsUseLightTheme(
         : BuiltInLightThemeId();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

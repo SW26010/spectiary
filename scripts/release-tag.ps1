@@ -66,10 +66,10 @@ $cmakeListsPath = Join-Path $repoRoot 'CMakeLists.txt'
 $cmakeLists = Get-Content -Raw -LiteralPath $cmakeListsPath
 $versionMatch = [regex]::Match(
     $cmakeLists,
-    '(?m)^\s*project\s*\(\s*SpecForge\s+VERSION\s+((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\b'
+    '(?m)^\s*project\s*\(\s*Spectiary\s+VERSION\s+((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\b'
 )
 if (-not $versionMatch.Success) {
-    throw 'Could not resolve a stable MAJOR.MINOR.PATCH SpecForge VERSION from CMakeLists.txt.'
+    throw 'Could not resolve a stable MAJOR.MINOR.PATCH Spectiary VERSION from CMakeLists.txt.'
 }
 $version = $versionMatch.Groups[1].Value
 $tag = "v$version"
@@ -102,7 +102,7 @@ if (-not $PSCmdlet.ShouldProcess('origin', $description)) {
     return
 }
 
-[void](Invoke-GitCapture -Arguments @('tag', '-a', $tag, $headCommit, '-m', "SpecForge $tag"))
+[void](Invoke-GitCapture -Arguments @('tag', '-a', $tag, $headCommit, '-m', "Spectiary $tag"))
 try {
     [void](Invoke-GitCapture -Arguments @('push', 'origin', "refs/tags/${tag}:refs/tags/${tag}"))
 }

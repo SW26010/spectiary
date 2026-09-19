@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace specforge::test {
+namespace spectiary::test {
 WidgetHarness::WidgetHarness(std::function<void()> render, FrameMode mode)
     : previous_(ImGui::GetCurrentContext()), render_(std::move(render)), mode_(mode)
 {
@@ -183,16 +183,16 @@ void WidgetHarness::Until(const std::function<bool()>& predicate,
     for (int i = 0; i < max_frames && !predicate(); ++i) Frames();
     if (!predicate()) throw std::runtime_error("Widget settlement timed out: " + std::string(description));
 }
-} // namespace specforge::test
+} // namespace spectiary::test
 
 void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImRect& bb,
                                const ImGuiLastItemData* data)
 {
-    if (ctx->TestEngine) static_cast<specforge::test::WidgetHarness*>(ctx->TestEngine)->ItemAdd(id, bb, data);
+    if (ctx->TestEngine) static_cast<spectiary::test::WidgetHarness*>(ctx->TestEngine)->ItemAdd(id, bb, data);
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const char* label, ImGuiItemStatusFlags)
 {
-    if (ctx->TestEngine) static_cast<specforge::test::WidgetHarness*>(ctx->TestEngine)->ItemInfo(id, label);
+    if (ctx->TestEngine) static_cast<spectiary::test::WidgetHarness*>(ctx->TestEngine)->ItemInfo(id, label);
 }
 void ImGuiTestEngineHook_Log(ImGuiContext*, const char*, ...) {}
 const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext*, ImGuiID) { return nullptr; }

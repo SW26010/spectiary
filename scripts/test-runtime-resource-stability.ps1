@@ -79,7 +79,7 @@ function Resolve-RuntimeResourceCTestTier {
             }
         }
         default {
-            throw "SPECFORGE_RESOURCE_STABILITY_TIER must be 'smoke' or 'soak', not '$RequestedTier'."
+            throw "SPECTIARY_RESOURCE_STABILITY_TIER must be 'smoke' or 'soak', not '$RequestedTier'."
         }
     }
 }
@@ -346,14 +346,14 @@ function Read-ProfileEvidence {
 }
 
 function Add-ResourceNativeMethods {
-    if ('SpecForge.RuntimeResourceNative' -as [type]) {
+    if ('Spectiary.RuntimeResourceNative' -as [type]) {
         return
     }
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-namespace SpecForge {
+namespace Spectiary {
     public static class RuntimeResourceNative {
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint GetGuiResources(IntPtr process, uint flags);
@@ -411,8 +411,8 @@ function Get-ProcessResourceSample {
     )
 
     $Process.Refresh()
-    $gdiObjects = [SpecForge.RuntimeResourceNative]::GetGuiResources($Process.Handle, 0)
-    $userObjects = [SpecForge.RuntimeResourceNative]::GetGuiResources($Process.Handle, 1)
+    $gdiObjects = [Spectiary.RuntimeResourceNative]::GetGuiResources($Process.Handle, 0)
+    $userObjects = [Spectiary.RuntimeResourceNative]::GetGuiResources($Process.Handle, 1)
     return [pscustomobject][ordered]@{
         sample_index = $SampleIndex
         elapsed_ms = $ElapsedMilliseconds
@@ -535,7 +535,7 @@ function Invoke-RuntimeResourceEvidenceAnalysis {
     $checks.Add((New-Check `
         -Name 'process_exit' `
         -Status $(if ($ProcessExitCode -eq 0) { 'PASS' } else { 'FAIL' }) `
-        -Detail "SpecForge exit code: $ProcessExitCode." `
+        -Detail "Spectiary exit code: $ProcessExitCode." `
         -Observed $ProcessExitCode `
         -Threshold 0))
 
@@ -959,7 +959,7 @@ function Get-ConfiguredSources {
             throw 'SourceListFile must contain a JSON array of source paths.'
         }
     }
-    $json = $env:SPECFORGE_RESOURCE_STABILITY_SOURCES_JSON
+    $json = $env:SPECTIARY_RESOURCE_STABILITY_SOURCES_JSON
     if ([string]::IsNullOrWhiteSpace($json)) {
         return @()
     }
@@ -968,7 +968,7 @@ function Get-ConfiguredSources {
         return @($parsed | ForEach-Object { $_ })
     }
     catch {
-        throw 'SPECFORGE_RESOURCE_STABILITY_SOURCES_JSON must be a JSON array of source paths.'
+        throw 'SPECTIARY_RESOURCE_STABILITY_SOURCES_JSON must be a JSON array of source paths.'
     }
 }
 
@@ -1011,10 +1011,10 @@ function Invoke-RuntimeResourceStability {
     $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
     $tier = Resolve-RuntimeResourceCTestTier `
         -Enabled ([bool]$CTestIntegration) `
-        -RequestedTier ([string]$env:SPECFORGE_RESOURCE_STABILITY_TIER)
+        -RequestedTier ([string]$env:SPECTIARY_RESOURCE_STABILITY_TIER)
     if ($tier.skip) {
         Write-Host (
-            'SKIP: Set SPECFORGE_RESOURCE_STABILITY_TIER to smoke or soak ' +
+            'SKIP: Set SPECTIARY_RESOURCE_STABILITY_TIER to smoke or soak ' +
             'to enable the periodic runtime resource CTest.')
         return 125
     }
@@ -1037,7 +1037,7 @@ function Invoke-RuntimeResourceStability {
     )
     if ($configuredSources.Count -lt 2) {
         $message =
-            'Provide at least two stable real source paths with -Source, or set SPECFORGE_RESOURCE_STABILITY_SOURCES_JSON.'
+            'Provide at least two stable real source paths with -Source, or set SPECTIARY_RESOURCE_STABILITY_SOURCES_JSON.'
         if ($SkipIfSourcesUnavailable) {
             Write-Host "SKIP: $message"
             return 125
@@ -1086,7 +1086,7 @@ function Invoke-RuntimeResourceStability {
     }
 
     $configuration = [ordered]@{
-        format_kind = 'specforge_runtime_resource_workload'
+        format_kind = 'spectiary_runtime_resource_workload'
         schema_version = 1
         status_path = $statusPath
         source_paths = @($resolvedSources)
@@ -1107,11 +1107,11 @@ function Invoke-RuntimeResourceStability {
 
     Add-ResourceNativeMethods
     $temporaryEnvironment = @{
-        SPECFORGE_RUNTIME_RESOURCE_WORKLOAD = $configurationPath
-        SPECFORGE_RUNTIME_RESOURCE_STATE_DIR = $stateDirectory
-        SPECFORGE_PROFILE = '1'
-        SPECFORGE_PROFILE_DIR = $runDirectory
-        SPECFORGE_PAN_PACING = $null
+        SPECTIARY_RUNTIME_RESOURCE_WORKLOAD = $configurationPath
+        SPECTIARY_RUNTIME_RESOURCE_STATE_DIR = $stateDirectory
+        SPECTIARY_PROFILE = '1'
+        SPECTIARY_PROFILE_DIR = $runDirectory
+        SPECTIARY_PAN_PACING = $null
     }
     $previousEnvironment = Set-TemporaryEnvironment -Values $temporaryEnvironment
     $process = $null
@@ -1194,11 +1194,11 @@ function Invoke-RuntimeResourceStability {
             " Startup diagnostic: $startupError"
         }
         throw (
-            "SpecForge did not produce a readable workload status file: " +
+            "Spectiary did not produce a readable workload status file: " +
             "$statusPath.$startupDetail")
     }
     $profileFiles = @(
-        Get-ChildItem -LiteralPath $runDirectory -Filter 'specforge-profile-*.jsonl' |
+        Get-ChildItem -LiteralPath $runDirectory -Filter 'spectiary-profile-*.jsonl' |
             Sort-Object LastWriteTime
     )
     if ($profileFiles.Count -ne 1) {
@@ -1242,7 +1242,7 @@ function Invoke-RuntimeResourceStability {
         }
     )
     $result = [pscustomobject][ordered]@{
-        format_kind = 'specforge_runtime_resource_stability_result'
+        format_kind = 'spectiary_runtime_resource_stability_result'
         schema_version = 1
         result = $analysis.result
         tier = $tier.name
@@ -1277,7 +1277,7 @@ function Invoke-RuntimeResourceStability {
         -Depth 12
 
     $failedChecks = @($analysis.checks | Where-Object status -eq 'FAIL')
-    Write-Host "$($analysis.result): SpecForge runtime resource stability"
+    Write-Host "$($analysis.result): Spectiary runtime resource stability"
     foreach ($check in $analysis.checks) {
         Write-Host "[$($check.status)] $($check.name): $($check.detail)"
     }
@@ -1297,7 +1297,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     catch {
         if ($null -ne $script:RuntimeResourceFailureResultPath) {
             $failureResult = [pscustomobject][ordered]@{
-                format_kind = 'specforge_runtime_resource_stability_result'
+                format_kind = 'spectiary_runtime_resource_stability_result'
                 schema_version = 1
                 result = 'FAIL'
                 finished_utc = (Get-Date).ToUniversalTime().ToString('o')
@@ -1308,7 +1308,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 -Path $script:RuntimeResourceFailureResultPath `
                 -Value $failureResult `
                 -Depth 8
-            Write-Host 'FAIL: SpecForge runtime resource stability'
+            Write-Host 'FAIL: Spectiary runtime resource stability'
             Write-Host "Evidence: $script:RuntimeResourceFailureResultPath"
         }
         Write-Error $_

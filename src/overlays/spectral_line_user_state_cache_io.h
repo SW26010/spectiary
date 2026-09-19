@@ -9,7 +9,7 @@
 #include <functional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 enum class CatalogUserStateCacheLoadIssueKind {
     None,
@@ -47,5 +47,5 @@ using CatalogUserStateCacheBeforeReplaceHook = AtomicFileWriteCheckpoint;
 void SetCatalogUserStateCacheBeforeReplaceHookForTests(
     CatalogUserStateCacheBeforeReplaceHook hook);
 
-}  // namespace specforge
+}  // namespace spectiary
 

@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 class SpectralLinesGroupingViewUi {
 public:
@@ -33,4 +33,4 @@ private:
     std::optional<std::string> group_context_group_id_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <system_error>
 
-namespace specforge {
+namespace spectiary {
 
 using AtomicFileReplaceOperation = std::function<std::error_code(
     const std::filesystem::path& temporary_path,
@@ -28,4 +28,4 @@ using AtomicFileRetryWait =
     std::string* error_message = nullptr,
     std::string_view target_description = "file");
 
-}  // namespace specforge
+}  // namespace spectiary

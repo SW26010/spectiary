@@ -17,7 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::string_view
     kAutomationNamedPipeReceiveDeadlineExpired =
@@ -221,4 +221,4 @@ private:
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

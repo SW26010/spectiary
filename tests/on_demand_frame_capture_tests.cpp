@@ -19,26 +19,26 @@ void Require(
 
 void TestExperimentalEnablementIsExactAndDefaultOff()
 {
-    const specforge::OnDemandFrameCaptureConfiguration
+    const spectiary::OnDemandFrameCaptureConfiguration
         missing =
-            specforge::ResolveOnDemandFrameCapture(
+            spectiary::ResolveOnDemandFrameCapture(
                 std::nullopt);
     Require(
         !missing.enabled && missing.recognized &&
             missing.requested.empty(),
         "missing configuration should keep experimental capture disabled");
 
-    const specforge::OnDemandFrameCaptureConfiguration
+    const spectiary::OnDemandFrameCaptureConfiguration
         enabled =
-            specforge::ResolveOnDemandFrameCapture("1");
+            spectiary::ResolveOnDemandFrameCapture("1");
     Require(
         enabled.enabled && enabled.recognized &&
             enabled.requested == "1",
         "the exact experimental value should enable capture");
 
-    const specforge::OnDemandFrameCaptureConfiguration
+    const spectiary::OnDemandFrameCaptureConfiguration
         unknown =
-            specforge::ResolveOnDemandFrameCapture(
+            spectiary::ResolveOnDemandFrameCapture(
                 "true");
     Require(
         !unknown.enabled && !unknown.recognized &&
@@ -48,8 +48,8 @@ void TestExperimentalEnablementIsExactAndDefaultOff()
 
 void TestRequestTargetsTheFollowingFrame()
 {
-    specforge::OnDemandFrameCapture capture(
-        specforge::ResolveOnDemandFrameCapture(
+    spectiary::OnDemandFrameCapture capture(
+        spectiary::ResolveOnDemandFrameCapture(
             "1"));
     const std::filesystem::path requested_output =
         L"C:\\automation-state\\artifacts\\requested.png";
@@ -59,7 +59,7 @@ void TestRequestTargetsTheFollowingFrame()
             41,
             true,
             requested_output) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     Accepted,
         "a renderable enabled window should accept a request");
@@ -70,7 +70,7 @@ void TestRequestTargetsTheFollowingFrame()
         "an accepted request should retain its validated explicit output until the next frame");
     Require(
         capture.status() ==
-            specforge::OnDemandFrameCaptureStatus::
+            spectiary::OnDemandFrameCaptureStatus::
                 Pending,
         "an accepted request should expose semantic pending status");
     Require(
@@ -89,7 +89,7 @@ void TestRequestTargetsTheFollowingFrame()
             capture.last_output_path() ==
                 output &&
             capture.status() ==
-                specforge::
+                spectiary::
                     OnDemandFrameCaptureStatus::
                         Captured,
         "completion should publish only the newly captured output");
@@ -97,19 +97,19 @@ void TestRequestTargetsTheFollowingFrame()
 
 void TestDuplicateRequestDoesNotMoveTheTarget()
 {
-    specforge::OnDemandFrameCapture capture(
-        specforge::ResolveOnDemandFrameCapture(
+    spectiary::OnDemandFrameCapture capture(
+        spectiary::ResolveOnDemandFrameCapture(
             "1"));
 
     Require(
         capture.Request(10, true) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     Accepted,
         "the initial request should be accepted");
     Require(
         capture.Request(20, true) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     AlreadyPending,
         "a second request should not replace a pending request");
@@ -120,12 +120,12 @@ void TestDuplicateRequestDoesNotMoveTheTarget()
 
 void TestNonRenderableWindowRejectsAndCancels()
 {
-    specforge::OnDemandFrameCapture capture(
-        specforge::ResolveOnDemandFrameCapture(
+    spectiary::OnDemandFrameCapture capture(
+        spectiary::ResolveOnDemandFrameCapture(
             "1"));
     Require(
         capture.Request(7, false) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     WindowNotRenderable,
         "a minimized or hidden window should reject capture immediately");
@@ -135,14 +135,14 @@ void TestNonRenderableWindowRejectsAndCancels()
                 "minimized or hidden") !=
                 std::string_view::npos &&
             capture.status() ==
-                specforge::
+                spectiary::
                     OnDemandFrameCaptureStatus::
                         WindowUnavailable,
         "the rejection should have explicit unavailable semantics");
 
     Require(
         capture.Request(8, true) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     Accepted,
         "a later renderable request should be accepted");
@@ -158,15 +158,15 @@ void TestNonRenderableWindowRejectsAndCancels()
 
 void TestTypedFailureStatusRetainsTechnicalDetail()
 {
-    specforge::OnDemandFrameCapture capture(
-        specforge::ResolveOnDemandFrameCapture("1"));
+    spectiary::OnDemandFrameCapture capture(
+        spectiary::ResolveOnDemandFrameCapture("1"));
 
     capture.FailCapture(
         "Direct3D/WIC capture",
         "0x80004005");
     Require(
         capture.status() ==
-                specforge::
+                spectiary::
                     OnDemandFrameCaptureStatus::
                         FailedCapture &&
             capture.status_operation() ==
@@ -178,20 +178,20 @@ void TestTypedFailureStatusRetainsTechnicalDetail()
     capture.FailPreparingOutputDirectory();
     Require(
         capture.status() ==
-            specforge::OnDemandFrameCaptureStatus::
+            spectiary::OnDemandFrameCaptureStatus::
                 FailedPreparingOutputDirectory,
         "directory preparation failure should remain distinguishable");
 }
 
 void TestCanceledRequestCannotResurrect()
 {
-    specforge::OnDemandFrameCapture capture(
-        specforge::ResolveOnDemandFrameCapture("1"));
+    spectiary::OnDemandFrameCapture capture(
+        spectiary::ResolveOnDemandFrameCapture("1"));
     const std::filesystem::path output =
         L"C:\\automation-state\\capture.png";
     Require(
         capture.Request(12, true, output) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     Accepted,
         "the cancellation fixture should accept a request");
@@ -202,7 +202,7 @@ void TestCanceledRequestCannotResurrect()
             !capture.requested_output_path() &&
             !capture.last_output_path() &&
             capture.status() ==
-                specforge::OnDemandFrameCaptureStatus::
+                spectiary::OnDemandFrameCaptureStatus::
                     Canceled,
         "cancel should synchronously clear the pending frame and explicit path");
     capture.ObserveWindowRenderable(false);
@@ -215,10 +215,10 @@ void TestCanceledRequestCannotResurrect()
 
 void TestDisabledCaptureCannotBecomePending()
 {
-    specforge::OnDemandFrameCapture capture;
+    spectiary::OnDemandFrameCapture capture;
     Require(
         capture.Request(1, true) ==
-            specforge::
+            spectiary::
                 OnDemandFrameCaptureRequestOutcome::
                     Disabled,
         "disabled capture should reject requests");

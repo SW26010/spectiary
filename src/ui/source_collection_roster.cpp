@@ -7,7 +7,7 @@
 #include <limits>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kMaximumResidentSnapshotCount = 8;
@@ -762,4 +762,4 @@ void SourceCollectionRoster::SetSnapshot(
     action.snapshot_change_reason = reason;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

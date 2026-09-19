@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct ProfileSettings {
     std::optional<std::filesystem::path> output_directory;
@@ -48,4 +48,4 @@ struct ProfileOutputDirectoryResolution {
     const std::filesystem::path& default_directory,
     const std::optional<std::filesystem::path>& environment_override);
 
-}  // namespace specforge
+}  // namespace spectiary

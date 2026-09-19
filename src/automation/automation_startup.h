@@ -10,14 +10,14 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 // Reserved inside an automation-owned state root. When present, this fixture
 // supplies the concrete Windows theme returned to FollowSystem resolution;
 // ordinary application launches never inspect it.
 inline constexpr std::wstring_view
     kAutomationSystemThemeTestFixtureName =
-        L".specforge-system-theme-test.txt";
+        L".system-theme-test.txt";
 
 struct AutomationStartupConfiguration {
     std::wstring pipe_name;
@@ -27,7 +27,7 @@ struct AutomationStartupConfiguration {
     bool allow_persistent_labeling_outputs = false;
 };
 
-struct SpecForgeCommandLine {
+struct SpectiaryCommandLine {
     std::optional<std::filesystem::path> initial_source;
     std::optional<AutomationStartupConfiguration> automation;
     bool automation_requested = false;
@@ -170,10 +170,10 @@ PinAutomationReadOnlyFile(
 void RemovePinnedAutomationStateRootBeforeLaunch(
     AutomationStateRootLease& root) noexcept;
 
-[[nodiscard]] SpecForgeCommandLine ParseSpecForgeCommandLine(
+[[nodiscard]] SpectiaryCommandLine ParseSpectiaryCommandLine(
     std::span<const std::wstring> arguments);
-[[nodiscard]] SpecForgeCommandLine
-ParseCurrentProcessSpecForgeCommandLine();
+[[nodiscard]] SpectiaryCommandLine
+ParseCurrentProcessSpectiaryCommandLine();
 
 [[nodiscard]] bool IsValidAutomationInstanceId(
     std::string_view value) noexcept;
@@ -200,4 +200,4 @@ ValidateAutomationCapturePath(
     const std::filesystem::path& automation_root,
     const std::filesystem::path& output_path);
 
-}  // namespace specforge
+}  // namespace spectiary

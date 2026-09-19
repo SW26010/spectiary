@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] std::string LocalizedSpectralLineName(
     UiLanguage language,
@@ -22,4 +22,4 @@ namespace specforge {
     std::string_view visible_name,
     std::string_view catalog_id);
 
-}  // namespace specforge
+}  // namespace spectiary

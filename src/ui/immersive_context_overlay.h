@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct ImmersiveContextOverlayView {
     std::string sequence_position_text;
@@ -34,4 +34,4 @@ BuildImmersiveContextOverlayView(
 RenderImmersiveContextOverlay(
     const ImmersiveContextOverlayView& view);
 
-}  // namespace specforge
+}  // namespace spectiary

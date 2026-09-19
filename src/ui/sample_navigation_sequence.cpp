@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string LowerAscii(std::string value)
@@ -452,4 +452,4 @@ SampleNavigationSequence BuildSampleNavigationSequence(
     return sequence;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

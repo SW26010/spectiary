@@ -5,7 +5,7 @@
 
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionLoadQueueExecutionOptions {
     // Zero selects the production policy: hardware concurrency, capped at four.
@@ -31,4 +31,4 @@ MakeSourceCollectionLoadQueueForTesting(
         std::move(adapters), std::move(options));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

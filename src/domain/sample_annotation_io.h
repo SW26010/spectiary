@@ -16,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
@@ -152,4 +152,4 @@ public:
 [[nodiscard]] std::optional<int> SampleAnnotationValueAsInt(const SampleAnnotationValue& value);
 [[nodiscard]] std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind);
 
-}  // namespace specforge
+}  // namespace spectiary

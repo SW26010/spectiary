@@ -1,6 +1,6 @@
 #include "platform/directory_change_generation.h"
 
-namespace specforge {
+namespace spectiary {
 
 void DirectoryChangeGenerationMonitor::CloseRegistration(
     DirectoryChangeGeneration& registration) noexcept
@@ -8,7 +8,7 @@ void DirectoryChangeGenerationMonitor::CloseRegistration(
     registration.Close();
 }
 
-}  // namespace specforge
+}  // namespace spectiary
 
 #if defined(_WIN32)
 
@@ -24,7 +24,7 @@ void DirectoryChangeGenerationMonitor::CloseRegistration(
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -283,11 +283,11 @@ DirectoryChangeGenerationHandle DirectoryChangeGenerationMonitor::Begin(
     return impl_->Begin(path, cancellation_checkpoint, cancellation_token);
 }
 
-}  // namespace specforge
+}  // namespace spectiary
 
 #else
 
-namespace specforge {
+namespace spectiary {
 
 class DirectoryChangeGenerationMonitor::Impl {
 public:
@@ -326,6 +326,6 @@ DirectoryChangeGenerationHandle DirectoryChangeGenerationMonitor::Begin(
     return impl_->Begin(path, cancellation_checkpoint, cancellation_token);
 }
 
-}  // namespace specforge
+}  // namespace spectiary
 
 #endif

@@ -12,7 +12,7 @@
 #include <string_view>
 #include <thread>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink {
 public:
@@ -187,4 +187,4 @@ private:
     bool active_ = false;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SpectralLineLabelLayoutInput {
     std::string_view stable_id;
@@ -133,4 +133,4 @@ void UpdateSpectralLineLabelLayoutContext(
     float plot_right,
     float horizontal_gap);
 
-}  // namespace specforge
+}  // namespace spectiary

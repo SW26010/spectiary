@@ -43,36 +43,36 @@ $issueTextHeader = Read-RepoFile "src/ui/sample_labeling_issue_text.h"
 
 $automationTarget = [regex]::Match(
     $cmake,
-    'add_library\(specforge_automation STATIC.*?(?=\nadd_library\(specforge_sessions)',
+    'add_library\(spectiary_automation STATIC.*?(?=\nadd_library\(spectiary_sessions)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 $sessionsTarget = [regex]::Match(
     $cmake,
-    'add_library\(specforge_sessions STATIC.*?(?=\nadd_library\(specforge_desktop_ui)',
+    'add_library\(spectiary_sessions STATIC.*?(?=\nadd_library\(spectiary_desktop_ui)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 $desktopTarget = [regex]::Match(
     $cmake,
-    'add_library\(specforge_desktop_ui STATIC.*?(?=\nadd_library\(specforge_renderer)',
+    'add_library\(spectiary_desktop_ui STATIC.*?(?=\nadd_library\(spectiary_renderer)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 Require-Match $automationTarget.Value 'src/automation/automation_state\.cpp' `
     "The automation target block must own automation_state.cpp."
-Require-Match $automationTarget.Value 'target_link_libraries\(specforge_automation[\s\S]*?PUBLIC[\s\S]*?specforge_core' `
+Require-Match $automationTarget.Value 'target_link_libraries\(spectiary_automation[\s\S]*?PUBLIC[\s\S]*?spectiary_core' `
     "The automation target must retain its core dependency."
-Require-NoMatch $automationTarget.Value 'specforge_sessions' `
+Require-NoMatch $automationTarget.Value 'spectiary_sessions' `
     "The automation target must not acquire the sessions target for panel visibility."
 
 Require-Match $sessionsTarget.Value 'src/ui/sample_workflow_coordinator\.cpp' `
     "The sessions target block must own the workflow coordinator."
-Require-Match $sessionsTarget.Value 'target_link_libraries\(specforge_sessions PUBLIC specforge_core\)' `
+Require-Match $sessionsTarget.Value 'target_link_libraries\(spectiary_sessions PUBLIC spectiary_core\)' `
     "The sessions target must retain its core dependency."
-Require-NoMatch $sessionsTarget.Value 'specforge_desktop_ui' `
+Require-NoMatch $sessionsTarget.Value 'spectiary_desktop_ui' `
     "The sessions target must not acquire the desktop UI target for labeling text."
 
 Require-Match $desktopTarget.Value 'src/ui/sample_workflow_panel\.cpp' `
     "The desktop UI target must own the labeling presentation adapter."
 Require-Match $desktopTarget.Value 'src/ui/ui_text\.cpp' `
     "The desktop UI target must own the localized text catalog."
-Require-Match $desktopTarget.Value 'target_link_libraries\(specforge_desktop_ui[\s\S]*?PUBLIC[\s\S]*?specforge_sessions' `
+Require-Match $desktopTarget.Value 'target_link_libraries\(spectiary_desktop_ui[\s\S]*?PUBLIC[\s\S]*?spectiary_sessions' `
     "The desktop UI target must retain its sessions dependency."
 
 Require-Match $automationState '#include "app/panel_visibility_state\.h"' `

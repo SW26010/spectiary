@@ -37,12 +37,12 @@ $start.WorkingDirectory = $repo
 $start.UseShellExecute = $false
 # This is an explicitly interactive profile: the user must see and drag the window.
 $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal
-$start.EnvironmentVariables['SPECFORGE_PROFILE'] = $(if ($windowed) { '0' } else { '1' })
-$start.EnvironmentVariables['SPECFORGE_PROFILE_WINDOWED'] = $(if ($windowed) { '1' } else { '0' })
-$start.EnvironmentVariables['SPECFORGE_PROFILE_DIR'] = $directory
-$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS'] = $(if ($IncrementalBuffers) { '1' } else { '0' })
-$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY'] = $(if ($FeedbackAcquireOnly) { '1' } else { '0' })
-$start.EnvironmentVariables['SPECFORGE_EXPERIMENT_NO_REDIRECTION_BITMAP'] = $(if ($RedirectionArm -eq 'B') { '1' } else { '0' })
+$start.EnvironmentVariables['SPECTIARY_PROFILE'] = $(if ($windowed) { '0' } else { '1' })
+$start.EnvironmentVariables['SPECTIARY_PROFILE_WINDOWED'] = $(if ($windowed) { '1' } else { '0' })
+$start.EnvironmentVariables['SPECTIARY_PROFILE_DIR'] = $directory
+$start.EnvironmentVariables['SPECTIARY_EXPERIMENT_INCREMENTAL_BUFFERS'] = $(if ($IncrementalBuffers) { '1' } else { '0' })
+$start.EnvironmentVariables['SPECTIARY_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY'] = $(if ($FeedbackAcquireOnly) { '1' } else { '0' })
+$start.EnvironmentVariables['SPECTIARY_EXPERIMENT_NO_REDIRECTION_BITMAP'] = $(if ($RedirectionArm -eq 'B') { '1' } else { '0' })
 [pscustomobject]@{ arm = $RedirectionArm; feedback_acquire_only = [bool]$FeedbackAcquireOnly;
     windowed_capture = [bool]$windowed; incremental_buffers = [bool]$IncrementalBuffers;
     capture_seconds = $(if ($windowed) { 5 } else { 0 }); resource_observation = [bool]$ObserveResources; executable = $Executable;
@@ -67,12 +67,12 @@ if ($windowed -and !$ObserveResources) {
 if (!$windowed) { Write-Host 'Let each interval settle, redock, and close normally. Record display setup and visual observations.' }
 Write-Host "Recording directory: $directory"
 if ($RedirectionArm -ne 'None') { Write-Host "Redirection A/B arm: $RedirectionArm (same isolated executable for both arms)." }
-$instance = 'SpecForgeResize-' + [guid]::NewGuid().ToString('N')
+$instance = 'SpectiaryResize-' + [guid]::NewGuid().ToString('N')
 function Invoke-ResizeWpr([string]$action) {
     $helper = Join-Path $PSScriptRoot 'profile-resize-wpr-helper.ps1'
     foreach ($value in @($helper, $directory)) { if ($value.Contains('"')) { throw 'Invalid path quote' } }
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$helper`" -Action $action -Instance $instance -Directory `"$directory`""
-    Write-Host "WPR $action requires administrator approval; SpecForge retains this shell's privileges."
+    Write-Host "WPR $action requires administrator approval; Spectiary retains this shell's privileges."
     $elevated = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -PassThru
     try {
         $null = $elevated.Handle

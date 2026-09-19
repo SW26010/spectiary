@@ -4,7 +4,7 @@
 #include <atomic>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::uint64_t kFeedbackReportIntervalFrames = 120;
@@ -738,4 +738,4 @@ void D3D11CompositionSwapChain::DrainStatistics() noexcept
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

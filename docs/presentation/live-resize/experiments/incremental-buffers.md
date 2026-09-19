@@ -9,7 +9,7 @@ suitability remain open.
 
 Implemented after the [bounded replacement proposal](../design/buffer-replacement.md).
 Default off. Only the isolated executable reads
-`SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS=1`; the ordinary application leaves main
+`SPECTIARY_EXPERIMENT_INCREMENTAL_BUFFERS=1`; the ordinary application leaves main
 and detached presentation on their existing policy. This is an explicitly authorized
 resize-policy experiment, not an instrumentation-only patch or an accepted fix.
 

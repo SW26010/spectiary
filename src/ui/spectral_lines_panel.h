@@ -9,7 +9,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 class SpectralLinesPanelUi {
 public:
@@ -34,4 +34,4 @@ private:
     SpectralLinesGroupingViewUi grouping_view_ui_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

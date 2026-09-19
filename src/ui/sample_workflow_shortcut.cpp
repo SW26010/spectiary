@@ -5,7 +5,7 @@
 #include <cctype>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool HoverFallbackActive(const SampleWorkflowShortcutContext& context)
@@ -176,4 +176,4 @@ std::string FormatSampleLabelShortcut(char shortcut)
     return std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(normalized))));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

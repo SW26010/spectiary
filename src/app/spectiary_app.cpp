@@ -1,4 +1,4 @@
-#include "app/specforge_app.h"
+#include "app/spectiary_app.h"
 #include "profile/presentation_trace_fields.h"
 
 #include "app/initial_source.h"
@@ -38,7 +38,7 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
-namespace specforge {
+namespace spectiary {
 
 
 namespace {
@@ -216,7 +216,7 @@ std::filesystem::path FrameCaptureOutputPath(
     GetLocalTime(&now);
 
     std::wostringstream name;
-    name << L"SpecForge-frame-"
+    name << L"Spectiary-frame-"
          << std::setfill(L'0')
          << std::setw(4) << now.wYear
          << std::setw(2) << now.wMonth
@@ -330,8 +330,8 @@ void ApplyTitleBarTheme(
 
 }  // namespace
 
-SpecForgeApp::SpecForgeApp(
-    const SpecForgeStartup& startup,
+SpectiaryApp::SpectiaryApp(
+    const SpectiaryStartup& startup,
     std::optional<AutomationStartupConfiguration>
         automation)
     : startup_(startup),
@@ -353,12 +353,12 @@ SpecForgeApp::SpecForgeApp(
 {
 }
 
-SpecForgeApp::~SpecForgeApp()
+SpectiaryApp::~SpectiaryApp()
 {
     Shutdown();
 }
 
-int SpecForgeApp::Run(
+int SpectiaryApp::Run(
     HINSTANCE instance,
     int show_command,
     std::optional<std::filesystem::path> initial_source)
@@ -541,7 +541,7 @@ int SpecForgeApp::Run(
     return static_cast<int>(message.wParam);
 }
 
-void SpecForgeApp::Initialize(
+void SpectiaryApp::Initialize(
     HINSTANCE instance,
     int show_command,
     const std::optional<std::filesystem::path>& initial_source)
@@ -576,7 +576,7 @@ void SpecForgeApp::Initialize(
 
     wchar_t windowed_capture[2] = {};
     if (!runtime_resource_workload_ &&
-        GetEnvironmentVariableW(L"SPECFORGE_PROFILE_WINDOWED", windowed_capture, 2) == 1 &&
+        GetEnvironmentVariableW(L"SPECTIARY_PROFILE_WINDOWED", windowed_capture, 2) == 1 &&
         windowed_capture[0] == L'1') {
         profile_limits_.max_duration = std::chrono::seconds(5);
     }
@@ -596,13 +596,13 @@ void SpecForgeApp::Initialize(
     if (runtime_resource_workload_ &&
         !profile_.is_open()) {
         throw std::runtime_error(
-            "Runtime resource workload requires SPECFORGE_PROFILE=1 and a writable profile output directory.");
+            "Runtime resource workload requires SPECTIARY_PROFILE=1 and a writable profile output directory.");
     }
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
     const std::wstring window_title =
-        FormatSpecForgeNativeWindowTitle(
+        FormatSpectiaryNativeWindowTitle(
             UiText(
                 ui_.ui_language(),
                 UiTextId::ApplicationWindowTitle));
@@ -626,10 +626,10 @@ void SpecForgeApp::Initialize(
     presentation_trace::main_hwnd = reinterpret_cast<std::uintptr_t>(window_.hwnd());
     presentation_trace::enabled = [](void* context) {
         return presentation_trace::capture_ready &&
-            static_cast<SpecForgeApp*>(context)->profile_.is_frame_recording_active();
+            static_cast<SpectiaryApp*>(context)->profile_.is_frame_recording_active();
     };
     presentation_trace::callback = [](void* context, const presentation_trace::Event& event) {
-        auto* app = static_cast<SpecForgeApp*>(context);
+        auto* app = static_cast<SpectiaryApp*>(context);
         std::uint64_t viewport_id = 0;
         if (event.window.hwnd != 0 && ImGui::GetCurrentContext() != nullptr) {
             for (const ImGuiViewport* viewport : ImGui::GetPlatformIO().Viewports) {
@@ -678,10 +678,10 @@ void SpecForgeApp::Initialize(
 
     InitializeUiBackends();
     if (!message_render_observer_.Start(
-            &SpecForgeApp::InvalidateRenderFromWin32Message,
+            &SpectiaryApp::InvalidateRenderFromWin32Message,
             this,
             kCompositorClockTickMessage,
-            &SpecForgeApp::ObserveWin32Message)) {
+            &SpectiaryApp::ObserveWin32Message)) {
         throw std::runtime_error("Failed to observe Win32 messages for render invalidation.");
     }
     InitializeAutomation();
@@ -701,7 +701,7 @@ void SpecForgeApp::Initialize(
     }
 }
 
-void SpecForgeApp::InitializeUiBackends()
+void SpectiaryApp::InitializeUiBackends()
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -714,7 +714,7 @@ void SpecForgeApp::InitializeUiBackends()
     std::filesystem::create_directories(runtime_paths.application_data_root, data_directory_error);
     if (data_directory_error) {
         throw std::runtime_error(
-            "Failed to create SpecForge runtime data directory '" +
+            "Failed to create Spectiary runtime data directory '" +
             PathToUtf8(runtime_paths.application_data_root) + "': " + data_directory_error.message());
     }
     io.IniFilename = nullptr;
@@ -799,14 +799,14 @@ void SpecForgeApp::InitializeUiBackends()
         throw std::runtime_error("Failed to initialize the Dear ImGui SDR viewport renderer.");
     }
 
-#ifdef SPECFORGE_REDIRECTION_AB_BUILD
+#ifdef SPECTIARY_REDIRECTION_AB_BUILD
     wchar_t feedback_experiment[2] = {};
     viewport_renderer_.SetFeedbackAcquireOnlyExperiment(
-        GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY", feedback_experiment, 2) == 1 &&
+        GetEnvironmentVariableW(L"SPECTIARY_EXPERIMENT_FEEDBACK_ACQUIRE_ONLY", feedback_experiment, 2) == 1 &&
         feedback_experiment[0] == L'1');
     wchar_t buffer_experiment[2] = {};
     viewport_renderer_.SetIncrementalBuffersForDiagnostics(
-        GetEnvironmentVariableW(L"SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS", buffer_experiment, 2) == 1 &&
+        GetEnvironmentVariableW(L"SPECTIARY_EXPERIMENT_INCREMENTAL_BUFFERS", buffer_experiment, 2) == 1 &&
         buffer_experiment[0] == L'1');
 #endif
     profile_.WriteEvent("feedback_experiment", {
@@ -820,7 +820,7 @@ void SpecForgeApp::InitializeUiBackends()
     imgui_initialized_ = true;
 }
 
-void SpecForgeApp::SaveImGuiLayoutForShutdown()
+void SpectiaryApp::SaveImGuiLayoutForShutdown()
 {
     if (!imgui_initialized_ || imgui_layout_saved_for_shutdown_) {
         return;
@@ -844,7 +844,7 @@ void SpecForgeApp::SaveImGuiLayoutForShutdown()
     }
 }
 
-void SpecForgeApp::Shutdown()
+void SpectiaryApp::Shutdown()
 {
     if (shutdown_complete_) {
         return;
@@ -923,7 +923,7 @@ void SpecForgeApp::Shutdown()
     shutdown_complete_ = true;
 }
 
-RenderFrameOutcome SpecForgeApp::RenderFrame()
+RenderFrameOutcome SpectiaryApp::RenderFrame()
 {
     if (!presentation_trace::capture_ready && profile_.is_frame_recording_active()) {
         presentation_trace::capture_ready = true;
@@ -1148,7 +1148,7 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
                : RenderFrameOutcome::Presented;
 }
 
-void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
+void SpectiaryApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
 {
     const bool plot_interaction_active = ui_.latency_sensitive_plot_interaction_active();
     const bool uncapped_pan_active = UncappedPanActive(window_renderable);
@@ -1218,14 +1218,14 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
                                               });
 }
 
-bool SpecForgeApp::UncappedPanActive(bool window_renderable) const
+bool SpectiaryApp::UncappedPanActive(bool window_renderable) const
 {
     return pan_pacing_.effective == PanPacingMode::Uncapped &&
            window_renderable &&
            ui_.latency_sensitive_plot_interaction_active();
 }
 
-D3D11PresentMode SpecForgeApp::MainPresentMode() const
+D3D11PresentMode SpectiaryApp::MainPresentMode() const
 {
     if (UncappedPanActive(!minimized_ && window_visible_)) {
         return D3D11PresentMode::Immediate;
@@ -1235,7 +1235,7 @@ D3D11PresentMode SpecForgeApp::MainPresentMode() const
                : D3D11PresentMode::DisplayVSync;
 }
 
-void SpecForgeApp::WritePanPacingState(
+void SpectiaryApp::WritePanPacingState(
     std::string_view reason,
     bool active)
 {
@@ -1298,16 +1298,16 @@ void SpecForgeApp::WritePanPacingState(
                                             });
 }
 
-void SpecForgeApp::InvalidateRenderFromWin32Message(void* context) noexcept
+void SpectiaryApp::InvalidateRenderFromWin32Message(void* context) noexcept
 {
-    static_cast<SpecForgeApp*>(context)->RequestMessageRender();
+    static_cast<SpectiaryApp*>(context)->RequestMessageRender();
 }
 
-void SpecForgeApp::ObserveWin32Message(
+void SpectiaryApp::ObserveWin32Message(
     void* context,
     const Win32ObservedMessage& message) noexcept
 {
-    auto* app = static_cast<SpecForgeApp*>(context);
+    auto* app = static_cast<SpectiaryApp*>(context);
     constexpr std::intptr_t kPreviousKeyStateMask = 1LL << 30;
     if (!app->profile_.is_open() || message.message != WM_KEYDOWN ||
         (message.lparam & kPreviousKeyStateMask) != 0) {
@@ -1320,14 +1320,14 @@ void SpecForgeApp::ObserveWin32Message(
     }
 }
 
-void SpecForgeApp::PostSourceLoadCompletionReady(HWND hwnd) noexcept
+void SpectiaryApp::PostSourceLoadCompletionReady(HWND hwnd) noexcept
 {
     if (hwnd != nullptr) {
         (void)PostMessageW(hwnd, kSourceLoadCompletionReadyMessage, 0, 0);
     }
 }
 
-void SpecForgeApp::RequestMessageRender() noexcept
+void SpectiaryApp::RequestMessageRender() noexcept
 {
     std::optional<RenderWakeScheduler::Duration> settings_save_delay;
     if (imgui_initialized_ && ImGui::GetCurrentContext() != nullptr) {
@@ -1340,7 +1340,7 @@ void SpecForgeApp::RequestMessageRender() noexcept
     render_wake_scheduler_.RequestFrame(settings_save_delay);
 }
 
-void SpecForgeApp::ApplyPendingResize()
+void SpectiaryApp::ApplyPendingResize()
 {
     if (!pending_resize_) {
         return;
@@ -1369,7 +1369,7 @@ void SpecForgeApp::ApplyPendingResize()
     LogDisplayEnvironment("resize");
 }
 
-void SpecForgeApp::ApplyUiScale(
+void SpectiaryApp::ApplyUiScale(
     float system_dpi_scale,
     int user_scale_percentage)
 {
@@ -1391,7 +1391,7 @@ void SpecForgeApp::ApplyUiScale(
         scales);
 }
 
-void SpecForgeApp::ApplyLocalizedWindowTitle()
+void SpectiaryApp::ApplyLocalizedWindowTitle()
 {
     if (window_.hwnd() == nullptr) {
         return;
@@ -1422,7 +1422,7 @@ void SpecForgeApp::ApplyLocalizedWindowTitle()
         return;
     }
     const std::wstring title =
-        FormatSpecForgeNativeWindowTitle(title_view);
+        FormatSpectiaryNativeWindowTitle(title_view);
     if (title == applied_window_title_) {
         applied_window_title_key_.emplace(title_view);
         return;
@@ -1435,7 +1435,7 @@ void SpecForgeApp::ApplyLocalizedWindowTitle()
     }
 }
 
-void SpecForgeApp::WriteDpiConfiguration(
+void SpectiaryApp::WriteDpiConfiguration(
     std::string_view reason)
 {
     if (!profile_.is_open() ||
@@ -1469,7 +1469,7 @@ void SpecForgeApp::WriteDpiConfiguration(
                                        });
 }
 
-void SpecForgeApp::ToggleFullscreen()
+void SpectiaryApp::ToggleFullscreen()
 {
     if (fullscreen_restore_) {
         ExitFullscreen();
@@ -1478,7 +1478,7 @@ void SpecForgeApp::ToggleFullscreen()
     }
 }
 
-void SpecForgeApp::EnterFullscreen()
+void SpectiaryApp::EnterFullscreen()
 {
     HWND hwnd = window_.hwnd();
     if (hwnd == nullptr || fullscreen_restore_) {
@@ -1521,7 +1521,7 @@ void SpecForgeApp::EnterFullscreen()
     LogDisplayEnvironment("fullscreen_enter");
 }
 
-void SpecForgeApp::ExitFullscreen()
+void SpectiaryApp::ExitFullscreen()
 {
     HWND hwnd = window_.hwnd();
     if (hwnd == nullptr || !fullscreen_restore_) {
@@ -1549,7 +1549,7 @@ void SpecForgeApp::ExitFullscreen()
     LogDisplayEnvironment("fullscreen_exit");
 }
 
-void SpecForgeApp::ToggleImmersivePlotMode()
+void SpectiaryApp::ToggleImmersivePlotMode()
 {
     if (ui_.immersive_plot_mode()) {
         ExitImmersivePlotMode();
@@ -1558,7 +1558,7 @@ void SpecForgeApp::ToggleImmersivePlotMode()
     }
 }
 
-void SpecForgeApp::EnterImmersivePlotMode()
+void SpectiaryApp::EnterImmersivePlotMode()
 {
     if (ui_.immersive_plot_mode()) {
         return;
@@ -1576,7 +1576,7 @@ void SpecForgeApp::EnterImmersivePlotMode()
     profile_.WriteEvent("immersive_plot", {ProfileSink::Field::Bool("enabled", true)});
 }
 
-void SpecForgeApp::ExitImmersivePlotMode()
+void SpectiaryApp::ExitImmersivePlotMode()
 {
     const bool was_immersive = ui_.immersive_plot_mode();
     ui_.ExitImmersivePlotMode();
@@ -1590,7 +1590,7 @@ void SpecForgeApp::ExitImmersivePlotMode()
     }
 }
 
-void SpecForgeApp::ToggleProfileRecording()
+void SpectiaryApp::ToggleProfileRecording()
 {
     const ProfileSink::LifecycleSnapshot lifecycle =
         profile_.lifecycle_snapshot();
@@ -1609,7 +1609,7 @@ void SpecForgeApp::ToggleProfileRecording()
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::RequestFrameCapture()
+void SpectiaryApp::RequestFrameCapture()
 {
     const OnDemandFrameCaptureRequestOutcome outcome =
         frame_capture_.Request(
@@ -1653,7 +1653,7 @@ void SpecForgeApp::RequestFrameCapture()
     }
 }
 
-void SpecForgeApp::CaptureRequestedFrame()
+void SpectiaryApp::CaptureRequestedFrame()
 {
     const std::optional<std::filesystem::path>
         requested_output =
@@ -1894,7 +1894,7 @@ void SpecForgeApp::CaptureRequestedFrame()
     render_wake_scheduler_.RequestFrame();
 }
 
-bool SpecForgeApp::StartProfileRecording(
+bool SpectiaryApp::StartProfileRecording(
     std::string_view trigger,
     std::optional<AutomationPreparedProfileOutput>
         prepared_output)
@@ -1974,7 +1974,7 @@ bool SpecForgeApp::StartProfileRecording(
     return true;
 }
 
-void SpecForgeApp::StopProfileRecording(std::string_view trigger)
+void SpectiaryApp::StopProfileRecording(std::string_view trigger)
 {
     const ProfileSink::LifecycleSnapshot lifecycle =
         profile_.lifecycle_snapshot();
@@ -2009,7 +2009,7 @@ AutomationSettingResult AutomationIntegerSettingResult(
     return {std::string(name), value, changed};
 }
 
-void SpecForgeApp::PostAutomationCommandReady(
+void SpectiaryApp::PostAutomationCommandReady(
     HWND hwnd) noexcept
 {
     if (hwnd != nullptr) {
@@ -2021,7 +2021,7 @@ void SpecForgeApp::PostAutomationCommandReady(
     }
 }
 
-void SpecForgeApp::InitializeAutomation()
+void SpectiaryApp::InitializeAutomation()
 {
     if (!automation_configuration_) {
         return;
@@ -2046,7 +2046,7 @@ void SpecForgeApp::InitializeAutomation()
     }
 }
 
-void SpecForgeApp::ApplyPendingApplicationSettings(
+void SpectiaryApp::ApplyPendingApplicationSettings(
     std::string_view scale_reason,
     bool request_frame)
 {
@@ -2072,7 +2072,7 @@ void SpecForgeApp::ApplyPendingApplicationSettings(
     }
 }
 
-bool SpecForgeApp::ResolveAndApplyTheme(
+bool SpectiaryApp::ResolveAndApplyTheme(
     bool refresh_native_windows)
 {
     const ThemeSelection selection =
@@ -2135,7 +2135,7 @@ bool SpecForgeApp::ResolveAndApplyTheme(
 }
 
 const ThemeDescriptor&
-SpecForgeApp::ResolvedThemeDescriptor() const
+SpectiaryApp::ResolvedThemeDescriptor() const
 {
     if (const ThemeDescriptor* descriptor =
             FindBuiltInThemeDescriptor(
@@ -2146,7 +2146,7 @@ SpecForgeApp::ResolvedThemeDescriptor() const
         BuiltInDarkThemeId());
 }
 
-void SpecForgeApp::ServiceAutomationSettingGet(
+void SpectiaryApp::ServiceAutomationSettingGet(
     const AutomationQueuedCommand& command)
 {
     if (!automation_server_->IsRequestActive(
@@ -2199,7 +2199,7 @@ void SpecForgeApp::ServiceAutomationSettingGet(
         "The requested automation setting is not supported.");
 }
 
-void SpecForgeApp::ServiceAutomationSettingSet(
+void SpectiaryApp::ServiceAutomationSettingSet(
     const AutomationQueuedCommand& command)
 {
     const auto* parameters =
@@ -2369,7 +2369,7 @@ void SpecForgeApp::ServiceAutomationSettingSet(
         result_payload);
 }
 
-void SpecForgeApp::ServiceAutomationPanelGet(
+void SpectiaryApp::ServiceAutomationPanelGet(
     const AutomationQueuedCommand& command)
 {
     automation_panel_coordinator_.ServicePanelGet(
@@ -2377,7 +2377,7 @@ void SpecForgeApp::ServiceAutomationPanelGet(
         AutomationPanelCoordinatorCallbacks());
 }
 
-void SpecForgeApp::ServiceAutomationPanelSet(
+void SpectiaryApp::ServiceAutomationPanelSet(
     const AutomationQueuedCommand& command)
 {
     automation_panel_coordinator_.ServicePanelSet(
@@ -2395,7 +2395,7 @@ void SpecForgeApp::ServiceAutomationPanelSet(
 }
 
 AutomationPanelCommandCoordinator::Callbacks
-SpecForgeApp::AutomationPanelCoordinatorCallbacks()
+SpectiaryApp::AutomationPanelCoordinatorCallbacks()
 {
     return {
         .is_request_active = [this](std::string_view request_id) {
@@ -2466,7 +2466,7 @@ SpecForgeApp::AutomationPanelCoordinatorCallbacks()
     };
 }
 
-AutomationExecution::Callbacks SpecForgeApp::AutomationExecutionCallbacks()
+AutomationExecution::Callbacks SpectiaryApp::AutomationExecutionCallbacks()
 {
     return {
         .is_request_active = [this](std::string_view id) { return automation_server_->IsRequestActive(id); },
@@ -2484,7 +2484,7 @@ AutomationExecution::Callbacks SpecForgeApp::AutomationExecutionCallbacks()
     };
 }
 
-void SpecForgeApp::BeginAutomationFrameCapture(
+void SpectiaryApp::BeginAutomationFrameCapture(
     const AutomationQueuedCommand& command)
 {
     const auto* parameters =
@@ -2575,7 +2575,7 @@ void SpecForgeApp::BeginAutomationFrameCapture(
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::ServiceAutomationProfileStart(
+void SpectiaryApp::ServiceAutomationProfileStart(
     const AutomationQueuedCommand& command)
 {
     if (!automation_configuration_) {
@@ -2648,7 +2648,7 @@ void SpecForgeApp::ServiceAutomationProfileStart(
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::BeginAutomationProfileStop(
+void SpectiaryApp::BeginAutomationProfileStop(
     const AutomationQueuedCommand& command)
 {
     const ProfileSink::LifecycleSnapshot lifecycle =
@@ -2680,7 +2680,7 @@ void SpecForgeApp::BeginAutomationProfileStop(
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::PollAutomationProfileStop()
+void SpectiaryApp::PollAutomationProfileStop()
 {
     if (!automation_profile_stop_command_) {
         return;
@@ -2704,7 +2704,7 @@ void SpecForgeApp::PollAutomationProfileStop()
         lifecycle.dropped_events);
 }
 
-bool SpecForgeApp::ServiceAutomationAppQuit(
+bool SpectiaryApp::ServiceAutomationAppQuit(
     const AutomationQueuedCommand& command)
 {
     const AutomationQueuedCommand quit_command =
@@ -2754,7 +2754,7 @@ bool SpecForgeApp::ServiceAutomationAppQuit(
     return true;
 }
 
-bool SpecForgeApp::
+bool SpectiaryApp::
     AutomationFrameCaptureRequestActive() const
 {
     return automation_server_ &&
@@ -2768,7 +2768,7 @@ bool SpecForgeApp::
                    ->output_path;
 }
 
-void SpecForgeApp::CancelAutomationFrameCapture(
+void SpectiaryApp::CancelAutomationFrameCapture(
     std::string_view reason)
 {
     if (!automation_capture_command_ &&
@@ -2791,7 +2791,7 @@ void SpecForgeApp::CancelAutomationFrameCapture(
         std::string(reason));
 }
 
-void SpecForgeApp::PollAutomationBusinessOperations()
+void SpectiaryApp::PollAutomationBusinessOperations()
 {
     PollAutomationProfileStop();
     PollAutomationPanelCommands();
@@ -2848,13 +2848,13 @@ void SpecForgeApp::PollAutomationBusinessOperations()
     }
 }
 
-bool SpecForgeApp::SettleAutomationPanelCommandsForShutdown()
+bool SpectiaryApp::SettleAutomationPanelCommandsForShutdown()
 {
     return automation_panel_coordinator_.SettleForShutdown(
         AutomationPanelCoordinatorCallbacks());
 }
 
-void SpecForgeApp::PollAutomationPanelCommands()
+void SpectiaryApp::PollAutomationPanelCommands()
 {
     automation_panel_coordinator_.Poll(
         ui_.PresentedPanelVisibilityForAutomation(),
@@ -2870,7 +2870,7 @@ void SpecForgeApp::PollAutomationPanelCommands()
         AutomationPanelCoordinatorCallbacks());
 }
 
-bool SpecForgeApp::AutomationBusinessIdle() const noexcept
+bool SpectiaryApp::AutomationBusinessIdle() const noexcept
 {
     return automation_panel_coordinator_.Idle() &&
            automation_execution_.Idle() &&
@@ -2879,7 +2879,7 @@ bool SpecForgeApp::AutomationBusinessIdle() const noexcept
            !frame_capture_.pending();
 }
 
-void SpecForgeApp::ServiceAutomation()
+void SpectiaryApp::ServiceAutomation()
 {
     if (!automation_server_) {
         return;
@@ -3021,7 +3021,7 @@ void SpecForgeApp::ServiceAutomation()
 }
 
 std::optional<RenderWakeScheduler::TimePoint>
-SpecForgeApp::NextAutomationDeadline() const
+SpectiaryApp::NextAutomationDeadline() const
 {
     const auto execution_deadline = automation_execution_.NextDeadline();
     if (!automation_poll_deadline_) return execution_deadline;
@@ -3030,7 +3030,7 @@ SpecForgeApp::NextAutomationDeadline() const
 }
 
 AutomationStateSnapshot
-SpecForgeApp::AutomationState()
+SpectiaryApp::AutomationState()
 {
     AutomationStateSnapshot state;
     if (!automation_configuration_ ||
@@ -3171,7 +3171,7 @@ SpecForgeApp::AutomationState()
     return state;
 }
 
-void SpecForgeApp::LogProfileRecordingStarted(
+void SpectiaryApp::LogProfileRecordingStarted(
     std::string_view trigger,
     std::string_view configuration_reason)
 {
@@ -3197,7 +3197,7 @@ void SpecForgeApp::LogProfileRecordingStarted(
     WriteRuntimeConfiguration(configuration_reason);
 }
 
-void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
+void SpectiaryApp::WriteRuntimeConfiguration(std::string_view reason)
 {
     if (!profile_.is_open()) {
         return;
@@ -3208,7 +3208,7 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
     const std::string source_type(
         snapshot ? MetadataValue(snapshot->source.metadata, "source_type") : std::string_view{});
     profile_.WriteEvent("runtime_config", {
-#ifdef SPECFORGE_REDIRECTION_AB_BUILD
+#ifdef SPECTIARY_REDIRECTION_AB_BUILD
                                             ProfileSink::Field::String("redirection_build", "creation_time_ab"),
 #else
                                             ProfileSink::Field::String("redirection_build", "baseline"),
@@ -3277,7 +3277,7 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
                                         });
 }
 
-void SpecForgeApp::RefreshProfileRecordingStatus()
+void SpectiaryApp::RefreshProfileRecordingStatus()
 {
     (void)profile_.TryFinalizeStop();
     const ProfileSink::LifecycleSnapshot lifecycle =
@@ -3315,7 +3315,7 @@ void SpecForgeApp::RefreshProfileRecordingStatus()
     }
 }
 
-void SpecForgeApp::LogPresentationUpdates()
+void SpectiaryApp::LogPresentationUpdates()
 {
     const D3D11PresentMode present_mode = MainPresentMode();
     WritePresentationUpdate(
@@ -3342,7 +3342,7 @@ void SpecForgeApp::LogPresentationUpdates()
     }
 }
 
-void SpecForgeApp::WritePresentationUpdate(
+void SpectiaryApp::WritePresentationUpdate(
     std::string_view target,
     unsigned int viewport_id,
     HWND hwnd,
@@ -3468,7 +3468,7 @@ void SpecForgeApp::WritePresentationUpdate(
     }
 }
 
-void SpecForgeApp::SchedulePresentationTargetRefresh(HWND hwnd) noexcept
+void SpectiaryApp::SchedulePresentationTargetRefresh(HWND hwnd) noexcept
 {
     if (hwnd != nullptr) {
         SetTimer(
@@ -3479,7 +3479,7 @@ void SpecForgeApp::SchedulePresentationTargetRefresh(HWND hwnd) noexcept
     }
 }
 
-void SpecForgeApp::RefreshPresentationTargets(std::string_view reason)
+void SpectiaryApp::RefreshPresentationTargets(std::string_view reason)
 {
     const HRESULT result = renderer_.RefreshPresentationTarget();
     if (FAILED(result)) {
@@ -3524,7 +3524,7 @@ void SpecForgeApp::RefreshPresentationTargets(std::string_view reason)
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
+void SpectiaryApp::LogDisplayEnvironment(std::string_view reason)
 {
     if (!profile_.is_open()) {
         return;
@@ -3844,7 +3844,7 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                               });
 }
 
-LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+LRESULT SpectiaryApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
     if (message == kSourceLoadCompletionReadyMessage) {
         render_wake_scheduler_.RequestFrame();
@@ -4028,7 +4028,7 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
-void SpecForgeApp::LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam)
+void SpectiaryApp::LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam)
 {
     const int x = GET_X_LPARAM(lparam);
     const int y = GET_Y_LPARAM(lparam);
@@ -4108,4 +4108,4 @@ void SpecForgeApp::LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam)
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -38,7 +38,7 @@ std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
     static std::atomic_uint64_t next_id = 1;
     return std::filesystem::temp_directory_path() /
-           ("specforge_source_queue_" + std::to_string(next_id.fetch_add(1)) + std::string(suffix));
+           ("spectiary_source_queue_" + std::to_string(next_id.fetch_add(1)) + std::string(suffix));
 }
 
 void WriteFixture(const std::filesystem::path& path)
@@ -49,7 +49,7 @@ void WriteFixture(const std::filesystem::path& path)
 }
 
 class MutableDirectoryChangeGeneration final
-    : public specforge::DirectoryChangeGeneration {
+    : public spectiary::DirectoryChangeGeneration {
 public:
     [[nodiscard]] bool IsCurrent() const noexcept override
     {
@@ -70,23 +70,23 @@ private:
     std::atomic_bool current_ = true;
 };
 
-specforge::SourceCollectionFolderListingGenerationHandle MakeFolderListingGeneration(
+spectiary::SourceCollectionFolderListingGenerationHandle MakeFolderListingGeneration(
     const std::filesystem::path& folder,
-    specforge::DirectoryChangeGenerationHandle change_generation)
+    spectiary::DirectoryChangeGenerationHandle change_generation)
 {
-    return std::make_shared<const specforge::SourceCollectionFolderListingGeneration>(
-        specforge::SourceCollectionFolderListingGeneration{
-            specforge::ScanSourceCollectionFolder(folder),
+    return std::make_shared<const spectiary::SourceCollectionFolderListingGeneration>(
+        spectiary::SourceCollectionFolderListingGeneration{
+            spectiary::ScanSourceCollectionFolder(folder),
             std::move(change_generation),
         });
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_index = 0,
     std::size_t spectrum_count = 3)
 {
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.id = "fixture";
     snapshot->source.display_name = "fixture";
     snapshot->source.path = path;
@@ -99,20 +99,20 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
-specforge::SourceCollectionContextReuseProof MakeFileReuseProof(
-    const specforge::SpectrumSnapshot& snapshot,
+spectiary::SourceCollectionContextReuseProof MakeFileReuseProof(
+    const spectiary::SpectrumSnapshot& snapshot,
     const std::vector<std::filesystem::path>& annotation_paths = {})
 {
-    const specforge::SourceCollectionSingleFileState dependency_state =
-        specforge::CaptureSourceCollectionSingleFileState(
+    const spectiary::SourceCollectionSingleFileState dependency_state =
+        spectiary::CaptureSourceCollectionSingleFileState(
             snapshot.source.path,
             annotation_paths);
-    specforge::SourceCollectionContext context =
-        specforge::LoadSourceCollectionContextCancelable(
+    spectiary::SourceCollectionContext context =
+        spectiary::LoadSourceCollectionContextCancelable(
             snapshot,
             dependency_state,
             []() {});
-    specforge::FinalizeSourceCollectionAnnotationContextFingerprint(
+    spectiary::FinalizeSourceCollectionAnnotationContextFingerprint(
         context,
         annotation_paths);
     return {
@@ -121,18 +121,18 @@ specforge::SourceCollectionContextReuseProof MakeFileReuseProof(
     };
 }
 
-specforge::SourceCollectionContextReuseProof MakeFolderReuseProof(
-    const specforge::SpectrumSnapshot& snapshot,
-    const specforge::SourceCollectionFolderListing& listing,
+spectiary::SourceCollectionContextReuseProof MakeFolderReuseProof(
+    const spectiary::SpectrumSnapshot& snapshot,
+    const spectiary::SourceCollectionFolderListing& listing,
     const std::vector<std::filesystem::path>& annotation_paths = {})
 {
-    const specforge::SourceCollectionSingleFileState dependency_state =
-        specforge::CaptureSourceCollectionSingleFileState(
+    const spectiary::SourceCollectionSingleFileState dependency_state =
+        spectiary::CaptureSourceCollectionSingleFileState(
             snapshot.source.path,
             annotation_paths);
-    specforge::SourceCollectionContext context =
-        specforge::BuildFolderSourceCollectionContext(snapshot, listing);
-    specforge::FinalizeSourceCollectionAnnotationContextFingerprint(
+    spectiary::SourceCollectionContext context =
+        spectiary::BuildFolderSourceCollectionContext(snapshot, listing);
+    spectiary::FinalizeSourceCollectionAnnotationContextFingerprint(
         context,
         annotation_paths);
     return {
@@ -141,11 +141,11 @@ specforge::SourceCollectionContextReuseProof MakeFolderReuseProof(
     };
 }
 
-specforge::SourceCollectionLoadDependencies Dependencies(
-    specforge::SourceCollectionLoadDependencies::SnapshotLoader loader)
+spectiary::SourceCollectionLoadDependencies Dependencies(
+    spectiary::SourceCollectionLoadDependencies::SnapshotLoader loader)
 {
-    specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     dependencies.snapshot_loader = std::move(loader);
     return dependencies;
 }
@@ -180,14 +180,14 @@ void WaitForRelease(
     }
 }
 
-std::vector<specforge::SourceCollectionLoadCompletion> WaitForCompletions(
-    specforge::SourceCollectionLoadQueue& queue,
+std::vector<spectiary::SourceCollectionLoadCompletion> WaitForCompletions(
+    spectiary::SourceCollectionLoadQueue& queue,
     std::size_t expected_count)
 {
-    std::vector<specforge::SourceCollectionLoadCompletion> completions;
+    std::vector<spectiary::SourceCollectionLoadCompletion> completions;
     Require(
         WaitUntil([&]() {
-            std::vector<specforge::SourceCollectionLoadCompletion> ready = queue.TakeCompleted();
+            std::vector<spectiary::SourceCollectionLoadCompletion> ready = queue.TakeCompleted();
             completions.insert(
                 completions.end(),
                 std::make_move_iterator(ready.begin()),
@@ -208,8 +208,8 @@ void TestEnqueueReturnsBeforeLoaderCompletes()
     std::shared_future<void> release = release_promise.get_future().share();
     std::atomic_bool entered_once = false;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const std::filesystem::path& source, std::size_t index, const auto& canceled) {
             if (!entered_once.exchange(true)) {
                 entered_promise.set_value();
@@ -243,8 +243,8 @@ void TestBatchLoadsWorkflowCachesOnce()
         both_decoders_entered_promise.get_future().share();
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (decoder_entries.fetch_add(1) + 1 == 2) {
                 both_decoders_entered_promise.set_value();
@@ -269,8 +269,8 @@ void TestBatchLoadsWorkflowCachesOnce()
     Require(
         completions[0].prepared && completions[1].prepared,
         "every batch source should produce a prepared result");
-    const auto& first_plan = std::get<specforge::PreparedSourceCollectionPlan>(completions[0].prepared->payload);
-    const auto& second_plan = std::get<specforge::PreparedSourceCollectionPlan>(completions[1].prepared->payload);
+    const auto& first_plan = std::get<spectiary::PreparedSourceCollectionPlan>(completions[0].prepared->payload);
+    const auto& second_plan = std::get<spectiary::PreparedSourceCollectionPlan>(completions[1].prepared->payload);
     Require(first_plan.workflow.preparation_cache &&
         first_plan.workflow.preparation_cache == second_plan.workflow.preparation_cache,
         "one restore batch should share one immutable cache snapshot");
@@ -289,7 +289,7 @@ void TestLargeQueuesBoundExecutionAndPreserveOrder()
         std::atomic_int active = 0, peak = 0, decoded = 0, starts = 0;
         std::mutex ids_mutex;
         std::unordered_set<std::thread::id> thread_ids;
-        auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
+        auto queue = spectiary::MakeSourceCollectionLoadQueueForTesting(
             Dependencies([&](const auto& source, std::size_t index, const auto& canceled) {
                 const int running = ++active;
                 int previous = peak.load();
@@ -307,7 +307,7 @@ void TestLargeQueuesBoundExecutionAndPreserveOrder()
                 return MakeSnapshot(source, index, count);
             }),
             {.foreground_limit = 2, .before_worker_start = [&]() { ++starts; }});
-        std::vector<specforge::SourceCollectionLoadRequest> requests;
+        std::vector<spectiary::SourceCollectionLoadRequest> requests;
         for (std::size_t index = 0; index < count; ++index) {
             requests.push_back({.path = path, .spectrum_index = index});
         }
@@ -347,7 +347,7 @@ void TestWorkerStartFailureCompletesWithoutStrandingQueue()
     const auto path = UniqueTempPath("_admission_failure.csv");
     WriteFixture(path);
     int starts = 0;
-    auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(
+    auto queue = spectiary::MakeSourceCollectionLoadQueueForTesting(
         Dependencies([](const auto& source, std::size_t index, const auto&) { return MakeSnapshot(source, index); }),
         {.foreground_limit = 1, .before_worker_start = [&]() {
             if (++starts == 1) throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
@@ -380,8 +380,8 @@ void TestSourcesUseIndependentThreads()
     std::mutex thread_ids_mutex;
     std::vector<std::thread::id> thread_ids;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             {
                 std::lock_guard lock(thread_ids_mutex);
@@ -428,8 +428,8 @@ void TestIndividualLoadsPublishInRequestOrder()
     std::promise<void> release_first_promise;
     std::shared_future<void> release_first = release_first_promise.get_future().share();
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
                 WaitForRelease(
@@ -446,11 +446,11 @@ void TestIndividualLoadsPublishInRequestOrder()
     const bool second_started =
         second_decoder_entered.wait_for(2s) == std::future_status::ready;
     bool published_early = false;
-    std::vector<specforge::SourceCollectionLoadCompletion> completions;
+    std::vector<spectiary::SourceCollectionLoadCompletion> completions;
     if (second_started) {
         published_early = WaitUntil(
             [&]() {
-                std::vector<specforge::SourceCollectionLoadCompletion> ready =
+                std::vector<spectiary::SourceCollectionLoadCompletion> ready =
                     queue.TakeCompleted();
                 completions.insert(
                     completions.end(),
@@ -462,7 +462,7 @@ void TestIndividualLoadsPublishInRequestOrder()
     }
     release_first_promise.set_value();
     if (completions.size() < 2) {
-        std::vector<specforge::SourceCollectionLoadCompletion> remaining =
+        std::vector<spectiary::SourceCollectionLoadCompletion> remaining =
             WaitForCompletions(queue, 2 - completions.size());
         completions.insert(
             completions.end(),
@@ -488,9 +488,9 @@ void TestPrefetchNeverBlocksForegroundPublication()
         UniqueTempPath("_prefetch_foreground.csv");
     WriteFixture(prefetch_path);
     WriteFixture(foreground_path);
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(prefetch_path, 0);
-    const specforge::SourceCollectionContextReuseProof proof =
+    const spectiary::SourceCollectionContextReuseProof proof =
         MakeFileReuseProof(*initial_snapshot);
     std::promise<void> prefetch_entered_promise;
     std::shared_future<void> prefetch_entered =
@@ -504,8 +504,8 @@ void TestPrefetchNeverBlocksForegroundPublication()
         THREAD_PRIORITY_ERROR_RETURN;
     std::atomic_bool prefetch_entered_once = false;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
         Dependencies(
             [&](const auto& path,
                 std::size_t index,
@@ -537,7 +537,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
             .path = prefetch_path,
             .spectrum_index = 1,
             .reuse =
-                specforge::SourceCollectionReuseCandidate::Verified(
+                spectiary::SourceCollectionReuseCandidate::Verified(
                     proof,
                     0),
         });
@@ -550,23 +550,23 @@ void TestPrefetchNeverBlocksForegroundPublication()
             .path = prefetch_path,
             .spectrum_index = 1,
             .reuse =
-                specforge::SourceCollectionReuseCandidate::Verified(
+                spectiary::SourceCollectionReuseCandidate::Verified(
                     proof,
                     0),
         });
     const std::uint64_t foreground_id =
         queue.Enqueue({.path = foreground_path});
 
-    std::vector<specforge::SourceCollectionLoadCompletion>
+    std::vector<spectiary::SourceCollectionLoadCompletion>
         foreground = WaitForCompletions(queue, 1);
     const bool cancel_requested =
         queue.Cancel(prefetch_id);
     release_prefetch_promise.set_value();
-    std::vector<specforge::SourceCollectionLoadCompletion>
+    std::vector<spectiary::SourceCollectionLoadCompletion>
         canceled_prefetch;
     const bool canceled_terminal_published =
         WaitUntil([&]() {
-            std::vector<specforge::SourceCollectionLoadCompletion>
+            std::vector<spectiary::SourceCollectionLoadCompletion>
                 ready = queue.TakeCompleted();
             canceled_prefetch.insert(
                 canceled_prefetch.end(),
@@ -598,7 +598,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
             canceled_prefetch.front().canceled &&
             canceled_prefetch.front()
                     .worker_terminal_at !=
-                specforge::
+                spectiary::
                     LoadLatencyTimePoint{},
         "a canceled prefetch should publish one worker-terminal marker");
     Require(
@@ -616,14 +616,14 @@ void TestPrefetchNeverBlocksForegroundPublication()
             .path = prefetch_path,
             .spectrum_index = 1,
             .reuse =
-                specforge::SourceCollectionReuseCandidate::Verified(
+                spectiary::SourceCollectionReuseCandidate::Verified(
                     proof,
                     0),
         });
     Require(
         retry_prefetch_id != 0,
         "a replacement prefetch should be admitted after the canceled worker exits");
-    std::vector<specforge::SourceCollectionLoadCompletion> retried =
+    std::vector<spectiary::SourceCollectionLoadCompletion> retried =
         WaitForCompletions(queue, 1);
     Require(
         retried.size() == 1 &&
@@ -645,8 +645,8 @@ void TestBatchPublishesInRequestOrder()
     std::promise<void> release_first_promise;
     std::shared_future<void> release_first = release_first_promise.get_future().share();
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
                 WaitForRelease(
@@ -665,11 +665,11 @@ void TestBatchPublishesInRequestOrder()
     const bool second_started =
         second_decoder_entered.wait_for(2s) == std::future_status::ready;
     bool published_early = false;
-    std::vector<specforge::SourceCollectionLoadCompletion> completions;
+    std::vector<spectiary::SourceCollectionLoadCompletion> completions;
     if (second_started) {
         published_early = WaitUntil(
             [&]() {
-                std::vector<specforge::SourceCollectionLoadCompletion> ready =
+                std::vector<spectiary::SourceCollectionLoadCompletion> ready =
                     queue.TakeCompleted();
                 completions.insert(
                     completions.end(),
@@ -681,7 +681,7 @@ void TestBatchPublishesInRequestOrder()
     }
     release_first_promise.set_value();
     if (completions.size() < 2) {
-        std::vector<specforge::SourceCollectionLoadCompletion> remaining =
+        std::vector<spectiary::SourceCollectionLoadCompletion> remaining =
             WaitForCompletions(queue, 2 - completions.size());
         completions.insert(
             completions.end(),
@@ -714,8 +714,8 @@ void TestCompletionReadyNotificationCoalescesUntilDrain()
     std::shared_future<void> release_first = release_first_promise.get_future().share();
     std::atomic_int notifications = 0;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
                 WaitForRelease(
@@ -741,7 +741,7 @@ void TestCompletionReadyNotificationCoalescesUntilDrain()
     }
     release_first_promise.set_value();
 
-    std::vector<specforge::SourceCollectionLoadCompletion> batch_completions =
+    std::vector<spectiary::SourceCollectionLoadCompletion> batch_completions =
         WaitForCompletions(queue, 2);
     Require(second_started, "notification test should finish the later batch task first");
     Require(
@@ -756,7 +756,7 @@ void TestCompletionReadyNotificationCoalescesUntilDrain()
         "multiple completions published into a non-empty queue should coalesce to one notification");
 
     const std::uint64_t third_id = queue.Enqueue({.path = third});
-    std::vector<specforge::SourceCollectionLoadCompletion> next_completion =
+    std::vector<spectiary::SourceCollectionLoadCompletion> next_completion =
         WaitForCompletions(queue, 1);
     Require(
         next_completion.size() == 1 && next_completion.front().task_id == third_id,
@@ -785,8 +785,8 @@ void TestBufferedBatchCompletionCanBeCanceled()
     std::shared_future<void> release_first = release_first_promise.get_future().share();
     std::atomic_int notifications = 0;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
                 WaitForRelease(
@@ -813,7 +813,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
     }
     release_first_promise.set_value();
 
-    std::vector<specforge::SourceCollectionLoadCompletion> completions =
+    std::vector<spectiary::SourceCollectionLoadCompletion> completions =
         WaitForCompletions(queue, 1);
     Require(second_started, "buffered cancel test should run the later source concurrently");
     Require(
@@ -838,8 +838,8 @@ void TestCancelSuppressesCompletion()
     std::atomic_bool entered_once = false;
     std::atomic_int notifications = 0;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& source, std::size_t index, const auto& canceled) {
             if (!entered_once.exchange(true)) {
                 entered_promise.set_value();
@@ -854,7 +854,7 @@ void TestCancelSuppressesCompletion()
     });
     const std::uint64_t task_id = queue.Enqueue({.path = path});
     Require(entered.wait_for(2s) == std::future_status::ready, "cancel test loader should start");
-    const specforge::SourceCollectionLoadActivitySnapshot active =
+    const spectiary::SourceCollectionLoadActivitySnapshot active =
         queue.ActivitySnapshot();
     Require(
         active.active_task_count == 1 &&
@@ -868,7 +868,7 @@ void TestCancelSuppressesCompletion()
     Require(
         notifications.load(std::memory_order_relaxed) == 0,
         "a canceled task with no activatable completion must not notify");
-    const specforge::SourceCollectionLoadActivitySnapshot canceled =
+    const spectiary::SourceCollectionLoadActivitySnapshot canceled =
         queue.ActivitySnapshot();
     Require(
         canceled.cancellation_request_count == 1 &&
@@ -898,8 +898,8 @@ void TestCanceledWorkerRemainsNonIdleUntilItRetires()
     std::atomic_bool entered_once = false;
     std::atomic_bool cancellation_signaled = false;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::
             MakeSourceCollectionLoadQueueForTesting(
                 Dependencies(
                     [&](const auto& source,
@@ -964,19 +964,19 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
     const std::filesystem::path path =
         UniqueTempPath("_resident_cancel_race.csv");
     WriteFixture(path);
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(path, 0);
-    const specforge::SourceCollectionContextReuseProof proof =
+    const spectiary::SourceCollectionContextReuseProof proof =
         MakeFileReuseProof(*snapshot);
-    specforge::SourceCollectionResidentSnapshot resident{
+    spectiary::SourceCollectionResidentSnapshot resident{
         .spectrum_index = 0,
         .snapshot = snapshot,
         .context_reuse_proof = proof,
     };
     std::atomic_int decoder_calls = 0;
     std::atomic_int notifications = 0;
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(
             Dependencies(
                 [&decoder_calls](
                     const auto& source,
@@ -995,7 +995,7 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
     const std::uint64_t task_id = queue.Enqueue({
         .path = path,
         .reuse =
-            specforge::SourceCollectionReuseCandidate::Verified(
+            spectiary::SourceCollectionReuseCandidate::Verified(
                 proof,
                 0,
                 {},
@@ -1021,7 +1021,7 @@ void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
             return !queue.NeedsService();
         }),
         "the canceled checkpointed request should terminate");
-    const specforge::SourceCollectionLoadActivitySnapshot
+    const spectiary::SourceCollectionLoadActivitySnapshot
         activity = queue.ActivitySnapshot();
     Require(
         activity.successful_cancellation_count == 1 &&
@@ -1046,8 +1046,8 @@ void TestCompletionReadyCallbackIsReentrantAndUnregistersSafely()
     std::atomic_int notifications = 0;
     std::atomic_int invalid_target_accesses = 0;
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [](const auto& path, std::size_t index, const auto&) {
             return MakeSnapshot(path, index);
         }));
@@ -1090,12 +1090,12 @@ void TestCompletionReadyCallbackIsReentrantAndUnregistersSafely()
         "unregister should wait for an already running completion-ready callback");
     Require(unregister_finished, "completion-ready callback unregister should finish after callback exit");
 
-    std::vector<specforge::SourceCollectionLoadCompletion> first_completion =
+    std::vector<spectiary::SourceCollectionLoadCompletion> first_completion =
         WaitForCompletions(queue, 1);
     Require(first_completion.size() == 1, "the first notified completion should remain drainable");
     notification_target_alive.store(false, std::memory_order_relaxed);
     (void)queue.Enqueue({.path = second});
-    std::vector<specforge::SourceCollectionLoadCompletion> second_completion =
+    std::vector<spectiary::SourceCollectionLoadCompletion> second_completion =
         WaitForCompletions(queue, 1);
     Require(second_completion.size() == 1, "late completion should remain available after unregister");
     Require(
@@ -1123,8 +1123,8 @@ void TestCancelStopsOnlyItsSourceThread()
     std::promise<void> release_survivor_promise;
     std::shared_future<void> release_survivor = release_survivor_promise.get_future().share();
 
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
             if (decoder_entries.fetch_add(1) + 1 == 2) {
                 both_decoders_entered_promise.set_value();
@@ -1153,7 +1153,7 @@ void TestCancelStopsOnlyItsSourceThread()
     Require(queue.NeedsService(), "canceling one source must not stop another active source");
     release_survivor_promise.set_value();
 
-    std::vector<specforge::SourceCollectionLoadCompletion> completions =
+    std::vector<spectiary::SourceCollectionLoadCompletion> completions =
         WaitForCompletions(queue, 1);
     Require(
         completions.size() == 1 && completions.front().task_id == surviving_id,
@@ -1166,9 +1166,9 @@ void TestFailureIsReported()
 {
     const std::filesystem::path path = UniqueTempPath("_failure.csv");
     WriteFixture(path);
-    specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
-        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+    spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+        [](const auto&, std::size_t, const auto&) -> spectiary::SpectrumSnapshotHandle {
             throw std::runtime_error("decoder failure");
         }));
     (void)queue.Enqueue({.path = path});
@@ -1193,8 +1193,8 @@ void TestDestructionStopsEverySourceThread()
         both_decoders_entered_promise.get_future().share();
 
     {
-        specforge::SourceCollectionLoadQueue queue =
-        specforge::MakeSourceCollectionLoadQueueForTesting(Dependencies(
+        spectiary::SourceCollectionLoadQueue queue =
+        spectiary::MakeSourceCollectionLoadQueueForTesting(Dependencies(
             [&](const auto& path, std::size_t index, const auto& canceled) {
                 if (decoder_entries.fetch_add(1) + 1 == 2) {
                     both_decoders_entered_promise.set_value();
@@ -1205,7 +1205,7 @@ void TestDestructionStopsEverySourceThread()
                 ++canceled_decoders;
                 return MakeSnapshot(path, index);
             }), {.foreground_limit = 2});
-        std::vector<specforge::SourceCollectionLoadRequest> requests;
+        std::vector<spectiary::SourceCollectionLoadRequest> requests;
         for (int index = 0; index < 64; ++index) {
             requests.push_back({.path = index % 2 == 0 ? first : second});
         }
@@ -1232,14 +1232,14 @@ void TestCancelWakesBlockedDirectoryRegistration()
         return MakeSnapshot(path, index);
     });
     dependencies.folder_change_generation_registration_factory =
-        [&](const auto&, std::stop_token stop) -> std::shared_ptr<specforge::DirectoryChangeGeneration> {
+        [&](const auto&, std::stop_token stop) -> std::shared_ptr<spectiary::DirectoryChangeGeneration> {
             entered_promise.set_value();
             std::unique_lock lock(mutex);
             condition.wait(lock, stop, [] { return false; });
             return {};
         };
     {
-        auto queue = specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies));
+        auto queue = spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies));
         const auto id = queue.Enqueue({.path = folder});
         Require(entered.wait_for(2s) == std::future_status::ready, "native registration seam must be entered");
         Require(queue.Cancel(id), "blocked source must accept cancellation");
@@ -1265,7 +1265,7 @@ void TestRetirementRunsOnWorker()
     std::future<std::thread::id> destroyed = destroyed_promise.get_future();
     const std::thread::id caller = std::this_thread::get_id();
     std::atomic_int notifications = 0;
-    specforge::SourceCollectionLoadQueue queue;
+    spectiary::SourceCollectionLoadQueue queue;
     queue.RegisterCompletionReadyCallback([&notifications]() {
         notifications.fetch_add(1, std::memory_order_relaxed);
     });

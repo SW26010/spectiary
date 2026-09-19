@@ -10,7 +10,7 @@
 #include <array>
 #include <cstddef>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kUiLanguageCount = static_cast<std::size_t>(UiLanguage::Count);
@@ -27,8 +27,8 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Settings", "设置"},
     UiTextEntry{"Language", "语言"},
     UiTextEntry{
-        "Choose the language used throughout SpecForge.",
-        "选择 SpecForge 全应用所使用的语言。"},
+        "Choose the language used throughout Spectiary.",
+        "选择 Spectiary 全应用所使用的语言。"},
     UiTextEntry{"Application language", "应用语言"},
     UiTextEntry{"English", "英语"},
     UiTextEntry{"Simplified Chinese", "简体中文"},
@@ -92,8 +92,8 @@ constexpr std::array kTextCatalog = {
         "The UI scale must be from 80% through 150%.",
         "界面缩放比例必须在 80% 到 150% 之间。"},
     UiTextEntry{
-        "The output directory is controlled by SPECFORGE_PROFILE_DIR.",
-        "输出目录由 SPECFORGE_PROFILE_DIR 控制。"},
+        "The output directory is controlled by SPECTIARY_PROFILE_DIR.",
+        "输出目录由 SPECTIARY_PROFILE_DIR 控制。"},
     UiTextEntry{
         "Stop the current recording before changing its output directory.",
         "请先停止当前录制，再更改其输出目录。"},
@@ -120,7 +120,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"plain", "普通"},
     UiTextEntry{"external", "外部"},
     UiTextEntry{"local", "本地"},
-    UiTextEntry{"SpecForge", "SpecForge"},
+    UiTextEntry{"Spectiary", "Spectiary"},
     UiTextEntry{"File", "文件"},
     UiTextEntry{"Open File...", "打开文件…"},
     UiTextEntry{"Open Folder...", "打开文件夹…"},
@@ -186,8 +186,8 @@ constexpr std::array kTextCatalog = {
         "选择性能分析输出文件夹"},
     UiTextEntry{"General", "常规"},
     UiTextEntry{
-        "Choose how SpecForge starts and restores your local workspace.",
-        "设置 SpecForge 的启动方式与本地工作区恢复行为。"},
+        "Choose how Spectiary starts and restores your local workspace.",
+        "设置 Spectiary 的启动方式与本地工作区恢复行为。"},
     UiTextEntry{"File opening", "文件打开"},
     UiTextEntry{
         "Restore the previous session at startup",
@@ -270,14 +270,14 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Source: storage-profile default", "来源：存储配置默认值"},
     UiTextEntry{"Source: saved setting", "来源：已保存设置"},
     UiTextEntry{
-        "Source: SPECFORGE_PROFILE_DIR environment override",
-        "来源：SPECFORGE_PROFILE_DIR 环境变量覆盖"},
+        "Source: SPECTIARY_PROFILE_DIR environment override",
+        "来源：SPECTIARY_PROFILE_DIR 环境变量覆盖"},
     UiTextEntry{"Choose Folder...", "选择文件夹…"},
     UiTextEntry{"Restore Default", "恢复默认值"},
     UiTextEntry{"Open Output Folder", "打开输出文件夹"},
     UiTextEntry{
-        "Remove SPECFORGE_PROFILE_DIR before changing this path in Settings.",
-        "请先移除 SPECFORGE_PROFILE_DIR，再在“设置”中更改此路径。"},
+        "Remove SPECTIARY_PROFILE_DIR before changing this path in Settings.",
+        "请先移除 SPECTIARY_PROFILE_DIR，再在“设置”中更改此路径。"},
     UiTextEntry{
         "Stop the current recording before changing its output directory.",
         "请先停止当前录制，再更改输出目录。"},
@@ -298,8 +298,8 @@ constexpr std::array kTextCatalog = {
         "Local astronomical spectrum inspection and labeling.",
         "本地天文光谱检视与标注。"},
     UiTextEntry{
-        "Copyright (c) 2026 SpecForge. All rights reserved.",
-        "版权所有 (c) 2026 SpecForge。保留所有权利。"},
+        "Copyright (c) 2026 Spectiary. All rights reserved.",
+        "版权所有 (c) 2026 Spectiary。保留所有权利。"},
     UiTextEntry{"Version", "版本"},
     UiTextEntry{"Distribution", "分发方式"},
     UiTextEntry{"Configuration", "构建配置"},
@@ -377,12 +377,12 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Could not open the log folder.", "无法打开日志文件夹。"},
     UiTextEntry{"Opened the log folder.", "已打开日志文件夹。"},
     UiTextEntry{"Diagnostic information copied.", "已复制诊断信息。"},
-    UiTextEntry{"SpecForge startup error", "SpecForge 启动错误"},
+    UiTextEntry{"Spectiary startup error", "Spectiary 启动错误"},
     UiTextEntry{"Unknown startup error.", "未知启动错误。"},
-    UiTextEntry{"SpecForge - Local state warning", "SpecForge - 本地状态警告"},
+    UiTextEntry{"Spectiary - Local state warning", "Spectiary - 本地状态警告"},
     UiTextEntry{
-        "SpecForge could not save all local state before exiting.",
-        "SpecForge 退出前无法保存全部本地状态。"},
+        "Spectiary could not save all local state before exiting.",
+        "Spectiary 退出前无法保存全部本地状态。"},
     UiTextEntry{"Unsaved areas:", "未保存的区域："},
     UiTextEntry{"Application settings", "应用设置"},
     UiTextEntry{"Source session", "源会话"},
@@ -393,14 +393,14 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Sample workflow", "样本工作流"},
     UiTextEntry{"Spectral-line state", "谱线状态"},
     UiTextEntry{
-        "Changes in these areas may not be restored the next time SpecForge starts.",
-        "这些区域中的更改可能无法在 SpecForge 下次启动时恢复。"},
+        "Changes in these areas may not be restored the next time Spectiary starts.",
+        "这些区域中的更改可能无法在 Spectiary 下次启动时恢复。"},
     UiTextEntry{
         "Use Settings > Diagnostics to record.",
         "请在“设置”>“诊断”中开始录制。"},
     UiTextEntry{
-        "Recording started by SPECFORGE_PROFILE.",
-        "已由 SPECFORGE_PROFILE 启动录制。"},
+        "Recording started by SPECTIARY_PROFILE.",
+        "已由 SPECTIARY_PROFILE 启动录制。"},
     UiTextEntry{"Could not start recording: ", "无法开始录制："},
     UiTextEntry{"Recording performance diagnostics.", "正在录制性能诊断。"},
     UiTextEntry{
@@ -447,11 +447,11 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Add file...", "添加文件…"},
     UiTextEntry{"Add folder...", "添加文件夹…"},
     UiTextEntry{
-        "Open in New SpecForge Instance",
-        "在新 SpecForge 实例打开"},
+        "Open in New Spectiary Instance",
+        "在新 Spectiary 实例打开"},
     UiTextEntry{
-        "Could not open the source in a new SpecForge instance.",
-        "无法在新的 SpecForge 实例中打开源。"},
+        "Could not open the source in a new Spectiary instance.",
+        "无法在新的 Spectiary 实例中打开源。"},
     UiTextEntry{"source", "个源"},
     UiTextEntry{"sources", "个源"},
     UiTextEntry{
@@ -1282,4 +1282,4 @@ std::string FormatLocalUserStateHealthMessage(
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

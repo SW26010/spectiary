@@ -11,7 +11,7 @@ endforeach()
 
 if(NOT EXISTS "${INPUT}")
     message(FATAL_ERROR
-        "Source SpecForge metadata does not exist: ${INPUT}"
+        "Source Spectiary metadata does not exist: ${INPUT}"
     )
 endif()
 
@@ -23,7 +23,7 @@ string(JSON schema_type
 if(NOT schema_error STREQUAL "NOTFOUND" OR
    NOT schema_type STREQUAL "NUMBER")
     message(FATAL_ERROR
-        "Source SpecForge metadata has no numeric schema_version: "
+        "Source Spectiary metadata has no numeric schema_version: "
         "${schema_error}"
     )
 endif()

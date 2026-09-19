@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::string_view kSampleLabelingAsdfFileFormatVersion = "1.0.0";
 inline constexpr std::string_view kSampleLabelingAsdfStandardVersion = "1.5.0";
@@ -202,4 +202,4 @@ RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
     std::ostream& output,
     const SampleLabelingDocument& document) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

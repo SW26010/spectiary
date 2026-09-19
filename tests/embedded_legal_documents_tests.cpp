@@ -30,25 +30,25 @@ std::string ReadFile(const std::filesystem::path& path)
 void TestEmbeddedDocumentsMatchSourceFiles()
 {
     struct ExpectedDocument {
-        specforge::LegalDocument document;
+        spectiary::LegalDocument document;
         std::string_view filename;
     };
     constexpr std::array expected_documents = {
         ExpectedDocument{
-            specforge::LegalDocument::ThirdPartyNotices,
+            spectiary::LegalDocument::ThirdPartyNotices,
             "THIRD_PARTY_NOTICES.txt"},
         ExpectedDocument{
-            specforge::LegalDocument::DataSources,
+            spectiary::LegalDocument::DataSources,
             "DATA_SOURCES.txt"},
     };
 
     for (const ExpectedDocument& expected : expected_documents) {
         const std::string source = ReadFile(
             std::filesystem::path(
-                SPECFORGE_LEGAL_SOURCE_DIRECTORY) /
+                SPECTIARY_LEGAL_SOURCE_DIRECTORY) /
             expected.filename);
         const std::string_view embedded =
-            specforge::EmbeddedLegalDocumentContent(
+            spectiary::EmbeddedLegalDocumentContent(
                 expected.document);
         Require(!embedded.empty(), "embedded legal document should exist");
         Require(

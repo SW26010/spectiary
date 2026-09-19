@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge::asdf_mutation_test {
+namespace spectiary::asdf_mutation_test {
 
 enum class MutationCategory {
     YamlStructure,
@@ -1229,4 +1229,4 @@ inline void ApplyUnknownMetadata(std::vector<unsigned char>& bytes,
     return output.str();
 }
 
-}  // namespace specforge::asdf_mutation_test
+}  // namespace spectiary::asdf_mutation_test

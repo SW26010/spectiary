@@ -15,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SettingsSection {
     General,
@@ -108,7 +108,7 @@ struct PlatformWorkArea {
 
 [[nodiscard]] SettingsPanelEnvironment
 SettingsPanelEnvironmentForStartup(
-    const SpecForgeStartup& startup);
+    const SpectiaryStartup& startup);
 [[nodiscard]] std::string FormatBuildSourceForAbout(
     const BuildSourceIdentity& build_source,
     UiLanguage language = UiLanguage::English);
@@ -238,4 +238,4 @@ private:
     friend struct SettingsPanelUiTestAccess;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

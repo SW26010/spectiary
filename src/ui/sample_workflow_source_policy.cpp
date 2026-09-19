@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string TrimAscii(std::string_view value)
@@ -1186,4 +1186,4 @@ SampleWorkflowSourcePolicy::CachedSortingSourceViews(
     return sorting_source_cache_;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

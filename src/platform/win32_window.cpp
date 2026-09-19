@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr UINT kDefaultWindowsDpi = 96;
@@ -216,4 +216,4 @@ void Win32Window::Destroy()
     client_height_ = 0;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

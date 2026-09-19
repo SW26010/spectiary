@@ -14,7 +14,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kMaximumLayoutBytes = 16U * 1024U * 1024U;
@@ -289,4 +289,4 @@ bool ImGuiLayoutPersistence::SaveNow(std::string* error) const
     return true;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

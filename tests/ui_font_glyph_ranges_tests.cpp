@@ -27,16 +27,16 @@ bool ContainsGlyph(const ImWchar* ranges, ImWchar glyph)
 
 void TestScientificGlyphRangesCoverSpectralLineNotation()
 {
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x03b1), "Greek alpha should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x03b4), "Greek delta should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x00b9), "superscript 1 should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x00b2), "superscript 2 should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x00b3), "superscript 3 should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x2074), "superscript 4 should be covered");
-    Require(ContainsGlyph(specforge::kScientificGlyphRanges, 0x2082), "subscript 2 should be covered");
-    Require(ContainsGlyph(specforge::kSpectralLabelGlyphRanges, 'H'), "spectral labels should cover Latin");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x03b1), "Greek alpha should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x03b4), "Greek delta should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x00b9), "superscript 1 should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x00b2), "superscript 2 should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x00b3), "superscript 3 should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x2074), "superscript 4 should be covered");
+    Require(ContainsGlyph(spectiary::kScientificGlyphRanges, 0x2082), "subscript 2 should be covered");
+    Require(ContainsGlyph(spectiary::kSpectralLabelGlyphRanges, 'H'), "spectral labels should cover Latin");
     Require(
-        ContainsGlyph(specforge::kSpectralLabelGlyphRanges, 0x03b1),
+        ContainsGlyph(spectiary::kSpectralLabelGlyphRanges, 0x03b1),
         "spectral labels should cover Greek alpha");
 }
 
@@ -53,7 +53,7 @@ void TestProductionFontSelection()
     Require(context != nullptr, "ImGui context should be created");
 
     ImGuiIO& io = ImGui::GetIO();
-    const specforge::UiFontSelection selection = specforge::AddUiFonts(io);
+    const spectiary::UiFontSelection selection = spectiary::AddUiFonts(io);
     Require(selection.scientific_font.has_value(), "a Windows scientific fallback font should load");
     Require(selection.cjk_font.has_value(), "a Windows CJK fallback font should load");
     Require(

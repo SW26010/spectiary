@@ -2,14 +2,14 @@
 # A kill-on-close Job Object owns each process tree so a per-case timeout can
 # terminate descendants as well as the directly launched process.
 
-if (-not ('SpecForgeBoundedProcess.NativeMethods' -as [type])) {
+if (-not ('SpectiaryBoundedProcess.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace SpecForgeBoundedProcess
+namespace SpectiaryBoundedProcess
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -149,37 +149,37 @@ namespace SpecForgeBoundedProcess
 '@
 }
 
-function Get-SpecForgeBoundedProcessWin32Error {
+function Get-SpectiaryBoundedProcessWin32Error {
     $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     return "${errorCode}: $((New-Object ComponentModel.Win32Exception($errorCode)).Message)"
 }
 
-function Close-SpecForgeBoundedProcessJob {
+function Close-SpectiaryBoundedProcessJob {
     param(
         [Parameter(Mandatory = $true)] [IntPtr]$Handle
     )
 
     if ($Handle -ne [IntPtr]::Zero) {
-        [void][SpecForgeBoundedProcess.NativeMethods]::CloseHandle($Handle)
+        [void][SpectiaryBoundedProcess.NativeMethods]::CloseHandle($Handle)
     }
 }
 
-function New-SpecForgeBoundedProcessJob {
-    $jobHandle = [SpecForgeBoundedProcess.NativeMethods]::CreateJobObject(
+function New-SpectiaryBoundedProcessJob {
+    $jobHandle = [SpectiaryBoundedProcess.NativeMethods]::CreateJobObject(
         [IntPtr]::Zero,
         $null)
     if ($jobHandle -eq [IntPtr]::Zero) {
-        throw "CreateJobObject failed: $(Get-SpecForgeBoundedProcessWin32Error)"
+        throw "CreateJobObject failed: $(Get-SpectiaryBoundedProcessWin32Error)"
     }
 
     $information =
-        New-Object SpecForgeBoundedProcess.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        New-Object SpectiaryBoundedProcess.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
     # BasicLimitInformation is a value-type field. PowerShell returns a copy
     # when a nested struct is read, so update the copy and explicitly assign
     # it back before marshaling the enclosing structure.
     $basicLimitInformation = $information.BasicLimitInformation
     $basicLimitInformation.LimitFlags =
-        [SpecForgeBoundedProcess.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        [SpectiaryBoundedProcess.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     $information.BasicLimitInformation = $basicLimitInformation
     $length = [Runtime.InteropServices.Marshal]::SizeOf($information)
     $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($length)
@@ -189,14 +189,14 @@ function New-SpecForgeBoundedProcessJob {
             $buffer,
             $false)
         $configured =
-            [SpecForgeBoundedProcess.NativeMethods]::SetInformationJobObject(
+            [SpectiaryBoundedProcess.NativeMethods]::SetInformationJobObject(
                 $jobHandle,
-                [SpecForgeBoundedProcess.NativeMethods]::JobObjectExtendedLimitInformation,
+                [SpectiaryBoundedProcess.NativeMethods]::JobObjectExtendedLimitInformation,
                 $buffer,
                 [uint32]$length)
         if (-not $configured) {
-            $message = Get-SpecForgeBoundedProcessWin32Error
-            Close-SpecForgeBoundedProcessJob -Handle $jobHandle
+            $message = Get-SpectiaryBoundedProcessWin32Error
+            Close-SpectiaryBoundedProcessJob -Handle $jobHandle
             throw "SetInformationJobObject failed: $message"
         }
     }
@@ -206,7 +206,7 @@ function New-SpecForgeBoundedProcessJob {
     return $jobHandle
 }
 
-function Add-SpecForgeProcessToBoundedJob {
+function Add-SpectiaryProcessToBoundedJob {
     param(
         [Parameter(Mandatory = $true)] [IntPtr]$JobHandle,
         [Parameter(Mandatory = $true)] [Diagnostics.Process]$Process
@@ -216,21 +216,21 @@ function Add-SpecForgeProcessToBoundedJob {
         return
     }
     $assigned =
-        [SpecForgeBoundedProcess.NativeMethods]::AssignProcessToJobObject(
+        [SpectiaryBoundedProcess.NativeMethods]::AssignProcessToJobObject(
             $JobHandle,
             $Process.Handle)
     if (-not $assigned) {
-        throw "AssignProcessToJobObject failed: $(Get-SpecForgeBoundedProcessWin32Error)"
+        throw "AssignProcessToJobObject failed: $(Get-SpectiaryBoundedProcessWin32Error)"
     }
 }
 
-function Get-SpecForgeDescendantProcessHandles {
+function Get-SpectiaryDescendantProcessHandles {
     param(
         [Parameter(Mandatory = $true)] [int]$RootProcessId
     )
 
     foreach ($processId in
-        [SpecForgeBoundedProcess.NativeMethods]::GetDescendantProcessIds(
+        [SpectiaryBoundedProcess.NativeMethods]::GetDescendantProcessIds(
             $RootProcessId)) {
         try {
             $process = [Diagnostics.Process]::GetProcessById($processId)
@@ -246,7 +246,7 @@ function Get-SpecForgeDescendantProcessHandles {
     }
 }
 
-function Stop-SpecForgeDescendantProcessHandles {
+function Stop-SpectiaryDescendantProcessHandles {
     param(
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
@@ -274,7 +274,7 @@ function Stop-SpecForgeDescendantProcessHandles {
     }
 }
 
-function ConvertTo-SpecForgeCommandLineArgument {
+function ConvertTo-SpectiaryCommandLineArgument {
     param(
         [Parameter(Mandatory = $true)]
         [AllowEmptyString()]
@@ -312,19 +312,19 @@ function ConvertTo-SpecForgeCommandLineArgument {
     return $builder.ToString()
 }
 
-function Join-SpecForgeCommandLineArguments {
+function Join-SpectiaryCommandLineArguments {
     param(
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$Arguments
     )
 
     return @(
         foreach ($argument in $Arguments) {
-            ConvertTo-SpecForgeCommandLineArgument -Argument ([string]$argument)
+            ConvertTo-SpectiaryCommandLineArgument -Argument ([string]$argument)
         }
     ) -join ' '
 }
 
-function Get-SpecForgeBoundedProcessStream {
+function Get-SpectiaryBoundedProcessStream {
     param(
         [Parameter(Mandatory = $true)] [object]$Task,
         [Parameter(Mandatory = $true)] [string]$Name,
@@ -342,7 +342,7 @@ function Get-SpecForgeBoundedProcessStream {
     }
 }
 
-function Get-SpecForgeBoundedProcessCaptureFile {
+function Get-SpectiaryBoundedProcessCaptureFile {
     param(
         [Parameter(Mandatory = $true)] [string]$Path
     )
@@ -369,7 +369,7 @@ function Get-SpecForgeBoundedProcessCaptureFile {
     }
 }
 
-function Join-SpecForgeBoundedProcessOutput {
+function Join-SpectiaryBoundedProcessOutput {
     param(
         [AllowEmptyString()] [string]$TargetOutput,
         [AllowEmptyString()] [string]$BootstrapOutput
@@ -385,7 +385,7 @@ function Join-SpecForgeBoundedProcessOutput {
     return $parts -join [Environment]::NewLine
 }
 
-function Get-SpecForgeOutputTail {
+function Get-SpectiaryOutputTail {
     param(
         [AllowEmptyString()] [string]$Text,
         [int]$LineCount = 20
@@ -403,7 +403,7 @@ function Get-SpecForgeOutputTail {
     return @($lines[$first..($lines.Count - 1)]) -join [Environment]::NewLine
 }
 
-function Get-SpecForgeBoundedBootstrapEncodedCommand {
+function Get-SpectiaryBoundedBootstrapEncodedCommand {
     $bootstrapScript = @'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -415,12 +415,12 @@ $stdoutCopyTask = $null
 $stderrCopyTask = $null
 try {
     $gate = [Threading.EventWaitHandle]::OpenExisting(
-        $env:SPECFORGE_BOUNDED_PROCESS_GATE)
+        $env:SPECTIARY_BOUNDED_PROCESS_GATE)
     if (-not $gate.WaitOne(30000)) {
         throw 'Bounded process launch gate timed out before Job assignment.'
     }
     $serializedBytes = [Convert]::FromBase64String(
-        $env:SPECFORGE_BOUNDED_PROCESS_SPEC)
+        $env:SPECTIARY_BOUNDED_PROCESS_SPEC)
     $serialized = [Text.Encoding]::Unicode.GetString($serializedBytes)
     $specification =
         [Management.Automation.PSSerializer]::Deserialize($serialized)
@@ -511,7 +511,7 @@ finally {
     return [Convert]::ToBase64String($bytes)
 }
 
-function Invoke-SpecForgeBoundedProcess {
+function Invoke-SpectiaryBoundedProcess {
     param(
         [Parameter(Mandatory = $true)] [string]$FilePath,
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$Arguments,
@@ -524,7 +524,7 @@ function Invoke-SpecForgeBoundedProcess {
     $jobHandle = [IntPtr]::Zero
     $launchGate = $null
     $captureRootName =
-        'specforge-bounded-process-' + [Guid]::NewGuid().ToString('N')
+        'spectiary-bounded-process-' + [Guid]::NewGuid().ToString('N')
     $targetStdoutPath = Join-Path `
         ([IO.Path]::GetTempPath()) `
         ($captureRootName + '.stdout.log')
@@ -541,8 +541,8 @@ function Invoke-SpecForgeBoundedProcess {
     $timedOut = $false
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $jobHandle = New-SpecForgeBoundedProcessJob
-        $gateName = 'Local\SpecForgeBoundedProcess-' + [Guid]::NewGuid().ToString('N')
+        $jobHandle = New-SpectiaryBoundedProcessJob
+        $gateName = 'Local\SpectiaryBoundedProcess-' + [Guid]::NewGuid().ToString('N')
         $launchGate = [Threading.EventWaitHandle]::new(
             $false,
             [Threading.EventResetMode]::ManualReset,
@@ -550,7 +550,7 @@ function Invoke-SpecForgeBoundedProcess {
         $launchSpecification = [pscustomobject]@{
             FilePath = $FilePath
             ArgumentString =
-                Join-SpecForgeCommandLineArguments -Arguments $Arguments
+                Join-SpectiaryCommandLineArguments -Arguments $Arguments
             StdoutPath = $targetStdoutPath
             StderrPath = $targetStderrPath
         }
@@ -561,21 +561,21 @@ function Invoke-SpecForgeBoundedProcess {
             [Text.Encoding]::Unicode.GetBytes($serializedSpecification))
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
         $startInfo.FileName = Join-Path $PSHOME 'powershell.exe'
-        $startInfo.Arguments = Join-SpecForgeCommandLineArguments -Arguments @(
+        $startInfo.Arguments = Join-SpectiaryCommandLineArguments -Arguments @(
             '-NoProfile',
             '-NonInteractive',
             '-ExecutionPolicy',
             'Bypass',
             '-EncodedCommand',
-            (Get-SpecForgeBoundedBootstrapEncodedCommand)
+            (Get-SpectiaryBoundedBootstrapEncodedCommand)
         )
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
-        $startInfo.EnvironmentVariables['SPECFORGE_BOUNDED_PROCESS_GATE'] =
+        $startInfo.EnvironmentVariables['SPECTIARY_BOUNDED_PROCESS_GATE'] =
             $gateName
-        $startInfo.EnvironmentVariables['SPECFORGE_BOUNDED_PROCESS_SPEC'] =
+        $startInfo.EnvironmentVariables['SPECTIARY_BOUNDED_PROCESS_SPEC'] =
             $encodedSpecification
 
         $process = [Diagnostics.Process]::new()
@@ -589,7 +589,7 @@ function Invoke-SpecForgeBoundedProcess {
         if ($null -ne $BeforeAssignmentProbe) {
             & $BeforeAssignmentProbe
         }
-        Add-SpecForgeProcessToBoundedJob `
+        Add-SpectiaryProcessToBoundedJob `
             -JobHandle $jobHandle `
             -Process $process
         # The controlled bootstrap cannot launch the requested target before
@@ -600,10 +600,10 @@ function Invoke-SpecForgeBoundedProcess {
         if (-not $process.WaitForExit($TimeoutSec * 1000)) {
             $timedOut = $true
             $descendants = @(
-                Get-SpecForgeDescendantProcessHandles `
+                Get-SpectiaryDescendantProcessHandles `
                     -RootProcessId $processId
             )
-            Close-SpecForgeBoundedProcessJob -Handle $jobHandle
+            Close-SpectiaryBoundedProcessJob -Handle $jobHandle
             $jobHandle = [IntPtr]::Zero
             if (-not $process.WaitForExit(5000)) {
                 $process.Kill()
@@ -611,19 +611,19 @@ function Invoke-SpecForgeBoundedProcess {
                     throw "Timed-out process PID $processId remained after bounded cleanup."
                 }
             }
-            Stop-SpecForgeDescendantProcessHandles -Processes $descendants
+            Stop-SpectiaryDescendantProcessHandles -Processes $descendants
             # A descendant can be created between the first snapshot and Job
             # closure in a constrained nested-job environment. Repeat the
             # held-handle sweep after the root has stopped.
             for ($cleanupPass = 0; $cleanupPass -lt 3; $cleanupPass++) {
                 $escapedDescendants = @(
-                    Get-SpecForgeDescendantProcessHandles `
+                    Get-SpectiaryDescendantProcessHandles `
                         -RootProcessId $processId
                 )
                 if ($escapedDescendants.Count -eq 0) {
                     break
                 }
-                Stop-SpecForgeDescendantProcessHandles `
+                Stop-SpectiaryDescendantProcessHandles `
                     -Processes $escapedDescendants
                 Start-Sleep -Milliseconds 50
             }
@@ -633,31 +633,31 @@ function Invoke-SpecForgeBoundedProcess {
             $exitCode = $process.ExitCode
             # Closing the kill-on-close Job also removes any descendant that
             # improperly survived after the root process exited.
-            Close-SpecForgeBoundedProcessJob -Handle $jobHandle
+            Close-SpectiaryBoundedProcessJob -Handle $jobHandle
             $jobHandle = [IntPtr]::Zero
         }
 
-        $bootstrapStdout = Get-SpecForgeBoundedProcessStream `
+        $bootstrapStdout = Get-SpectiaryBoundedProcessStream `
             -Task $stdoutTask `
             -Name 'stdout'
-        $bootstrapStderr = Get-SpecForgeBoundedProcessStream `
+        $bootstrapStderr = Get-SpectiaryBoundedProcessStream `
             -Task $stderrTask `
             -Name 'stderr'
-        $stdout = Join-SpecForgeBoundedProcessOutput `
+        $stdout = Join-SpectiaryBoundedProcessOutput `
             -TargetOutput (
-                Get-SpecForgeBoundedProcessCaptureFile `
+                Get-SpectiaryBoundedProcessCaptureFile `
                     -Path $targetStdoutPath) `
             -BootstrapOutput $bootstrapStdout
-        $stderr = Join-SpecForgeBoundedProcessOutput `
+        $stderr = Join-SpectiaryBoundedProcessOutput `
             -TargetOutput (
-                Get-SpecForgeBoundedProcessCaptureFile `
+                Get-SpectiaryBoundedProcessCaptureFile `
                     -Path $targetStderrPath) `
             -BootstrapOutput $bootstrapStderr
     }
     finally {
         $stopwatch.Stop()
         if ($jobHandle -ne [IntPtr]::Zero) {
-            Close-SpecForgeBoundedProcessJob -Handle $jobHandle
+            Close-SpectiaryBoundedProcessJob -Handle $jobHandle
         }
         if ($null -ne $launchGate) {
             $launchGate.Dispose()
@@ -692,15 +692,15 @@ function Invoke-SpecForgeBoundedProcess {
     }
 }
 
-function New-SpecForgeBoundedCaseFailureMessage {
+function New-SpectiaryBoundedCaseFailureMessage {
     param(
         [Parameter(Mandatory = $true)] [string]$CaseId,
         [Parameter(Mandatory = $true)] [string]$Reason,
         [Parameter(Mandatory = $true)] [psobject]$Result
     )
 
-    $stdoutTail = Get-SpecForgeOutputTail -Text $Result.Stdout
-    $stderrTail = Get-SpecForgeOutputTail -Text $Result.Stderr
+    $stdoutTail = Get-SpectiaryOutputTail -Text $Result.Stdout
+    $stderrTail = Get-SpectiaryOutputTail -Text $Result.Stderr
     return @(
         "Case '$CaseId' $Reason",
         "PID: $($Result.ProcessId)",
@@ -712,7 +712,7 @@ function New-SpecForgeBoundedCaseFailureMessage {
     ) -join [Environment]::NewLine
 }
 
-function Invoke-SpecForgeBoundedValidationCase {
+function Invoke-SpectiaryBoundedValidationCase {
     param(
         [Parameter(Mandatory = $true)] [ValidatePattern('^[a-z0-9][a-z0-9-]*$')] [string]$CaseId,
         [Parameter(Mandatory = $true)] [string]$Description,
@@ -730,7 +730,7 @@ function Invoke-SpecForgeBoundedValidationCase {
             $TimeoutSec,
             $Description)
     try {
-        $result = Invoke-SpecForgeBoundedProcess `
+        $result = Invoke-SpectiaryBoundedProcess `
             -FilePath $FilePath `
             -Arguments $Arguments `
             -TimeoutSec $TimeoutSec
@@ -746,7 +746,7 @@ function Invoke-SpecForgeBoundedValidationCase {
                 $CaseId,
                 $result.ElapsedMilliseconds,
                 $result.ProcessId)
-        throw (New-SpecForgeBoundedCaseFailureMessage `
+        throw (New-SpectiaryBoundedCaseFailureMessage `
                 -CaseId $CaseId `
                 -Reason "timed out after ${TimeoutSec}s." `
                 -Result $result)
@@ -769,7 +769,7 @@ function Invoke-SpecForgeBoundedValidationCase {
         else {
             "failed with exit code $($result.ExitCode)."
         }
-        throw (New-SpecForgeBoundedCaseFailureMessage `
+        throw (New-SpectiaryBoundedCaseFailureMessage `
                 -CaseId $CaseId `
                 -Reason $reason `
                 -Result $result)
@@ -784,7 +784,7 @@ function Invoke-SpecForgeBoundedValidationCase {
                 $result.ElapsedMilliseconds,
                 $result.ProcessId,
                 $result.ExitCode)
-        throw (New-SpecForgeBoundedCaseFailureMessage `
+        throw (New-SpectiaryBoundedCaseFailureMessage `
                 -CaseId $CaseId `
                 -Reason "failed without expected message '$ExpectedMessage'." `
                 -Result $result)

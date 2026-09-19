@@ -1,4 +1,4 @@
-name: SpecForge release
+name: Spectiary release
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: specforge-release-${{ github.ref }}
+  group: spectiary-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -40,10 +40,10 @@ jobs:
           $cmakeLists = Get-Content -Raw -LiteralPath 'CMakeLists.txt'
           $versionMatch = [regex]::Match(
             $cmakeLists,
-            '(?m)^\s*project\s*\(\s*SpecForge\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\b'
+            '(?m)^\s*project\s*\(\s*Spectiary\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\b'
           )
           if (-not $versionMatch.Success) {
-            throw 'Could not resolve SpecForge VERSION from CMakeLists.txt.'
+            throw 'Could not resolve Spectiary VERSION from CMakeLists.txt.'
           }
           $projectVersion = $versionMatch.Groups[1].Value
           if ($projectVersion -cne $version) {
@@ -85,7 +85,7 @@ jobs:
             throw 'Runner vcpkg checkout is unavailable.'
           }
 
-          $binaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          $binaryCache = Join-Path $env:RUNNER_TEMP 'spectiary-vcpkg-cache'
           New-Item -ItemType Directory -Path $binaryCache -Force | Out-Null
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $vcvars = @(
@@ -96,7 +96,7 @@ jobs:
           }
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot" -Encoding utf8
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" -Encoding utf8
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECFORGE_VCVARS_PATH=$vcvars" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTIARY_VCVARS_PATH=$vcvars" -Encoding utf8
 
       - name: Verify static Release FITS loading
         shell: pwsh
@@ -106,7 +106,7 @@ jobs:
             -File scripts\build-ninja-msvc-debug.ps1 `
             -Preset ninja-msvc-release-static `
             -Configure `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release configure failed with exit code $LASTEXITCODE."
@@ -115,8 +115,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass `
             -File scripts\build-ninja-msvc-debug.ps1 `
             -Preset ninja-msvc-release-static `
-            -Target specforge_fits_file_reader_tests `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -Target spectiary_fits_file_reader_tests `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release FITS reader build failed with exit code $LASTEXITCODE."
@@ -125,8 +125,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass `
             -File scripts\build-ninja-msvc-debug.ps1 `
             -Preset ninja-msvc-release-static `
-            -Target specforge_loader_tests `
-            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -Target spectiary_loader_tests `
+            -VcvarsPath "$env:SPECTIARY_VCVARS_PATH" `
             -TimeoutSec 1200
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release loader build failed with exit code $LASTEXITCODE."
@@ -135,7 +135,7 @@ jobs:
           ctest --test-dir build\ninja-msvc-release-static `
             --output-on-failure `
             --no-tests=error `
-            -R '^specforge_fits_file_reader_tests$'
+            -R '^spectiary_fits_file_reader_tests$'
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release FITS reader test failed with exit code $LASTEXITCODE."
           }
@@ -143,7 +143,7 @@ jobs:
           ctest --test-dir build\ninja-msvc-release-static `
             --output-on-failure `
             --no-tests=error `
-            -R '^specforge_loader_tests$'
+            -R '^spectiary_loader_tests$'
           if ($LASTEXITCODE -ne 0) {
             throw "Static Release loader test failed with exit code $LASTEXITCODE."
           }
@@ -238,7 +238,7 @@ jobs:
             --verify-tag `
             --generate-notes `
             --fail-on-no-commits `
-            --title "SpecForge $env:GITHUB_REF_NAME"
+            --title "Spectiary $env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub Release publication failed with exit code $LASTEXITCODE."
           }

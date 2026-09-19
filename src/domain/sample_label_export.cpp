@@ -7,7 +7,7 @@
 
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void SetError(
@@ -265,4 +265,4 @@ bool ExportSampleLabelSnapshot(
     return false;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

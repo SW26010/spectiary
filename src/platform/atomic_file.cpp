@@ -23,7 +23,7 @@
 #include <Windows.h>
 #endif
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::atomic<std::uint64_t> temporary_file_sequence{0};
@@ -316,4 +316,4 @@ bool WriteFileAtomically(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

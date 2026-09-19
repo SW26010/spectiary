@@ -5,7 +5,7 @@
 
 #include <cstddef>
 
-namespace specforge {
+namespace spectiary {
 
 // Immutable frame data shared by the panel controller and plot renderer.
 // automatic_color_slot is assigned from catalog + marker identity, not view
@@ -16,4 +16,4 @@ struct SpectralLinePlotMarker {
     std::size_t automatic_color_slot = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

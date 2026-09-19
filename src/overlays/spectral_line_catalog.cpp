@@ -13,11 +13,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
-#include "specforge/public_spectral_lines_embedded.h"
+#ifdef SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES
+#include "spectiary/public_spectral_lines_embedded.h"
 #endif
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kDefaultCatalogPath = "config/spectral_lines.public.tsv";
@@ -293,7 +293,7 @@ SpectralLineCatalog LoadPublicSpectralLineCatalogFromPath(const std::filesystem:
 SpectralLineCatalog LoadPackagedPublicSpectralLineCatalog(
     const std::filesystem::path& path)
 {
-#ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
+#ifdef SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES
     std::istringstream stream(kEmbeddedPublicSpectralLineCatalog);
     return LoadSpectralLineCatalogFromStream(stream, std::filesystem::path(kDefaultCatalogPath), true);
 #else
@@ -301,4 +301,4 @@ SpectralLineCatalog LoadPackagedPublicSpectralLineCatalog(
 #endif
 }
 
-}  // namespace specforge
+}  // namespace spectiary

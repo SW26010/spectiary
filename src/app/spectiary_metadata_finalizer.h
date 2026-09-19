@@ -1,18 +1,18 @@
 #pragma once
 
-#include "app/specforge_metadata.h"
+#include "app/spectiary_metadata.h"
 #include "platform/atomic_file.h"
 
 #include <chrono>
 #include <functional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 using MetadataFinalizerClock = std::function<
     std::chrono::system_clock::time_point()>;
 
-struct SpecForgeMetadataFinalizerOptions {
+struct SpectiaryMetadataFinalizerOptions {
     std::filesystem::path executable_path;
     std::filesystem::path metadata_path;
     BuildIdentity build_identity;
@@ -27,8 +27,8 @@ struct SpecForgeMetadataFinalizerOptions {
 // finalization removes that constrained target so a newly linked executable
 // cannot retain a stale sidecar. The atomic writer still owns temporary-file
 // cleanup and replacement semantics.
-[[nodiscard]] bool FinalizeSpecForgeMetadata(
-    const SpecForgeMetadataFinalizerOptions& options,
+[[nodiscard]] bool FinalizeSpectiaryMetadata(
+    const SpectiaryMetadataFinalizerOptions& options,
     std::string* error_message = nullptr);
 
-}  // namespace specforge
+}  // namespace spectiary

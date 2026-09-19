@@ -14,7 +14,7 @@
 #endif
 #include <Windows.h>
 
-namespace specforge {
+namespace spectiary {
 
 ExclusiveFileLease::ExclusiveFileLease(void* native_handle) noexcept
     : native_handle_(native_handle)
@@ -121,4 +121,4 @@ ExclusiveFileLeaseAcquireResult TryAcquireExclusiveFileLease(
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

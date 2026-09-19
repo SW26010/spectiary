@@ -4,7 +4,7 @@
 #include <memory>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] bool Win32MessageCanInvalidateRender(
     std::uint32_t message,
@@ -42,4 +42,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -1,6 +1,6 @@
 #include "app/application_settings.h"
 #include "app/local_user_state.h"
-#include "app/specforge_app.h"
+#include "app/spectiary_app.h"
 #include "app/runtime_paths.h"
 #include "automation/automation_startup.h"
 #include "platform/win32_text.h"
@@ -43,7 +43,7 @@ std::optional<std::filesystem::path> EnvironmentPath(
 bool RuntimeResourceWorkloadEnabled()
 {
     return EnvironmentPath(
-               L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD")
+               L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD")
         .has_value();
 }
 
@@ -66,21 +66,21 @@ std::filesystem::path StartupErrorFileName(
               "runtime-resource-startup-error.txt");
 }
 
-specforge::SpecForgeStartup PrepareStartup(
-    const specforge::SpecForgeCommandLine& command_line)
+spectiary::SpectiaryStartup PrepareStartup(
+    const spectiary::SpectiaryCommandLine& command_line)
 {
-    specforge::RuntimePathInputs inputs =
-        specforge::CurrentProcessRuntimePathInputs(
-            specforge::CurrentExecutablePath());
+    spectiary::RuntimePathInputs inputs =
+        spectiary::CurrentProcessRuntimePathInputs(
+            spectiary::CurrentExecutablePath());
     if (!command_line.automation) {
-        return specforge::PrepareSpecForgeStartup(
+        return spectiary::PrepareSpectiaryStartup(
             std::move(inputs));
     }
 
     const std::filesystem::path ordinary_root =
-        specforge::OrdinaryUserStateRootForExecutable(
-            specforge::CurrentExecutablePath());
-    if (!specforge::AutomationStateRootIsIndependent(
+        spectiary::OrdinaryUserStateRootForExecutable(
+            spectiary::CurrentExecutablePath());
+    if (!spectiary::AutomationStateRootIsIndependent(
             command_line.automation->state_root,
             ordinary_root)) {
         throw std::runtime_error(
@@ -91,7 +91,7 @@ specforge::SpecForgeStartup PrepareStartup(
     inputs.application_data_root_override =
         command_line.automation->state_root;
     inputs.legacy_application_data_root = command_line.automation->state_root;
-    return specforge::PrepareSpecForgeStartup(
+    return spectiary::PrepareSpectiaryStartup(
         std::move(inputs));
 }
 
@@ -128,7 +128,7 @@ void WriteAutomatedStartupError(
 
 void ReportStartupError(
     std::string_view message,
-    specforge::UiLanguage language,
+    spectiary::UiLanguage language,
     bool automation_requested,
     const std::optional<std::filesystem::path>&
         automation_state_root)
@@ -137,12 +137,12 @@ void ReportStartupError(
             automation_requested,
             automation_state_root)) {
         const std::wstring wide_message =
-            specforge::Utf8ToWide(message);
+            spectiary::Utf8ToWide(message);
         const std::wstring wide_title =
-            specforge::Utf8ToWide(
-                specforge::UiText(
+            spectiary::Utf8ToWide(
+                spectiary::UiText(
                     language,
-                    specforge::UiTextId::
+                    spectiary::UiTextId::
                         StartupErrorTitle));
         MessageBoxW(
             nullptr,
@@ -153,7 +153,7 @@ void ReportStartupError(
     }
 
     const std::string diagnostic =
-        "SpecForge startup error: " +
+        "Spectiary startup error: " +
         std::string(message) + "\n";
     OutputDebugStringA(diagnostic.c_str());
     const std::optional<std::filesystem::path>
@@ -163,7 +163,7 @@ void ReportStartupError(
             : (automation_requested
                    ? std::nullopt
                    : EnvironmentPath(
-                         L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR"));
+                         L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR"));
     if (state_directory) {
         WriteAutomatedStartupError(
             *state_directory,
@@ -182,10 +182,10 @@ void ReportStartupError(
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
-    specforge::UiLanguage startup_error_language =
-        specforge::UiLanguage::English;
-    const specforge::SpecForgeCommandLine command_line =
-        specforge::ParseCurrentProcessSpecForgeCommandLine();
+    spectiary::UiLanguage startup_error_language =
+        spectiary::UiLanguage::English;
+    const spectiary::SpectiaryCommandLine command_line =
+        spectiary::ParseCurrentProcessSpectiaryCommandLine();
     std::optional<std::filesystem::path>
         automation_diagnostic_root;
     try {
@@ -195,7 +195,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
         }
         if (command_line.automation) {
             if (const auto conflict =
-                    specforge::
+                    spectiary::
                         ActiveIncompatibleAutomationEnvironmentVariable()) {
                 std::string conflict_name;
                 conflict_name.reserve(
@@ -212,24 +212,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
                     "'.");
             }
         }
-        specforge::SpecForgeStartup startup =
+        spectiary::SpectiaryStartup startup =
             PrepareStartup(command_line);
-        specforge::MigrateLegacyApplicationStorage(startup.runtime_paths());
+        spectiary::MigrateLegacyApplicationStorage(startup.runtime_paths());
         // Hidden is presentation only; checkpoint I/O owns and reports failures.
         std::error_code unsaved_directory_error;
         std::filesystem::create_directories(startup.runtime_paths().unsaved_root, unsaved_directory_error);
-        specforge::HideUnsavedCheckpointDirectory(startup.runtime_paths().unsaved_root);
+        spectiary::HideUnsavedCheckpointDirectory(startup.runtime_paths().unsaved_root);
         if (command_line.automation) {
             automation_diagnostic_root =
                 command_line.automation->state_root;
         }
         startup_error_language =
-            specforge::ApplicationSettings(
-                specforge::ApplicationSettingsStorageForRuntimePaths(
+            spectiary::ApplicationSettings(
+                spectiary::ApplicationSettingsStorageForRuntimePaths(
                     startup.runtime_paths()))
                 .View()
                 .language;
-        specforge::SpecForgeApp app(
+        spectiary::SpectiaryApp app(
             startup,
             command_line.automation);
         return app.Run(
@@ -244,9 +244,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
             automation_diagnostic_root);
     } catch (...) {
         ReportStartupError(
-            specforge::UiText(
+            spectiary::UiText(
                 startup_error_language,
-                specforge::UiTextId::
+                spectiary::UiTextId::
                     UnknownStartupError),
             startup_error_language,
             command_line.automation_requested,

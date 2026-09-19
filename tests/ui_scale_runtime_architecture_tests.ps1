@@ -6,11 +6,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $appSource = Get-Content -Raw (
-    Join-Path $RepoRoot "src/app/specforge_app.cpp")
+    Join-Path $RepoRoot "src/app/spectiary_app.cpp")
 
 $startRecording = [regex]::Match(
     $appSource,
-    'bool SpecForgeApp::StartProfileRecording\(.*?(?=void SpecForgeApp::StopProfileRecording\()',
+    'bool SpectiaryApp::StartProfileRecording\(.*?(?=void SpectiaryApp::StopProfileRecording\()',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $startRecording.Success) {
@@ -24,7 +24,7 @@ if ($startRecording.Value -notmatch
 
 $dpiConfiguration = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::WriteDpiConfiguration\(.*?(?=void SpecForgeApp::ToggleFullscreen\()',
+    'void SpectiaryApp::WriteDpiConfiguration\(.*?(?=void SpectiaryApp::ToggleFullscreen\()',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $dpiConfiguration.Success -or
@@ -41,7 +41,7 @@ if (-not $dpiConfiguration.Success -or
 
 $pendingSettingsApplication = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::ApplyPendingApplicationSettings\(.*?(?=void SpecForgeApp::ServiceAutomationSettingGet\()',
+    'void SpectiaryApp::ApplyPendingApplicationSettings\(.*?(?=void SpectiaryApp::ServiceAutomationSettingGet\()',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $pendingSettingsApplication.Success -or
@@ -60,7 +60,7 @@ if (-not $pendingSettingsApplication.Success -or
 
 $serviceAutomation = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::ServiceAutomation\(\).*?(?=std::optional<RenderWakeScheduler::TimePoint>)',
+    'void SpectiaryApp::ServiceAutomation\(\).*?(?=std::optional<RenderWakeScheduler::TimePoint>)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $serviceAutomation.Success -or
@@ -71,7 +71,7 @@ if (-not $serviceAutomation.Success -or
 
 $settingSet = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::ServiceAutomationSettingSet\(.*?(?=\r?\nvoid SpecForgeApp::)',
+    'void SpectiaryApp::ServiceAutomationSettingSet\(.*?(?=\r?\nvoid SpectiaryApp::)',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $settingSet.Success -or

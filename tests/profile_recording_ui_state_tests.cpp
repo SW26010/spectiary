@@ -16,40 +16,40 @@ void Require(bool condition, std::string_view message)
 
 void TestInactivePresentationStartsRecording()
 {
-    const specforge::ProfileRecordingUiPresentation presentation =
-        specforge::ResolveProfileRecordingUiPresentation(false, false);
+    const spectiary::ProfileRecordingUiPresentation presentation =
+        spectiary::ResolveProfileRecordingUiPresentation(false, false);
     Require(presentation.status_text.empty(), "inactive status should stay out of the everyday status bar");
     Require(presentation.menu_action == "Start Recording", "inactive menu should start recording");
     Require(!presentation.show_recording_indicator, "inactive status should not show the red recording indicator");
     Require(
-        specforge::ResolveProfileRecordingToggleAction(false, false) ==
-            specforge::ProfileRecordingToggleAction::Start,
+        spectiary::ResolveProfileRecordingToggleAction(false, false) ==
+            spectiary::ProfileRecordingToggleAction::Start,
         "inactive toggle should route to Start");
 }
 
 void TestActivePresentationStopsRecording()
 {
-    const specforge::ProfileRecordingUiPresentation presentation =
-        specforge::ResolveProfileRecordingUiPresentation(true, false);
+    const spectiary::ProfileRecordingUiPresentation presentation =
+        spectiary::ResolveProfileRecordingUiPresentation(true, false);
     Require(presentation.status_text == "Performance recording", "active status should identify recording");
     Require(presentation.menu_action == "Stop Recording", "active menu should stop recording");
     Require(presentation.show_recording_indicator, "active status should show the red recording indicator");
     Require(
-        specforge::ResolveProfileRecordingToggleAction(true, false) ==
-            specforge::ProfileRecordingToggleAction::Stop,
+        spectiary::ResolveProfileRecordingToggleAction(true, false) ==
+            spectiary::ProfileRecordingToggleAction::Stop,
         "active toggle should route to Stop");
 }
 
 void TestStoppingPresentationDisablesToggle()
 {
-    const specforge::ProfileRecordingUiPresentation presentation =
-        specforge::ResolveProfileRecordingUiPresentation(false, true);
+    const spectiary::ProfileRecordingUiPresentation presentation =
+        spectiary::ResolveProfileRecordingUiPresentation(false, true);
     Require(presentation.status_text == "Finishing recording...", "draining status should be visible");
     Require(!presentation.menu_action_enabled, "the menu should be disabled while the writer drains");
     Require(!presentation.show_recording_indicator, "draining should not look like active recording");
     Require(
-        specforge::ResolveProfileRecordingToggleAction(false, true) ==
-            specforge::ProfileRecordingToggleAction::None,
+        spectiary::ResolveProfileRecordingToggleAction(false, true) ==
+            spectiary::ProfileRecordingToggleAction::None,
         "a second toggle should be ignored while the writer drains");
 }
 

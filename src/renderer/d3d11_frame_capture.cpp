@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -495,7 +495,7 @@ std::wstring RandomTemporaryName()
     constexpr wchar_t kHex[] =
         L"0123456789abcdef";
     std::wstring name =
-        L".specforge-capture-";
+        L".spectiary-capture-";
     for (int index = 0; index < 32; ++index) {
         name.push_back(
             kHex[random() & 0x0fU]);
@@ -985,4 +985,4 @@ D3D11FrameCaptureResult CaptureD3D11TextureToPng(
     return {S_OK, {}};
 }
 
-}  // namespace specforge
+}  // namespace spectiary

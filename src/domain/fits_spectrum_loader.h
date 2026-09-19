@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <functional>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 
 bool IsFitsSourcePath(const std::filesystem::path& path);
 
@@ -16,4 +16,4 @@ SpectrumSnapshotHandle LoadFitsSnapshotCancelable(
     std::size_t spectrum_index,
     const std::function<bool()>& cancellation_requested);
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

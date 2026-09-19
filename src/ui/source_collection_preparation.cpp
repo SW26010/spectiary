@@ -11,7 +11,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void ValidateDecodedSnapshot(const SpectrumSnapshotHandle& snapshot)
@@ -1180,4 +1180,4 @@ PreparedSourceCollection SourceCollectionPreparation::Prepare(
         cancellation_token);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

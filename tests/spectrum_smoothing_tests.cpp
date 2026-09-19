@@ -38,54 +38,54 @@ void RequireVectorNear(
 void TestNoneReturnsInput()
 {
     const std::vector<double> values = {1.0, 4.0, 9.0};
-    const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, {});
+    const std::vector<double> smoothed = spectiary::SmoothSpectrumValues(values, {});
     Require(smoothed == values, "none smoothing should return the input values");
 }
 
 void TestGaussianKeepsConstantSignal()
 {
-    specforge::SpectrumSmoothingSettings settings;
-    settings.method = specforge::SpectrumSmoothingMethod::Gaussian;
+    spectiary::SpectrumSmoothingSettings settings;
+    settings.method = spectiary::SpectrumSmoothingMethod::Gaussian;
     settings.parameters.gaussian_sigma = 1.0;
 
     const std::vector<double> values = {5.0, 5.0, 5.0, 5.0};
-    const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);
+    const std::vector<double> smoothed = spectiary::SmoothSpectrumValues(values, settings);
     RequireVectorNear(smoothed, values, 1.0e-12, "gaussian smoothing should keep a constant signal constant");
 }
 
 void TestMedianUsesReflectedEdges()
 {
-    specforge::SpectrumSmoothingSettings settings;
-    settings.method = specforge::SpectrumSmoothingMethod::Median;
+    spectiary::SpectrumSmoothingSettings settings;
+    settings.method = spectiary::SpectrumSmoothingMethod::Median;
     settings.parameters.median_kernel_size = 3;
 
     const std::vector<double> values = {9.0, 1.0, 8.0, 2.0, 7.0};
-    const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);
+    const std::vector<double> smoothed = spectiary::SmoothSpectrumValues(values, settings);
     const std::vector<double> expected = {9.0, 8.0, 2.0, 7.0, 7.0};
     Require(smoothed == expected, "median smoothing should use reflected edge samples");
 }
 
 void TestMedianKernelLargerThanSignalDoesNotIntroduceZeroes()
 {
-    specforge::SpectrumSmoothingSettings settings;
-    settings.method = specforge::SpectrumSmoothingMethod::Median;
+    spectiary::SpectrumSmoothingSettings settings;
+    settings.method = spectiary::SpectrumSmoothingMethod::Median;
     settings.parameters.median_kernel_size = 99;
 
     const std::vector<double> values = {2.0, 10.0, 20.0};
-    const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);
+    const std::vector<double> smoothed = spectiary::SmoothSpectrumValues(values, settings);
     Require(smoothed == values, "median smoothing should clamp oversized kernels to the signal length");
 }
 
 void TestMedianKernelNormalization()
 {
-    Require(specforge::NormalizeMedianKernelSize(-1) == 3, "median kernel should have a minimum size");
-    Require(specforge::NormalizeMedianKernelSize(2) == 3, "median kernel should round small even values to 3");
-    Require(specforge::NormalizeMedianKernelSize(4) == 5, "median kernel should be odd");
-    Require(specforge::NormalizeMedianKernelSize(7) == 7, "median kernel should preserve valid odd values");
-    Require(specforge::NormalizeMedianKernelSize(10001) == 501, "median kernel should have a conservative cap");
-    Require(specforge::EffectiveMedianKernelSize(99, 5) == 5, "effective kernel should not exceed odd signal length");
-    Require(specforge::EffectiveMedianKernelSize(99, 4) == 3, "effective kernel should fit even signal lengths");
-    Require(specforge::EffectiveMedianKernelSize(99, 2) == 1, "short signals should not be median filtered");
+    Require(spectiary::NormalizeMedianKernelSize(-1) == 3, "median kernel should have a minimum size");
+    Require(spectiary::NormalizeMedianKernelSize(2) == 3, "median kernel should round small even values to 3");
+    Require(spectiary::NormalizeMedianKernelSize(4) == 5, "median kernel should be odd");
+    Require(spectiary::NormalizeMedianKernelSize(7) == 7, "median kernel should preserve valid odd values");
+    Require(spectiary::NormalizeMedianKernelSize(10001) == 501, "median kernel should have a conservative cap");
+    Require(spectiary::EffectiveMedianKernelSize(99, 5) == 5, "effective kernel should not exceed odd signal length");
+    Require(spectiary::EffectiveMedianKernelSize(99, 4) == 3, "effective kernel should fit even signal lengths");
+    Require(spectiary::EffectiveMedianKernelSize(99, 2) == 1, "short signals should not be median filtered");
 }
 
 }  // namespace

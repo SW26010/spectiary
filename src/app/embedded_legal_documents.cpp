@@ -1,21 +1,21 @@
 #include "app/embedded_legal_documents.h"
 
-#include "platform/specforge_resource.h"
+#include "platform/spectiary_resource.h"
 
 #include <Windows.h>
 
 #include <cstddef>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 int ResourceId(LegalDocument document) noexcept
 {
     switch (document) {
     case LegalDocument::ThirdPartyNotices:
-        return SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES;
+        return SPECTIARY_RESOURCE_THIRD_PARTY_NOTICES;
     case LegalDocument::DataSources:
-        return SPECFORGE_RESOURCE_DATA_SOURCES;
+        return SPECTIARY_RESOURCE_DATA_SOURCES;
     }
     return 0;
 }
@@ -53,4 +53,4 @@ std::string_view EmbeddedLegalDocumentContent(
         static_cast<std::size_t>(size)};
 }
 
-}  // namespace specforge
+}  // namespace spectiary

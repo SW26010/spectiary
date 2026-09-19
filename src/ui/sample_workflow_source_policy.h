@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleWorkflowSourceContext {
     const SourceCollectionManifest* collection = nullptr;
@@ -168,4 +168,4 @@ private:
     mutable SourceCollectionFilterView filter_view_cache_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

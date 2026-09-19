@@ -4,7 +4,7 @@
 #include <cmath>
 #include <numeric>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool MateriallyDifferent(double left, double right, double relative_tolerance)
@@ -250,4 +250,4 @@ std::span<const SpectralLineLabelLayoutResult> LayoutSpectralLineLabels(
     return workspace.results;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

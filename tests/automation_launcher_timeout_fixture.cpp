@@ -90,7 +90,7 @@ bool ReadPipeMessage(
     std::string& message)
 {
     std::vector<char> buffer(
-        specforge::kAutomationMaxMessageBytes + 1U);
+        spectiary::kAutomationMaxMessageBytes + 1U);
     DWORD bytes_read = 0;
     if (!ReadFile(
             pipe,
@@ -101,7 +101,7 @@ bool ReadPipeMessage(
         return false;
     }
     if (bytes_read >
-        specforge::kAutomationMaxMessageBytes) {
+        spectiary::kAutomationMaxMessageBytes) {
         return false;
     }
     message.assign(
@@ -170,9 +170,9 @@ int RunTimeoutFixture(
             PIPE_WAIT,
         1,
         static_cast<DWORD>(
-            specforge::kAutomationMaxMessageBytes),
+            spectiary::kAutomationMaxMessageBytes),
         static_cast<DWORD>(
-            specforge::kAutomationMaxMessageBytes),
+            spectiary::kAutomationMaxMessageBytes),
         1'000,
         nullptr);
     if (pipe.value == INVALID_HANDLE_VALUE ||
@@ -192,10 +192,10 @@ int RunTimeoutFixture(
         return 94;
     }
     const auto hello =
-        specforge::ParseAutomationClientMessage(hello_request);
+        spectiary::ParseAutomationClientMessage(hello_request);
     if (!hello.message ||
         hello.message->kind !=
-            specforge::AutomationClientMessage::Kind::Hello ||
+            spectiary::AutomationClientMessage::Kind::Hello ||
         !WriteMarker(
             root,
             "hello-request-observed.txt",
@@ -210,7 +210,7 @@ int RunTimeoutFixture(
 
     if (!WritePipeMessage(
             pipe.value,
-            specforge::SerializeAutomationHelloResponse(
+            spectiary::SerializeAutomationHelloResponse(
                 hello.message->request_id,
                 NarrowAscii(*instance_id)))) {
         return 96;
@@ -221,10 +221,10 @@ int RunTimeoutFixture(
         return 97;
     }
     const auto command =
-        specforge::ParseAutomationClientMessage(command_request);
+        spectiary::ParseAutomationClientMessage(command_request);
     if (!command.message ||
         command.message->kind !=
-            specforge::AutomationClientMessage::Kind::Request ||
+            spectiary::AutomationClientMessage::Kind::Request ||
         !WriteMarker(
             root,
             mode == L"no-accepted-no-terminal"
@@ -244,7 +244,7 @@ int RunTimeoutFixture(
 
     if (!WritePipeMessage(
             pipe.value,
-            specforge::SerializeAutomationAcceptedResponse(
+            spectiary::SerializeAutomationAcceptedResponse(
                 command.message->request_id,
                 command.message->command))) {
         return 99;
@@ -268,7 +268,7 @@ int RunTimeoutFixture(
     if (mode == L"quit-no-terminal") {
         if (!WritePipeMessage(
                 pipe.value,
-                specforge::SerializeAutomationTerminalResponse(
+                spectiary::SerializeAutomationTerminalResponse(
                     command.message->request_id,
                     command.message->command,
                     "completed"))) {
@@ -280,12 +280,12 @@ int RunTimeoutFixture(
             return 101;
         }
         const auto quit =
-            specforge::ParseAutomationClientMessage(quit_request);
+            spectiary::ParseAutomationClientMessage(quit_request);
         if (!quit.message ||
             quit.message->kind !=
-                specforge::AutomationClientMessage::Kind::Request ||
+                spectiary::AutomationClientMessage::Kind::Request ||
             quit.message->command !=
-                specforge::AutomationCommandKind::AppQuit ||
+                spectiary::AutomationCommandKind::AppQuit ||
             !WriteMarker(
                 root,
                 "quit-request-observed.txt",
@@ -319,7 +319,7 @@ int RunTimeoutFixture(
 int wmain(int argc, wchar_t** argv)
 {
     const auto mode = EnvironmentValue(
-        L"SPECFORGE_AUTOMATION_TIMEOUT_FIXTURE");
+        L"SPECTIARY_AUTOMATION_TIMEOUT_FIXTURE");
     if (!mode) {
         return 90;
     }

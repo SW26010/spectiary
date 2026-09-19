@@ -1,6 +1,6 @@
 #include "profile/load_latency_trace_lifecycle.h"
 
-namespace specforge {
+namespace spectiary {
 
 std::int64_t LoadLatencyNanoseconds(LoadLatencyTimePoint at) noexcept
 {
@@ -242,4 +242,4 @@ LoadLatencyAttemptLifecycle::Reports() const noexcept
     return reports;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -1,11 +1,11 @@
 #include "app/native_window_title.h"
 
 #include "platform/win32_text.h"
-#include "specforge/specforge_build_identity.h"
+#include "spectiary/spectiary_build_identity.h"
 
 #include <algorithm>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kMaxSourceNameLength = 48;
@@ -167,12 +167,12 @@ bool NativeWindowTitleSemanticKey::Matches(
              sample_count_ == view.sample_count));
 }
 
-std::wstring FormatSpecForgeNativeWindowTitle(
+std::wstring FormatSpectiaryNativeWindowTitle(
     const NativeWindowTitleView& view)
 {
     std::wstring title = Utf8ToWide(view.product_name);
     const std::wstring version = Utf8ToWide(
-        build_info::kSpecForgeVersion);
+        build_info::kSpectiaryVersion);
     if (!version.empty()) {
         if (!title.empty()) {
             title.push_back(L' ');
@@ -215,11 +215,11 @@ std::wstring FormatSpecForgeNativeWindowTitle(
     return title;
 }
 
-std::wstring FormatSpecForgeNativeWindowTitle(
+std::wstring FormatSpectiaryNativeWindowTitle(
     std::string_view product_name,
     const NativeWindowTitleContext& context)
 {
-    return FormatSpecForgeNativeWindowTitle({
+    return FormatSpectiaryNativeWindowTitle({
         .product_name = product_name,
         .source_path = &context.source_path,
         .loading = context.loading,
@@ -231,4 +231,4 @@ std::wstring FormatSpecForgeNativeWindowTitle(
     });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

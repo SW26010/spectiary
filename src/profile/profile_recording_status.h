@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class ProfileRecordingStatusKind {
     UseDiagnosticsToRecord,
@@ -36,4 +36,4 @@ DescribeProfileRecordingStop(
     std::uint64_t dropped_events,
     std::string_view error_message);
 
-}  // namespace specforge
+}  // namespace spectiary

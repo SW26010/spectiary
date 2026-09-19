@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kStateFormatKind = "spectiary.sample_navigation_state.cache";
@@ -98,4 +98,4 @@ bool SaveSampleNavigationStateCache(
         });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

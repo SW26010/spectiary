@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 struct SyntheticSpectrumData {
@@ -85,4 +85,4 @@ SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot()
     return snapshot;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

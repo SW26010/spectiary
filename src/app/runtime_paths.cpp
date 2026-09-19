@@ -26,7 +26,7 @@
 #include <shlobj_core.h>
 #endif
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::filesystem::path PackageRootForExecutable(const std::filesystem::path& executable_path)
@@ -76,7 +76,7 @@ RuntimeResourceUserStateRootOverride()
     if (_wdupenv_s(
             &workload_path,
             &workload_path_size,
-            L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD") != 0 ||
+            L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD") != 0 ||
         workload_path == nullptr ||
         workload_path[0] == L'\0') {
         std::free(workload_path);
@@ -89,7 +89,7 @@ RuntimeResourceUserStateRootOverride()
     if (_wdupenv_s(
             &state_root,
             &state_root_size,
-            L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR") != 0 ||
+            L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR") != 0 ||
         state_root == nullptr ||
         state_root[0] == L'\0') {
         std::free(state_root);
@@ -100,9 +100,9 @@ RuntimeResourceUserStateRootOverride()
     return result;
 #else
     const char* workload_path =
-        std::getenv("SPECFORGE_RUNTIME_RESOURCE_WORKLOAD");
+        std::getenv("SPECTIARY_RUNTIME_RESOURCE_WORKLOAD");
     const char* state_root =
-        std::getenv("SPECFORGE_RUNTIME_RESOURCE_STATE_DIR");
+        std::getenv("SPECTIARY_RUNTIME_RESOURCE_STATE_DIR");
     if (workload_path == nullptr || *workload_path == '\0' ||
         state_root == nullptr || *state_root == '\0') {
         return std::nullopt;
@@ -301,20 +301,20 @@ void MigrateLegacyApplicationStorage(const RuntimePaths& paths)
     import(paths.legacy_application_data_root / paths.spectral_line_user_state_path.filename(), paths.spectral_line_user_state_path);
 }
 
-SpecForgeStartup::SpecForgeStartup(
+SpectiaryStartup::SpectiaryStartup(
     RuntimePaths runtime_paths,
-    SpecForgeMetadataReadResult metadata)
+    SpectiaryMetadataReadResult metadata)
     : runtime_paths_(std::move(runtime_paths)),
       metadata_(std::move(metadata))
 {
 }
 
-const RuntimePaths& SpecForgeStartup::runtime_paths() const noexcept
+const RuntimePaths& SpectiaryStartup::runtime_paths() const noexcept
 {
     return runtime_paths_;
 }
 
-const SpecForgeMetadataReadResult& SpecForgeStartup::metadata()
+const SpectiaryMetadataReadResult& SpectiaryStartup::metadata()
     const noexcept
 {
     return metadata_;
@@ -331,7 +331,7 @@ RuntimePathInputs CurrentProcessRuntimePathInputs(
     };
 }
 
-SpecForgeStartup PrepareSpecForgeStartup(
+SpectiaryStartup PrepareSpectiaryStartup(
     RuntimePathInputs inputs)
 {
     if (inputs.executable_path.empty()) {
@@ -339,8 +339,8 @@ SpecForgeStartup PrepareSpecForgeStartup(
             "The executable path is required for startup.");
     }
 
-    SpecForgeMetadataReadResult metadata =
-        ReadAdjacentSpecForgeMetadata(
+    SpectiaryMetadataReadResult metadata =
+        ReadAdjacentSpectiaryMetadata(
             inputs.executable_path.parent_path(),
             CompiledBuildIdentity());
     if (metadata.startup_error) {
@@ -350,15 +350,15 @@ SpecForgeStartup PrepareSpecForgeStartup(
     RuntimePaths paths = RuntimePathsForDeployment(
         metadata.deployment,
         std::move(inputs));
-    return SpecForgeStartup(
+    return SpectiaryStartup(
         std::move(paths),
         std::move(metadata));
 }
 
-const SpecForgeStartup& DefaultSpecForgeStartup()
+const SpectiaryStartup& DefaultSpectiaryStartup()
 {
-    static const SpecForgeStartup startup =
-        PrepareSpecForgeStartup(
+    static const SpectiaryStartup startup =
+        PrepareSpectiaryStartup(
             CurrentProcessRuntimePathInputs(
                 CurrentExecutablePath()));
     return startup;
@@ -366,7 +366,7 @@ const SpecForgeStartup& DefaultSpecForgeStartup()
 
 RuntimePaths DefaultRuntimePaths()
 {
-    return DefaultSpecForgeStartup().runtime_paths();
+    return DefaultSpectiaryStartup().runtime_paths();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

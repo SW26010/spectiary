@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 // Read-only migration input. Never an active persistence owner.
 struct LegacySpectrumViewState {
@@ -31,4 +31,4 @@ struct LegacySpectrumViewStateLoadResult {
 LoadLegacySpectrumViewState(
     const std::filesystem::path& path);
 
-}  // namespace specforge
+}  // namespace spectiary

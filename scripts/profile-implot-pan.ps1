@@ -38,26 +38,26 @@ if ($null -eq $resolvedExecutable) {
 $logDir = Join-Path $repoRoot 'logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
-Write-Host 'SpecForge ImPlot pan-drag profile'
+Write-Host 'Spectiary ImPlot pan-drag profile'
 Write-Host "Pan pacing: $PanPacing"
 if ($InitialSource) {
     Write-Host "Initial source: $InitialSource"
 }
 Write-Host '1. In the Spectrum plot, left-drag pan for 10-15 seconds.'
 Write-Host '2. Keep the interaction focused: avoid wheel zoom, docking changes, and side panels.'
-Write-Host '3. Close SpecForge to run the analyzer.'
+Write-Host '3. Close Spectiary to run the analyzer.'
 Write-Host ''
 
-$previousProfile = $env:SPECFORGE_PROFILE
-$previousProfileDir = $env:SPECFORGE_PROFILE_DIR
-$previousPanPacing = $env:SPECFORGE_PAN_PACING
-$env:SPECFORGE_PROFILE = '1'
-$env:SPECFORGE_PROFILE_DIR = $logDir
+$previousProfile = $env:SPECTIARY_PROFILE
+$previousProfileDir = $env:SPECTIARY_PROFILE_DIR
+$previousPanPacing = $env:SPECTIARY_PAN_PACING
+$env:SPECTIARY_PROFILE = '1'
+$env:SPECTIARY_PROFILE_DIR = $logDir
 if ($PanPacing -eq 'Uncapped') {
-    $env:SPECFORGE_PAN_PACING = 'uncapped'
+    $env:SPECTIARY_PAN_PACING = 'uncapped'
 }
 else {
-    Remove-Item Env:SPECFORGE_PAN_PACING -ErrorAction SilentlyContinue
+    Remove-Item Env:SPECTIARY_PAN_PACING -ErrorAction SilentlyContinue
 }
 $launchTime = Get-Date
 try {
@@ -73,33 +73,33 @@ try {
     }
     $process = Start-Process @startProcessArguments
     if ($process.ExitCode -ne 0) {
-        throw "SpecForge exited with code $($process.ExitCode)."
+        throw "Spectiary exited with code $($process.ExitCode)."
     }
 }
 finally {
     if ($null -eq $previousProfile) {
-        Remove-Item Env:SPECFORGE_PROFILE -ErrorAction SilentlyContinue
+        Remove-Item Env:SPECTIARY_PROFILE -ErrorAction SilentlyContinue
     }
     else {
-        $env:SPECFORGE_PROFILE = $previousProfile
+        $env:SPECTIARY_PROFILE = $previousProfile
     }
 
     if ($null -eq $previousProfileDir) {
-        Remove-Item Env:SPECFORGE_PROFILE_DIR -ErrorAction SilentlyContinue
+        Remove-Item Env:SPECTIARY_PROFILE_DIR -ErrorAction SilentlyContinue
     }
     else {
-        $env:SPECFORGE_PROFILE_DIR = $previousProfileDir
+        $env:SPECTIARY_PROFILE_DIR = $previousProfileDir
     }
 
     if ($null -eq $previousPanPacing) {
-        Remove-Item Env:SPECFORGE_PAN_PACING -ErrorAction SilentlyContinue
+        Remove-Item Env:SPECTIARY_PAN_PACING -ErrorAction SilentlyContinue
     }
     else {
-        $env:SPECFORGE_PAN_PACING = $previousPanPacing
+        $env:SPECTIARY_PAN_PACING = $previousPanPacing
     }
 }
 
-$latestLog = Get-ChildItem -Path $logDir -Filter 'specforge-profile-*.jsonl' |
+$latestLog = Get-ChildItem -Path $logDir -Filter 'spectiary-profile-*.jsonl' |
     Where-Object { $_.LastWriteTime -ge $launchTime } |
     Sort-Object LastWriteTime |
     Select-Object -Last 1

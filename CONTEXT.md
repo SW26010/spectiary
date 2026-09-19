@@ -1,13 +1,13 @@
-# SpecForge
+# Spectiary
 
-SpecForge is an interactive spectral inspection tool. Its language separates
+Spectiary is an interactive spectral inspection tool. Its language separates
 physical reference data from user-owned display organization.
 
 ## Language
 
 ### Sample Filtering Language Standard
 
-SpecForge reserves this word family for user-authored sample subset selection.
+Spectiary reserves this word family for user-authored sample subset selection.
 Always qualify new user-facing text and new documentation as `sample filter`,
 `sample filtering`, or `Sample Filters`. Tests and domain-facing code should
 move toward the same qualification as related areas are touched, but existing
@@ -42,7 +42,7 @@ optional grouping supplied by the catalog, and declared wavelength semantics.
 _Avoid_: User line groups, private presets
 
 **Public spectral-line catalog**:
-The built-in spectral-line catalog shipped with SpecForge.
+The built-in spectral-line catalog shipped with Spectiary.
 _Avoid_: User line groups, private presets
 
 **Catalog identity**:

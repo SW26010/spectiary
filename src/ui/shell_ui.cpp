@@ -27,7 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -998,7 +998,7 @@ std::string ShellLocalStateFlushResult::FailureMessage(
 }
 
 ShellUi::ShellUi(
-    const SpecForgeStartup& startup,
+    const SpectiaryStartup& startup,
     PlotTouchpadGestureSource* touchpad_gestures,
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy)
@@ -1154,7 +1154,7 @@ LocalUserStatePersistenceLifecycle::SaveResult
 ShellUi::SaveSpectrumViewportState()
 {
     std::string error;
-    const bool saved = specforge::SaveSpectrumViewportState(
+    const bool saved = spectiary::SaveSpectrumViewportState(
         spectrum_viewport_state_path_,
         CurrentSpectrumViewportState(),
         &error);
@@ -1168,7 +1168,7 @@ LocalUserStatePersistenceLifecycle::SaveResult
 ShellUi::SaveSpectrumPlotPreferences()
 {
     std::string error;
-    const bool saved = specforge::SaveSpectrumPlotPreferences(
+    const bool saved = spectiary::SaveSpectrumPlotPreferences(
         spectrum_plot_preferences_path_,
         SpectrumPlotPreferences{spectrum_view_session_.View().plot_colors}, &error);
     return {.saved = saved, .error = std::move(error)};
@@ -3613,4 +3613,4 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

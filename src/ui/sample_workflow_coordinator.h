@@ -22,7 +22,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct PreparedSampleWorkflowState;
 struct SampleWorkflowPreparationCacheBundle;
@@ -399,4 +399,4 @@ private:
     mutable std::optional<SourceCollectionSampleSortingView> prepared_sorting_view_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

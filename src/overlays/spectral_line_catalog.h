@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SpectralLineMarkerKind {
     Line,
@@ -38,4 +38,4 @@ struct SpectralLineCatalog {
 [[nodiscard]] double SpectralLineMarkerPosition(const SpectralLineMarker& marker);
 [[nodiscard]] const char* SpectralLineMarkerKindLabel(SpectralLineMarkerKind kind);
 
-}  // namespace specforge
+}  // namespace spectiary

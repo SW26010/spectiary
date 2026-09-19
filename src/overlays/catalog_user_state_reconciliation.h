@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_set>
 
-namespace specforge {
+namespace spectiary {
 
 // Reconciles one controller task's catalog state against the durable state
 // observed immediately before that task started.  The result deliberately
@@ -38,4 +38,4 @@ struct CatalogUserStateReconciliationResult {
     std::optional<bool> local_selection_is_explicit = std::nullopt,
     std::unordered_set<std::string> local_group_ordering_view_ids = {});
 
-}  // namespace specforge
+}  // namespace spectiary

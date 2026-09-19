@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleNavigationSortDirection {
     Ascending,
@@ -103,4 +103,4 @@ void ApplySampleNavigationSequenceProjection(
     const SampleNavigationSequenceInput& input,
     const std::function<void()>& cancellation_checkpoint);
 
-}  // namespace specforge
+}  // namespace spectiary

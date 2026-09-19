@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleLabelingCanonicalSourceDescriptor;
 
@@ -78,4 +78,4 @@ DeserializeSampleLabelValueFromExport(
     const SampleLabelExportSnapshot& snapshot,
     std::string* error_message = nullptr);
 
-}  // namespace specforge
+}  // namespace spectiary

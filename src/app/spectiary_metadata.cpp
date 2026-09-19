@@ -1,8 +1,8 @@
-#include "app/specforge_metadata.h"
+#include "app/spectiary_metadata.h"
 
 #include "app/local_user_state_json.h"
-#include "app/specforge_metadata_validation.h"
-#include "specforge/specforge_build_identity.h"
+#include "app/spectiary_metadata_validation.h"
+#include "spectiary/spectiary_build_identity.h"
 
 #include <fstream>
 #include <optional>
@@ -11,7 +11,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::optional<std::string> ReadRequiredMetadataString(
@@ -70,7 +70,7 @@ std::string MetadataError(
     const std::filesystem::path& path,
     std::string_view detail)
 {
-    return "Invalid SpecForge metadata '" + PathToUtf8(path) +
+    return "Invalid Spectiary metadata '" + PathToUtf8(path) +
         "': " + std::string(detail);
 }
 
@@ -87,7 +87,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     }
     const auto application_id = ReadRequiredMetadataString(root, "application_id");
     const auto product_name = ReadRequiredMetadataString(*product, "name");
-    const auto specforge_version = ReadRequiredMetadataString(*product, "version");
+    const auto spectiary_version = ReadRequiredMetadataString(*product, "version");
     const std::optional<std::string> configuration =
         ReadRequiredMetadataString(*build, "configuration");
     const std::optional<std::string> target_architecture =
@@ -144,7 +144,7 @@ BuildMetadataReadResult ReadBuildMetadata(
         }
     }
 
-    if (!application_id || !product_name || !specforge_version || !configuration ||
+    if (!application_id || !product_name || !spectiary_version || !configuration ||
         !target_architecture || !source_mode || !source_revision ||
         !compiler_id || !compiler_version || !cmake_version || !generator ||
         !windows_sdk_version || !dear_imgui || !implot || !cfitsio ||
@@ -167,7 +167,7 @@ BuildMetadataReadResult ReadBuildMetadata(
         const BuildIdentity actual_identity = {
             .application_id = *application_id,
             .product_name = *product_name,
-            .specforge_version = *specforge_version,
+            .spectiary_version = *spectiary_version,
             .configuration = *configuration,
             .target_architecture = *target_architecture,
             .source_mode = *source_mode,
@@ -183,7 +183,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     }
 
     if (*application_id != expected_identity.application_id ||
-        *specforge_version != expected_identity.specforge_version ||
+        *spectiary_version != expected_identity.spectiary_version ||
         *configuration != expected_identity.configuration ||
         *target_architecture != expected_identity.target_architecture ||
         *source_mode != expected_identity.source_mode ||
@@ -246,7 +246,7 @@ std::optional<std::string> ReadDeployment(
     return std::nullopt;
 }
 
-SpecForgeMetadataReadResult MissingMetadataResult()
+SpectiaryMetadataReadResult MissingMetadataResult()
 {
     return {};
 }
@@ -299,11 +299,11 @@ const char* StorageProfileName(StorageProfile profile)
 
 namespace {
 
-SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
+SpectiaryMetadataReadResult ReadSpectiaryMetadataForSchema(
     const std::filesystem::path& path,
     const BuildIdentity& expected_identity)
 {
-    SpecForgeMetadataReadResult result;
+    SpectiaryMetadataReadResult result;
     result.metadata_path = path;
 
     std::optional<std::string> exists_error;
@@ -355,16 +355,16 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
 
 }  // namespace
 
-SpecForgeMetadataReadResult ReadSpecForgeMetadata(
+SpectiaryMetadataReadResult ReadSpectiaryMetadata(
     const std::filesystem::path& path,
     const BuildIdentity& expected_identity)
 {
-    return ReadSpecForgeMetadataForSchema(
+    return ReadSpectiaryMetadataForSchema(
         path,
         expected_identity);
 }
 
-SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
+SpectiaryMetadataReadResult ReadAdjacentSpectiaryMetadata(
     const std::filesystem::path& package_root,
     const BuildIdentity& expected_identity)
 {
@@ -374,12 +374,12 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
             metadata_contract::kCanonicalMetadataFileName));
     std::optional<std::string> exists_error;
     if (PathExists(current_path, exists_error)) {
-        return ReadSpecForgeMetadataForSchema(
+        return ReadSpectiaryMetadataForSchema(
             current_path,
             expected_identity);
     }
     if (exists_error) {
-        SpecForgeMetadataReadResult result;
+        SpectiaryMetadataReadResult result;
         result.metadata_path = current_path;
         result.startup_error = std::move(exists_error);
         return result;
@@ -392,7 +392,7 @@ BuildIdentity CompiledBuildIdentity()
 {
     return {
         .product_name = project_identity::kProductDisplayName,
-        .specforge_version = build_info::kSpecForgeVersion,
+        .spectiary_version = build_info::kSpectiaryVersion,
         .configuration = build_info::kBuildConfiguration,
         .target_architecture =
             build_info::kTargetArchitecture,
@@ -402,4 +402,4 @@ BuildIdentity CompiledBuildIdentity()
     };
 }
 
-}  // namespace specforge
+}  // namespace spectiary

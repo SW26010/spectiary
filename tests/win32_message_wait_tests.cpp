@@ -19,7 +19,7 @@ namespace {
 
 using namespace std::chrono_literals;
 
-constexpr wchar_t kWindowClassName[] = L"SpecForgeWin32MessageWaitTests";
+constexpr wchar_t kWindowClassName[] = L"SpectiaryWin32MessageWaitTests";
 constexpr UINT kSentMessage = WM_APP + 1U;
 constexpr UINT kUnusedQueuedMessage = WM_APP + 2U;
 constexpr UINT kIgnoredClockMessage = WM_APP + 3U;
@@ -99,17 +99,17 @@ private:
 
 void RequestFrame(void* context) noexcept
 {
-    static_cast<specforge::RenderWakeScheduler*>(context)->RequestFrame();
+    static_cast<spectiary::RenderWakeScheduler*>(context)->RequestFrame();
 }
 
 struct ObservedMessageState {
     int count = 0;
-    specforge::Win32ObservedMessage message;
+    spectiary::Win32ObservedMessage message;
 };
 
 void RecordObservedMessage(
     void* context,
-    const specforge::Win32ObservedMessage& message) noexcept
+    const spectiary::Win32ObservedMessage& message) noexcept
 {
     if (message.message != WM_KEYDOWN) {
         return;
@@ -119,29 +119,29 @@ void RecordObservedMessage(
     state->message = message;
 }
 
-void SettleScheduler(specforge::RenderWakeScheduler& scheduler)
+void SettleScheduler(spectiary::RenderWakeScheduler& scheduler)
 {
-    const specforge::RenderWakeScheduler::TimePoint start{};
-    const auto follow_up = start + specforge::RenderWakeScheduler::kInteractiveFrameInterval;
+    const spectiary::RenderWakeScheduler::TimePoint start{};
+    const auto follow_up = start + spectiary::RenderWakeScheduler::kInteractiveFrameInterval;
     Require(
         scheduler.TakeAction(start, true) ==
-            specforge::RenderWakeAction::RenderFrame,
+            spectiary::RenderWakeAction::RenderFrame,
         "render scheduler should begin its initial frame");
     scheduler.CompleteFrame(
         start,
         {},
-        specforge::RenderFrameOutcome::Presented);
+        spectiary::RenderFrameOutcome::Presented);
     Require(
         scheduler.TakeAction(follow_up, true) ==
-            specforge::RenderWakeAction::RenderFrame,
+            spectiary::RenderWakeAction::RenderFrame,
         "render scheduler should run its settling frame");
     scheduler.CompleteFrame(
         follow_up,
         {},
-        specforge::RenderFrameOutcome::Presented);
+        spectiary::RenderFrameOutcome::Presented);
     Require(
         scheduler.TakeAction(follow_up, true) ==
-            specforge::RenderWakeAction::Wait,
+            spectiary::RenderWakeAction::Wait,
         "render should leave the scheduler idle");
 }
 
@@ -165,10 +165,10 @@ void SendNonqueuedMessage(HWND window, UINT message, std::string_view failure_me
 
 BOOL WaitAndDispatchSentMessage()
 {
-    const auto wake_reason = specforge::WaitForWin32MessageOrDeadline(
+    const auto wake_reason = spectiary::WaitForWin32MessageOrDeadline(
         std::chrono::steady_clock::now() + 1s);
     Require(
-        wake_reason == specforge::Win32MessageWaitWake::MessageInput,
+        wake_reason == spectiary::Win32MessageWaitWake::MessageInput,
         "tail wait should report the pending sent message");
 
     MSG queued_message = {};
@@ -185,9 +185,9 @@ void TestQueuedWindowMessageRequestsFrame()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
 
     Require(
@@ -209,7 +209,7 @@ void TestQueuedWindowMessageRequestsFrame()
 
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
-            (specforge::RenderWakeScheduler::TimePoint::min)(),
+            (spectiary::RenderWakeScheduler::TimePoint::min)(),
         "retrieving queued input for a secondary window should request a frame");
 
     observer.Stop();
@@ -221,7 +221,7 @@ void TestSecondaryWindowKeyMessagePreservesCorrelationPayload()
     DrainQueuedMessages();
 
     ObservedMessageState observed;
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(
         observer.Start(
             [](void*) noexcept {},
@@ -237,7 +237,7 @@ void TestSecondaryWindowKeyMessagePreservesCorrelationPayload()
     Require(
         GetMessageW(&queued, window.hwnd(), WM_KEYDOWN, WM_KEYDOWN) > 0,
         "secondary window key input should be retrieved");
-    observer.ObserveQueuedMessage(specforge::Win32ObservedMessage{
+    observer.ObserveQueuedMessage(spectiary::Win32ObservedMessage{
         reinterpret_cast<std::uintptr_t>(queued.hwnd),
         queued.message,
         static_cast<std::uintptr_t>(queued.wParam),
@@ -258,9 +258,9 @@ void TestQueuedHitTestDoesNotCreateRenderFeedback()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
 
     Require(
@@ -289,18 +289,18 @@ void TestDirectManipulationUpdateMessageIsOnlyNeutralForAttachedWindow()
 {
     constexpr std::uint32_t kObservedDirectManipulationUpdateMessage = 0x0096U;
     Require(
-        specforge::ClassifyWin32TouchpadQueuedMessage(
+        spectiary::ClassifyWin32TouchpadQueuedMessage(
             kObservedDirectManipulationUpdateMessage,
-            true) == specforge::Win32TouchpadQueuedMessageAction::PumpUpdates,
+            true) == spectiary::Win32TouchpadQueuedMessageAction::PumpUpdates,
         "Direct Manipulation internal updates must advance input without rendering");
     Require(
-        specforge::ClassifyWin32TouchpadQueuedMessage(
+        spectiary::ClassifyWin32TouchpadQueuedMessage(
             kObservedDirectManipulationUpdateMessage,
-            false) == specforge::Win32TouchpadQueuedMessageAction::InvalidateRender,
+            false) == spectiary::Win32TouchpadQueuedMessageAction::InvalidateRender,
         "the undocumented message must not be ignored outside an attached viewport");
     Require(
-        specforge::ClassifyWin32TouchpadQueuedMessage(WM_MOUSEMOVE, true) ==
-            specforge::Win32TouchpadQueuedMessageAction::InvalidateRender,
+        spectiary::ClassifyWin32TouchpadQueuedMessage(WM_MOUSEMOVE, true) ==
+            spectiary::Win32TouchpadQueuedMessageAction::InvalidateRender,
         "real queued pointer input must keep invalidating attached viewports");
 }
 
@@ -321,27 +321,27 @@ void TestFailedTouchpadWakePostCanRetry()
 {
     bool wake_pending = false;
     Require(
-        specforge::TryPostWin32TouchpadWake(1U, WM_APP, wake_pending, FailTouchpadWakePost) ==
-            specforge::Win32TouchpadWakePostResult::Failed,
+        spectiary::TryPostWin32TouchpadWake(1U, WM_APP, wake_pending, FailTouchpadWakePost) ==
+            spectiary::Win32TouchpadWakePostResult::Failed,
         "a failed PostMessage call should be reported");
     Require(!wake_pending, "a failed PostMessage call must release the coalescing latch");
 
     g_touchpad_wake_post_count = 0;
     Require(
-        specforge::TryPostWin32TouchpadWake(
+        spectiary::TryPostWin32TouchpadWake(
             1U,
             WM_APP,
             wake_pending,
-            CountSuccessfulTouchpadWakePost) == specforge::Win32TouchpadWakePostResult::Posted,
+            CountSuccessfulTouchpadWakePost) == spectiary::Win32TouchpadWakePostResult::Posted,
         "the next gesture should retry the wake after a failed post");
     Require(wake_pending, "a successful wake post should retain the coalescing latch until Poll");
     Require(
-        specforge::TryPostWin32TouchpadWake(
+        spectiary::TryPostWin32TouchpadWake(
             1U,
             WM_APP,
             wake_pending,
             CountSuccessfulTouchpadWakePost) ==
-            specforge::Win32TouchpadWakePostResult::AlreadyPending,
+            spectiary::Win32TouchpadWakePostResult::AlreadyPending,
         "a pending wake should coalesce later gestures");
     Require(g_touchpad_wake_post_count == 1, "coalescing should issue only one successful PostMessage");
 }
@@ -351,9 +351,9 @@ void TestIgnoredQueuedClockMessageOnlyGrantsPermission()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(
         observer.Start(RequestFrame, &scheduler, kIgnoredClockMessage),
         "message observer should accept one permission-only message");
@@ -384,9 +384,9 @@ void TestSentMessageWakeRemainsRenderableWhenPeekReturnsFalse()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
 
     SendNonqueuedMessage(
@@ -399,7 +399,7 @@ void TestSentMessageWakeRemainsRenderableWhenPeekReturnsFalse()
     Require(queued == FALSE, "a dispatched sent message should not appear as a queued message");
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
-            (specforge::RenderWakeScheduler::TimePoint::min)(),
+            (spectiary::RenderWakeScheduler::TimePoint::min)(),
         "dispatching the sent message should request a frame even when PeekMessage returns false");
 
     observer.Stop();
@@ -410,9 +410,9 @@ void TestHitTestSentMessageDoesNotCreateRenderFeedback()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
 
     SendNonqueuedMessage(
@@ -435,9 +435,9 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
     TestWindow window;
     DrainQueuedMessages();
 
-    specforge::RenderWakeScheduler scheduler;
+    spectiary::RenderWakeScheduler scheduler;
     SettleScheduler(scheduler);
-    specforge::Win32MessageRenderObserver observer;
+    spectiary::Win32MessageRenderObserver observer;
     Require(
         observer.Start(RequestFrame, &scheduler, kIgnoredClockMessage),
         "message observer should start with a permission-only message");
@@ -460,11 +460,11 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
 int main()
 {
     {
-        namespace trace = specforge::presentation_trace;
-        namespace native = specforge::native_size_trace;
+        namespace trace = spectiary::presentation_trace;
+        namespace native = spectiary::native_size_trace;
         TestWindow window;
-        specforge::RenderWakeScheduler scheduler;
-        specforge::Win32MessageRenderObserver observer;
+        spectiary::RenderWakeScheduler scheduler;
+        spectiary::Win32MessageRenderObserver observer;
         Require(observer.Start(&RequestFrame, &scheduler), "native trace hook must start");
         Require(native::hook_available, "return hook must be available in integration test");
         const auto hwnd = reinterpret_cast<std::uintptr_t>(window.hwnd());
@@ -544,10 +544,10 @@ int main()
         observer.Stop();
     }
     {
-        namespace trace = specforge::presentation_trace;
+        namespace trace = spectiary::presentation_trace;
         TestWindow window;
-        specforge::RenderWakeScheduler scheduler;
-        specforge::Win32MessageRenderObserver observer;
+        spectiary::RenderWakeScheduler scheduler;
+        spectiary::Win32MessageRenderObserver observer;
         Require(observer.Start(&RequestFrame, &scheduler), "size-move hook must start");
         const auto hwnd = reinterpret_cast<std::uintptr_t>(window.hwnd());
         trace::Register(hwnd, 320, 240);

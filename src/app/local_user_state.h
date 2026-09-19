@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 // Internal recovery storage remains unobtrusive in the Windows shell.
 void HideUnsavedCheckpointDirectory(const std::filesystem::path& directory) noexcept;
 
@@ -209,4 +209,4 @@ private:
     std::string load_diagnostic_detail_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

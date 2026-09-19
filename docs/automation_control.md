@@ -1,6 +1,6 @@
 # Local automation control plane
 
-SpecForge provides a Windows-local control plane for tests and debugging. It is
+Spectiary provides a Windows-local control plane for tests and debugging. It is
 disabled during ordinary startup and is not a supported end-user CLI, remote
 service, or plugin interface.
 
@@ -9,17 +9,17 @@ service, or plugin interface.
 Build the GUI and console launcher with the repository wrapper:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_native
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_automation_launcher
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target spectiary_native
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target spectiary_automation_launcher
 ```
 
 Start an isolated automation instance:
 
 ```powershell
-.\build\ninja-msvc-debug\SpecForgeAutomation.exe
+.\build\ninja-msvc-debug\SpectiaryAutomation.exe
 ```
 
-The launcher accepts `--app <SpecForge.exe>`,
+The launcher accepts `--app <Spectiary.exe>`,
 `--state-root <new-absolute-directory>`, the optional
 `--labeling-state-seed <absolute-production-cache.json>`, and the optional
 `--imgui-layout-seed <absolute-imgui-layout-v2.ini>`. The state-root path
@@ -85,7 +85,7 @@ The launcher owns only the GUI process it creates. Every post-launch error path
 first requests normal `app.quit` when a completed handshake still permits
 communication, then waits for a bounded interval. A disconnected or
 unresponsive launcher-owned child is terminated through that exact process
-handle; launcher cleanup never searches for or stops unrelated SpecForge
+handle; launcher cleanup never searches for or stops unrelated Spectiary
 processes.
 
 The thin console accepts only:
@@ -271,7 +271,7 @@ Commands with parameters use these stable request shapes:
 ```json
 {"type":"request","request_id":"setting-get-1","command":"setting.get","params":{"name":"ui.language"}}
 {"type":"request","request_id":"setting-set-1","command":"setting.set","params":{"name":"ui.scale","value":125}}
-{"type":"request","request_id":"theme-set-1","command":"setting.set","params":{"name":"ui.theme","value":"specforge.theme.light"}}
+{"type":"request","request_id":"theme-set-1","command":"setting.set","params":{"name":"ui.theme","value":"builtin.theme.light"}}
 {"type":"request","request_id":"panel-get-1","command":"panel.get","params":{"name":"files"}}
 {"type":"request","request_id":"panel-set-1","command":"panel.set","params":{"name":"spectral_lines","visible":false}}
 {"type":"request","request_id":"open-1","command":"source.open","params":{"path":"C:\\fixtures\\spectra"}}
@@ -294,7 +294,7 @@ no field is silently ignored.
 | --- | --- | --- |
 | `ui.language` | string | exact persisted values `en` or `zh-Hans` |
 | `ui.scale` | integer | 80 through 150, inclusive |
-| `ui.theme` | string | `follow-system`, `specforge.theme.dark`, or `specforge.theme.light` |
+| `ui.theme` | string | `follow-system`, `builtin.theme.dark`, or `builtin.theme.light` |
 
 `ui.theme` reports and persists the selection policy value. In particular,
 `follow-system` remains `follow-system`; it is not replaced by whichever
@@ -519,7 +519,7 @@ completes only after that production writer owns the real JSONL output. Its
 result is:
 
 ```json
-{"result":{"status":"recording","path":"C:\\automation-state\\logs\\specforge-profile-<timestamp>.jsonl"}}
+{"result":{"status":"recording","path":"C:\\automation-state\\logs\\spectiary-profile-<timestamp>.jsonl"}}
 ```
 
 An already active or finishing recording fails with
@@ -543,7 +543,7 @@ the finished writer and therefore implies that the JSONL's final
 result is:
 
 ```json
-{"result":{"status":"succeeded","path":"C:\\automation-state\\logs\\specforge-profile-<timestamp>.jsonl","stop_reason":"explicit","dropped_events":0}}
+{"result":{"status":"succeeded","path":"C:\\automation-state\\logs\\spectiary-profile-<timestamp>.jsonl","stop_reason":"explicit","dropped_events":0}}
 ```
 
 A final stream failure produces terminal `failed` with
@@ -659,7 +659,7 @@ assignment still returns its result even when its auto-advance is superseded.
 An unsuccessful Present supplies no completion evidence; the existing launcher
 timeout policy remains responsible for bounding externally awaited commands.
 
-`specforge_automation_execution_tests` exercises these transitions directly with
+`spectiary_automation_execution_tests` exercises these transitions directly with
 controlled Shell observations; the real-GUI launcher integration suite verifies
 the production adapter and rendering path.
 
@@ -671,7 +671,7 @@ model. These layers have different authority and timing:
 | Layer | Authority and examples | Automation meaning |
 | --- | --- | --- |
 | Production source truth | `ApplicationSettings`, Shell/Session controllers, the sample-labeling controller, `ProfileSink`, and the frame-capture pipeline | Commands validate, claim, and mutate only through these existing owners. Operation-specific terminals report facts produced by the owner. |
-| Derived observation | `SpecForgeApp::AutomationState()` plus the last successfully presented `ShellAutomationView` | `state.get` is a point-in-time projection. Live source-load state may lead the presented spectrum/label snapshot; capture and profile fields summarize current or last terminal observations. It is neither durable state nor mutation authority. |
+| Derived observation | `SpectiaryApp::AutomationState()` plus the last successfully presented `ShellAutomationView` | `state.get` is a point-in-time projection. Live source-load state may lead the presented spectrum/label snapshot; capture and profile fields summarize current or last terminal observations. It is neither durable state nor mutation authority. |
 | Persisted projection | Production settings, panel, session, labeling, layout, profile, and capture files below the isolated root | Durability follows each production owner's contract. Settings writes are synchronous; panel/session/label state may be debounced or retryable; a label terminal carries persistence flags; `app.quit` drives the ordinary final-flush/shutdown path. |
 
 A successful command terminal therefore means exactly what that command section
@@ -680,7 +680,7 @@ elapsed or that a later `state.get` must describe an unpresented live change.
 
 ## State and focus isolation
 
-Automation redirects all SpecForge-owned mutable state paths beneath the
+Automation redirects all Spectiary-owned mutable state paths beneath the
 launcher-created root. Startup rejects a root equal to, containing, or contained
 by the ordinary Standalone/Portable state root. Ordinary startup remains
 unchanged. Automated startup errors are written inside the automation root
@@ -688,9 +688,9 @@ instead of opening a modal dialog, but only after that root has passed the
 isolation check.
 
 The launcher passes an explicit child environment with the legacy
-`SPECFORGE_PROFILE`, `SPECFORGE_PROFILE_DIR`,
-`SPECFORGE_RUNTIME_RESOURCE_WORKLOAD`, and
-`SPECFORGE_RUNTIME_RESOURCE_STATE_DIR` variables removed. The GUI independently
+`SPECTIARY_PROFILE`, `SPECTIARY_PROFILE_DIR`,
+`SPECTIARY_RUNTIME_RESOURCE_WORKLOAD`, and
+`SPECTIARY_RUNTIME_RESOURCE_STATE_DIR` variables removed. The GUI independently
 rejects automation startup if any of them is present, before App/Shell state is
 constructed.
 
@@ -719,7 +719,7 @@ blocking, hidden/minimized/immersive panel rejection followed by normal quit,
 an intervening idle barrier, and a real HWND shutdown rollback before final
 cache validation,
 both disconnect-first and finalizer-lease-first capture
-publication ordering, and a real SpecForge HWND workflow that verifies visible
+publication ordering, and a real Spectiary HWND workflow that verifies visible
 capture without foreground activation plus hidden/minimized rejection without
 window restoration. Coverage also includes runtime-state isolation and a
 real launcher/GUI profile-start/source-open/wait/goto/label/return/capture/
@@ -756,7 +756,7 @@ coverage also blocks the production UI-scale path and verifies
 notification, and a usable idle barrier.
 
 The manually selected `gui-integration` CTest group also includes
-`specforge_imgui_viewport_ownership_integration_tests`. It starts from a seeded
+`spectiary_imgui_viewport_ownership_integration_tests`. It starts from a seeded
 layout with detached Spectral Lines and Information panels, verifies both
 secondary HWNDs are non-topmost windows owned by the main HWND, and moves one
 secondary HWND fully inside and then moves its center outside the main client
@@ -764,9 +764,9 @@ rectangle without synthesizing mouse input. Unchanged `panel.set` requests act
 as detached-viewport Present barriers, and both viewport HWNDs must retain their
 identity. The test then minimizes the main window, confirms Windows hides the
 owned HWNDs without destroying them, activates an independent cross-process
-Win32 peer window, and restores SpecForge through that foreground peer. After
+Win32 peer window, and restores Spectiary through that foreground peer. After
 restore, the owned HWNDs must be visible with unchanged identity and ownership,
-and the SpecForge ownership group must remain contiguous above the peer in the
+and the Spectiary ownership group must remain contiguous above the peer in the
 non-topmost z-order.
 This test is intentionally excluded from both the required headless gate and
 the protected `real-gui` CI label; run it on an interactive desktop with:
@@ -784,18 +784,18 @@ useful as the files evolve.
 | Boundary or lifecycle rule | Production source | Verification evidence | Documented contract and audit result |
 | --- | --- | --- | --- |
 | Local-only, single-user, single-client pipe; remote and second clients rejected | `automation_named_pipe.cpp`: `PrepareCurrentUserPipeSecurity`, `AutomationNamedPipeServer::Start` | `TestPipeAclIsCurrentUserOnly`, `TestSingleClientQueueAndLifecycle` in `automation_control_tests.cpp` | **Verified.** See **Trust boundary** and **Transport and protocol**. Same-user hostile code is explicitly outside the boundary. |
-| Random instance/nonce handshake and automation-only startup arguments | `automation_launcher_main.cpp`: `RandomHex`, `BuildGuiCommandLine`; `automation_startup.cpp`: `ParseSpecForgeCommandLine` | `TestStartupAndNoActivationContract`; real launcher hello/instance assertions in `automation_launcher_integration_tests.ps1` | **Verified.** Partial, repeated, mismatched, or inherited legacy startup input fails closed before App construction. |
+| Random instance/nonce handshake and automation-only startup arguments | `automation_launcher_main.cpp`: `RandomHex`, `BuildGuiCommandLine`; `automation_startup.cpp`: `ParseSpectiaryCommandLine` | `TestStartupAndNoActivationContract`; real launcher hello/instance assertions in `automation_launcher_integration_tests.ps1` | **Verified.** Partial, repeated, mismatched, or inherited legacy startup input fails closed before App construction. |
 | New launcher-pinned state root, ordinary-root separation, and isolated production paths | `automation_startup.cpp`: `CreatePinnedAutomationStateRoot`, `AutomationStateRootIsIndependent`; `main.cpp`: `PrepareStartup` | `TestStartupAndNoActivationContract`, `automation_state_isolation_tests.cpp`, root-identity scenarios in `automation_launcher_integration_tests.ps1` | **Verified.** The launcher rejects an existing root and same/parent/child overlap; the GUI independently rechecks separation. |
 | Seed identity, read-only ownership, materialization, and persistent-output policy | `automation_launcher_main.cpp`: `ValidateLabelingStateSeed`, `MaterializeLabelingStateSeed`; `automation_startup.cpp`: `PinAutomationReadOnlyFile`, `MaterializePinnedAutomationSeed` | seed replacement/output/reparse scenarios in `automation_control_tests.cpp`, `automation_state_isolation_tests.cpp`, and `automation_launcher_integration_tests.ps1` | **Verified.** Normal launcher seeds permit internal drafts only; the direct two-process fixture requires an explicit startup opt-in. |
 | Capture path ownership, create-new/no-follow encoding, and publish/disconnect ordering | `automation_startup.cpp`: `ValidateAutomationCapturePath`; `d3d11_frame_capture.cpp`: handle-relative prepare/publish; `automation_named_pipe.cpp`: `TryFinalizeFrameCapture` | `TestFrameCaptureFinalizationLease`; real GUI outside-root, reparse, disconnect, and PNG checks in `automation_launcher_integration_tests.ps1` | **Verified.** No desktop screenshot or general external write seam exists. |
-| Profile output ownership, no-follow final handle, and finalized writer terminal | `automation_startup.cpp`: `AutomationProfileOutputFactory::Create`; `specforge_app.cpp`: `ServiceAutomationProfileStart`, `PollAutomationProfileStop` | `TestProfileOutputCreationIsHandleBoundToAutomationRoot`, `TestProfileWriteFailureUsesStopTerminalResponsePath`, real GUI profile scenarios | **Verified.** Final success requires the summary record and flush; start or write failures remain distinct. |
+| Profile output ownership, no-follow final handle, and finalized writer terminal | `automation_startup.cpp`: `AutomationProfileOutputFactory::Create`; `spectiary_app.cpp`: `ServiceAutomationProfileStart`, `PollAutomationProfileStop` | `TestProfileOutputCreationIsHandleBoundToAutomationRoot`, `TestProfileWriteFailureUsesStopTerminalResponsePath`, real GUI profile scenarios | **Verified.** Final success requires the summary record and flush; start or write failures remain distinct. |
 | UTF-8 JSON, duplicate/nesting/malformed/oversized input, exact commands and bounded response | `local_user_state_json.cpp`: `JsonParser`; `automation_protocol.cpp`: `ParseAutomationClientMessage`; `automation_named_pipe.cpp`: `ReadMessage`, `EnqueueResponseLocked` | `TestProtocolAndStableState`, `TestSingleClientQueueAndLifecycle`, `TestPreHandshakeJsonNestingIsBounded`, `TestQueueCapacityVersionAndDisconnect`, `TestOversizedTerminalResponseIsBounded` | **Verified.** Invalid or unsupported input fails before acceptance; oversized correlated output becomes `response_too_large` without poisoning the connection. |
 | Queue, request-ID, acceptance, terminal, and shutdown rejection | `automation_named_pipe.cpp`: `HandleClientMessage`, `TryReserveRequestIdLocked`, `Complete`, `Fail` | `TestSingleClientQueueAndLifecycle`, `TestDistinctRequestIdLimit`, `TestQueueCapacityVersionAndDisconnect` | **Verified.** While connected, each accepted request has one terminal; valid observed IDs are consumed as documented. |
 | Execution claims, disconnect, quit sequence barrier, and publication races | `automation_named_pipe.cpp`: `TryClaimExecution`, `TryBeginAppQuit`, `HandleDisconnect`, `TryFinalizeFrameCapture` | `TestExecutionClaimsAndQuitBarrier`, `TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState`, `TestFrameCaptureFinalizationLease` | **Verified.** Unclaimed work cancels; claimed mutations keep factual ownership and terminal ordering. |
-| `wait.idle`, retry ownership, and persistence timing | `specforge_app.cpp`: `ServiceAutomation`, `AutomationBusinessIdle`; production persistence owners under `src/app` and `src/sessions` | `TestIdleWaitIsAnEarlierOnlySequenceBarrier`, `TestIdleWaitStopsLaterBusinessDispatch`, real GUI persistence assertions | **Verified.** The barrier is earlier-sequence-only and does not wait for future debounce/retry deadlines. |
-| Source truth versus live, presented, terminal, and persisted projections | `automation_execution.cpp`: source/navigation/label phases and terminal facts; `specforge_app.cpp`: remaining command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
+| `wait.idle`, retry ownership, and persistence timing | `spectiary_app.cpp`: `ServiceAutomation`, `AutomationBusinessIdle`; production persistence owners under `src/app` and `src/sessions` | `TestIdleWaitIsAnEarlierOnlySequenceBarrier`, `TestIdleWaitStopsLaterBusinessDispatch`, real GUI persistence assertions | **Verified.** The barrier is earlier-sequence-only and does not wait for future debounce/retry deadlines. |
+| Source truth versus live, presented, terminal, and persisted projections | `automation_execution.cpp`: source/navigation/label phases and terminal facts; `spectiary_app.cpp`: remaining command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
 | Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, deadline-bound response helpers; `automation_named_pipe.cpp`: `AutomationNamedPipeClient::SendUntil` and `ReceiveUntil`; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | hello-no-response, no-accepted/accepted-command, accepted pipeline, pipeline-write-stall, and EOF app.quit-no-terminal fake GUI/pipe fixture cases, with retained-root and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **Verified.** Launcher-owned response/write deadlines close the pipe and preserve the existing exact-child handle/Job Object cleanup path; accepted requests remain explicitly outcome-ambiguous and are never retried. |
-| Orderly shutdown, panel rollback, state flush, and writer retirement | `specforge_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
+| Orderly shutdown, panel rollback, state flush, and writer retirement | `spectiary_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
 
 The 2026-08-06 audit at base commit `4472fad` found no P0 or P1 defect and one
 P2 defect, tracked by Issue #30. This follow-up closes that audit gap with the
@@ -803,5 +803,5 @@ launcher deadlines and fake-GUI regression described above. The repository
 wrapper rebuilt the control, panel-coordinator, state-isolation, launcher, and
 native targets successfully.
 `ctest -L ci-headless` passed all 5 tests, and the real-GUI
-`specforge_automation_launcher_integration_tests` passed its complete
+`spectiary_automation_launcher_integration_tests` passed its complete
 launcher-to-GUI workflow.

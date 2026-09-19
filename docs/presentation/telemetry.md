@@ -4,7 +4,7 @@ For investigation scope, evidence and current decisions, see [issue #56](live-re
 The ordinary instrumentation path does not select a resize strategy. It leaves
 buffer count, synchronous rebuilding, fallback, Present flags, frame scheduling,
 main acquire timeout (1000 ms) and detached acquire timeout (0 ms) unchanged.
-Enable the existing bounded JSONL recorder with `SPECFORGE_PROFILE=1` (or the UI).
+Enable the existing bounded JSONL recorder with `SPECTIARY_PROFILE=1` (or the UI).
 No per-event clock reads or JSON serialization occur while recording is inactive.
 Window identity bookkeeping remains bounded by live presentation objects.
 
@@ -181,7 +181,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/profile-live-resize.
 
 Run this from the usual, non-administrator repository terminal. Windows asks for
 administrator approval to start WPR and again to save it. Only the WPR helper is
-elevated; SpecForge retains the caller's privileges. Resize the detached Spectrum
+elevated; Spectiary retains the caller's privileges. Resize the detached Spectrum
 outer border for 10–15 seconds, with three seconds idle before and after; redock
 and close normally. Allow the second UAC prompt to save the trace.
 
@@ -224,7 +224,7 @@ this capture path.
 
 Capture-window follow-up: the live-resize runner now starts recording **off** when
 `-FeedbackBreakdown` or `-WindowedCapture` is selected. Prepare the detached viewport,
-then use Settings > Diagnostics > Start Recording. `SPECFORGE_PROFILE_WINDOWED=1`
+then use Settings > Diagnostics > Start Recording. `SPECTIARY_PROFILE_WINDOWED=1`
 sets the existing recorder duration bound to five seconds, retaining its ordinary
 queue/file bounds and frame-finalization tail. It does not affect runtime-resource
 workload duration policy. Close normally after recording finishes; only one recording
@@ -274,7 +274,7 @@ The legacy `buffer_replacement_experiment.enabled` event name is retained for an
 and historical capture compatibility. It now reports the detached incremental-buffer
 policy in production too (true by default); it does not assert that every viewport
 selected Composition. Read per-viewport backend transitions for capability/failure fallback.
-Only the isolated diagnostic executable reads `SPECFORGE_EXPERIMENT_INCREMENTAL_BUFFERS`;
+Only the isolated diagnostic executable reads `SPECTIARY_EXPERIMENT_INCREMENTAL_BUFFERS`;
 there, an absent switch still selects baseline buffers for paired comparisons.
 
 Use `profile-live-resize.ps1 -Scenario NativeSize -FeedbackBreakdown` for a manually

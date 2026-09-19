@@ -3,6 +3,8 @@
 
 #include <Windows.h>
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <cstdio>
 
 #include <atomic>
 #include <chrono>
@@ -30,7 +32,7 @@ std::filesystem::path TestRoot()
     const auto timestamp =
         std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
-           ("specforge-imgui-layout-tests-" +
+           ("spectiary-imgui-layout-tests-" +
             std::to_string(GetCurrentProcessId()) +
             "-" + std::to_string(timestamp));
 }
@@ -266,7 +268,7 @@ int RunContentionChild(int argc, wchar_t** argv)
         while (!FileExists(start)) {
             Sleep(1);
         }
-        specforge::ImGuiLayoutPersistence persistence(target);
+        spectiary::ImGuiLayoutPersistence persistence(target);
         std::string error;
         return persistence.SaveSnapshot(
                    ContentionSnapshot(writer),
@@ -287,11 +289,11 @@ int RunInterruptedWriteChild(int argc, wchar_t** argv)
     try {
         const std::filesystem::path target(argv[2]);
         const std::filesystem::path ready(argv[3]);
-        specforge::AtomicFileWriteOptions options;
+        spectiary::AtomicFileWriteOptions options;
         options.open_mode = std::ios::binary | std::ios::trunc;
         options.target_description = "interrupted ImGui layout";
         std::string error;
-        const bool completed = specforge::WriteFileAtomically(
+        const bool completed = spectiary::WriteFileAtomically(
             target,
             options,
             [&ready](std::ostream& stream, std::string& writer_error) {
@@ -320,7 +322,7 @@ int RunInterruptedWriteChild(int argc, wchar_t** argv)
 void TestContentionKeepsEveryCompletedSnapshotReadable(
     const std::filesystem::path& target)
 {
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     const std::string seed =
         "[Window][seed]\n"
         "Pos=1,2\n"
@@ -375,7 +377,7 @@ void TestContentionKeepsEveryCompletedSnapshotReadable(
 
     const std::string final_snapshot = ReadText(target);
     Require(
-        specforge::ImGuiLayoutPersistence::IsWellFormedSnapshot(
+        spectiary::ImGuiLayoutPersistence::IsWellFormedSnapshot(
             final_snapshot),
         "contention target should remain structurally valid");
     bool matched_writer = false;
@@ -390,7 +392,7 @@ void TestContentionKeepsEveryCompletedSnapshotReadable(
 void TestCrossProcessContentionKeepsEveryCompletedSnapshotReadable(
     const std::filesystem::path& target)
 {
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     std::string error;
     Require(
         persistence.SaveSnapshot(
@@ -442,7 +444,7 @@ void TestCrossProcessContentionKeepsEveryCompletedSnapshotReadable(
 
     const std::string final_snapshot = ReadText(target);
     Require(
-        specforge::ImGuiLayoutPersistence::IsWellFormedSnapshot(
+        spectiary::ImGuiLayoutPersistence::IsWellFormedSnapshot(
             final_snapshot),
         "cross-process contention target should remain structurally valid");
     bool matched_writer = false;
@@ -457,7 +459,7 @@ void TestCrossProcessContentionKeepsEveryCompletedSnapshotReadable(
 void TestInterruptedWritePreservesPreviousSnapshot(
     const std::filesystem::path& target)
 {
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     const std::string stable =
         "[Window][stable]\n"
         "Pos=11,12\n"
@@ -468,11 +470,11 @@ void TestInterruptedWritePreservesPreviousSnapshot(
         persistence.SaveSnapshot(stable, &error),
         error.empty() ? "stable layout write failed" : error);
 
-    specforge::AtomicFileWriteOptions options;
+    spectiary::AtomicFileWriteOptions options;
     options.open_mode = std::ios::binary | std::ios::trunc;
     options.target_description = "interrupted ImGui layout";
     Require(
-        !specforge::WriteFileAtomically(
+        !spectiary::WriteFileAtomically(
             target,
             options,
             [](std::ostream& stream, std::string& writer_error) {
@@ -490,7 +492,7 @@ void TestInterruptedWritePreservesPreviousSnapshot(
 void TestInterruptedWriteByProcessTerminationRecoversOnRestart(
     const std::filesystem::path& target)
 {
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     const std::string stable =
         "[Window][stable]\n"
         "Pos=11,12\n"
@@ -539,9 +541,9 @@ void TestInterruptedWriteByProcessTerminationRecoversOnRestart(
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ConfigureImGuiForTest();
-    const specforge::ImGuiLayoutLoadResult load = persistence.Load();
+    const spectiary::ImGuiLayoutLoadResult load = persistence.Load();
     Require(
-        load.status == specforge::ImGuiLayoutLoadStatus::Loaded,
+        load.status == spectiary::ImGuiLayoutLoadStatus::Loaded,
         "a fresh context should recover the complete target after interruption");
     ImGui::NewFrame();
     ImGui::Begin("stable");
@@ -566,21 +568,21 @@ void TestSectionNamesMayContainClosingBrackets(
         "Pos=31,32\n"
         "Size=333,334\n"
         "Collapsed=0\n";
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     std::string error;
     Require(
         persistence.SaveSnapshot(layout, &error),
         error.empty() ? "bracketed-name layout write failed" : error);
     Require(
-        specforge::ImGuiLayoutPersistence::IsWellFormedSnapshot(layout),
+        spectiary::ImGuiLayoutPersistence::IsWellFormedSnapshot(layout),
         "section names containing ] should pass structural validation");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ConfigureImGuiForTest();
-    const specforge::ImGuiLayoutLoadResult load = persistence.Load();
+    const spectiary::ImGuiLayoutLoadResult load = persistence.Load();
     Require(
-        load.status == specforge::ImGuiLayoutLoadStatus::Loaded,
+        load.status == spectiary::ImGuiLayoutLoadStatus::Loaded,
         "ImGui should load a section name containing ]");
     ImGui::NewFrame();
     ImGui::Begin("name-with-]closing");
@@ -600,10 +602,23 @@ void TestSectionNamesMayContainClosingBrackets(
 void TestViewportOwnershipLayoutFixtureContract()
 {
     const std::filesystem::path fixture(
-        SPECFORGE_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE);
+        SPECTIARY_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE);
     const std::string snapshot = ReadText(fixture);
+    // Use the linked ImGui hash implementation so an ID cutover cannot leave
+    // a syntactically valid fixture pointing at a different runtime dockspace.
+    const ImGuiID host_id = ImHashStr("Main Dock Host###DockHostV2");
+    const ImGuiID dock_id = ImHashStr("DockSpaceSampleNavigationV1", 0, host_id);
+    char dock_header[96]{};
+    std::snprintf(dock_header, sizeof(dock_header),
+        "DockSpace             ID=0x%08X Window=0x%08X", dock_id, host_id);
+    Require(snapshot.find(dock_header) != std::string::npos,
+        "fixture hashes must match the runtime host and dockspace IDs");
+    char parent[32]{};
+    std::snprintf(parent, sizeof(parent), "Parent=0x%08X", dock_id);
+    Require(snapshot.find(parent) != std::string::npos,
+        "fixture dock children must reference the current dockspace");
     Require(
-        specforge::ImGuiLayoutPersistence::
+        spectiary::ImGuiLayoutPersistence::
             IsWellFormedSnapshot(snapshot),
         "viewport ownership layout fixture should remain a well-formed ImGui snapshot");
 
@@ -637,7 +652,7 @@ void TestViewportOwnershipLayoutFixtureContract()
         snapshot.find("[Docking][Data]") !=
                 std::string::npos &&
             snapshot.find(
-                "DockSpace             ID=0xEEC57B96") !=
+                "DockSpace             ID=0x80BF2369") !=
                 std::string::npos,
         "viewport ownership fixture should retain a loaded dockspace so startup does not reseed the default layout");
 }
@@ -645,18 +660,18 @@ void TestViewportOwnershipLayoutFixtureContract()
 void TestMalformedLayoutRecoversOnNextSave(
     const std::filesystem::path& target)
 {
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     const std::string malformed = "[Window][truncated\nPos=1,2\n";
     std::string error;
     Require(
         !persistence.SaveSnapshot(malformed, &error),
         "malformed snapshots should not replace a layout target");
 
-    specforge::AtomicFileWriteOptions options;
+    spectiary::AtomicFileWriteOptions options;
     options.open_mode = std::ios::binary | std::ios::trunc;
     options.target_description = "malformed ImGui layout fixture";
     Require(
-        specforge::WriteFileAtomically(
+        spectiary::WriteFileAtomically(
             target,
             options,
             [&](std::ostream& stream, std::string&) {
@@ -669,9 +684,9 @@ void TestMalformedLayoutRecoversOnNextSave(
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ConfigureImGuiForTest();
-    const specforge::ImGuiLayoutLoadResult load = persistence.Load();
+    const spectiary::ImGuiLayoutLoadResult load = persistence.Load();
     Require(
-        load.status == specforge::ImGuiLayoutLoadStatus::Malformed,
+        load.status == spectiary::ImGuiLayoutLoadStatus::Malformed,
         "malformed layout should fall back to defaults");
     ImGui::DestroyContext();
 
@@ -696,7 +711,7 @@ void TestRestartLoadsTheSharedSnapshot(
         "Pos=123,234\n"
         "Size=321,243\n"
         "Collapsed=0\n";
-    specforge::ImGuiLayoutPersistence persistence(target);
+    spectiary::ImGuiLayoutPersistence persistence(target);
     std::string error;
     Require(
         persistence.SaveSnapshot(layout, &error),
@@ -705,9 +720,9 @@ void TestRestartLoadsTheSharedSnapshot(
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ConfigureImGuiForTest();
-    const specforge::ImGuiLayoutLoadResult load = persistence.Load();
+    const spectiary::ImGuiLayoutLoadResult load = persistence.Load();
     Require(
-        load.status == specforge::ImGuiLayoutLoadStatus::Loaded,
+        load.status == spectiary::ImGuiLayoutLoadStatus::Loaded,
         "restart should load a complete shared layout");
 
     ImGui::NewFrame();
@@ -730,7 +745,7 @@ void TestRestartLoadsTheSharedSnapshot(
         !ImGui::GetIO().WantSaveIniSettings,
         "successful manual layout save should clear the request flag");
     Require(
-        specforge::ImGuiLayoutPersistence::IsWellFormedSnapshot(
+        spectiary::ImGuiLayoutPersistence::IsWellFormedSnapshot(
             ReadText(target)),
         "manual ImGui layout save should produce a complete snapshot");
     ImGui::DestroyContext();
@@ -738,9 +753,9 @@ void TestRestartLoadsTheSharedSnapshot(
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ConfigureImGuiForTest();
-    const specforge::ImGuiLayoutLoadResult restarted = persistence.Load();
+    const spectiary::ImGuiLayoutLoadResult restarted = persistence.Load();
     Require(
-        restarted.status == specforge::ImGuiLayoutLoadStatus::Loaded,
+        restarted.status == spectiary::ImGuiLayoutLoadStatus::Loaded,
         "a fresh context should load the manually saved layout");
     ImGui::NewFrame();
     ImGui::Begin("restart-window");

@@ -658,10 +658,10 @@ function Start-GuiInstance {
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     foreach ($variable in @(
-            'SPECFORGE_PROFILE',
-            'SPECFORGE_PROFILE_DIR',
-            'SPECFORGE_RUNTIME_RESOURCE_WORKLOAD',
-            'SPECFORGE_RUNTIME_RESOURCE_STATE_DIR')) {
+            'SPECTIARY_PROFILE',
+            'SPECTIARY_PROFILE_DIR',
+            'SPECTIARY_RUNTIME_RESOURCE_WORKLOAD',
+            'SPECTIARY_RUNTIME_RESOURCE_STATE_DIR')) {
         [void]$start.Environment.Remove($variable)
     }
     if (-not [string]::IsNullOrWhiteSpace(
@@ -1383,7 +1383,7 @@ $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $script:ResolvedStateFixture = (Resolve-Path -LiteralPath $StateFixture).Path
 $fixtureParent = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
-    ('specforge-multi-instance-labeling-' + [Guid]::NewGuid().ToString('N'))
+    ('spectiary-multi-instance-labeling-' + [Guid]::NewGuid().ToString('N'))
 $sharedStateRoot = Join-Path $fixtureParent 'shared-state'
 $sourcesRoot = Join-Path $fixtureParent 'sources'
 $portableARoot = Join-Path $fixtureParent 'portable-a'
@@ -1396,7 +1396,7 @@ $runnerTempRoot = Join-Path $fixtureParent 'runner-temp'
 $script:RunnerTempRoot = $runnerTempRoot
 $script:AliasLockRoot = Join-Path `
     $runnerTempRoot `
-    'SpecForge\sample-labeling-cache-locks'
+    '0238d5bf7b34bb99c006f9807537d31234ca2e3d\sample-labeling-cache-locks'
 $instanceA = $null
 $instanceB = $null
 $failure = $null

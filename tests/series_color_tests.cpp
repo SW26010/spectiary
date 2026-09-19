@@ -64,80 +64,80 @@ double ContrastRatio(
 
 void TestColorModelExpressesAutoAndExplicitColor()
 {
-    const specforge::PlotSeriesColor automatic;
-    const specforge::RgbaColor custom{
+    const spectiary::PlotSeriesColor automatic;
+    const spectiary::RgbaColor custom{
         .red = 0.12f,
         .green = 0.34f,
         .blue = 0.56f,
         .alpha = 0.78f,
     };
-    const specforge::PlotSeriesColor explicit_color =
-        specforge::PlotSeriesColor::ExplicitColor(
+    const spectiary::PlotSeriesColor explicit_color =
+        spectiary::PlotSeriesColor::ExplicitColor(
             custom);
 
     Require(
         automatic ==
-                specforge::PlotSeriesColor::Auto() &&
+                spectiary::PlotSeriesColor::Auto() &&
             automatic.mode() ==
-                specforge::PlotSeriesColorMode::Auto &&
+                spectiary::PlotSeriesColorMode::Auto &&
             !automatic.explicit_color(),
         "plot series colors should default to Auto without storing a resolved theme color");
     Require(
         explicit_color.mode() ==
-                specforge::PlotSeriesColorMode::
+                spectiary::PlotSeriesColorMode::
                     ExplicitColor &&
             explicit_color.explicit_color() &&
             *explicit_color.explicit_color() == custom,
         "ExplicitColor should preserve the exact RGBA user value");
     Require(
-        specforge::PlotSeriesColor::Auto() ==
+        spectiary::PlotSeriesColor::Auto() ==
             automatic,
         "restoring a series color should return to the canonical Auto state");
 }
 
 void TestSpectrumPlotStyleDefaultsToAuto()
 {
-    const specforge::SpectrumPlotStyle style;
+    const spectiary::SpectrumPlotStyle style;
     Require(
         style.colors.raw_spectrum ==
-                specforge::PlotSeriesColor::Auto() &&
+                spectiary::PlotSeriesColor::Auto() &&
             style.colors.gaussian_smoothing ==
-                specforge::PlotSeriesColor::Auto() &&
+                spectiary::PlotSeriesColor::Auto() &&
             style.colors.median_smoothing ==
-                specforge::PlotSeriesColor::Auto(),
+                spectiary::PlotSeriesColor::Auto(),
         "every built-in spectrum curve should enter the shared series-color path in Auto mode by default");
     Require(
-        specforge::SpectrumSeriesStableId(
-            specforge::SpectrumPlotSeries::RawSpectrum) ==
-                specforge::kRawSpectrumPlotSeriesId &&
-            specforge::SpectrumSeriesStableId(
-                specforge::SpectrumPlotSeries::GaussianSmoothing) ==
-                specforge::kGaussianSmoothingPlotSeriesId &&
-            specforge::SpectrumSeriesStableId(
-                specforge::SpectrumPlotSeries::MedianSmoothing) ==
-                specforge::kMedianSmoothingPlotSeriesId,
+        spectiary::SpectrumSeriesStableId(
+            spectiary::SpectrumPlotSeries::RawSpectrum) ==
+                spectiary::kRawSpectrumPlotSeriesId &&
+            spectiary::SpectrumSeriesStableId(
+                spectiary::SpectrumPlotSeries::GaussianSmoothing) ==
+                spectiary::kGaussianSmoothingPlotSeriesId &&
+            spectiary::SpectrumSeriesStableId(
+                spectiary::SpectrumPlotSeries::MedianSmoothing) ==
+                spectiary::kMedianSmoothingPlotSeriesId,
         "the spectrum series mapping should preserve stable identities across UI, persistence, and rendering");
 }
 
 void TestAssignmentsRemainStableAcrossFrames()
 {
-    specforge::StablePlotSeriesColorAssignments
+    spectiary::StablePlotSeriesColorAssignments
         assignments;
     const std::size_t raw_slot =
         assignments.SlotFor(
-            specforge::kRawSpectrumPlotSeriesId);
+            spectiary::kRawSpectrumPlotSeriesId);
     const std::size_t gaussian_slot =
         assignments.SlotFor(
-            specforge::kGaussianSmoothingPlotSeriesId);
+            spectiary::kGaussianSmoothingPlotSeriesId);
 
     Require(
         raw_slot == 0 &&
             gaussian_slot == 1 &&
             assignments.SlotFor(
-                specforge::kRawSpectrumPlotSeriesId) ==
+                spectiary::kRawSpectrumPlotSeriesId) ==
                 raw_slot &&
             assignments.SlotFor(
-                specforge::kGaussianSmoothingPlotSeriesId) ==
+                spectiary::kGaussianSmoothingPlotSeriesId) ==
                 gaussian_slot &&
             assignments.size() == 2,
         "stable series identities should retain one cached slot instead of being reassigned per frame");
@@ -146,29 +146,29 @@ void TestAssignmentsRemainStableAcrossFrames()
     Require(
         assignments.size() == 0 &&
             assignments.SlotFor(
-                specforge::kRawSpectrumPlotSeriesId) ==
+                spectiary::kRawSpectrumPlotSeriesId) ==
                 0,
         "clearing an owner scope should restart its stable palette assignment sequence");
 }
 
 void TestAutoPaletteUsesDistinctSlotsBeforeWrapping()
 {
-    const specforge::SemanticPalette& palette =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+    const spectiary::SemanticPalette& palette =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
             ->palette;
-    specforge::StablePlotSeriesColorAssignments
+    spectiary::StablePlotSeriesColorAssignments
         assignments;
     std::vector<ImVec4> resolved;
     resolved.reserve(
-        specforge::kPlotAutoSeriesColorCount + 1);
+        spectiary::kPlotAutoSeriesColorCount + 1);
 
     for (std::size_t index = 0;
-         index < specforge::kPlotAutoSeriesColorCount + 1;
+         index < spectiary::kPlotAutoSeriesColorCount + 1;
          ++index) {
         resolved.push_back(
-            specforge::ResolvePlotSeriesColor(
-                specforge::PlotSeriesColor::Auto(),
+            spectiary::ResolvePlotSeriesColor(
+                spectiary::PlotSeriesColor::Auto(),
                 palette,
                 assignments,
                 "visible-series-" +
@@ -176,11 +176,11 @@ void TestAutoPaletteUsesDistinctSlotsBeforeWrapping()
     }
 
     for (std::size_t left = 0;
-         left < specforge::kPlotAutoSeriesColorCount;
+         left < spectiary::kPlotAutoSeriesColorCount;
          ++left) {
         for (std::size_t right = left + 1;
              right <
-                specforge::kPlotAutoSeriesColorCount;
+                spectiary::kPlotAutoSeriesColorCount;
              ++right) {
             Require(
                 !SameColor(
@@ -198,29 +198,29 @@ void TestAutoPaletteUsesDistinctSlotsBeforeWrapping()
 
 void TestAutoResolutionTracksResolvedTheme()
 {
-    const specforge::SemanticPalette& dark =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+    const spectiary::SemanticPalette& dark =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
             ->palette;
-    const specforge::SemanticPalette& light =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInLightThemeId())
+    const spectiary::SemanticPalette& light =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInLightThemeId())
             ->palette;
-    specforge::StablePlotSeriesColorAssignments
+    spectiary::StablePlotSeriesColorAssignments
         assignments;
 
     const ImVec4 dark_color =
-        specforge::ResolvePlotSeriesColor(
-            specforge::PlotSeriesColor::Auto(),
+        spectiary::ResolvePlotSeriesColor(
+            spectiary::PlotSeriesColor::Auto(),
             dark,
             assignments,
-            specforge::kMedianSmoothingPlotSeriesId);
+            spectiary::kMedianSmoothingPlotSeriesId);
     const ImVec4 light_color =
-        specforge::ResolvePlotSeriesColor(
-            specforge::PlotSeriesColor::Auto(),
+        spectiary::ResolvePlotSeriesColor(
+            spectiary::PlotSeriesColor::Auto(),
             light,
             assignments,
-            specforge::kMedianSmoothingPlotSeriesId);
+            spectiary::kMedianSmoothingPlotSeriesId);
     Require(
         !SameColor(dark_color, light_color) &&
             SameColor(
@@ -249,43 +249,43 @@ void TestAutoResolutionTracksResolvedTheme()
 
 void TestExplicitColorWinsAndReturningToAutoReusesSlot()
 {
-    const specforge::SemanticPalette& dark =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+    const spectiary::SemanticPalette& dark =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
             ->palette;
-    const specforge::SemanticPalette& light =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInLightThemeId())
+    const spectiary::SemanticPalette& light =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInLightThemeId())
             ->palette;
-    const specforge::RgbaColor custom{
+    const spectiary::RgbaColor custom{
         .red = 0.91f,
         .green = 0.13f,
         .blue = 0.47f,
         .alpha = 0.63f,
     };
-    specforge::StablePlotSeriesColorAssignments
+    spectiary::StablePlotSeriesColorAssignments
         assignments;
 
     const ImVec4 explicit_dark =
-        specforge::ResolvePlotSeriesColor(
-            specforge::PlotSeriesColor::ExplicitColor(
+        spectiary::ResolvePlotSeriesColor(
+            spectiary::PlotSeriesColor::ExplicitColor(
                 custom),
             dark,
             assignments,
-            specforge::kRawSpectrumPlotSeriesId);
+            spectiary::kRawSpectrumPlotSeriesId);
     const ImVec4 explicit_light =
-        specforge::ResolvePlotSeriesColor(
-            specforge::PlotSeriesColor::ExplicitColor(
+        spectiary::ResolvePlotSeriesColor(
+            spectiary::PlotSeriesColor::ExplicitColor(
                 custom),
             light,
             assignments,
-            specforge::kRawSpectrumPlotSeriesId);
+            spectiary::kRawSpectrumPlotSeriesId);
     const ImVec4 restored_auto =
-        specforge::ResolvePlotSeriesColor(
-            specforge::PlotSeriesColor::Auto(),
+        spectiary::ResolvePlotSeriesColor(
+            spectiary::PlotSeriesColor::Auto(),
             light,
             assignments,
-            specforge::kRawSpectrumPlotSeriesId);
+            spectiary::kRawSpectrumPlotSeriesId);
 
     const ImVec4 expected_custom(
         custom.red,
@@ -312,12 +312,12 @@ void TestSmoothingEmphasisPreservesExplicitRgba()
         0.65f,
         0.72f);
     const ImVec4 automatic =
-        specforge::ApplyRawSpectrumSmoothingEmphasis(
-            specforge::PlotSeriesColor::Auto(),
+        spectiary::ApplyRawSpectrumSmoothingEmphasis(
+            spectiary::PlotSeriesColor::Auto(),
             resolved);
     const ImVec4 explicit_color =
-        specforge::ApplyRawSpectrumSmoothingEmphasis(
-            specforge::PlotSeriesColor::ExplicitColor(
+        spectiary::ApplyRawSpectrumSmoothingEmphasis(
+            spectiary::PlotSeriesColor::ExplicitColor(
                 {
                     .red = resolved.x,
                     .green = resolved.y,
@@ -339,23 +339,23 @@ void TestSmoothingEmphasisPreservesExplicitRgba()
 
 void TestSpectralLineVisualsShareOneResolvedColor()
 {
-    const specforge::SemanticPalette& dark =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+    const spectiary::SemanticPalette& dark =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
             ->palette;
-    const specforge::SemanticPalette& light =
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInLightThemeId())
+    const spectiary::SemanticPalette& light =
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInLightThemeId())
             ->palette;
-    specforge::SpectralLinePlotMarker automatic;
+    spectiary::SpectralLinePlotMarker automatic;
     automatic.automatic_color_slot = 3;
 
     const auto dark_colors =
-        specforge::ResolveSpectralLineVisualColors(
+        spectiary::ResolveSpectralLineVisualColors(
             automatic,
             dark);
     const auto light_colors =
-        specforge::ResolveSpectralLineVisualColors(
+        spectiary::ResolveSpectralLineVisualColors(
             automatic,
             light);
     Require(
@@ -386,7 +386,7 @@ void TestSpectralLineVisualsShareOneResolvedColor()
 
     const ImVec4 custom(0.11f, 0.22f, 0.33f, 0.44f);
     automatic.color =
-        specforge::PlotSeriesColor::ExplicitColor({
+        spectiary::PlotSeriesColor::ExplicitColor({
             .red = custom.x,
             .green = custom.y,
             .blue = custom.z,
@@ -394,13 +394,13 @@ void TestSpectralLineVisualsShareOneResolvedColor()
         });
     Require(
         SameColor(
-            specforge::ResolveSpectralLineVisualColors(
+            spectiary::ResolveSpectralLineVisualColors(
                 automatic,
                 dark)
                 .marker_and_label,
             custom) &&
             SameColor(
-                specforge::ResolveSpectralLineVisualColors(
+                spectiary::ResolveSpectralLineVisualColors(
                     automatic,
                     light)
                     .marker_and_label,

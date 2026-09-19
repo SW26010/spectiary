@@ -8,7 +8,7 @@
 #include <utility>
 #include <variant>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::int64_t ElapsedNavigationResolutionNanoseconds(
@@ -1997,4 +1997,4 @@ void SourceCollectionActivationTransaction::
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class ImGuiLayoutLoadStatus {
     Missing,
@@ -57,4 +57,4 @@ private:
     std::filesystem::path target_path_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

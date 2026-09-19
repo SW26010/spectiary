@@ -1,4 +1,4 @@
-# SpecForge 技术方向
+# Spectiary 技术方向
 
 ## 原则
 

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] ImVec4 ResolvePlotSeriesColor(
     const PlotSeriesColor& selection,
@@ -19,4 +19,4 @@ namespace specforge {
     StablePlotSeriesColorAssignments& assignments,
     std::string_view stable_series_id);
 
-}  // namespace specforge
+}  // namespace spectiary

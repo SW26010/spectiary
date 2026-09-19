@@ -35,7 +35,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $PSScriptRoot 'build-ninja-msvc-debug.ps1'
 $preset = 'ninja-msvc-debug'
-$targetName = 'specforge_sample_labeling_asdf_mutation_tests'
+$targetName = 'spectiary_sample_labeling_asdf_mutation_tests'
 $executablePath = Join-Path $repoRoot (
     'build\' + $preset + '\' + $targetName + '.exe')
 
@@ -181,7 +181,7 @@ try {
         }
     }
     $manifest = [ordered]@{
-        format_kind = 'specforge.asdf_mutation_corpus_run'
+        format_kind = 'spectiary.asdf_mutation_corpus_run'
         schema_version = 1
         started_at_utc = $startedAt.ToString('o')
         repository = $repoRoot

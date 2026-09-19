@@ -12,12 +12,12 @@
 namespace {
 
 using namespace std::chrono_literals;
-using Scheduler = specforge::RenderWakeScheduler;
-using Action = specforge::RenderWakeAction;
-using FrameOutcome = specforge::RenderFrameOutcome;
-using TickOutcome = specforge::CompositorClockTickOutcome;
+using Scheduler = spectiary::RenderWakeScheduler;
+using Action = spectiary::RenderWakeAction;
+using FrameOutcome = spectiary::RenderFrameOutcome;
+using TickOutcome = spectiary::CompositorClockTickOutcome;
 
-constexpr wchar_t kWindowClassName[] = L"SpecForgeCompositorClockTests";
+constexpr wchar_t kWindowClassName[] = L"SpectiaryCompositorClockTests";
 constexpr UINT kTickMessage = WM_APP + 0x71U;
 std::atomic_int g_enable_calls = 0;
 std::atomic_int g_disable_calls = 0;
@@ -149,16 +149,16 @@ bool WaitForTick(HWND window)
     return false;
 }
 
-specforge::Win32CompositorClock MakeFakeClock()
+spectiary::Win32CompositorClock MakeFakeClock()
 {
-    return specforge::Win32CompositorClock({FakeBoost, FakeWait});
+    return spectiary::Win32CompositorClock({FakeBoost, FakeWait});
 }
 
 void TestBoostPostsCoalescedClockTicksAndReleasesCleanly()
 {
     ResetFakeApi();
     TestWindow window;
-    specforge::Win32CompositorClock clock = MakeFakeClock();
+    spectiary::Win32CompositorClock clock = MakeFakeClock();
 
     Require(clock.Initialize(window.hwnd(), kTickMessage), "injected compositor API should initialize");
     Require(clock.available(), "initialized compositor clock should report available");
@@ -181,7 +181,7 @@ void TestFailedBoostDoesNotStartTicker()
     ResetFakeApi();
     g_fail_enable = true;
     TestWindow window;
-    specforge::Win32CompositorClock clock = MakeFakeClock();
+    spectiary::Win32CompositorClock clock = MakeFakeClock();
 
     Require(clock.Initialize(window.hwnd(), kTickMessage), "fake API should still initialize");
     Require(!clock.SetBoostRequested(true), "failed system boost should fall back without a ticker");
@@ -198,7 +198,7 @@ void TestShutdownReleasesAnOutstandingBoost()
 {
     ResetFakeApi();
     TestWindow window;
-    specforge::Win32CompositorClock clock = MakeFakeClock();
+    spectiary::Win32CompositorClock clock = MakeFakeClock();
 
     Require(clock.Initialize(window.hwnd(), kTickMessage), "fake API should initialize");
     Require(clock.SetBoostRequested(true), "boost should start before shutdown");
@@ -215,7 +215,7 @@ void TestUnexpectedWaitExitWakesUiForFallbackPacing()
 {
     ResetFakeApi();
     TestWindow window;
-    specforge::Win32CompositorClock clock({FakeBoost, FailingWait});
+    spectiary::Win32CompositorClock clock({FakeBoost, FailingWait});
     Scheduler scheduler;
     const Scheduler::TimePoint start{};
     SettleScheduler(scheduler, start);
@@ -254,7 +254,7 @@ void TestUnexpectedWaitExitWakesUiForFallbackPacing()
 void TestInvalidInitializationArgumentsFailClosed()
 {
     ResetFakeApi();
-    specforge::Win32CompositorClock clock = MakeFakeClock();
+    spectiary::Win32CompositorClock clock = MakeFakeClock();
 
     Require(!clock.Initialize(nullptr, kTickMessage), "null tick window should be rejected");
     Require(clock.last_boost_result() == E_INVALIDARG, "invalid arguments should preserve E_INVALIDARG");

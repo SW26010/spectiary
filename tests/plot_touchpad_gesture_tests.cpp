@@ -22,10 +22,10 @@ void RequireNear(double actual, double expected, const std::string& message)
     Require(std::abs(actual - expected) < 1.0e-9, message);
 }
 
-specforge::PlotTouchpadGestureDelta Pan(float x, float y, specforge::PlotGestureAxes axes)
+spectiary::PlotTouchpadGestureDelta Pan(float x, float y, spectiary::PlotGestureAxes axes)
 {
-    specforge::PlotTouchpadGestureDelta gesture;
-    gesture.kind = specforge::PlotTouchpadGestureKind::Pan;
+    spectiary::PlotTouchpadGestureDelta gesture;
+    gesture.kind = spectiary::PlotTouchpadGestureKind::Pan;
     gesture.axes = axes;
     gesture.plot_rect = {100.0f, 200.0f, 500.0f, 400.0f};
     gesture.pan_x = x;
@@ -33,14 +33,14 @@ specforge::PlotTouchpadGestureDelta Pan(float x, float y, specforge::PlotGesture
     return gesture;
 }
 
-specforge::PlotTouchpadGestureDelta Zoom(
+spectiary::PlotTouchpadGestureDelta Zoom(
     double factor,
     float anchor_x,
     float anchor_y,
-    specforge::PlotGestureAxes axes)
+    spectiary::PlotGestureAxes axes)
 {
-    specforge::PlotTouchpadGestureDelta gesture;
-    gesture.kind = specforge::PlotTouchpadGestureKind::Zoom;
+    spectiary::PlotTouchpadGestureDelta gesture;
+    gesture.kind = spectiary::PlotTouchpadGestureKind::Zoom;
     gesture.axes = axes;
     gesture.plot_rect = {100.0f, 200.0f, 500.0f, 400.0f};
     gesture.anchor_x = anchor_x;
@@ -51,7 +51,7 @@ specforge::PlotTouchpadGestureDelta Zoom(
 
 void TestTargetHitTestingUsesAxisZonesBeforePlotBody()
 {
-    specforge::PlotTouchpadTarget target;
+    spectiary::PlotTouchpadTarget target;
     target.plot_rect = {0.0f, 0.0f, 500.0f, 400.0f};
     target.x_axis_rect = {0.0f, 356.0f, 500.0f, 400.0f};
     target.y_axis_rect = {0.0f, 0.0f, 44.0f, 400.0f};
@@ -59,16 +59,16 @@ void TestTargetHitTestingUsesAxisZonesBeforePlotBody()
 
     bool hit = false;
     Require(
-        specforge::HitTestPlotTouchpadTarget(target, 200.0f, 380.0f, &hit) ==
-                specforge::PlotGestureAxes::XOnly &&
+        spectiary::HitTestPlotTouchpadTarget(target, 200.0f, 380.0f, &hit) ==
+                spectiary::PlotGestureAxes::XOnly &&
             hit,
         "bottom edge should select only the x axis");
     Require(
-        specforge::HitTestPlotTouchpadTarget(target, 20.0f, 200.0f, &hit) ==
-                specforge::PlotGestureAxes::YOnly &&
+        spectiary::HitTestPlotTouchpadTarget(target, 20.0f, 200.0f, &hit) ==
+                spectiary::PlotGestureAxes::YOnly &&
             hit,
         "left edge should select only the y axis");
-    (void)specforge::HitTestPlotTouchpadTarget(
+    (void)spectiary::HitTestPlotTouchpadTarget(
         target,
         14.0f,
         386.0f,
@@ -77,21 +77,21 @@ void TestTargetHitTestingUsesAxisZonesBeforePlotBody()
         !hit,
         "the Keep View exclusion should reject touchpad contact before axis hit testing");
     Require(
-        specforge::HitTestPlotTouchpadTarget(target, 200.0f, 200.0f, &hit) ==
-                specforge::PlotGestureAxes::Both &&
+        spectiary::HitTestPlotTouchpadTarget(target, 200.0f, 200.0f, &hit) ==
+                spectiary::PlotGestureAxes::Both &&
             hit,
         "plot body should select both axes");
-    (void)specforge::HitTestPlotTouchpadTarget(target, 700.0f, 200.0f, &hit);
+    (void)spectiary::HitTestPlotTouchpadTarget(target, 700.0f, 200.0f, &hit);
     Require(!hit, "outside point should not capture a touchpad gesture");
 }
 
 void TestPanMovesBothAxesWithDirectManipulationContent()
 {
-    specforge::PlotViewLimits limits{0.0, 100.0, -10.0, 10.0};
+    spectiary::PlotViewLimits limits{0.0, 100.0, -10.0, 10.0};
     Require(
-        specforge::ApplyPlotTouchpadGesture(
+        spectiary::ApplyPlotTouchpadGesture(
             limits,
-            Pan(40.0f, 20.0f, specforge::PlotGestureAxes::Both)),
+            Pan(40.0f, 20.0f, spectiary::PlotGestureAxes::Both)),
         "two-axis pan should change limits");
 
     RequireNear(limits.x_min, -10.0, "rightward content motion should reveal lower x values");
@@ -102,28 +102,28 @@ void TestPanMovesBothAxesWithDirectManipulationContent()
 
 void TestAxisConstrainedPanLeavesOtherAxisUnchanged()
 {
-    specforge::PlotViewLimits x_limits{0.0, 100.0, -10.0, 10.0};
-    (void)specforge::ApplyPlotTouchpadGesture(
+    spectiary::PlotViewLimits x_limits{0.0, 100.0, -10.0, 10.0};
+    (void)spectiary::ApplyPlotTouchpadGesture(
         x_limits,
-        Pan(40.0f, 20.0f, specforge::PlotGestureAxes::XOnly));
+        Pan(40.0f, 20.0f, spectiary::PlotGestureAxes::XOnly));
     RequireNear(x_limits.x_min, -10.0, "x-only pan should update x");
     RequireNear(x_limits.y_min, -10.0, "x-only pan should preserve y");
 
-    specforge::PlotViewLimits y_limits{0.0, 100.0, -10.0, 10.0};
-    (void)specforge::ApplyPlotTouchpadGesture(
+    spectiary::PlotViewLimits y_limits{0.0, 100.0, -10.0, 10.0};
+    (void)spectiary::ApplyPlotTouchpadGesture(
         y_limits,
-        Pan(40.0f, 20.0f, specforge::PlotGestureAxes::YOnly));
+        Pan(40.0f, 20.0f, spectiary::PlotGestureAxes::YOnly));
     RequireNear(y_limits.x_min, 0.0, "y-only pan should preserve x");
     RequireNear(y_limits.y_min, -8.0, "y-only pan should update y");
 }
 
 void TestPinchZoomKeepsGestureAnchorFixed()
 {
-    specforge::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
+    spectiary::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
     Require(
-        specforge::ApplyPlotTouchpadGesture(
+        spectiary::ApplyPlotTouchpadGesture(
             limits,
-            Zoom(2.0, 200.0f, 250.0f, specforge::PlotGestureAxes::Both)),
+            Zoom(2.0, 200.0f, 250.0f, spectiary::PlotGestureAxes::Both)),
         "pinch zoom should change limits");
 
     RequireNear(limits.x_min, 12.5, "x zoom should remain anchored at one quarter width");
@@ -134,36 +134,36 @@ void TestPinchZoomKeepsGestureAnchorFixed()
 
 void TestGestureBatchPreservesEventOrder()
 {
-    specforge::PlotTouchpadGestureBatch batch;
-    batch.deltas.push_back(Pan(40.0f, 0.0f, specforge::PlotGestureAxes::Both));
-    batch.deltas.push_back(Zoom(2.0, 300.0f, 300.0f, specforge::PlotGestureAxes::Both));
+    spectiary::PlotTouchpadGestureBatch batch;
+    batch.deltas.push_back(Pan(40.0f, 0.0f, spectiary::PlotGestureAxes::Both));
+    batch.deltas.push_back(Zoom(2.0, 300.0f, 300.0f, spectiary::PlotGestureAxes::Both));
 
-    specforge::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
-    Require(specforge::ApplyPlotTouchpadGestures(limits, batch), "gesture batch should change limits");
+    spectiary::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
+    Require(spectiary::ApplyPlotTouchpadGestures(limits, batch), "gesture batch should change limits");
     RequireNear(limits.x_min, 15.0, "zoom should apply after pan using the updated range");
     RequireNear(limits.x_max, 65.0, "ordered batch should preserve final x span");
 }
 
 void TestInvalidGestureIsIgnored()
 {
-    specforge::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
-    specforge::PlotTouchpadGestureDelta gesture =
-        Zoom(0.0, 300.0f, 300.0f, specforge::PlotGestureAxes::Both);
-    Require(!specforge::ApplyPlotTouchpadGesture(limits, gesture), "zero zoom factor should be ignored");
+    spectiary::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
+    spectiary::PlotTouchpadGestureDelta gesture =
+        Zoom(0.0, 300.0f, 300.0f, spectiary::PlotGestureAxes::Both);
+    Require(!spectiary::ApplyPlotTouchpadGesture(limits, gesture), "zero zoom factor should be ignored");
     RequireNear(limits.x_min, 0.0, "invalid gesture should preserve limits");
     RequireNear(limits.x_max, 100.0, "invalid gesture should preserve limits");
 }
 
 void TestOverflowingGestureIsTransactional()
 {
-    specforge::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
-    const specforge::PlotTouchpadGestureDelta gesture = Zoom(
+    spectiary::PlotViewLimits limits{0.0, 100.0, 0.0, 20.0};
+    const spectiary::PlotTouchpadGestureDelta gesture = Zoom(
         std::numeric_limits<double>::min(),
         300.0f,
         300.0f,
-        specforge::PlotGestureAxes::Both);
+        spectiary::PlotGestureAxes::Both);
     Require(
-        !specforge::ApplyPlotTouchpadGesture(limits, gesture),
+        !spectiary::ApplyPlotTouchpadGesture(limits, gesture),
         "overflowing zoom should be rejected");
     RequireNear(limits.x_min, 0.0, "rejected zoom should preserve x minimum");
     RequireNear(limits.x_max, 100.0, "rejected zoom should preserve x maximum");
@@ -174,16 +174,16 @@ void TestOverflowingGestureIsTransactional()
 void TestPlotPanActivityStartsOnPlotAndPersistsUntilRelease()
 {
     Require(
-        !specforge::IsPlotPanDragActive(false, false, true, true),
+        !spectiary::IsPlotPanDragActive(false, false, true, true),
         "dragging outside the plot should not request latency-sensitive refresh");
     Require(
-        specforge::IsPlotPanDragActive(false, true, true, true),
+        spectiary::IsPlotPanDragActive(false, true, true, true),
         "a left drag over the plot should start latency-sensitive refresh");
     Require(
-        specforge::IsPlotPanDragActive(true, false, true, false),
+        spectiary::IsPlotPanDragActive(true, false, true, false),
         "an active plot drag should remain active after leaving the plot");
     Require(
-        !specforge::IsPlotPanDragActive(true, true, false, false),
+        !spectiary::IsPlotPanDragActive(true, true, false, false),
         "button release should end latency-sensitive refresh");
 }
 

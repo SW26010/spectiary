@@ -19,7 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleWorkflowPanelUiTestAccess;
 struct ShellUiTestAccess;
@@ -206,4 +206,4 @@ private:
             SampleLabelingOutputArtifactFormat::None;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

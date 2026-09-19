@@ -2,7 +2,7 @@
 
 #include "domain/sample_labeling_document.h"
 
-namespace specforge::diagnostics {
+namespace spectiary::diagnostics {
 
 // Opt-in exhaustive diagnostics for test/hardening tools. Ordinary production
 // input validation must use the bounded fail-fast entry point. Both entry
@@ -10,4 +10,4 @@ namespace specforge::diagnostics {
 [[nodiscard]] SampleLabelingDocumentValidationResult
 ValidateSampleLabelingDocument(const SampleLabelingDocument& document);
 
-}  // namespace specforge::diagnostics
+}  // namespace spectiary::diagnostics

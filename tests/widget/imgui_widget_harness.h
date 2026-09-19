@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge::test {
+namespace spectiary::test {
 
 // Frame-local observations, never a manually maintained production rectangle map.
 struct Widget {
@@ -59,4 +59,4 @@ private:
     FrameMode mode_;
     int observed_frame_ = -1;
 };
-} // namespace specforge::test
+} // namespace spectiary::test

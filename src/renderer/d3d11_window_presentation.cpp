@@ -3,7 +3,7 @@
 
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 const char* D3D11PresentationBackendName(
     D3D11PresentationBackend backend) noexcept
@@ -446,4 +446,4 @@ HRESULT D3D11WindowPresentation::RecordFailure(
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

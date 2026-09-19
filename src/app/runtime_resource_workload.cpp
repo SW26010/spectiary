@@ -16,13 +16,13 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::string_view kConfigurationFormatKind =
-    "specforge_runtime_resource_workload";
+    "spectiary_runtime_resource_workload";
 constexpr std::string_view kStatusFormatKind =
-    "specforge_runtime_resource_workload_status";
+    "spectiary_runtime_resource_workload_status";
 constexpr int kSchemaVersion = 1;
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -367,16 +367,16 @@ LoadRuntimeResourceWorkloadConfigurationFromEnvironment()
 {
     const std::optional<std::filesystem::path> config_path =
         EnvironmentPath(
-            L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD");
+            L"SPECTIARY_RUNTIME_RESOURCE_WORKLOAD");
     if (!config_path) {
         return {};
     }
     if (!EnvironmentPath(
-            L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR")) {
+            L"SPECTIARY_RUNTIME_RESOURCE_STATE_DIR")) {
         return {
             .configuration = std::nullopt,
             .error_message =
-                "SPECFORGE_RUNTIME_RESOURCE_STATE_DIR is required when the runtime resource workload is enabled.",
+                "SPECTIARY_RUNTIME_RESOURCE_STATE_DIR is required when the runtime resource workload is enabled.",
         };
     }
     return LoadRuntimeResourceWorkloadConfiguration(
@@ -818,7 +818,7 @@ void RuntimeResourceWorkload::RecordLocalStateFlushFailure(
     std::string message)
 {
     const std::string diagnostic =
-        "SpecForge local state flush failure: " +
+        "Spectiary local state flush failure: " +
         message + "\n";
     OutputDebugStringA(diagnostic.c_str());
 
@@ -1351,4 +1351,4 @@ void RuntimeResourceWorkload::RequestClose(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

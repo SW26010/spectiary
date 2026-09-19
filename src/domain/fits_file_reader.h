@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 
 constexpr std::uintmax_t kMaxSynchronousFitsFileBytes =
     64ULL * 1024ULL * 1024ULL;
@@ -126,4 +126,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

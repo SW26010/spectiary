@@ -44,9 +44,9 @@ void TestSafeStemRules()
 
     for (const FilenameCase& test : cases) {
         Require(
-            specforge::SuggestedSampleLabelingFilename(
+            spectiary::SuggestedSampleLabelingFilename(
                 test.task_name,
-                specforge::SampleLabelingFilePurpose::CanonicalOutput) ==
+                spectiary::SampleLabelingFilePurpose::CanonicalOutput) ==
                 test.expected,
             "safe filename stem rule should produce the expected ASDF name");
     }
@@ -58,16 +58,16 @@ void TestControlCharactersAndInvalidUtf8AreSafe()
         std::string{"a\x01", 2} +
         std::string{"\xc2\x85", 2} + "b";
     Require(
-        specforge::SuggestedSampleLabelingFilename(
+        spectiary::SuggestedSampleLabelingFilename(
             controls,
-            specforge::SampleLabelingFilePurpose::CanonicalOutput) ==
+            spectiary::SampleLabelingFilePurpose::CanonicalOutput) ==
             "a__b.asdf",
         "ASCII and Unicode control characters should be replaced");
 
     Require(
-        specforge::SuggestedSampleLabelingFilename(
+        spectiary::SuggestedSampleLabelingFilename(
             std::string_view{"\xc0\xaf", 2},
-            specforge::SampleLabelingFilePurpose::CanonicalOutput) ==
+            spectiary::SampleLabelingFilePurpose::CanonicalOutput) ==
             "labeling-task.asdf",
         "invalid UTF-8 should fall back instead of entering the platform dialog");
 }
@@ -75,24 +75,24 @@ void TestControlCharactersAndInvalidUtf8AreSafe()
 void TestPurposeExtensions()
 {
     struct PurposeCase {
-        specforge::SampleLabelingFilePurpose purpose;
+        spectiary::SampleLabelingFilePurpose purpose;
         std::string_view expected;
     };
     constexpr std::array cases = {
         PurposeCase{
-            specforge::SampleLabelingFilePurpose::CanonicalOutput,
+            spectiary::SampleLabelingFilePurpose::CanonicalOutput,
             "Task.asdf"},
         PurposeCase{
-            specforge::SampleLabelingFilePurpose::NpyExport,
+            spectiary::SampleLabelingFilePurpose::NpyExport,
             "Task.npy"},
         PurposeCase{
-            specforge::SampleLabelingFilePurpose::CsvExport,
+            spectiary::SampleLabelingFilePurpose::CsvExport,
             "Task.csv"},
     };
 
     for (const PurposeCase& test : cases) {
         Require(
-            specforge::SuggestedSampleLabelingFilename(
+            spectiary::SuggestedSampleLabelingFilename(
                 "Task", test.purpose) == test.expected,
             "file purpose should select exactly one expected extension");
     }

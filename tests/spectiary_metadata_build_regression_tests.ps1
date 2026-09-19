@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Configuration,
 
-    [string]$BuildTarget = 'specforge_metadata',
+    [string]$BuildTarget = 'spectiary_metadata',
 
     [string]$BuildWrapper = '',
 
@@ -268,7 +268,7 @@ try {
         throw 'No-op build refreshed the metadata completion timestamp.'
     }
 
-    Write-Host 'SpecForge repeated/no-op metadata build regression passed.'
+    Write-Host 'Spectiary repeated/no-op metadata build regression passed.'
 }
 finally {
     # Leave the build directory with the fresh pair produced by the real link,

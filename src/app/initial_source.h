@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 class ShellUi;
 
@@ -11,4 +11,4 @@ void OpenInitialSource(
     ShellUi& shell,
     const std::optional<std::filesystem::path>& initial_source);
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -4,7 +4,7 @@
 #include <thread>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr wchar_t kDirectCompositionLibrary[] = L"dcomp.dll";
@@ -287,4 +287,4 @@ std::uint64_t Win32CompositorClock::tick_count() const noexcept
     return impl_->tick_count.load(std::memory_order_relaxed);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

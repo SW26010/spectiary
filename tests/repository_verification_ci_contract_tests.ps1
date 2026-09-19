@@ -175,7 +175,7 @@ $asdfCMakeText = Get-Content -Raw -LiteralPath (
     (Resolve-Path -LiteralPath $AsdfCMakeLists).Path)
 
 Assert-True `
-    -Condition ($workflowText.Contains('name: SpecForge repository verification')) `
+    -Condition ($workflowText.Contains('name: Spectiary repository verification')) `
     -Message 'Repository verification workflow must keep its explicit owner name.'
 Assert-ManualOnlyTrigger `
     -Text $workflowText `
@@ -269,7 +269,7 @@ Assert-True `
     -Condition (
         $coreToolchain.Contains('VCPKG_ROOT=') -and
         $coreToolchain.Contains('VCPKG_DEFAULT_BINARY_CACHE=') -and
-        $coreToolchain.Contains('SPECFORGE_VCVARS_PATH=')
+        $coreToolchain.Contains('SPECTIARY_VCVARS_PATH=')
     ) `
     -Message 'Core verification must resolve hosted vcpkg and MSVC explicitly.'
 Assert-True `
@@ -293,7 +293,7 @@ Assert-True `
     -Condition (
         $benchmarkBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and
         $benchmarkBuild.Contains(
-            '-Target specforge_asdf_labeling_production_benchmark') -and
+            '-Target spectiary_asdf_labeling_production_benchmark') -and
         $benchmarkBuild.Contains('-TimeoutSec 600') -and
         $benchmarkBuild.Contains('ASDF production benchmark build failed')
     ) `
@@ -302,7 +302,7 @@ Assert-True `
     -Condition (
         $debugTests.Contains('ctest --preset fast') -and
         $debugTests.Contains('ctest --preset extended') -and
-        $debugTests.Contains('SPECFORGE_ASDF_MUTATION_ARTIFACT_DIRECTORY') -and
+        $debugTests.Contains('SPECTIARY_ASDF_MUTATION_ARTIFACT_DIRECTORY') -and
         $debugTests.Contains('asdf-mutation-failure') -and
         $debugTests.Contains('fast.log') -and
         $debugTests.Contains('extended.log') -and
@@ -411,7 +411,7 @@ Assert-FailClosedJob `
 Assert-True `
     -Condition (
         $asdfToolchain.Contains('VCPKG_ROOT=') -and
-        $asdfToolchain.Contains('SPECFORGE_VCVARS_PATH=') -and
+        $asdfToolchain.Contains('SPECTIARY_VCVARS_PATH=') -and
         $asdfPython.Contains('actions/setup-python@v6') -and
         $asdfPython.Contains("python-version: '3.12'") -and
         $asdfInstall.Contains('tools\asdf_labeling_spike\requirements.txt')
@@ -434,7 +434,7 @@ Assert-True `
         $asdfBuild.Contains('scripts\build-ninja-msvc-debug.ps1') -and
         $asdfBuild.Contains('-Preset ninja-msvc-debug-asdf-labeling-spike') -and
         $asdfBuild.Contains(
-            '-Target specforge_asdf_labeling_interoperability_targets') -and
+            '-Target spectiary_asdf_labeling_interoperability_targets') -and
         $asdfBuild.Contains('-TimeoutSec 900') -and
         [regex]::IsMatch(
             $asdfBuild,
@@ -475,8 +475,8 @@ Assert-True `
     -Condition (
         $rootCMakeText -match
             '(?ms)add_dependencies\s*\(\s*' +
-            'specforge_asdf_labeling_interoperability_targets\s+' +
-            'specforge_sample_labeling_asdf_codec_tests\s*\)'
+            'spectiary_asdf_labeling_interoperability_targets\s+' +
+            'spectiary_sample_labeling_asdf_codec_tests\s*\)'
     ) `
     -Message (
         'ASDF interoperability target closure must include the production codec tests.'
@@ -489,9 +489,9 @@ Assert-True `
     ) `
     -Message 'ASDF specialized owner requires three pinned-oracle CTests.'
 $expectedAsdfOracleTests = @(
-    'specforge_asdf_labeling_spike_native_fixture_test',
-    'specforge_asdf_labeling_interoperability',
-    'specforge_sample_labeling_asdf_checksum_interoperability'
+    'spectiary_asdf_labeling_spike_native_fixture_test',
+    'spectiary_asdf_labeling_interoperability',
+    'spectiary_sample_labeling_asdf_checksum_interoperability'
 )
 foreach ($testName in $expectedAsdfOracleTests) {
     $propertyMatch = [regex]::Match(

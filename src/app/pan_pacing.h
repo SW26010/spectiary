@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class PanPacingMode {
     Display,
@@ -26,4 +26,4 @@ struct PanPacingConfiguration {
     bool left_mouse_dragging,
     bool uncapped_pan_active) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

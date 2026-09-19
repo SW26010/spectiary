@@ -34,10 +34,10 @@ void Require(bool condition, std::string_view message)
 }
 
 void RequireCompleteLocalUserStatePathMapping(
-    const specforge::RuntimePaths& paths,
+    const spectiary::RuntimePaths& paths,
     const std::filesystem::path& root)
 {
-    using namespace specforge::local_user_state_paths;
+    using namespace spectiary::local_user_state_paths;
     Require(paths.spectrum_plot_preferences_path ==
                 paths.application_data_root / "config" / kSpectrumPlotPreferences &&
             paths.spectrum_viewport_state_path ==
@@ -144,14 +144,14 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
 
 void TestDefaultLocalUserStatePathUsesStateRoleRoot()
 {
-    const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json", specforge::DefaultRuntimePaths());
-    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
+    const std::filesystem::path path = spectiary::DefaultLocalUserStatePath("nested/state.json", spectiary::DefaultRuntimePaths());
+    const spectiary::RuntimePaths runtime_paths = spectiary::DefaultRuntimePaths();
     Require(path.filename() == "state.json", "default local state path should keep the requested filename");
     Require(path.parent_path().filename() == "nested", "default local state path should keep relative subdirectories");
     Require(
         path == runtime_paths.state_root / "nested" / "state.json",
         "default local state path should live under the selected storage root");
-    if (runtime_paths.storage_profile == specforge::StorageProfile::Portable) {
+    if (runtime_paths.storage_profile == spectiary::StorageProfile::Portable) {
         Require(
             path.parent_path().parent_path().filename() == "state",
             "portable local state path should live under the package state root");
@@ -165,19 +165,19 @@ void TestDefaultLocalUserStatePathUsesStateRoleRoot()
 void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
 {
     const std::filesystem::path package_root =
-        std::filesystem::temp_directory_path() / "specforge_runtime_path_package";
+        std::filesystem::temp_directory_path() / "spectiary_runtime_path_package";
     const std::filesystem::path installed_root =
-        std::filesystem::temp_directory_path() / "specforge_runtime_path_installed";
+        std::filesystem::temp_directory_path() / "spectiary_runtime_path_installed";
 
-    specforge::RuntimePathInputs inputs;
+    spectiary::RuntimePathInputs inputs;
     inputs.executable_path = package_root / "arbitrarily-renamed-program.exe";
     inputs.local_app_data_user_state_root = installed_root;
 
-    const specforge::RuntimePaths portable_paths =
-        specforge::RuntimePathsForDeployment(
+    const spectiary::RuntimePaths portable_paths =
+        spectiary::RuntimePathsForDeployment(
             {
-                .distribution = specforge::Distribution::Portable,
-                .storage_profile = specforge::StorageProfile::Portable,
+                .distribution = spectiary::Distribution::Portable,
+                .storage_profile = spectiary::StorageProfile::Portable,
             },
             inputs);
     Require(portable_paths.package_root == package_root, "portable package root should be the executable directory");
@@ -190,12 +190,12 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         portable_paths,
         package_root);
 
-    const specforge::RuntimePaths installed_paths =
-        specforge::RuntimePathsForDeployment(
+    const spectiary::RuntimePaths installed_paths =
+        spectiary::RuntimePathsForDeployment(
             {
-                .distribution = specforge::Distribution::Installer,
+                .distribution = spectiary::Distribution::Installer,
                 .storage_profile =
-                    specforge::StorageProfile::LocalAppData,
+                    spectiary::StorageProfile::LocalAppData,
             },
             inputs);
     Require(installed_paths.package_root == package_root, "installed package root should still be the executable directory");
@@ -211,16 +211,16 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         portable_paths.application_data_root != installed_paths.application_data_root,
         "portable and installed state roots should stay distinct");
 
-    const specforge::RuntimePaths winget_paths =
-        specforge::RuntimePathsForDeployment(
+    const spectiary::RuntimePaths winget_paths =
+        spectiary::RuntimePathsForDeployment(
             {
-                .distribution = specforge::Distribution::WinGet,
+                .distribution = spectiary::Distribution::WinGet,
                 .storage_profile =
-                    specforge::StorageProfile::LocalAppData,
+                    spectiary::StorageProfile::LocalAppData,
             },
             inputs);
     Require(
-        winget_paths.distribution == specforge::Distribution::WinGet,
+        winget_paths.distribution == spectiary::Distribution::WinGet,
         "WinGet identity should be retained for About");
     Require(
         winget_paths.application_data_root ==
@@ -231,7 +231,7 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         inputs.executable_path = invalid_path;
         bool rejected = false;
         try {
-            (void)specforge::RuntimePathsForDeployment({}, inputs);
+            (void)spectiary::RuntimePathsForDeployment({}, inputs);
         } catch (const std::invalid_argument&) {
             rejected = true;
         }
@@ -241,16 +241,16 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_atomic_file_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_atomic_file_tests";
     const std::filesystem::path path = root / "nested" / "state.txt";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::AtomicFileWriteOptions options;
+    spectiary::AtomicFileWriteOptions options;
     options.target_description = "test state file";
     std::string error;
     Require(
-        specforge::WriteFileAtomically(
+        spectiary::WriteFileAtomically(
             path,
             options,
             [](std::ostream& stream, std::string&) {
@@ -262,7 +262,7 @@ void TestAtomicWriteCreatesParentAndReplacesExistingFile()
     Require(ReadTextFile(path) == "old", "initial atomic write should create the target file");
 
     Require(
-        specforge::WriteFileAtomically(
+        spectiary::WriteFileAtomically(
             path,
             options,
             [](std::ostream& stream, std::string&) {
@@ -279,16 +279,16 @@ void TestAtomicWriteCreatesParentAndReplacesExistingFile()
 
 void TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_atomic_file_failure_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_atomic_file_failure_tests";
     const std::filesystem::path path = root / "state.txt";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::AtomicFileWriteOptions options;
+    spectiary::AtomicFileWriteOptions options;
     options.target_description = "test state file";
     std::string error;
     Require(
-        specforge::WriteFileAtomically(
+        spectiary::WriteFileAtomically(
             path,
             options,
             [](std::ostream& stream, std::string&) {
@@ -299,7 +299,7 @@ void TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure()
         error.empty() ? "initial atomic write failed" : error);
 
     Require(
-        !specforge::WriteFileAtomically(
+        !spectiary::WriteFileAtomically(
             path,
             options,
             [](std::ostream& stream, std::string& writer_error) {
@@ -322,14 +322,14 @@ void TestAtomicReplaceRetriesTransientSharingViolation()
     const std::filesystem::path target = "target";
     std::size_t operation_count = 0;
     std::vector<std::chrono::milliseconds> waits;
-    specforge::AtomicFileReplaceRetryPolicy retry_policy;
+    spectiary::AtomicFileReplaceRetryPolicy retry_policy;
     retry_policy.maximum_attempts = 5;
     retry_policy.initial_retry_delay = 5ms;
     retry_policy.maximum_retry_delay = 40ms;
 
     std::string error;
     Require(
-        specforge::ReplaceFileAtomicallyWithOperation(
+        spectiary::ReplaceFileAtomicallyWithOperation(
             temporary,
             target,
             retry_policy,
@@ -369,7 +369,7 @@ void TestAtomicReplaceDoesNotRetryByDefault()
     std::size_t wait_count = 0;
     std::string error;
     Require(
-        !specforge::ReplaceFileAtomicallyWithOperation(
+        !spectiary::ReplaceFileAtomicallyWithOperation(
             "temporary",
             "target",
             {},
@@ -400,56 +400,56 @@ void TestJsonSyntaxAndSchemaBoundaries()
              "\"\\uZZZZ\"", "\"\\x20\"", "\"\n\"",
              "{\"a\":1,\"a\":2}", "{\"a\":1,\"\\u0061\":2}",
              "{\"a\":[{\"b\":0,\"b\":1}]}"}) {
-        Require(!specforge::ParseJson(malformed, error) && !error.empty(),
+        Require(!spectiary::ParseJson(malformed, error) && !error.empty(),
                 "malformed JSON and duplicate decoded keys must fail");
     }
-    Require(!specforge::ParseJson(std::string("\"\xC0\xAF\""), error),
+    Require(!spectiary::ParseJson(std::string("\"\xC0\xAF\""), error),
             "invalid UTF-8 must fail");
-    const auto unicode = specforge::ParseJson(R"({"text":"\u4e2d\uD83D\uDE00\u0000"})", error);
+    const auto unicode = spectiary::ParseJson(R"({"text":"\u4e2d\uD83D\uDE00\u0000"})", error);
     Require(unicode && error.empty() &&
-            specforge::ReadJsonStringMember(*unicode, "text") == std::string("\xE4\xB8\xAD\xF0\x9F\x98\x80\0", 8),
+            spectiary::ReadJsonStringMember(*unicode, "text") == std::string("\xE4\xB8\xAD\xF0\x9F\x98\x80\0", 8),
             "Unicode escapes and embedded NUL must decode");
-    Require(specforge::ParseJson(R"([{"a":1},{"a":2,"child":{"a":3}}])", error).has_value(),
+    Require(spectiary::ParseJson(R"([{"a":1},{"a":2,"child":{"a":3}}])", error).has_value(),
             "keys in distinct objects must not conflict");
 
     for (const std::string_view number : {"1.5", "1e2", "1.0", "true", "\"1\"",
              "18446744073709551616", "-9223372036854775809"}) {
-        const auto value = specforge::ParseJson("{\"n\":" + std::string(number) + "}", error);
+        const auto value = spectiary::ParseJson("{\"n\":" + std::string(number) + "}", error);
         Require(value.has_value(), "ordinary JSON syntax must parse independently of integer schemas");
-        Require(!specforge::ReadJsonIntMember(*value, "n") && !specforge::ReadJsonSizeMember(*value, "n"),
+        Require(!spectiary::ReadJsonIntMember(*value, "n") && !spectiary::ReadJsonSizeMember(*value, "n"),
                 "non-integer storage and overflow must not convert to schema integers");
     }
-    const auto bounds = specforge::ParseJson(
+    const auto bounds = spectiary::ParseJson(
         R"({"min":-2147483648,"max":2147483647,"over":2147483648,"under":-2147483649,"huge":18446744073709551615,"negative":-1})", error);
-    Require(bounds && specforge::ReadJsonIntMember(*bounds, "min") == (std::numeric_limits<int>::min)() &&
-            specforge::ReadJsonIntMember(*bounds, "max") == (std::numeric_limits<int>::max)() &&
-            !specforge::ReadJsonIntMember(*bounds, "over") && !specforge::ReadJsonIntMember(*bounds, "under") &&
-            !specforge::ReadJsonIntMember(*bounds, "huge") && !specforge::ReadJsonSizeMember(*bounds, "negative") &&
-            !specforge::JsonIsInt64(bounds->at("huge")), "integer boundary checks must fail closed");
-    const auto signed_bounds = specforge::ParseJson("[-9223372036854775808,9223372036854775807]", error);
-    Require(signed_bounds && specforge::JsonIsInt64(signed_bounds->at(0)) &&
-            specforge::JsonIsInt64(signed_bounds->at(1)), "signed int64 endpoints must remain valid");
-    Require(specforge::ParseJson(unicode->dump(), error) == unicode,
+    Require(bounds && spectiary::ReadJsonIntMember(*bounds, "min") == (std::numeric_limits<int>::min)() &&
+            spectiary::ReadJsonIntMember(*bounds, "max") == (std::numeric_limits<int>::max)() &&
+            !spectiary::ReadJsonIntMember(*bounds, "over") && !spectiary::ReadJsonIntMember(*bounds, "under") &&
+            !spectiary::ReadJsonIntMember(*bounds, "huge") && !spectiary::ReadJsonSizeMember(*bounds, "negative") &&
+            !spectiary::JsonIsInt64(bounds->at("huge")), "integer boundary checks must fail closed");
+    const auto signed_bounds = spectiary::ParseJson("[-9223372036854775808,9223372036854775807]", error);
+    Require(signed_bounds && spectiary::JsonIsInt64(signed_bounds->at(0)) &&
+            spectiary::JsonIsInt64(signed_bounds->at(1)), "signed int64 endpoints must remain valid");
+    Require(spectiary::ParseJson(unicode->dump(), error) == unicode,
             "library serialization must preserve semantic values");
 }
 
 void TestJsonResourceBoundsAndCancellation()
 {
     std::string error;
-    const std::string at_depth = std::string(specforge::kMaxJsonNestingDepth, '[') + "0" +
-        std::string(specforge::kMaxJsonNestingDepth, ']');
-    Require(specforge::ParseJson(at_depth, error).has_value(), "maximum supported depth must parse");
-    Require(!specforge::ParseJson("[" + at_depth + "]", error), "excess depth must fail");
-    const std::string too_large(specforge::kMaxJsonInputBytes + 1, ' ');
-    Require(!specforge::ParseJson(too_large, error), "oversized input must fail before parsing");
+    const std::string at_depth = std::string(spectiary::kMaxJsonNestingDepth, '[') + "0" +
+        std::string(spectiary::kMaxJsonNestingDepth, ']');
+    Require(spectiary::ParseJson(at_depth, error).has_value(), "maximum supported depth must parse");
+    Require(!spectiary::ParseJson("[" + at_depth + "]", error), "excess depth must fail");
+    const std::string too_large(spectiary::kMaxJsonInputBytes + 1, ' ');
+    Require(!spectiary::ParseJson(too_large, error), "oversized input must fail before parsing");
     std::istringstream oversized_stream(too_large);
     std::string contents;
-    Require(!specforge::ReadTextStreamCancelable(oversized_stream, contents) && contents.empty(),
+    Require(!spectiary::ReadTextStreamCancelable(oversized_stream, contents) && contents.empty(),
             "stream reads must enforce the byte limit");
     std::string nodes = "[";
-    for (std::size_t i = 0; i < specforge::kMaxJsonNodes; ++i) nodes += "0,";
+    for (std::size_t i = 0; i < spectiary::kMaxJsonNodes; ++i) nodes += "0,";
     nodes.back() = ']';
-    Require(!specforge::ParseJson(nodes, error) && error.find("node count") != std::string::npos,
+    Require(!spectiary::ParseJson(nodes, error) && error.find("node count") != std::string::npos,
             "shallow node abuse must be bounded");
     struct Canceled {};
     for (const std::string& input : {
@@ -459,7 +459,7 @@ void TestJsonResourceBoundsAndCancellation()
         int checkpoints = 0;
         bool canceled = false;
         try {
-            (void)specforge::ParseJson(input, error, [&] {
+            (void)spectiary::ParseJson(input, error, [&] {
                 if (++checkpoints == 3) throw Canceled{};
             });
         } catch (const Canceled&) { canceled = true; }
@@ -469,7 +469,7 @@ void TestJsonResourceBoundsAndCancellation()
     bool canceled = false;
     std::istringstream stream(std::string(200000, ' '));
     try {
-        (void)specforge::ReadTextStreamCancelable(stream, contents, [&] {
+        (void)spectiary::ReadTextStreamCancelable(stream, contents, [&] {
             if (++reads == 2) throw Canceled{};
         });
     } catch (const Canceled&) { canceled = true; }
@@ -478,7 +478,7 @@ void TestJsonResourceBoundsAndCancellation()
 
 void TestVersionedJsonCacheShellRoundTripsDocument()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_json_cache_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_json_cache_tests";
     const std::filesystem::path path = root / "state.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
@@ -498,7 +498,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
              })},
         });
     Require(
-        specforge::WriteVersionedJsonCacheDocument(
+        spectiary::WriteVersionedJsonCacheDocument(
             path,
             "spectiary.test.cache",
             2,
@@ -517,7 +517,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
             "object members should be sorted");
 
     Require(
-        specforge::WriteVersionedJsonCacheDocument(
+        spectiary::WriteVersionedJsonCacheDocument(
             path,
             "spectiary.test.cache",
             2,
@@ -527,19 +527,19 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
             ReadTextFile(path) == expected,
         "repeated structured writes should be byte-stable");
 
-    const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {2}, "test cache");
+    const spectiary::VersionedJsonCacheLoadResult loaded =
+        spectiary::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {2}, "test cache");
     Require(loaded.warning.empty(), loaded.warning);
     Require(loaded.document.has_value(), "versioned cache should load");
     Require(loaded.document->schema_version == 2, "versioned cache should report the parsed schema");
-    const nlohmann::json* items = specforge::JsonObjectMember(loaded.document->root, "items");
+    const nlohmann::json* items = spectiary::JsonObjectMember(loaded.document->root, "items");
     Require(items != nullptr && items->type() == nlohmann::json::value_t::array, "versioned cache should expose body fields");
     Require((*items).size() == 1, "versioned cache should preserve array items");
     Require(
-        specforge::ReadJsonStringMember((*items).front(), "name").value_or("") == "alpha",
+        spectiary::ReadJsonStringMember((*items).front(), "name").value_or("") == "alpha",
         "versioned cache should parse item strings");
     Require(
-        specforge::ReadJsonIntMember((*items).front(), "value").value_or(0) == 7,
+        spectiary::ReadJsonIntMember((*items).front(), "value").value_or(0) == 7,
         "versioned cache should parse item integers");
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -548,7 +548,7 @@ void TestStructuredJsonCacheRejectsInvalidBody()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_json_document_invalid_tests";
+        "spectiary_json_document_invalid_tests";
     const std::filesystem::path path = root / "state.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
@@ -556,7 +556,7 @@ void TestStructuredJsonCacheRejectsInvalidBody()
     WriteTextFile(path, "stable");
     std::string error;
     Require(
-        !specforge::WriteVersionedJsonCacheDocument(
+        !spectiary::WriteVersionedJsonCacheDocument(
             path,
             "spectiary.test.cache",
             1,
@@ -574,24 +574,24 @@ void TestStructuredJsonCacheRejectsInvalidBody()
 void TestJsonWriteLimitsPreserveDurableState()
 {
     const auto path = std::filesystem::temp_directory_path() /
-        "specforge_json_write_limits.json";
+        "spectiary_json_write_limits.json";
     WriteTextFile(path, "previous durable state");
     std::string error;
     nlohmann::json nested = 0;
-    for (std::size_t i = 0; i < specforge::kMaxJsonNestingDepth; ++i) {
+    for (std::size_t i = 0; i < spectiary::kMaxJsonNestingDepth; ++i) {
         nested = nlohmann::json::array({std::move(nested)});
     }
-    Require(!specforge::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
+    Require(!spectiary::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
                 nlohmann::json::object({{"nested", std::move(nested)}}), &error),
             "a write beyond the read depth must fail");
     Require(ReadTextFile(path) == "previous durable state", "failed write must preserve the old generation");
-    Require(!specforge::WriteVersionedJsonCacheFile(path, "test", 1, "test cache",
+    Require(!spectiary::WriteVersionedJsonCacheFile(path, "test", 1, "test cache",
                 [](std::ostream& stream, std::string&) {
                     stream << ",\"duplicate\":1,\"duplicate\":2";
                     return true;
                 }, &error), "streaming cache writers must also produce readable JSON");
     Require(ReadTextFile(path) == "previous durable state", "malformed streamed output must not replace state");
-    Require(!specforge::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
+    Require(!spectiary::WriteVersionedJsonCacheDocument(path, "test", 1, "test cache",
                 nlohmann::json::object({{"text", std::string("\xFF")}}), &error),
             "invalid UTF-8 serialization must fail safely");
     Require(ReadTextFile(path) == "previous durable state", "serialization errors must preserve state");
@@ -600,21 +600,21 @@ void TestJsonWriteLimitsPreserveDurableState()
 
 void TestVersionedJsonCacheShellReportsCorruptCacheWarning()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_json_cache_corrupt_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_json_cache_corrupt_tests";
     const std::filesystem::path path = root / "state.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     WriteTextFile(path, "{ invalid json");
 
-    const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1}, "test cache");
+    const spectiary::VersionedJsonCacheLoadResult loaded =
+        spectiary::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1}, "test cache");
 
     Require(!loaded.document.has_value(), "corrupt versioned cache should not load a document");
     Require(!loaded.warning.empty(), "corrupt versioned cache should report a warning");
     Require(
         loaded.issue_kind ==
-                specforge::VersionedJsonCacheLoadIssueKind::
+                spectiary::VersionedJsonCacheLoadIssueKind::
                     InvalidDocument &&
             !loaded.diagnostic_detail.empty(),
         "corrupt versioned cache should expose an invalid-document issue and parser detail");
@@ -623,7 +623,7 @@ void TestVersionedJsonCacheShellReportsCorruptCacheWarning()
 
 void TestVersionedJsonCacheShellRejectsUnsupportedSchema()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_json_cache_schema_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_json_cache_schema_tests";
     const std::filesystem::path path = root / "state.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
@@ -636,14 +636,14 @@ void TestVersionedJsonCacheShellRejectsUnsupportedSchema()
         "  \"items\": []\n"
         "}\n");
 
-    const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1, 2}, "test cache");
+    const spectiary::VersionedJsonCacheLoadResult loaded =
+        spectiary::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1, 2}, "test cache");
 
     Require(!loaded.document.has_value(), "unsupported versioned cache should not load a document");
     Require(!loaded.warning.empty(), "unsupported versioned cache should report a warning");
     Require(
         loaded.issue_kind ==
-                specforge::VersionedJsonCacheLoadIssueKind::
+                spectiary::VersionedJsonCacheLoadIssueKind::
                     UnsupportedFormatOrSchema &&
             loaded.diagnostic_detail.find(
                 "schema_version=99") !=
@@ -656,7 +656,7 @@ void TestVersionedJsonCacheDiagnosticsUseUtf8Paths()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_json_cache_utf8_path_tests";
+        "spectiary_json_cache_utf8_path_tests";
     const std::filesystem::path path =
         root / std::filesystem::path(
                    std::u8string(u8"用户缓存"));
@@ -664,8 +664,8 @@ void TestVersionedJsonCacheDiagnosticsUseUtf8Paths()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(path);
 
-    const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(
+    const spectiary::VersionedJsonCacheLoadResult loaded =
+        spectiary::LoadVersionedJsonCacheFile(
             path,
             "spectiary.test.cache",
             {1},
@@ -673,7 +673,7 @@ void TestVersionedJsonCacheDiagnosticsUseUtf8Paths()
 
     Require(
         loaded.issue_kind ==
-                specforge::VersionedJsonCacheLoadIssueKind::
+                spectiary::VersionedJsonCacheLoadIssueKind::
                     ReadFailed &&
             loaded.diagnostic_detail.find(
                 "\xE7\x94\xA8\xE6\x88\xB7\xE7\xBC\x93\xE5\xAD\x98") !=
@@ -690,16 +690,16 @@ void TestSortedCacheKeysReturnsStableOrder()
         {"middle", 3},
     };
 
-    const std::vector<std::string> keys = specforge::SortedCacheKeys(values);
+    const std::vector<std::string> keys = spectiary::SortedCacheKeys(values);
     Require(keys == std::vector<std::string>({"alpha", "middle", "zeta"}), "cache keys should be sorted");
 }
 
 void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
 {
-    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    using Scheduler = spectiary::LocalUserStateSaveScheduler;
     const Scheduler::TimePoint start{};
     Scheduler scheduler(30ms, 120ms);
-    specforge::LocalUserStateSaveStatus status;
+    spectiary::LocalUserStateSaveStatus status;
 
     scheduler.MarkDirtyAt(start);
     status.MarkFailed("could not write state");
@@ -726,10 +726,10 @@ void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
 
 void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
 {
-    specforge::LocalUserStateHealthView health;
-    specforge::AppendLocalUserStateHealth(
+    spectiary::LocalUserStateHealthView health;
+    spectiary::AppendLocalUserStateHealth(
         health,
-        specforge::LocalUserStateArea::
+        spectiary::LocalUserStateArea::
             SourceSession,
         {
             .retrying = true,
@@ -739,34 +739,34 @@ void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
         });
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Retrying,
+            spectiary::LocalUserStateHealthKind::Retrying,
         "retrying should produce retrying health");
     Require(
         health.messages.size() == 1 &&
             health.messages[0].area ==
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SourceSession &&
             health.messages[0].kind ==
-                specforge::
+                spectiary::
                     LocalUserStateHealthMessageKind::
                         SaveRetrying &&
             health.messages[0].diagnostic_detail ==
                 "SYSTEM_DETAIL_TOKEN",
         "health aggregation must retain only diagnostic detail instead of preformatting English area and retry text");
 
-    specforge::AppendLocalUserStateHealth(
+    spectiary::AppendLocalUserStateHealth(
         health,
-        specforge::LocalUserStateArea::
+        spectiary::LocalUserStateArea::
             SpectralLines,
         {.recovered = true});
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Retrying,
+            spectiary::LocalUserStateHealthKind::Retrying,
         "recovery must not hide an outstanding warning");
 
-    specforge::AppendLocalUserStateHealth(
+    spectiary::AppendLocalUserStateHealth(
         health,
-        specforge::LocalUserStateArea::
+        spectiary::LocalUserStateArea::
             PanelVisibility,
         {
             .retrying = true,
@@ -775,15 +775,15 @@ void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
         });
     Require(
         health.kind ==
-                specforge::LocalUserStateHealthKind::Retrying &&
+                spectiary::LocalUserStateHealthKind::Retrying &&
             health.messages.back().diagnostic_detail ==
                 "Could not save panel visibility.",
         "legacy persistence producers should retain their concrete failure as transitional diagnostic detail");
 
-    specforge::LocalUserStateHealthView explicit_detail_health;
-    specforge::AppendLocalUserStateHealth(
+    spectiary::LocalUserStateHealthView explicit_detail_health;
+    spectiary::AppendLocalUserStateHealth(
         explicit_detail_health,
-        specforge::LocalUserStateArea::
+        spectiary::LocalUserStateArea::
             SampleNavigation,
         {
             .load_warning =
@@ -801,7 +801,7 @@ void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
 
 void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
 {
-    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    using Scheduler = spectiary::LocalUserStateSaveScheduler;
     const Scheduler::TimePoint start{};
     Scheduler scheduler(30ms, 120ms);
     Require(!scheduler.dirty(), "new save scheduler should start clean");
@@ -831,7 +831,7 @@ void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
 
 void TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain()
 {
-    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    using Scheduler = spectiary::LocalUserStateSaveScheduler;
     const Scheduler::TimePoint start{};
     Scheduler scheduler(30ms, 120ms);
     scheduler.MarkDirtyAt(start + 5ms);
@@ -843,7 +843,7 @@ void TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain()
 
 void TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff()
 {
-    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    using Scheduler = spectiary::LocalUserStateSaveScheduler;
     const Scheduler::TimePoint start{};
     Scheduler scheduler(30ms, 120ms);
 
@@ -860,7 +860,7 @@ void TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff()
 
 void TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported()
 {
-    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    using Scheduler = spectiary::LocalUserStateSaveScheduler;
     Scheduler scheduler(0ms, 50ms);
     scheduler.MarkDirty();
 
@@ -877,7 +877,7 @@ void TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported()
 
 void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
 {
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     const Lifecycle::TimePoint start{};
     Lifecycle lifecycle(30ms, 120ms);
     lifecycle.SetLoadWarning(
@@ -912,7 +912,7 @@ void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
             }) == Lifecycle::FlushOutcome::Failed &&
             attempts == 1,
         "a due maintenance save should report the owner failure");
-    const specforge::LocalUserStatePersistenceStatus failed =
+    const spectiary::LocalUserStatePersistenceStatus failed =
         lifecycle.PersistenceStatus();
     const auto retry_deadline = lifecycle.NextMaintenanceDeadline();
     Require(
@@ -946,7 +946,7 @@ void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
             }) == Lifecycle::FlushOutcome::Saved &&
             attempts == 2,
         "a retry at its deadline should report a successful save");
-    const specforge::LocalUserStatePersistenceStatus recovered =
+    const spectiary::LocalUserStatePersistenceStatus recovered =
         lifecycle.PersistenceStatus();
     Require(
         !lifecycle.dirty() &&
@@ -959,7 +959,7 @@ void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
         "a successful retry should clear pending warnings and expose recovery");
 
     lifecycle.MarkDirtyAt(start + 200ms);
-    const specforge::LocalUserStatePersistenceStatus mutated =
+    const spectiary::LocalUserStatePersistenceStatus mutated =
         lifecycle.PersistenceStatus();
     Require(
         lifecycle.dirty() && !mutated.recovered &&
@@ -970,7 +970,7 @@ void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
 
 void TestLocalUserStatePersistenceLifecycleStartsRetryAfterSlowFailureReturns()
 {
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     const Lifecycle::TimePoint start{};
     Lifecycle lifecycle(0ms, 50ms);
     lifecycle.MarkDirtyAt(start);
@@ -997,7 +997,7 @@ void TestLocalUserStatePersistenceLifecycleStartsRetryAfterSlowFailureReturns()
 
 void TestLocalUserStatePersistenceLifecycleCleanFlushIsNotNeeded()
 {
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     Lifecycle lifecycle(30ms, 120ms);
     int attempts = 0;
 
@@ -1015,7 +1015,7 @@ void TestLocalUserStatePersistenceLifecycleCleanFlushIsNotNeeded()
 
 void TestLocalUserStatePersistenceLifecycleFlushesIndependentOwners()
 {
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     const Lifecycle::TimePoint start{};
     Lifecycle failed_owner(1s, 120ms);
     Lifecycle successful_owner(1s, 120ms);
@@ -1063,25 +1063,25 @@ void TestLocalUserStatePersistenceLifecycleFlushesIndependentOwners()
 
 void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
 {
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_panel_visibility_tests";
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "spectiary_panel_visibility_tests";
     const std::filesystem::path path = root / "panel-visibility.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::PanelVisibilityState state;
+    spectiary::PanelVisibilityState state;
     state.files = false;
     state.filters = false;
     state.information = false;
     state.spectral_lines = false;
 
-    Require(specforge::SavePanelVisibilityStateCache(path, state), "panel visibility cache should save");
+    Require(spectiary::SavePanelVisibilityStateCache(path, state), "panel visibility cache should save");
     const std::string stable_output = ReadTextFile(path);
     Require(
-        specforge::SavePanelVisibilityStateCache(path, state) &&
+        spectiary::SavePanelVisibilityStateCache(path, state) &&
             ReadTextFile(path) == stable_output,
         "panel visibility output should be byte-stable");
-    const specforge::PanelVisibilityState loaded =
-        specforge::LoadPanelVisibilityStateCache(path).state;
+    const spectiary::PanelVisibilityState loaded =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
     Require(!loaded.files, "files panel hidden state should persist");
     Require(loaded.navigation, "navigation panel visible state should persist");
     Require(loaded.annotations, "annotations panel visible state should persist");
@@ -1098,17 +1098,17 @@ void TestPanelVisibilityStateCacheIgnoresCorruptJson()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_panel_visibility_corrupt_tests";
+        "spectiary_panel_visibility_corrupt_tests";
     const std::filesystem::path path =
         root / "panel-visibility.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     WriteTextFile(path, "{ invalid json");
-    const specforge::PanelVisibilityStateCacheLoadResult loaded =
-        specforge::LoadPanelVisibilityStateCache(path);
+    const spectiary::PanelVisibilityStateCacheLoadResult loaded =
+        spectiary::LoadPanelVisibilityStateCache(path);
     Require(
-        loaded.state == specforge::PanelVisibilityState{},
+        loaded.state == spectiary::PanelVisibilityState{},
         "corrupt panel visibility cache should use defaults");
     Require(
         !loaded.warning.empty(),
@@ -1119,7 +1119,7 @@ void TestPanelVisibilityStateCacheIgnoresCorruptJson()
 void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
 {
     const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / "specforge_panel_visibility_partial_tests";
+        std::filesystem::temp_directory_path() / "spectiary_panel_visibility_partial_tests";
     const std::filesystem::path path = root / "panel-visibility.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
@@ -1132,8 +1132,8 @@ void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
         "  \"files\": false\n"
         "}\n");
 
-    const specforge::PanelVisibilityState loaded =
-        specforge::LoadPanelVisibilityStateCache(path).state;
+    const spectiary::PanelVisibilityState loaded =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
     Require(!loaded.files, "loaded panel visibility should apply present fields");
     Require(loaded.navigation, "missing navigation visibility should default to visible");
     Require(loaded.annotations, "missing annotations visibility should default to visible");
@@ -1150,7 +1150,7 @@ void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_panel_visibility_invalid_field_tests";
+        "spectiary_panel_visibility_invalid_field_tests";
     const std::filesystem::path path =
         root / "panel-visibility.json";
     std::error_code cleanup_error;
@@ -1165,8 +1165,8 @@ void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
         "  \"navigation\": \"visible\"\n"
         "}\n");
 
-    const specforge::PanelVisibilityStateCacheLoadResult loaded =
-        specforge::LoadPanelVisibilityStateCache(path);
+    const spectiary::PanelVisibilityStateCacheLoadResult loaded =
+        spectiary::LoadPanelVisibilityStateCache(path);
     Require(
         !loaded.state.files && loaded.state.navigation,
         "valid fields should load while invalid fields use defaults");
@@ -1179,16 +1179,16 @@ void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
 void TestSharedLifecycleFlushesPanelVisibilityCodec()
 {
     const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / "specforge_panel_visibility_persistence_tests";
+        std::filesystem::temp_directory_path() / "spectiary_panel_visibility_persistence_tests";
     const std::filesystem::path path = root / "panel-visibility.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     Lifecycle persistence(30ms, 120ms);
-    const specforge::PanelVisibilityState previous =
-        specforge::LoadPanelVisibilityStateCache(path).state;
-    specforge::PanelVisibilityState current = previous;
+    const spectiary::PanelVisibilityState previous =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
+    spectiary::PanelVisibilityState current = previous;
     current.files = false;
     current.information = false;
 
@@ -1196,7 +1196,7 @@ void TestSharedLifecycleFlushesPanelVisibilityCodec()
     Require(
         persistence.Flush([&] {
             return Lifecycle::SaveResult{
-                .saved = specforge::SavePanelVisibilityStateCache(
+                .saved = spectiary::SavePanelVisibilityStateCache(
                     path,
                     current),
                 .error = "Could not save panel visibility.",
@@ -1204,8 +1204,8 @@ void TestSharedLifecycleFlushesPanelVisibilityCodec()
         }) != Lifecycle::FlushOutcome::Failed,
         "dirty panel visibility should flush");
 
-    const specforge::PanelVisibilityState restored =
-        specforge::LoadPanelVisibilityStateCache(path).state;
+    const spectiary::PanelVisibilityState restored =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
     Require(!restored.files, "flushed UI-hidden files panel should restore hidden");
     Require(restored.navigation, "unchanged navigation panel should restore visible");
     Require(!restored.information, "flushed UI-hidden information panel should restore hidden");
@@ -1215,16 +1215,16 @@ void TestSharedLifecycleFlushesPanelVisibilityCodec()
 void TestSharedLifecycleRunsPanelVisibilityCodecAtDeadline()
 {
     const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / "specforge_panel_visibility_deadline_tests";
+        std::filesystem::temp_directory_path() / "spectiary_panel_visibility_deadline_tests";
     const std::filesystem::path path = root / "panel-visibility.json";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     Lifecycle persistence(30ms, 120ms);
-    const specforge::PanelVisibilityState previous =
-        specforge::LoadPanelVisibilityStateCache(path).state;
-    specforge::PanelVisibilityState current = previous;
+    const spectiary::PanelVisibilityState previous =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
+    spectiary::PanelVisibilityState current = previous;
     current.smoothing = false;
     persistence.MarkDirty();
 
@@ -1234,7 +1234,7 @@ void TestSharedLifecycleRunsPanelVisibilityCodecAtDeadline()
         *deadline - 1ms,
         [&] {
             return Lifecycle::SaveResult{
-                .saved = specforge::SavePanelVisibilityStateCache(
+                .saved = spectiary::SavePanelVisibilityStateCache(
                     path,
                     current),
                 .error = "Could not save panel visibility.",
@@ -1245,7 +1245,7 @@ void TestSharedLifecycleRunsPanelVisibilityCodecAtDeadline()
         *deadline,
         [&] {
             return Lifecycle::SaveResult{
-                .saved = specforge::SavePanelVisibilityStateCache(
+                .saved = spectiary::SavePanelVisibilityStateCache(
                     path,
                     current),
                 .error = "Could not save panel visibility.",
@@ -1261,7 +1261,7 @@ void TestSharedLifecycleReportsPanelVisibilityCodecRecovery()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_panel_visibility_recovery_tests";
+        "spectiary_panel_visibility_recovery_tests";
     const std::filesystem::path blocker =
         root / "not-a-directory";
     const std::filesystem::path path =
@@ -1271,16 +1271,16 @@ void TestSharedLifecycleReportsPanelVisibilityCodecRecovery()
     std::filesystem::create_directories(root);
     WriteTextFile(blocker, "block cache directory creation");
 
-    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    using Lifecycle = spectiary::LocalUserStatePersistenceLifecycle;
     Lifecycle persistence(30ms, 120ms);
-    specforge::PanelVisibilityState current =
-        specforge::LoadPanelVisibilityStateCache(path).state;
+    spectiary::PanelVisibilityState current =
+        spectiary::LoadPanelVisibilityStateCache(path).state;
     current.files = false;
     persistence.MarkDirty();
     Require(
         persistence.Flush([&] {
             return Lifecycle::SaveResult{
-                .saved = specforge::SavePanelVisibilityStateCache(
+                .saved = spectiary::SavePanelVisibilityStateCache(
                     path,
                     current),
                 .error = "Could not save panel visibility.",
@@ -1298,7 +1298,7 @@ void TestSharedLifecycleReportsPanelVisibilityCodecRecovery()
     Require(
         persistence.Flush([&] {
             return Lifecycle::SaveResult{
-                .saved = specforge::SavePanelVisibilityStateCache(
+                .saved = spectiary::SavePanelVisibilityStateCache(
                     path,
                     current),
                 .error = "Could not save panel visibility.",
@@ -1309,7 +1309,7 @@ void TestSharedLifecycleReportsPanelVisibilityCodecRecovery()
         persistence.PersistenceStatus().recovered,
         "successful panel visibility retry should expose recovery");
 
-    specforge::PanelVisibilityState next = current;
+    spectiary::PanelVisibilityState next = current;
     next.files = true;
     persistence.MarkDirty();
     Require(
@@ -1334,7 +1334,7 @@ void TestCancelableTextStreamReadStopsBetweenChunks()
 
     bool canceled = false;
     try {
-        (void)specforge::ReadTextStreamCancelable(
+        (void)spectiary::ReadTextStreamCancelable(
             stream,
             contents,
             [&cancellation_checks]() {

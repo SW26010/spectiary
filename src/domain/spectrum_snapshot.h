@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SpectrumAxisQuantity {
     Unknown,
@@ -125,4 +125,4 @@ struct SpectrumSnapshot {
 
 using SpectrumSnapshotHandle = std::shared_ptr<const SpectrumSnapshot>;
 
-}  // namespace specforge
+}  // namespace spectiary

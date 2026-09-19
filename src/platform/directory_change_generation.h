@@ -5,7 +5,7 @@
 #include <memory>
 #include <stop_token>
 
-namespace specforge {
+namespace spectiary {
 
 class DirectoryChangeGenerationMonitor;
 
@@ -62,4 +62,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

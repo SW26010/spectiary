@@ -6,7 +6,7 @@
 
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 bool Win32MessageCanInvalidateRender(
     std::uint32_t message,
@@ -144,4 +144,4 @@ void Win32MessageRenderObserver::Stop() noexcept
     impl_->permission_only_message.reset();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

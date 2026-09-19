@@ -13,7 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 inline constexpr std::size_t kMaximumGeneratedNameCopyCount = 1024;
 
@@ -217,4 +217,4 @@ bool CopyMarkerReference(
     std::string_view target_group_id);
 [[nodiscard]] std::string GroupExpansionKey(std::string_view view_id, std::string_view group_id);
 
-}  // namespace specforge
+}  // namespace spectiary

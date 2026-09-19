@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string LabelingContextText(
@@ -165,4 +165,4 @@ RenderImmersiveContextOverlay(
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

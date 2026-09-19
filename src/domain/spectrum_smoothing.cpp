@@ -6,7 +6,7 @@
 #include <limits>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr double kGaussianTruncate = 4.0;
@@ -163,4 +163,4 @@ std::vector<double> SmoothSpectrumValues(const std::vector<double>& values, cons
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

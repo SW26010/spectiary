@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SampleAnnotationWorkflowRelationship;
 enum class SampleLabelSaveMessageKind;
@@ -571,4 +571,4 @@ enum class UiTextId {
     UiLanguage language,
     const LocalUserStateHealthMessage& message);
 
-}  // namespace specforge
+}  // namespace spectiary

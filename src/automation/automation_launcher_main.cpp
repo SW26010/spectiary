@@ -49,10 +49,10 @@ std::string ResponseWaitFailure(
     std::string_view receive_error)
 {
     if (receive_error ==
-            specforge::
+            spectiary::
                 kAutomationNamedPipeReceiveDeadlineExpired ||
         receive_error ==
-            specforge::
+            spectiary::
                 kAutomationNamedPipeSendDeadlineExpired) {
         std::ostringstream message;
         message << "Automation " << exchange
@@ -101,7 +101,7 @@ std::wstring BuildGuiCommandLine(
             command_line.push_back(L' ');
         }
         command_line +=
-            specforge::QuoteWindowsCommandLineArgument(argument);
+            spectiary::QuoteWindowsCommandLineArgument(argument);
     }
     return command_line;
 }
@@ -154,7 +154,7 @@ bool BuildAutomationChildEnvironment(
             delimiter == std::wstring_view::npos
             ? entry
             : entry.substr(0, delimiter);
-        if (!specforge::
+        if (!spectiary::
                 IsIncompatibleAutomationEnvironmentVariable(
                     name)) {
             environment_block.insert(
@@ -174,10 +174,10 @@ LauncherOptions ParseOptions(int argc, wchar_t** argv)
 {
     LauncherOptions options;
     const std::filesystem::path launcher_path =
-        specforge::CurrentExecutablePath();
+        spectiary::CurrentExecutablePath();
     options.app_path =
         launcher_path.parent_path() /
-        specforge::project_identity::kExecutableFilename;
+        spectiary::project_identity::kExecutableFilename;
 
     for (int index = 1; index < argc; ++index) {
         const std::wstring_view argument(argv[index]);
@@ -279,7 +279,7 @@ bool PathContainsReparsePoint(
 }
 
 bool RejectLabelingStateOutputPaths(
-    const specforge::SampleLabelingStateCache& cache,
+    const spectiary::SampleLabelingStateCache& cache,
     std::string_view failure_message,
     std::string& error_message)
 {
@@ -299,25 +299,25 @@ bool RejectLabelingStateOutputPaths(
 }
 
 bool ValidateLabelingStateSeed(
-    const specforge::
+    const spectiary::
         AutomationReadOnlyFileLease& seed,
     const std::filesystem::path& state_root,
     const std::filesystem::path& ordinary_root,
     std::string& error_message)
 {
-    if (!specforge::AutomationStateRootIsIndependent(
+    if (!spectiary::AutomationStateRootIsIndependent(
             seed.path(),
             ordinary_root) ||
-        !specforge::AutomationStateRootIsIndependent(
+        !spectiary::AutomationStateRootIsIndependent(
             seed.path(),
             state_root)) {
         error_message =
             "Labeling state seed must be independent from ordinary and automation state roots.";
         return false;
     }
-    const specforge::SampleLabelingStateCacheLoadResult
+    const spectiary::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadLegacySampleLabelingDraftSeed(seed.path());
+            spectiary::LoadLegacySampleLabelingDraftSeed(seed.path());
     if (!loaded.warning.empty()) {
         error_message =
             loaded.warning ==
@@ -360,7 +360,7 @@ bool ReadValidImGuiLayoutSeed(
     if (!input.is_open() ||
         input.bad() ||
         snapshot.size() != size ||
-        !specforge::ImGuiLayoutPersistence::
+        !spectiary::ImGuiLayoutPersistence::
             IsWellFormedSnapshot(snapshot)) {
         error_message =
             std::string(description) +
@@ -371,16 +371,16 @@ bool ReadValidImGuiLayoutSeed(
 }
 
 bool ValidateImGuiLayoutSeed(
-    const specforge::
+    const spectiary::
         AutomationReadOnlyFileLease& seed,
     const std::filesystem::path& state_root,
     const std::filesystem::path& ordinary_root,
     std::string& error_message)
 {
-    if (!specforge::AutomationStateRootIsIndependent(
+    if (!spectiary::AutomationStateRootIsIndependent(
             seed.path(),
             ordinary_root) ||
-        !specforge::AutomationStateRootIsIndependent(
+        !spectiary::AutomationStateRootIsIndependent(
             seed.path(),
             state_root)) {
         error_message =
@@ -394,21 +394,21 @@ bool ValidateImGuiLayoutSeed(
 }
 
 bool MaterializeLabelingStateSeed(
-    specforge::AutomationStateRootLease&
+    spectiary::AutomationStateRootLease&
         state_root,
-    const specforge::
+    const spectiary::
         AutomationReadOnlyFileLease& seed,
     std::string& error_message)
 {
     const std::wstring destination_name =
         std::filesystem::path(
-            specforge::local_user_state_paths::
+            spectiary::local_user_state_paths::
                 kLegacySampleLabelingState)
             .wstring();
     const std::filesystem::path destination =
         state_root.path() /
         destination_name;
-    if (!specforge::
+    if (!spectiary::
             MaterializePinnedAutomationSeed(
             state_root,
             seed,
@@ -416,9 +416,9 @@ bool MaterializeLabelingStateSeed(
             error_message)) {
         return false;
     }
-    const specforge::SampleLabelingStateCacheLoadResult
+    const spectiary::SampleLabelingStateCacheLoadResult
         loaded =
-            specforge::LoadLegacySampleLabelingDraftSeed(destination);
+            spectiary::LoadLegacySampleLabelingDraftSeed(destination);
     if (!loaded.warning.empty()) {
         error_message =
             loaded.warning ==
@@ -434,21 +434,21 @@ bool MaterializeLabelingStateSeed(
 }
 
 bool MaterializeImGuiLayoutSeed(
-    specforge::AutomationStateRootLease&
+    spectiary::AutomationStateRootLease&
         state_root,
-    const specforge::
+    const spectiary::
         AutomationReadOnlyFileLease& seed,
     std::string& error_message)
 {
     const std::wstring destination_name =
         std::filesystem::path(
-            specforge::local_user_state_paths::
+            spectiary::local_user_state_paths::
                 kImGuiIni)
             .wstring();
     const std::filesystem::path destination =
         state_root.path() /
         destination_name;
-    if (!specforge::
+    if (!spectiary::
             MaterializePinnedAutomationSeed(
                 state_root,
                 seed,
@@ -465,7 +465,7 @@ bool MaterializeImGuiLayoutSeed(
 class PrelaunchStateRootGuard {
 public:
     explicit PrelaunchStateRootGuard(
-        specforge::AutomationStateRootLease&
+        spectiary::AutomationStateRootLease&
             root)
         : root_(&root)
     {
@@ -476,7 +476,7 @@ public:
         if (!active_) {
             return;
         }
-        specforge::
+        spectiary::
             RemovePinnedAutomationStateRootBeforeLaunch(
                 *root_);
     }
@@ -487,7 +487,7 @@ public:
     }
 
 private:
-    specforge::AutomationStateRootLease*
+    spectiary::AutomationStateRootLease*
         root_ = nullptr;
     bool active_ = true;
 };
@@ -565,7 +565,7 @@ LauncherLineReadStatus ReadLauncherLine(
                 break;
             }
         }
-        line = specforge::WideToUtf8(
+        line = spectiary::WideToUtf8(
             wide_line);
         if (!wide_line.empty() &&
             line.empty()) {
@@ -584,7 +584,7 @@ LauncherLineReadStatus ReadLauncherLine(
             "Could not read an automation command from standard input.";
         return LauncherLineReadStatus::Error;
     }
-    if (!specforge::IsValidUtf8(line)) {
+    if (!spectiary::IsValidUtf8(line)) {
         error_message =
             "Redirected automation commands must be encoded as UTF-8.";
         return LauncherLineReadStatus::Error;
@@ -665,10 +665,10 @@ std::string LowerAscii(std::string value)
 }
 
 struct HumanCommand {
-    specforge::AutomationCommandKind kind =
-        specforge::AutomationCommandKind::
+    spectiary::AutomationCommandKind kind =
+        spectiary::AutomationCommandKind::
             StateGet;
-    specforge::AutomationCommandParameters
+    spectiary::AutomationCommandParameters
         parameters;
 };
 
@@ -683,7 +683,7 @@ CommandFromHumanLine(
         lower == "state.get") {
         return HumanCommand{
             .kind =
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     StateGet,
         };
     }
@@ -691,7 +691,7 @@ CommandFromHumanLine(
         lower == "wait.idle") {
         return HumanCommand{
             .kind =
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     WaitIdle,
         };
     }
@@ -699,7 +699,7 @@ CommandFromHumanLine(
         lower == "profile.start") {
         return HumanCommand{
             .kind =
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     ProfileStart,
         };
     }
@@ -707,7 +707,7 @@ CommandFromHumanLine(
         lower == "profile.stop") {
         return HumanCommand{
             .kind =
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     ProfileStop,
         };
     }
@@ -715,7 +715,7 @@ CommandFromHumanLine(
         lower == "app.quit") {
         return HumanCommand{
             .kind =
-                specforge::AutomationCommandKind::
+                spectiary::AutomationCommandKind::
                     AppQuit,
         };
     }
@@ -731,11 +731,11 @@ CommandFromHumanLine(
         if (!name.empty()) {
             return HumanCommand{
                 .kind =
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SettingGet,
                 .parameters =
-                    specforge::
+                    spectiary::
                         AutomationSettingGetParameters{
                             .name = name,
                         },
@@ -763,7 +763,7 @@ CommandFromHumanLine(
                     separator + 1U));
             if (!name.empty() &&
                 !value_text.empty()) {
-                specforge::AutomationSettingValue
+                spectiary::AutomationSettingValue
                     value = value_text;
                 if (const auto integer =
                         ParseSignedInteger(
@@ -781,11 +781,11 @@ CommandFromHumanLine(
                 }
                 return HumanCommand{
                     .kind =
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 SettingSet,
                     .parameters =
-                        specforge::
+                        spectiary::
                             AutomationSettingSetParameters{
                                 .name = name,
                                 .value =
@@ -805,10 +805,10 @@ CommandFromHumanLine(
         if (!name.empty()) {
             return HumanCommand{
                 .kind =
-                    specforge::AutomationCommandKind::
+                    spectiary::AutomationCommandKind::
                         PanelGet,
                 .parameters =
-                    specforge::AutomationPanelGetParameters{
+                    spectiary::AutomationPanelGetParameters{
                         .name = name,
                     },
             };
@@ -834,10 +834,10 @@ CommandFromHumanLine(
                 (value == "true" || value == "false")) {
                 return HumanCommand{
                     .kind =
-                        specforge::AutomationCommandKind::
+                        spectiary::AutomationCommandKind::
                             PanelSet,
                     .parameters =
-                        specforge::AutomationPanelSetParameters{
+                        spectiary::AutomationPanelSetParameters{
                             .name = name,
                             .visible = value == "true",
                         },
@@ -857,11 +857,11 @@ CommandFromHumanLine(
         if (!path.empty()) {
             return HumanCommand{
                 .kind =
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SourceOpen,
                 .parameters =
-                    specforge::
+                    spectiary::
                         AutomationSourceOpenParameters{
                             .path = path,
                         },
@@ -880,11 +880,11 @@ CommandFromHumanLine(
         if (!name.empty()) {
             return HumanCommand{
                 .kind =
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SpectrumGoto,
                 .parameters =
-                    specforge::
+                    spectiary::
                         AutomationSpectrumGotoParameters{
                             .target = {
                                 .name = name,
@@ -907,11 +907,11 @@ CommandFromHumanLine(
                     index_text)) {
             return HumanCommand{
                 .kind =
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             SpectrumGoto,
                 .parameters =
-                    specforge::
+                    spectiary::
                         AutomationSpectrumGotoParameters{
                             .target = {
                                 .index = *index,
@@ -930,7 +930,7 @@ CommandFromHumanLine(
         std::string assignment_text = Trim(
             line.substr(label_prefix.size()));
         std::optional<
-            specforge::AutomationSpectrumTarget>
+            spectiary::AutomationSpectrumTarget>
             target;
         constexpr std::string_view
             target_name_marker =
@@ -961,7 +961,7 @@ CommandFromHumanLine(
                 return std::nullopt;
             }
             target =
-                specforge::AutomationSpectrumTarget{
+                spectiary::AutomationSpectrumTarget{
                     .name = name,
                 };
         } else if (
@@ -978,7 +978,7 @@ CommandFromHumanLine(
                     ParseNonnegativeSize(
                         index_text)) {
                 target =
-                    specforge::
+                    spectiary::
                         AutomationSpectrumTarget{
                             .index = *index,
                         };
@@ -1004,11 +1004,11 @@ CommandFromHumanLine(
                     (std::numeric_limits<int>::max)()) {
                 return HumanCommand{
                     .kind =
-                        specforge::
+                        spectiary::
                             AutomationCommandKind::
                                 LabelAssign,
                     .parameters =
-                        specforge::
+                        spectiary::
                         AutomationLabelAssignParameters{
                             .code =
                                 static_cast<int>(
@@ -1030,11 +1030,11 @@ CommandFromHumanLine(
         if (!path.empty()) {
             return HumanCommand{
                 .kind =
-                    specforge::
+                    spectiary::
                         AutomationCommandKind::
                             FrameCapture,
                 .parameters =
-                    specforge::
+                    spectiary::
                         AutomationFrameCaptureParameters{
                             .path = path,
                         },
@@ -1047,9 +1047,9 @@ CommandFromHumanLine(
 }
 
 bool SendCommandAndWait(
-    specforge::AutomationNamedPipeClient& client,
-    specforge::AutomationCommandKind command,
-    const specforge::AutomationCommandParameters&
+    spectiary::AutomationNamedPipeClient& client,
+    spectiary::AutomationCommandKind command,
+    const spectiary::AutomationCommandParameters&
         parameters,
     std::uint64_t request_number,
     std::string& error_message)
@@ -1058,7 +1058,7 @@ bool SendCommandAndWait(
         "request-" +
         std::to_string(request_number);
     if (!client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     request_id,
                     command,
@@ -1086,7 +1086,7 @@ bool SendCommandAndWait(
         std::cout << response << '\n'
                   << std::flush;
         const auto parsed =
-            specforge::ParseAutomationServerMessage(
+            spectiary::ParseAutomationServerMessage(
                 response);
         if (!parsed.message ||
             parsed.message->request_id != request_id) {
@@ -1123,17 +1123,17 @@ bool SendCommandAndWait(
 }
 
 bool SendPipelineAndWait(
-    specforge::AutomationNamedPipeClient& client,
+    spectiary::AutomationNamedPipeClient& client,
     const std::vector<HumanCommand>& commands,
     std::uint64_t& request_number,
     std::string& error_message)
 {
     if (commands.size() >
-        specforge::kAutomationQueueCapacity) {
+        spectiary::kAutomationQueueCapacity) {
         error_message =
             "Pipeline accepts at most " +
             std::to_string(
-                specforge::
+                spectiary::
                     kAutomationQueueCapacity) +
             " commands.";
         return false;
@@ -1154,7 +1154,7 @@ bool SendPipelineAndWait(
             "request-" +
             std::to_string(request_number++);
         const std::string request =
-            specforge::SerializeAutomationCommandRequest(
+            spectiary::SerializeAutomationCommandRequest(
                 request_id,
                 command.kind,
                 command.parameters);
@@ -1192,7 +1192,7 @@ bool SendPipelineAndWait(
         std::cout << response << '\n'
                   << std::flush;
         const auto parsed =
-            specforge::ParseAutomationServerMessage(
+            spectiary::ParseAutomationServerMessage(
                 response);
         if (!parsed.message) {
             error_message =
@@ -1250,7 +1250,7 @@ bool SendPipelineAndWait(
 }
 
 bool SendCommandAndDisconnectAfterAccepted(
-    specforge::AutomationNamedPipeClient& client,
+    spectiary::AutomationNamedPipeClient& client,
     const HumanCommand& command,
     std::uint64_t request_number,
     std::string& error_message)
@@ -1259,7 +1259,7 @@ bool SendCommandAndDisconnectAfterAccepted(
         "request-" +
         std::to_string(request_number);
     if (!client.Send(
-            specforge::
+            spectiary::
                 SerializeAutomationCommandRequest(
                     request_id,
                     command.kind,
@@ -1285,7 +1285,7 @@ bool SendCommandAndDisconnectAfterAccepted(
         std::cout << response << '\n'
                   << std::flush;
         const auto parsed =
-            specforge::ParseAutomationServerMessage(
+            spectiary::ParseAutomationServerMessage(
                 response);
         if (!parsed.message ||
             parsed.message->request_id != request_id) {
@@ -1391,7 +1391,7 @@ class LauncherOwnedProcessGuard {
 public:
     LauncherOwnedProcessGuard(
         HANDLE process,
-        specforge::AutomationNamedPipeClient& client)
+        spectiary::AutomationNamedPipeClient& client)
         : process_(process),
           client_(client)
     {
@@ -1430,18 +1430,18 @@ public:
             graceful_wait_exhausted_ = true;
             error_message =
                 wait_result == WAIT_TIMEOUT
-                ? "SpecForge did not complete normal shutdown within " +
+                ? "Spectiary did not complete normal shutdown within " +
                     std::to_string(
                         kLauncherProcessExitTimeout.count()) +
                     " seconds."
-                : "Could not wait for the SpecForge automation process.";
+                : "Could not wait for the Spectiary automation process.";
             return false;
         }
         if (!GetExitCodeProcess(
                 process_,
                 &exit_code)) {
             error_message =
-                "Could not read the SpecForge automation process exit code.";
+                "Could not read the Spectiary automation process exit code.";
             return false;
         }
         CloseOwnedHandles();
@@ -1466,10 +1466,10 @@ private:
                 !normal_quit_requested_) {
                 std::string ignored_error;
                 (void)client_.Send(
-                    specforge::
+                    spectiary::
                         SerializeAutomationCommandRequest(
                             "launcher-cleanup-quit",
-                            specforge::
+                            spectiary::
                                 AutomationCommandKind::
                                     AppQuit),
                     ignored_error);
@@ -1505,7 +1505,7 @@ private:
     }
 
     HANDLE process_ = nullptr;
-    specforge::AutomationNamedPipeClient& client_;
+    spectiary::AutomationNamedPipeClient& client_;
     bool handshake_complete_ = false;
     bool normal_quit_requested_ = false;
     bool graceful_wait_exhausted_ = false;
@@ -1514,7 +1514,7 @@ private:
 void PrintUsage()
 {
     std::cout
-        << "Usage: SpecForgeAutomation [--app <Spectiary.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>] [--imgui-layout-seed <imgui-layout-v2.ini>]\n"
+        << "Usage: SpectiaryAutomation [--app <Spectiary.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>] [--imgui-layout-seed <imgui-layout-v2.ini>]\n"
         << "Commands: setting get <ui.language|ui.scale|ui.theme>, setting set <ui.language|ui.scale|ui.theme> <value>, panel get <name>, panel set <name> <true|false>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }
@@ -1544,7 +1544,7 @@ int wmain(int argc, wchar_t** argv)
         !std::filesystem::is_regular_file(
             app_path)) {
         std::cerr
-            << "SpecForge GUI executable was not found.\n";
+            << "Spectiary GUI executable was not found.\n";
         return 2;
     }
 
@@ -1558,13 +1558,13 @@ int wmain(int argc, wchar_t** argv)
         return 2;
     }
     const std::wstring pipe_name =
-        specforge::AutomationPipeNameForInstance(
+        spectiary::AutomationPipeNameForInstance(
             *instance_id);
 
     std::filesystem::path state_root =
         options.state_root.value_or(
             std::filesystem::temp_directory_path() /
-            "SpecForgeAutomation" /
+            "SpectiaryAutomation" /
             *instance_id);
     state_root =
         std::filesystem::absolute(
@@ -1578,20 +1578,20 @@ int wmain(int argc, wchar_t** argv)
     std::filesystem::path ordinary_state_root;
     try {
         ordinary_state_root =
-            specforge::
+            spectiary::
                 OrdinaryUserStateRootForExecutable(
                     app_path);
     } catch (const std::exception& error) {
         std::cerr
-            << "Could not resolve the ordinary SpecForge state root: "
+            << "Could not resolve the ordinary Spectiary state root: "
             << error.what() << '\n';
         return 2;
     }
-    if (!specforge::AutomationStateRootIsIndependent(
+    if (!spectiary::AutomationStateRootIsIndependent(
             state_root,
             ordinary_state_root)) {
         std::cerr
-            << "Automation state root must be independent from the ordinary SpecForge state root.\n";
+            << "Automation state root must be independent from the ordinary Spectiary state root.\n";
         return 2;
     }
     if (PathContainsReparsePoint(
@@ -1601,11 +1601,11 @@ int wmain(int argc, wchar_t** argv)
         return 2;
     }
     std::string error_message;
-    specforge::AutomationReadOnlyFileLease
+    spectiary::AutomationReadOnlyFileLease
         labeling_state_seed;
     if (options.labeling_state_seed) {
         labeling_state_seed =
-            specforge::
+            spectiary::
                 PinAutomationReadOnlyFile(
                     *options
                          .labeling_state_seed,
@@ -1620,11 +1620,11 @@ int wmain(int argc, wchar_t** argv)
             return 2;
         }
     }
-    specforge::AutomationReadOnlyFileLease
+    spectiary::AutomationReadOnlyFileLease
         imgui_layout_seed;
     if (options.imgui_layout_seed) {
         imgui_layout_seed =
-            specforge::
+            spectiary::
                 PinAutomationReadOnlyFile(
                     *options
                          .imgui_layout_seed,
@@ -1646,9 +1646,9 @@ int wmain(int argc, wchar_t** argv)
         std::cerr << error_message << '\n';
         return 2;
     }
-    specforge::AutomationStateRootLease
+    spectiary::AutomationStateRootLease
         state_root_lease =
-            specforge::
+            spectiary::
                 CreatePinnedAutomationStateRoot(
                     state_root,
                     error_message);
@@ -1676,10 +1676,10 @@ int wmain(int argc, wchar_t** argv)
         return 2;
     }
     labeling_state_seed =
-        specforge::
+        spectiary::
             AutomationReadOnlyFileLease{};
     imgui_layout_seed =
-        specforge::
+        spectiary::
             AutomationReadOnlyFileLease{};
 
     std::wstring command_line =
@@ -1712,7 +1712,7 @@ int wmain(int argc, wchar_t** argv)
             &startup,
             &process)) {
         std::cerr
-            << "Could not launch SpecForge automation GUI (Win32 error "
+            << "Could not launch Spectiary automation GUI (Win32 error "
             << GetLastError() << ").\n";
         return 2;
     }
@@ -1730,7 +1730,7 @@ int wmain(int argc, wchar_t** argv)
     CloseHandle(process.hThread);
     prelaunch_state_root.Release();
 
-    specforge::AutomationNamedPipeClient client;
+    spectiary::AutomationNamedPipeClient client;
     LauncherOwnedProcessGuard child_process(
         process.hProcess,
         client);
@@ -1753,7 +1753,7 @@ int wmain(int argc, wchar_t** argv)
     }
     if (!client.connected()) {
         std::cerr
-            << "Could not connect to SpecForge automation: "
+            << "Could not connect to Spectiary automation: "
             << error_message << '\n';
         const std::filesystem::path startup_error =
             state_root /
@@ -1766,7 +1766,7 @@ int wmain(int argc, wchar_t** argv)
     }
 
     if (!client.Send(
-            specforge::SerializeAutomationHelloRequest(
+            spectiary::SerializeAutomationHelloRequest(
                 "hello-1",
                 *nonce),
             error_message)) {
@@ -1783,7 +1783,7 @@ int wmain(int argc, wchar_t** argv)
             error_message)) {
         client.Close();
         if (error_message ==
-            specforge::
+            spectiary::
                 kAutomationNamedPipeReceiveDeadlineExpired) {
             error_message =
                 "Automation hello response timed out after " +
@@ -1796,12 +1796,12 @@ int wmain(int argc, wchar_t** argv)
     }
     std::cout << hello_response << '\n';
     const auto hello =
-        specforge::ParseAutomationServerMessage(
+        spectiary::ParseAutomationServerMessage(
             hello_response);
     if (!hello.message ||
         hello.message->status != "completed" ||
         hello.message->protocol_version !=
-            specforge::kAutomationProtocolVersion ||
+            spectiary::kAutomationProtocolVersion ||
         hello.message->instance_id != *instance_id) {
         std::cerr
             << "Automation handshake failed.\n";
@@ -1812,7 +1812,7 @@ int wmain(int argc, wchar_t** argv)
     std::cout
         << "Automation state root: "
         << state_root.string() << '\n'
-        << "SpecForge PID: "
+        << "Spectiary PID: "
         << process.dwProcessId << '\n';
     PrintUsage();
 
@@ -1902,7 +1902,7 @@ int wmain(int argc, wchar_t** argv)
                     pipeline.end(),
                     [](const HumanCommand& command) {
                         return command.kind ==
-                            specforge::AutomationCommandKind::
+                            spectiary::AutomationCommandKind::
                                 AppQuit;
                     });
             if (!SendPipelineAndWait(
@@ -1990,7 +1990,7 @@ int wmain(int argc, wchar_t** argv)
             return 2;
         }
         if (command->kind ==
-            specforge::AutomationCommandKind::
+            spectiary::AutomationCommandKind::
                 AppQuit) {
             app_quit_sent = true;
             child_process.MarkNormalQuitRequested();
@@ -2006,8 +2006,8 @@ int wmain(int argc, wchar_t** argv)
     if (!app_quit_sent && client.connected()) {
         if (SendCommandAndWait(
                 client,
-                specforge::AutomationCommandKind::AppQuit,
-                specforge::AutomationCommandParameters{},
+                spectiary::AutomationCommandKind::AppQuit,
+                spectiary::AutomationCommandParameters{},
                 request_number,
                 error_message)) {
             app_quit_sent = true;

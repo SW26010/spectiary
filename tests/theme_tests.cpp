@@ -41,159 +41,159 @@ float Luminance(const ImVec4& color)
 
 void TestBuiltInThemesHaveStableIdentities()
 {
-    const std::span<const specforge::ThemeDescriptor> descriptors =
-        specforge::BuiltInThemeDescriptors();
+    const std::span<const spectiary::ThemeDescriptor> descriptors =
+        spectiary::BuiltInThemeDescriptors();
     Require(
         descriptors.size() == 2,
         "the initial registry should expose the two built-in themes");
     Require(
-        specforge::BuiltInDarkThemeId().value() ==
+        spectiary::BuiltInDarkThemeId().value() ==
                 "builtin.theme.dark" &&
-            specforge::BuiltInLightThemeId().value() ==
+            spectiary::BuiltInLightThemeId().value() ==
                 "builtin.theme.light",
         "built-in themes should expose stable non-boolean identities");
     Require(
-        specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId())
+        spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId())
                 ->color_scheme ==
-            specforge::ThemeColorScheme::Dark &&
-            specforge::FindBuiltInThemeDescriptor(
-                specforge::BuiltInLightThemeId())
+            spectiary::ThemeColorScheme::Dark &&
+            spectiary::FindBuiltInThemeDescriptor(
+                spectiary::BuiltInLightThemeId())
                     ->color_scheme ==
-                specforge::ThemeColorScheme::Light,
+                spectiary::ThemeColorScheme::Light,
         "theme descriptors should carry color-scheme metadata separately from identity");
 }
 
 void TestWindowsPreferenceMapsToConcreteThemeIds()
 {
     Require(
-        specforge::WindowsSystemThemeIdFromAppsUseLightTheme(
+        spectiary::WindowsSystemThemeIdFromAppsUseLightTheme(
             std::uint32_t{0}) ==
-            specforge::BuiltInDarkThemeId(),
+            spectiary::BuiltInDarkThemeId(),
         "Windows AppsUseLightTheme=0 should resolve to the dark theme ID");
     Require(
-        specforge::WindowsSystemThemeIdFromAppsUseLightTheme(
+        spectiary::WindowsSystemThemeIdFromAppsUseLightTheme(
             std::uint32_t{1}) ==
-            specforge::BuiltInLightThemeId(),
+            spectiary::BuiltInLightThemeId(),
         "Windows AppsUseLightTheme=1 should resolve to the light theme ID");
     Require(
-        !specforge::WindowsSystemThemeIdFromAppsUseLightTheme(
+        !spectiary::WindowsSystemThemeIdFromAppsUseLightTheme(
             std::nullopt),
         "an unreadable Windows preference should remain unresolved at the platform boundary");
 }
 
 void TestFollowSystemResolutionFallsBackToDark()
 {
-    const specforge::ThemeSelection follow_system =
-        specforge::ThemeSelection::FollowSystem();
+    const spectiary::ThemeSelection follow_system =
+        spectiary::ThemeSelection::FollowSystem();
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             follow_system,
-            specforge::BuiltInLightThemeId()) ==
-            specforge::BuiltInLightThemeId(),
+            spectiary::BuiltInLightThemeId()) ==
+            spectiary::BuiltInLightThemeId(),
         "follow-system should use the concrete system theme identity");
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             follow_system,
-            specforge::BuiltInDarkThemeId()) ==
-            specforge::BuiltInDarkThemeId(),
+            spectiary::BuiltInDarkThemeId()) ==
+            spectiary::BuiltInDarkThemeId(),
         "follow-system should resolve the dark Windows state without changing selection policy");
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             follow_system,
             std::nullopt) ==
-            specforge::BuiltInDarkThemeId(),
+            spectiary::BuiltInDarkThemeId(),
         "an unavailable system theme should safely resolve to dark");
 }
 
 void TestExplicitSelectionHasPriority()
 {
-    const specforge::ThemeSelection explicit_light =
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInLightThemeId());
+    const spectiary::ThemeSelection explicit_light =
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInLightThemeId());
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             explicit_light,
-            specforge::BuiltInDarkThemeId()) ==
-            specforge::BuiltInLightThemeId(),
+            spectiary::BuiltInDarkThemeId()) ==
+            spectiary::BuiltInLightThemeId(),
         "an explicit theme identity should take priority over the system theme");
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             explicit_light,
             std::nullopt) ==
-            specforge::BuiltInLightThemeId(),
+            spectiary::BuiltInLightThemeId(),
         "an explicit theme should remain unaffected when the system theme cannot be read");
 }
 
 void TestSelectionStableValuesRoundTrip()
 {
     const std::array selections = {
-        specforge::ThemeSelection::FollowSystem(),
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInDarkThemeId()),
-        specforge::ThemeSelection::Explicit(
-            specforge::BuiltInLightThemeId()),
+        spectiary::ThemeSelection::FollowSystem(),
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInDarkThemeId()),
+        spectiary::ThemeSelection::Explicit(
+            spectiary::BuiltInLightThemeId()),
     };
-    for (const specforge::ThemeSelection& selection :
+    for (const spectiary::ThemeSelection& selection :
          selections) {
         Require(
-            specforge::ParseThemeSelectionStableValue(
-                specforge::ThemeSelectionStableValue(
+            spectiary::ParseThemeSelectionStableValue(
+                spectiary::ThemeSelectionStableValue(
                     selection)) == selection,
             "theme selection automation values should round-trip through stable non-boolean identities");
     }
     Require(
-        !specforge::ParseThemeSelectionStableValue(
+        !spectiary::ParseThemeSelectionStableValue(
             "spectiary.theme.unknown"),
         "unknown theme automation values should be rejected at the registry boundary");
 }
 
 void TestResolverPreservesSyntheticFutureIdentity()
 {
-    const specforge::ThemeId future_theme(
+    const spectiary::ThemeId future_theme(
         std::string_view("spectiary.theme.synthetic"));
-    const specforge::ThemeSelection selection =
-        specforge::ThemeSelection::Explicit(future_theme);
+    const spectiary::ThemeSelection selection =
+        spectiary::ThemeSelection::Explicit(future_theme);
     Require(
-        specforge::ResolveThemeId(
+        spectiary::ResolveThemeId(
             selection,
-            specforge::BuiltInDarkThemeId()) ==
+            spectiary::BuiltInDarkThemeId()) ==
             future_theme,
         "the unified resolver should preserve a non-light/dark theme identity without a new branch");
     const std::array future_registry = {
-        specforge::ThemeDescriptor{
+        spectiary::ThemeDescriptor{
             .id = future_theme,
             .color_scheme =
-                specforge::ThemeColorScheme::Dark,
+                spectiary::ThemeColorScheme::Dark,
         },
     };
     Require(
-        specforge::FindThemeDescriptor(
+        spectiary::FindThemeDescriptor(
             future_registry,
-            specforge::ResolveThemeId(
+            spectiary::ResolveThemeId(
                 selection,
-                specforge::BuiltInLightThemeId())) ==
+                spectiary::BuiltInLightThemeId())) ==
             &future_registry.front(),
         "a synthetic theme should pass through resolution into the shared descriptor lookup path");
     Require(
-        !specforge::IsSupportedThemeSelection(selection),
+        !spectiary::IsSupportedThemeSelection(selection),
         "the current settings registry should still reject unshipped themes");
 }
 
 void TestResolvedDescriptorsOwnAllRenderingColors()
 {
-    const specforge::ThemeDescriptor& dark =
-        specforge::ResolveBuiltInThemeDescriptor(
-            specforge::ThemeSelection::Explicit(
-                specforge::BuiltInDarkThemeId()),
-            specforge::BuiltInLightThemeId());
-    const specforge::ThemeDescriptor& light =
-        specforge::ResolveBuiltInThemeDescriptor(
-            specforge::ThemeSelection::FollowSystem(),
-            specforge::BuiltInLightThemeId());
+    const spectiary::ThemeDescriptor& dark =
+        spectiary::ResolveBuiltInThemeDescriptor(
+            spectiary::ThemeSelection::Explicit(
+                spectiary::BuiltInDarkThemeId()),
+            spectiary::BuiltInLightThemeId());
+    const spectiary::ThemeDescriptor& light =
+        spectiary::ResolveBuiltInThemeDescriptor(
+            spectiary::ThemeSelection::FollowSystem(),
+            spectiary::BuiltInLightThemeId());
     Require(
-        dark.id == specforge::BuiltInDarkThemeId() &&
-            light.id == specforge::BuiltInLightThemeId(),
+        dark.id == spectiary::BuiltInDarkThemeId() &&
+            light.id == spectiary::BuiltInLightThemeId(),
         "descriptor resolution should preserve explicit priority and follow-system identity");
     Require(
         Luminance(dark.palette.background) <
@@ -218,8 +218,8 @@ void TestResolvedDescriptorsOwnAllRenderingColors()
 
 void TestImGuiThemeApplicationUsesOfficialColorsAndOpaqueViewportBackground()
 {
-    for (const specforge::ThemeDescriptor& theme :
-         specforge::BuiltInThemeDescriptors()) {
+    for (const spectiary::ThemeDescriptor& theme :
+         spectiary::BuiltInThemeDescriptors()) {
         ImGuiStyle actual;
         actual.WindowRounding = 7.25f;
         actual.FramePadding = ImVec2(13.0f, 17.0f);
@@ -227,14 +227,14 @@ void TestImGuiThemeApplicationUsesOfficialColorsAndOpaqueViewportBackground()
         actual.FontScaleMain = 1.37f;
         ImGuiStyle official = actual;
         if (theme.color_scheme ==
-            specforge::ThemeColorScheme::Light) {
+            spectiary::ThemeColorScheme::Light) {
             ImGui::StyleColorsLight(&official);
         } else {
             ImGui::StyleColorsDark(&official);
         }
         official.Colors[ImGuiCol_WindowBg].w = 1.0f;
 
-        specforge::ApplyImGuiThemeColors(theme, actual);
+        spectiary::ApplyImGuiThemeColors(theme, actual);
         for (int color = 0; color < ImGuiCol_COUNT; ++color) {
             Require(
                 SameColor(actual.Colors[color], official.Colors[color]),
@@ -253,8 +253,8 @@ void TestImGuiThemeApplicationUsesOfficialColorsAndOpaqueViewportBackground()
 
 void TestImPlotThemeApplicationUsesAutoBaseAndSemanticOverrides()
 {
-    for (const specforge::ThemeDescriptor& theme :
-         specforge::BuiltInThemeDescriptors()) {
+    for (const spectiary::ThemeDescriptor& theme :
+         spectiary::BuiltInThemeDescriptors()) {
         ImPlotStyle actual;
         actual.PlotBorderSize = 4.75f;
         actual.PlotPadding = ImVec2(11.0f, 13.0f);
@@ -262,7 +262,7 @@ void TestImPlotThemeApplicationUsesAutoBaseAndSemanticOverrides()
         ImPlotStyle automatic = actual;
         ImPlot::StyleColorsAuto(&automatic);
 
-        specforge::ApplyImPlotThemeColors(theme, actual);
+        spectiary::ApplyImPlotThemeColors(theme, actual);
         Require(
             SameColor(
                 actual.Colors[ImPlotCol_AxisText],
@@ -296,14 +296,14 @@ void TestImPlotThemeApplicationUsesAutoBaseAndSemanticOverrides()
 
 void TestSyntheticThemeUsesSharedRuntimeApplicationPath()
 {
-    specforge::ThemeDescriptor synthetic{
-        .id = specforge::ThemeId(
+    spectiary::ThemeDescriptor synthetic{
+        .id = spectiary::ThemeId(
             "spectiary.theme.synthetic.light"),
         .color_scheme =
-            specforge::ThemeColorScheme::Light,
+            spectiary::ThemeColorScheme::Light,
         .palette =
-            specforge::FindBuiltInThemeDescriptor(
-                specforge::BuiltInLightThemeId())
+            spectiary::FindBuiltInThemeDescriptor(
+                spectiary::BuiltInLightThemeId())
                 ->palette,
         .clear_color = {0.91f, 0.92f, 0.93f, 1.0f},
     };
@@ -314,22 +314,22 @@ void TestSyntheticThemeUsesSharedRuntimeApplicationPath()
     ImGuiStyle official = actual;
     ImGui::StyleColorsLight(&official);
     official.Colors[ImGuiCol_WindowBg].w = 1.0f;
-    specforge::ApplyImGuiThemeColors(
+    spectiary::ApplyImGuiThemeColors(
         synthetic,
         actual);
-    specforge::ActivateTheme(synthetic);
+    spectiary::ActivateTheme(synthetic);
     Require(
         SameColor(
             actual.Colors[ImGuiCol_WindowBg],
             official.Colors[ImGuiCol_WindowBg]) &&
             SameColor(
-                specforge::ActiveSemanticPalette().accent,
+                spectiary::ActiveSemanticPalette().accent,
                 synthetic.palette.accent),
         "a third theme should use the same descriptor-driven runtime path without an identity branch");
 
-    specforge::ActivateTheme(
-        *specforge::FindBuiltInThemeDescriptor(
-            specforge::BuiltInDarkThemeId()));
+    spectiary::ActivateTheme(
+        *spectiary::FindBuiltInThemeDescriptor(
+            spectiary::BuiltInDarkThemeId()));
 }
 
 }  // namespace

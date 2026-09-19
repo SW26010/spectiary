@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct OnDemandFrameCaptureConfiguration {
     std::string requested;
@@ -120,4 +120,4 @@ private:
     std::string status_result_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

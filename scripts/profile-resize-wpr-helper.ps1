@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('Start', 'Stop')][string]$Action,
-    [Parameter(Mandatory)][ValidatePattern('^SpecForgeResize-[a-f0-9]{32}$')][string]$Instance,
+    [Parameter(Mandatory)][ValidatePattern('^SpectiaryResize-[a-f0-9]{32}$')][string]$Instance,
     [Parameter(Mandatory)][string]$Directory
 )
 $ErrorActionPreference = 'Stop'

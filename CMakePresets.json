@@ -13,10 +13,10 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "OFF",
-        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "OFF",
-        "SPECFORGE_BUILD_SOURCE_MODE": "working_tree",
-        "SPECFORGE_BUILD_SOURCE_REVISION": "",
+        "SPECTIARY_BUILD_ASDF_LABELING_HARDENING": "OFF",
+        "SPECTIARY_BUILD_ASDF_LABELING_SPIKE": "OFF",
+        "SPECTIARY_BUILD_SOURCE_MODE": "working_tree",
+        "SPECTIARY_BUILD_SOURCE_REVISION": "",
         "VCPKG_MANIFEST_FEATURES": ""
       }
     },
@@ -32,7 +32,7 @@
       "hidden": true,
       "cacheVariables": {
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
-        "SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES": "ON",
+        "SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES": "ON",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static"
       }
     },
@@ -66,8 +66,8 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "SPECFORGE_BUILD_WIDGET_TESTS": "ON",
-        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "ON"
+        "SPECTIARY_BUILD_WIDGET_TESTS": "ON",
+        "SPECTIARY_BUILD_ASDF_LABELING_HARDENING": "ON"
       }
     },
     {
@@ -80,7 +80,7 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON"
+        "SPECTIARY_BUILD_ASDF_LABELING_SPIKE": "ON"
       }
     },
     {
@@ -105,7 +105,7 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON"
+        "SPECTIARY_BUILD_ASDF_LABELING_SPIKE": "ON"
       }
     },
     {
@@ -118,7 +118,7 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "SPECFORGE_BUILD_ASDF_LABELING_HARDENING": "ON"
+        "SPECTIARY_BUILD_ASDF_LABELING_HARDENING": "ON"
       }
     }
   ],

@@ -13,10 +13,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Resolve-SpecForgeVcvarsPath {
+function Resolve-SpectiaryVcvarsPath {
     param(
         [string]$ExplicitPath = '',
-        [string]$EnvironmentPath = $env:SPECFORGE_VCVARS_PATH,
+        [string]$EnvironmentPath = $env:SPECTIARY_VCVARS_PATH,
         [string]$VswherePath = '',
         [string]$LegacyPath = ''
     )
@@ -29,7 +29,7 @@ function Resolve-SpecForgeVcvarsPath {
                 Path = $ExplicitPath
             },
             @{
-                Name = 'SPECFORGE_VCVARS_PATH'
+                Name = 'SPECTIARY_VCVARS_PATH'
                 Path = $EnvironmentPath
             }
         )) {
@@ -240,7 +240,7 @@ function Assert-TaskkillTreeAvailable {
 
     try {
         $probeJobHandle = New-KillOnCloseJob
-        $assigned = [SpecForgeBuildJob.NativeMethods]::AssignProcessToJobObject($probeJobHandle, $probe.Handle)
+        $assigned = [SpectiaryBuildJob.NativeMethods]::AssignProcessToJobObject($probeJobHandle, $probe.Handle)
         if (-not $assigned) {
             $message = Get-LastWin32ErrorMessage
             Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
@@ -275,12 +275,12 @@ function Assert-TaskkillTreeAvailable {
     }
 }
 
-if (-not ('SpecForgeBuildJob.NativeMethods' -as [type])) {
+if (-not ('SpectiaryBuildJob.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-namespace SpecForgeBuildJob
+namespace SpectiaryBuildJob
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -352,26 +352,26 @@ function Close-NativeHandle {
     param([IntPtr]$Handle)
 
     if ($Handle -ne [IntPtr]::Zero) {
-        [void][SpecForgeBuildJob.NativeMethods]::CloseHandle($Handle)
+        [void][SpectiaryBuildJob.NativeMethods]::CloseHandle($Handle)
     }
 }
 
 function New-KillOnCloseJob {
-    $jobHandle = [SpecForgeBuildJob.NativeMethods]::CreateJobObject([IntPtr]::Zero, $null)
+    $jobHandle = [SpectiaryBuildJob.NativeMethods]::CreateJobObject([IntPtr]::Zero, $null)
     if ($jobHandle -eq [IntPtr]::Zero) {
         throw "CreateJobObject failed: $(Get-LastWin32ErrorMessage)"
     }
 
-    $info = New-Object SpecForgeBuildJob.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-    $info.BasicLimitInformation.LimitFlags = [SpecForgeBuildJob.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $info = New-Object SpectiaryBuildJob.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info.BasicLimitInformation.LimitFlags = [SpectiaryBuildJob.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     $length = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
     $buffer = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($length)
 
     try {
         [System.Runtime.InteropServices.Marshal]::StructureToPtr($info, $buffer, $false)
-        $ok = [SpecForgeBuildJob.NativeMethods]::SetInformationJobObject(
+        $ok = [SpectiaryBuildJob.NativeMethods]::SetInformationJobObject(
             $jobHandle,
-            [SpecForgeBuildJob.NativeMethods]::JobObjectExtendedLimitInformation,
+            [SpectiaryBuildJob.NativeMethods]::JobObjectExtendedLimitInformation,
             $buffer,
             [uint32]$length)
         if (-not $ok) {
@@ -390,7 +390,7 @@ function New-KillOnCloseJob {
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 
-$VcvarsPath = Resolve-SpecForgeVcvarsPath -ExplicitPath $VcvarsPath
+$VcvarsPath = Resolve-SpectiaryVcvarsPath -ExplicitPath $VcvarsPath
 
 if (-not $LogDir) {
     $LogDir = Join-Path $repoRoot 'logs\build'
@@ -434,29 +434,29 @@ else {
 $cmakeCommand = 'cmake ' + (($cmakeArgs | ForEach-Object { Quote-BatchArgument $_ }) -join ' ')
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $mode = if ($Configure) { 'configure' } else { 'build' }
-$batchPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.cmd"
-$stdoutPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.out.log"
-$stderrPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.err.log"
-$exitCodePath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.exit"
-$preflightLogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.preflight.log"
-$watchdogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.watchdog.ps1"
-$watchdogLogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.watchdog.log"
+$batchPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.cmd"
+$stdoutPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.out.log"
+$stderrPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.err.log"
+$exitCodePath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.exit"
+$preflightLogPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.preflight.log"
+$watchdogPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.watchdog.ps1"
+$watchdogLogPath = Join-Path $LogDir "spectiary-$Preset-$mode-$timestamp.watchdog.log"
 
 $batchLines = @(
     '@echo off',
     'setlocal',
     ('call "' + $VcvarsPath + '"'),
-    'set SPECFORGE_EXITCODE=%ERRORLEVEL%',
-    'if not "%SPECFORGE_EXITCODE%"=="0" goto done',
+    'set SPECTIARY_EXITCODE=%ERRORLEVEL%',
+    'if not "%SPECTIARY_EXITCODE%"=="0" goto done',
     $cmakeCommand,
-    'set SPECFORGE_EXITCODE=%ERRORLEVEL%',
+    'set SPECTIARY_EXITCODE=%ERRORLEVEL%',
     ':done',
-    ('> "' + $exitCodePath + '" echo %SPECFORGE_EXITCODE%'),
-    'exit /b %SPECFORGE_EXITCODE%'
+    ('> "' + $exitCodePath + '" echo %SPECTIARY_EXITCODE%'),
+    'exit /b %SPECTIARY_EXITCODE%'
 )
 Set-Content -LiteralPath $batchPath -Value $batchLines -Encoding ASCII
 
-Write-Host "SpecForge MSVC CMake $mode"
+Write-Host "Spectiary MSVC CMake $mode"
 Write-Host "Command: $cmakeCommand"
 Write-Host "Timeout: $TimeoutSec seconds"
 Write-Host "Stdout: $stdoutPath"
@@ -483,7 +483,7 @@ try {
         -WindowStyle Hidden `
         -PassThru
 
-    $assigned = [SpecForgeBuildJob.NativeMethods]::AssignProcessToJobObject($jobHandle, $process.Handle)
+    $assigned = [SpectiaryBuildJob.NativeMethods]::AssignProcessToJobObject($jobHandle, $process.Handle)
     if (-not $assigned) {
         $message = Get-LastWin32ErrorMessage
         [void](Invoke-TaskkillTree -ProcessId $process.Id)

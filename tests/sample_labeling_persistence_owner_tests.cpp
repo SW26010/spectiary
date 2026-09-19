@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 namespace {
-using namespace specforge;
+using namespace spectiary;
 void Require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
@@ -86,7 +86,7 @@ void TestOwners(const std::filesystem::path& root)
 int main()
 {
     const auto root = std::filesystem::temp_directory_path() /
-        ("specforge-labeling-owners-" + std::to_string(GetCurrentProcessId()));
+        ("spectiary-labeling-owners-" + std::to_string(GetCurrentProcessId()));
     try {
         TestOwners(root);
         std::filesystem::remove_all(root);

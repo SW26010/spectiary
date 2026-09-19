@@ -19,8 +19,8 @@ void Require(bool condition, std::string_view message)
 
 void TestSystemAndUserScaleComposition()
 {
-    const specforge::UiScaleFactors default_scale =
-        specforge::CalculateUiScaleFactors(1.5f, 100);
+    const spectiary::UiScaleFactors default_scale =
+        spectiary::CalculateUiScaleFactors(1.5f, 100);
     Require(
         std::abs(default_scale.system - 1.5f) < 0.0001f &&
             std::abs(default_scale.user - 1.0f) < 0.0001f &&
@@ -28,8 +28,8 @@ void TestSystemAndUserScaleComposition()
                 0.0001f,
         "100% should preserve the Windows DPI scale");
 
-    const specforge::UiScaleFactors scaled =
-        specforge::CalculateUiScaleFactors(1.5f, 125);
+    const spectiary::UiScaleFactors scaled =
+        spectiary::CalculateUiScaleFactors(1.5f, 125);
     Require(
         std::abs(scaled.system - 1.5f) < 0.0001f &&
             std::abs(scaled.user - 1.25f) < 0.0001f &&
@@ -37,8 +37,8 @@ void TestSystemAndUserScaleComposition()
                 0.0001f,
         "system and user scales should multiply");
 
-    const specforge::UiScaleFactors moved =
-        specforge::CalculateUiScaleFactors(1.0f, 125);
+    const spectiary::UiScaleFactors moved =
+        spectiary::CalculateUiScaleFactors(1.0f, 125);
     Require(
         std::abs(moved.user - 1.25f) < 0.0001f &&
             std::abs(moved.effective - 1.25f) < 0.0001f,
@@ -49,10 +49,10 @@ void TestStyleScalingPreservesVisibleHairlines()
 {
     const ImGuiStyle base_style;
     ImGuiStyle scaled_style;
-    specforge::ApplyUiScaleToImGuiStyle(
+    spectiary::ApplyUiScaleToImGuiStyle(
         scaled_style,
         base_style,
-        specforge::CalculateUiScaleFactors(1.0f, 80));
+        spectiary::CalculateUiScaleFactors(1.0f, 80));
 
     Require(
         base_style.WindowBorderSize > 0.0f &&

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionRosterRemoveResult {
     SourceCollectionSessionAction action;
@@ -164,4 +164,4 @@ private:
     std::uint64_t resident_access_epoch_ = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

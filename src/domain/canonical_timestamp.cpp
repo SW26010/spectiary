@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <stdexcept>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 [[nodiscard]] bool IsWithinCanonicalTimestampRange(
@@ -150,4 +150,4 @@ std::optional<CanonicalTimestamp> ParseCanonicalTimestamp(
     return CanonicalTimestamp::FromTimePoint(time_point);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

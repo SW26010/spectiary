@@ -12,7 +12,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kPreferencesFormatKind =
@@ -289,4 +289,4 @@ bool SaveSpectrumPlotPreferences(
         error_message);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

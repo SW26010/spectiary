@@ -67,12 +67,12 @@ function Read-UInt32BigEndian {
         [uint32]$Bytes[$Offset + 3]
 }
 
-if ($null -eq ('SpecForgeApplicationIconNative' -as [type])) {
+if ($null -eq ('SpectiaryApplicationIconNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-public static class SpecForgeApplicationIconNative
+public static class SpectiaryApplicationIconNative
 {
     [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadLibraryExW(string fileName, IntPtr file, uint flags);
@@ -102,8 +102,8 @@ public static class SpecForgeApplicationIconNative
 
 $iconPath = Join-Path $RepoRoot 'resources\branding\spectiary.ico'
 $svgPath = Join-Path $RepoRoot 'resources\branding\spectiary.svg'
-$resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
-$resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
+$resourceHeaderPath = Join-Path $RepoRoot 'src\platform\spectiary_resource.h'
+$resourceTemplatePath = Join-Path $RepoRoot 'src\platform\spectiary_resources.rc.in'
 $cmakePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $generatorPath = Join-Path $RepoRoot 'scripts\generate-application-icon.ps1'
 
@@ -203,7 +203,7 @@ if ((Compare-Object $requiredSizes ($actualSizes | Sort-Object -Unique))) {
 $resourceHeader = Get-Content -Raw -LiteralPath $resourceHeaderPath
 $resourceIdMatch = [regex]::Match(
     $resourceHeader,
-    '#define\s+SPECFORGE_RESOURCE_APPLICATION_ICON\s+(\d+)')
+    '#define\s+SPECTIARY_RESOURCE_APPLICATION_ICON\s+(\d+)')
 if (-not $resourceIdMatch.Success) {
     throw 'Application icon resource identifier is missing.'
 }
@@ -211,25 +211,25 @@ $resourceId = [int]$resourceIdMatch.Groups[1].Value
 
 $loadLibraryAsDataFile = 0x00000002
 $loadLibraryAsImageResource = 0x00000020
-$module = [SpecForgeApplicationIconNative]::LoadLibraryExW(
+$module = [SpectiaryApplicationIconNative]::LoadLibraryExW(
     (Resolve-Path -LiteralPath $BuiltExecutable).Path,
     [IntPtr]::Zero,
     $loadLibraryAsDataFile -bor $loadLibraryAsImageResource)
 if ($module -eq [IntPtr]::Zero) {
-    throw "Could not open SpecForge executable resources: $BuiltExecutable"
+    throw "Could not open Spectiary executable resources: $BuiltExecutable"
 }
 
 try {
-    $groupIcon = [SpecForgeApplicationIconNative]::FindResourceW(
+    $groupIcon = [SpectiaryApplicationIconNative]::FindResourceW(
         $module,
         [IntPtr]$resourceId,
         [IntPtr]14)
     if ($groupIcon -eq [IntPtr]::Zero) {
-        throw "SpecForge executable is missing group icon resource $resourceId."
+        throw "Spectiary executable is missing group icon resource $resourceId."
     }
 
     foreach ($size in @(16, 32)) {
-        $loadedIcon = [SpecForgeApplicationIconNative]::LoadImageW(
+        $loadedIcon = [SpectiaryApplicationIconNative]::LoadImageW(
             $module,
             [IntPtr]$resourceId,
             1,
@@ -237,23 +237,23 @@ try {
             $size,
             0)
         if ($loadedIcon -eq [IntPtr]::Zero) {
-            throw "SpecForge executable icon resource $resourceId could not load at ${size}px."
+            throw "Spectiary executable icon resource $resourceId could not load at ${size}px."
         }
-        [void][SpecForgeApplicationIconNative]::DestroyIcon($loadedIcon)
+        [void][SpectiaryApplicationIconNative]::DestroyIcon($loadedIcon)
     }
 }
 finally {
-    [void][SpecForgeApplicationIconNative]::FreeLibrary($module)
+    [void][SpectiaryApplicationIconNative]::FreeLibrary($module)
 }
 
 $resourceTemplate = Get-Content -Raw -LiteralPath $resourceTemplatePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakePath
 
 Assert-Contains $resourceTemplate `
-    'SPECFORGE_RESOURCE_APPLICATION_ICON ICON "@SPECFORGE_APPLICATION_ICON@"' `
+    'SPECTIARY_RESOURCE_APPLICATION_ICON ICON "@SPECTIARY_APPLICATION_ICON@"' `
     'Application icon resource template'
 Assert-Contains $cmakeSource `
-    '${SPECFORGE_APPLICATION_ICON}' `
+    '${SPECTIARY_APPLICATION_ICON}' `
     'Application icon resource dependency'
 
 Write-Host 'Application icon asset, resource, and integration checks passed.'

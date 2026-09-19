@@ -1,6 +1,6 @@
 #include "ui/sample_label_presentation.h"
 
-namespace specforge {
+namespace spectiary {
 
 std::string LocalizedSampleLabelValue(
     UiLanguage language,
@@ -41,4 +41,4 @@ std::string LocalizedCompactSampleLabelValue(
     return std::to_string(code);
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleAnnotationDisplayNameOverride {
     std::string source_id;
@@ -51,4 +51,4 @@ LoadSampleWorkflowStateCache(
     const std::filesystem::path& path,
     const SampleWorkflowStateCache& cache);
 
-}  // namespace specforge
+}  // namespace spectiary

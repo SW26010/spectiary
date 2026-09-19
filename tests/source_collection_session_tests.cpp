@@ -48,12 +48,12 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
+spectiary::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
 {
     const auto timestamp =
-        specforge::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+        spectiary::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
     Require(timestamp.has_value(), "test canonical timestamp should parse");
-    specforge::SampleLabelingTaskCanonicalMetadata metadata;
+    spectiary::SampleLabelingTaskCanonicalMetadata metadata;
     metadata.created_at = *timestamp;
     metadata.modified_at = *timestamp;
     metadata.origin.kind = "manual";
@@ -61,7 +61,7 @@ specforge::SampleLabelingTaskCanonicalMetadata TestCanonicalMetadata()
 }
 
 void RequireResolvedSequencePosition(
-    const specforge::SourceCollectionNavigationView& view,
+    const spectiary::SourceCollectionNavigationView& view,
     std::optional<std::size_t> expected_zero_based_position,
     std::size_t expected_sequence_length,
     std::string_view message)
@@ -93,7 +93,7 @@ std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     std::filesystem::path path = std::filesystem::temp_directory_path();
-    path /= "specforge_source_collection_session_";
+    path /= "spectiary_source_collection_session_";
     path += std::to_string(now);
     path += std::string(suffix);
     return path;
@@ -186,7 +186,7 @@ std::string AnnotationSourceId(const std::filesystem::path& path)
 }
 
 bool HasSortSource(
-    const specforge::SourceCollectionSampleSortingView& view,
+    const spectiary::SourceCollectionSampleSortingView& view,
     std::string_view source_id)
 {
     return std::any_of(view.sources.begin(), view.sources.end(), [source_id](const auto& source) {
@@ -195,7 +195,7 @@ bool HasSortSource(
 }
 
 bool HasAvailableSortSource(
-    const specforge::SourceCollectionSampleSortingView& view,
+    const spectiary::SourceCollectionSampleSortingView& view,
     std::string_view source_id)
 {
     return std::any_of(view.available_sources.begin(), view.available_sources.end(), [source_id](const auto& source) {
@@ -204,25 +204,25 @@ bool HasAvailableSortSource(
 }
 
 bool HasPersistenceMessage(
-    const specforge::LocalUserStateHealthView& health,
-    specforge::LocalUserStateArea area,
+    const spectiary::LocalUserStateHealthView& health,
+    spectiary::LocalUserStateArea area,
     std::optional<
-        specforge::LocalUserStateHealthMessageKind>
+        spectiary::LocalUserStateHealthMessageKind>
         kind = std::nullopt)
 {
     return std::any_of(
         health.messages.begin(),
         health.messages.end(),
         [area, kind](
-            const specforge::
+            const spectiary::
                 LocalUserStateHealthMessage& message) {
             return message.area == area &&
                    (!kind || message.kind == *kind);
         });
 }
 
-const specforge::SourceCollectionSampleSortSourceView* FindSortSource(
-    const specforge::SourceCollectionSampleSortingView& view,
+const spectiary::SourceCollectionSampleSortSourceView* FindSortSource(
+    const spectiary::SourceCollectionSampleSortingView& view,
     std::string_view source_id)
 {
     const auto match = std::find_if(view.sources.begin(), view.sources.end(), [source_id](const auto& source) {
@@ -236,15 +236,15 @@ void SaveLabelResultFixture(
     std::string task_id,
     std::string task_name,
     std::vector<int> values,
-    specforge::SampleLabelSet label_set,
+    spectiary::SampleLabelSet label_set,
     bool write_metadata)
 {
-    specforge::SampleLabelingTask task =
-        specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), values.size());
+    spectiary::SampleLabelingTask task =
+        spectiary::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), values.size());
     task.values.Complete() = std::move(values);
     task.label_set = std::move(label_set);
     std::string error;
-    const specforge::test_support::LegacyFixtureIo adapter;
+    const spectiary::test_support::LegacyFixtureIo adapter;
     Require(
         adapter.SaveLabelArray(path, task, &error),
         error.empty() ? "label result fixture NPY should save" : error);
@@ -256,18 +256,18 @@ void SaveLabelResultFixture(
     }
 }
 
-specforge::SpectrumSnapshotHandle MakeSnapshot(
+spectiary::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_count,
     std::size_t current_index,
     std::string format = "test")
 {
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->source.id = "source";
     snapshot->source.display_name = "source";
     snapshot->source.path = path;
     snapshot->source.metadata.push_back(
-        specforge::SpectrumMetadataEntry{
+        spectiary::SpectrumMetadataEntry{
             "format",
             format,
             format});
@@ -282,25 +282,25 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
 }
 
 void ActivateCanonicalFixtureSource(
-    specforge::SampleLabelingController& controller,
+    spectiary::SampleLabelingController& controller,
     const std::filesystem::path& source_path,
-    const specforge::SourceCollectionContext& context)
+    const spectiary::SourceCollectionContext& context)
 {
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(
             source_path,
             context.identity.spectrum_count,
             0);
     controller.ActivateSource(
         context.identity,
-        specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+        spectiary::BuildSampleLabelingCanonicalSourceDescriptor(
             *snapshot,
             context));
 }
 
 void TestCanonicalSaveRejectsReservedStorage()
 {
-    using namespace specforge;
+    using namespace spectiary;
     const auto base = UniqueTempPath("_canonical_storage_admission");
     for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
         const auto root = base / (profile == StorageProfile::Portable ? "portable" : "local");
@@ -344,49 +344,49 @@ void TestCanonicalSaveRejectsReservedStorage()
     std::filesystem::remove_all(base);
 }
 
-specforge::PreparedSampleWorkflowState PrepareWorkflow(
-    const specforge::SpectrumSnapshotHandle& snapshot,
-    const specforge::SourceCollectionContext& context,
+spectiary::PreparedSampleWorkflowState PrepareWorkflow(
+    const spectiary::SpectrumSnapshotHandle& snapshot,
+    const spectiary::SourceCollectionContext& context,
     std::size_t prepared_index,
     std::filesystem::path labeling_cache = {},
     std::filesystem::path workflow_cache = {})
 {
-    return specforge::PrepareSampleWorkflowState(
+    return spectiary::PrepareSampleWorkflowState(
         *snapshot,
         context,
         prepared_index,
         {std::move(labeling_cache), std::move(workflow_cache)});
 }
 
-using SnapshotLoader = std::function<specforge::SpectrumSnapshotHandle(
+using SnapshotLoader = std::function<spectiary::SpectrumSnapshotHandle(
     const std::filesystem::path&,
     std::size_t)>;
 
-specforge::SourceCollectionLoadDependencies LoadingDependencies(
+spectiary::SourceCollectionLoadDependencies LoadingDependencies(
     SnapshotLoader loader,
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
     const std::filesystem::path& workflow_cache)
 {
-    specforge::SourceCollectionLoadDependencies adapters;
-    adapters.workflow_cache_paths = specforge::test_support::EmptyWorkflowCachePaths();
+    spectiary::SourceCollectionLoadDependencies adapters;
+    adapters.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
     SnapshotLoader folder_loader = loader;
     adapters.snapshot_loader = [loader = std::move(loader)](
                                    const std::filesystem::path& path,
                                    std::size_t spectrum_index,
                                    const auto& canceled) {
         if (canceled()) {
-            throw specforge::SourceCollectionPreparationCanceled();
+            throw spectiary::SourceCollectionPreparationCanceled();
         }
         return loader(path, spectrum_index);
     };
     adapters.folder_snapshot_loader = [loader = std::move(folder_loader)](
                                           const std::filesystem::path& path,
                                           std::size_t spectrum_index,
-                                          const specforge::SourceCollectionFolderListing&,
+                                          const spectiary::SourceCollectionFolderListing&,
                                           const auto& canceled) {
         if (canceled()) {
-            throw specforge::SourceCollectionPreparationCanceled();
+            throw spectiary::SourceCollectionPreparationCanceled();
         }
         return loader(path, spectrum_index);
     };
@@ -398,7 +398,7 @@ specforge::SourceCollectionLoadDependencies LoadingDependencies(
     return adapters;
 }
 
-class PreparedSession final : public specforge::SourceCollectionSession {
+class PreparedSession final : public spectiary::SourceCollectionSession {
 public:
     PreparedSession(
         SnapshotLoader loader,
@@ -406,24 +406,24 @@ public:
         std::filesystem::path navigation_cache,
         std::filesystem::path labeling_cache,
         std::filesystem::path workflow_cache,
-        specforge::SampleLabelingController::
+        spectiary::SampleLabelingController::
             CanonicalDocumentPublisher
                 canonical_document_publisher = {},
-        specforge::SampleLabelingController::
+        spectiary::SampleLabelingController::
             CanonicalValuesPublisher
                 canonical_values_publisher = {},
-        const specforge::RuntimePaths& runtime_paths = {})
-        : specforge::SourceCollectionSession(
+        const spectiary::RuntimePaths& runtime_paths = {})
+        : spectiary::SourceCollectionSession(
               source_session_cache,
               navigation_cache,
               labeling_cache,
               workflow_cache,
-              specforge::SampleLabelingStateCacheLoadPolicy::
+              spectiary::SampleLabelingStateCacheLoadPolicy::
                   AllowPersistentOutputs,
               std::move(canonical_document_publisher),
               std::move(canonical_values_publisher),
               runtime_paths),
-          queue_(specforge::MakeSourceCollectionLoadQueueForTesting(
+          queue_(spectiary::MakeSourceCollectionLoadQueueForTesting(
               LoadingDependencies(
                   std::move(loader),
                   navigation_cache,
@@ -433,7 +433,7 @@ public:
         RestorePreparedSources();
     }
 
-    [[nodiscard]] specforge::SourceCollectionSessionResult Open(
+    [[nodiscard]] spectiary::SourceCollectionSessionResult Open(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0,
         std::vector<std::filesystem::path> annotation_paths = {})
@@ -444,29 +444,29 @@ public:
             std::move(annotation_paths)));
     }
 
-    [[nodiscard]] specforge::SourceCollectionSessionResult SubmitAndService(
-        specforge::SourceCollectionSessionIntent intent)
+    [[nodiscard]] spectiary::SourceCollectionSessionResult SubmitAndService(
+        spectiary::SourceCollectionSessionIntent intent)
     {
         return ServiceFollowUps(
-            specforge::SourceCollectionSession::Submit(std::move(intent)));
+            spectiary::SourceCollectionSession::Submit(std::move(intent)));
     }
 
 private:
-    [[nodiscard]] specforge::SourceCollectionSessionResult CommitPrepared(
+    [[nodiscard]] spectiary::SourceCollectionSessionResult CommitPrepared(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
         std::vector<std::filesystem::path> annotation_paths)
     {
-        specforge::SourceCollectionLoadRequest request{
+        spectiary::SourceCollectionLoadRequest request{
             .path = path,
             .spectrum_index = spectrum_index,
             .annotation_paths = std::move(annotation_paths),
         };
-        if (std::optional<specforge::SourceCollectionLoadHint> hint =
+        if (std::optional<spectiary::SourceCollectionLoadHint> hint =
                 LoadHintForSource(path, spectrum_index)) {
             request.reuse = std::move(hint->reuse);
         }
-        auto completion = specforge::test_support::WaitForSourceCompletion(
+        auto completion = spectiary::test_support::WaitForSourceCompletion(
             queue_, queue_.Enqueue(std::move(request)));
         if (!completion.prepared) {
             throw std::runtime_error(completion.error_message);
@@ -481,12 +481,12 @@ private:
             std::move(prepared.context_reuse_proof));
     }
 
-    [[nodiscard]] specforge::SourceCollectionSessionResult ServiceFollowUps(
-        specforge::SourceCollectionSessionResult result)
+    [[nodiscard]] spectiary::SourceCollectionSessionResult ServiceFollowUps(
+        spectiary::SourceCollectionSessionResult result)
     {
         for (std::size_t attempt = 0; result.follow_up_spectrum_index; ++attempt) {
             Require(attempt < 8, "prepared session follow-up should converge");
-            const specforge::SpectrumSnapshotHandle snapshot =
+            const spectiary::SpectrumSnapshotHandle snapshot =
                 CurrentSourceSnapshot();
             Require(
                 snapshot && !snapshot->source.path.empty(),
@@ -495,12 +495,12 @@ private:
             const std::size_t spectrum_index =
                 *result.follow_up_spectrum_index;
             result.follow_up_spectrum_index.reset();
-            specforge::SourceCollectionSessionResult follow_up =
+            spectiary::SourceCollectionSessionResult follow_up =
                 CommitPrepared(
                     path,
                     spectrum_index,
                     AnnotationPathsForSource(path));
-            specforge::MergeSourceCollectionSessionAction(
+            spectiary::MergeSourceCollectionSessionAction(
                 result.action,
                 follow_up.action);
             result.loaded = result.loaded || follow_up.loaded;
@@ -526,7 +526,7 @@ private:
 
     void RestorePreparedSources()
     {
-        std::optional<specforge::SourceCollectionDeferredRestorePlan> restore =
+        std::optional<spectiary::SourceCollectionDeferredRestorePlan> restore =
             TakeDeferredRestorePlan();
         if (!restore) {
             return;
@@ -537,7 +537,7 @@ private:
             active_source_path =
                 restore->sources[*restore->active_source_index].path;
         }
-        for (const specforge::SourceCollectionSavedSource& source :
+        for (const spectiary::SourceCollectionSavedSource& source :
              restore->sources) {
             try {
                 (void)Open(
@@ -550,7 +550,7 @@ private:
             }
         }
         if (active_source_path) {
-            const specforge::SourceCollectionSessionView view = View();
+            const spectiary::SourceCollectionSessionView view = View();
             const auto active = std::find_if(
                 view.sources.begin(),
                 view.sources.end(),
@@ -560,17 +560,17 @@ private:
             if (active != view.sources.end()) {
                 const std::size_t active_index = static_cast<std::size_t>(
                     std::distance(view.sources.begin(), active));
-                (void)specforge::SourceCollectionSession::Submit(
-                    specforge::SourceCollectionSessionIntent::
+                (void)spectiary::SourceCollectionSession::Submit(
+                    spectiary::SourceCollectionSessionIntent::
                         EditSourceCollection(
-                            specforge::SourceCollectionIntent::SwitchActive(
+                            spectiary::SourceCollectionIntent::SwitchActive(
                                 active_index)));
             }
         }
         FinishDeferredRestore();
     }
 
-    specforge::SourceCollectionLoadQueue queue_;
+    spectiary::SourceCollectionLoadQueue queue_;
 };
 
 PreparedSession MakeSession(
@@ -657,7 +657,7 @@ PreparedSession MakePersistentSession(
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
     std::vector<SourceFixture> fixtures,
-    const specforge::RuntimePaths& runtime_paths = {})
+    const spectiary::RuntimePaths& runtime_paths = {})
 {
     return PreparedSession(
         [&loaded_snapshots, fixtures = std::move(fixtures)](
@@ -702,16 +702,16 @@ PreparedSession MakeWorkflowPersistentSession(
         workflow_cache);
 }
 
-specforge::SourceCollectionSessionResult Submit(
-    specforge::SourceCollectionSession& session,
-    specforge::SourceCollectionSessionIntent intent)
+spectiary::SourceCollectionSessionResult Submit(
+    spectiary::SourceCollectionSession& session,
+    spectiary::SourceCollectionSessionIntent intent)
 {
     return session.Submit(std::move(intent));
 }
 
-specforge::SourceCollectionSessionResult Submit(
+spectiary::SourceCollectionSessionResult Submit(
     PreparedSession& session,
-    specforge::SourceCollectionSessionIntent intent)
+    spectiary::SourceCollectionSessionIntent intent)
 {
     return session.SubmitAndService(
         std::move(intent));
@@ -732,7 +732,7 @@ PreparedSourceOpenRequest OpenSourceCollection(
     };
 }
 
-specforge::SourceCollectionSessionResult Submit(
+spectiary::SourceCollectionSessionResult Submit(
     PreparedSession& session,
     PreparedSourceOpenRequest request)
 {
@@ -741,54 +741,54 @@ specforge::SourceCollectionSessionResult Submit(
         request.spectrum_index);
 }
 
-specforge::SourceCollectionSessionIntent SwitchSourceCollection(std::size_t source_index)
+spectiary::SourceCollectionSessionIntent SwitchSourceCollection(std::size_t source_index)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::SwitchActive(source_index));
+    return spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::SwitchActive(source_index));
 }
 
-specforge::SourceCollectionSessionIntent RemoveSourceCollection(std::size_t source_index)
+spectiary::SourceCollectionSessionIntent RemoveSourceCollection(std::size_t source_index)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::Remove(source_index));
+    return spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::Remove(source_index));
 }
 
-specforge::SourceCollectionSessionIntent AddReadOnlyAnnotation(std::filesystem::path path)
+spectiary::SourceCollectionSessionIntent AddReadOnlyAnnotation(std::filesystem::path path)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::AddReadOnlyAnnotationResult(std::move(path)));
+    return spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::AddReadOnlyAnnotationResult(std::move(path)));
 }
 
-specforge::SourceCollectionSessionIntent RemoveReadOnlyAnnotation(std::filesystem::path path)
+spectiary::SourceCollectionSessionIntent RemoveReadOnlyAnnotation(std::filesystem::path path)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::RemoveReadOnlyAnnotationResult(std::move(path)));
+    return spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::RemoveReadOnlyAnnotationResult(std::move(path)));
 }
 
-specforge::SourceCollectionSessionIntent RenameAnnotationDisplayName(
+spectiary::SourceCollectionSessionIntent RenameAnnotationDisplayName(
     std::filesystem::path path,
     std::string display_name)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::RenameAnnotationResultDisplayName(
+    return spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::RenameAnnotationResultDisplayName(
             std::move(path),
             std::move(display_name)));
 }
 
-specforge::SourceCollectionSessionIntent AddSampleFilterSource(std::string source_id)
+spectiary::SourceCollectionSessionIntent AddSampleFilterSource(std::string source_id)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-        specforge::SampleFilteringIntent::AddSource(std::move(source_id)));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+        spectiary::SampleFilteringIntent::AddSource(std::move(source_id)));
 }
 
-specforge::SourceCollectionSessionIntent RemoveSampleFilterSource(std::string source_id)
+spectiary::SourceCollectionSessionIntent RemoveSampleFilterSource(std::string source_id)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-        specforge::SampleFilteringIntent::RemoveSource(std::move(source_id)));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+        spectiary::SampleFilteringIntent::RemoveSource(std::move(source_id)));
 }
 
 std::filesystem::path AddPlainIntegerFilterAnnotation(
-    specforge::SourceCollectionSession& session,
+    spectiary::SourceCollectionSession& session,
     std::vector<int> values,
     std::string_view suffix = "_filter.npy")
 {
@@ -798,203 +798,203 @@ std::filesystem::path AddPlainIntegerFilterAnnotation(
         "filter",
         "Filter",
         std::move(values),
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "plain integer filter annotation should load");
     return annotation_path;
 }
 
 std::string AddPlainIntegerSampleFilterSource(
-    specforge::SourceCollectionSession& session,
+    spectiary::SourceCollectionSession& session,
     std::vector<int> values,
     std::string_view suffix = "_filter.npy")
 {
     const std::filesystem::path annotation_path =
         AddPlainIntegerFilterAnnotation(session, std::move(values), suffix);
     const std::string source_id = AnnotationSourceId(annotation_path);
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(session, AddSampleFilterSource(source_id));
     Require(session.View().filter.sources.size() == 1, "sample filter source should be explicitly added");
     Require(session.View().filter.sources[0].id == source_id, "added filter source should use the annotation id");
     return source_id;
 }
 
-specforge::SourceCollectionSessionIntent MoveSampleNavigation(specforge::SampleNavigationRequest request)
+spectiary::SourceCollectionSessionIntent MoveSampleNavigation(spectiary::SampleNavigationRequest request)
 {
-    return specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-        specforge::SampleNavigationIntent::Move(std::move(request)));
+    return spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+        spectiary::SampleNavigationIntent::Move(std::move(request)));
 }
 
-specforge::SourceCollectionSessionIntent SetSampleNameQuery(std::string query)
+spectiary::SourceCollectionSessionIntent SetSampleNameQuery(std::string query)
 {
-    return specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-        specforge::SampleNavigationIntent::SetSampleNameQuery(std::move(query)));
+    return spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+        spectiary::SampleNavigationIntent::SetSampleNameQuery(std::move(query)));
 }
 
-specforge::SourceCollectionSessionIntent StartOrResumeTemporaryLabelingTask()
+spectiary::SourceCollectionSessionIntent StartOrResumeTemporaryLabelingTask()
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask());
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask());
 }
 
-specforge::SourceCollectionSessionIntent RenameActiveLabelingTask(
+spectiary::SourceCollectionSessionIntent RenameActiveLabelingTask(
     std::string expected_task_id,
     std::string requested_name)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::RenameActiveLabelingTask(
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::RenameActiveLabelingTask(
             std::move(expected_task_id),
             std::move(requested_name)));
 }
 
-specforge::SourceCollectionSessionIntent RecoverTemporaryLabelingTask(
+spectiary::SourceCollectionSessionIntent RecoverTemporaryLabelingTask(
     std::string source_identity,
     std::string task_id)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
             std::move(source_identity),
             std::move(task_id)));
 }
 
-specforge::SourceCollectionSessionIntent DeleteTemporaryLabelingTask(
+spectiary::SourceCollectionSessionIntent DeleteTemporaryLabelingTask(
     std::string source_identity,
     std::string task_id)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
             std::move(source_identity),
             std::move(task_id)));
 }
 
-specforge::SourceCollectionSessionIntent ActivateLabelingTaskFromAnnotation(std::filesystem::path annotation_path)
+spectiary::SourceCollectionSessionIntent ActivateLabelingTaskFromAnnotation(std::filesystem::path annotation_path)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(std::move(annotation_path)));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(std::move(annotation_path)));
 }
 
-specforge::SourceCollectionSessionIntent DeleteActiveLabelingTask()
+spectiary::SourceCollectionSessionIntent DeleteActiveLabelingTask()
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::DeleteActiveLabelingTask());
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::DeleteActiveLabelingTask());
 }
 
-specforge::SourceCollectionSessionIntent SetActiveLabelingOutputPath(std::filesystem::path output_path)
+spectiary::SourceCollectionSessionIntent SetActiveLabelingOutputPath(std::filesystem::path output_path)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(std::move(output_path)));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(std::move(output_path)));
 }
 
-specforge::SourceCollectionSessionIntent ExportActiveLabels(
+spectiary::SourceCollectionSessionIntent ExportActiveLabels(
     std::filesystem::path output_path,
-    specforge::SampleLabelExportFormat format =
-        specforge::SampleLabelExportFormat::Npy)
+    spectiary::SampleLabelExportFormat format =
+        spectiary::SampleLabelExportFormat::Npy)
 {
-    return specforge::SourceCollectionSessionIntent::
+    return spectiary::SourceCollectionSessionIntent::
         ChangeActiveSampleWorkflow(
-            specforge::ActiveSampleWorkflowIntent::
+            spectiary::ActiveSampleWorkflowIntent::
                 ExportActiveLabels(
                     std::move(output_path),
                     format));
 }
 
-specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabelDefinition label)
+spectiary::SourceCollectionSessionIntent UpsertActiveLabel(spectiary::SampleLabelDefinition label)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(std::move(label)));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel(std::move(label)));
 }
 
-specforge::SourceCollectionSessionIntent UpdateActiveLabel(
+spectiary::SourceCollectionSessionIntent UpdateActiveLabel(
     int original_code,
-    specforge::SampleLabelDefinition label,
+    spectiary::SampleLabelDefinition label,
     bool allow_used_code_change)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::UpdateActiveLabel(
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::UpdateActiveLabel(
             original_code,
             std::move(label),
             allow_used_code_change));
 }
 
-specforge::SourceCollectionSessionIntent RemoveActiveLabel(int code)
+spectiary::SourceCollectionSessionIntent RemoveActiveLabel(int code)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::RemoveActiveLabel(code));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::RemoveActiveLabel(code));
 }
 
-specforge::SourceCollectionSessionIntent SetActiveLabelingAutoAdvance(bool enabled)
+spectiary::SourceCollectionSessionIntent SetActiveLabelingAutoAdvance(bool enabled)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(enabled));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(enabled));
 }
 
-specforge::SourceCollectionSessionIntent DeactivateActiveLabelingTask()
+spectiary::SourceCollectionSessionIntent DeactivateActiveLabelingTask()
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask());
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask());
 }
 
-specforge::SourceCollectionSessionIntent AssignActiveLabelToCurrentSample(int code)
+spectiary::SourceCollectionSessionIntent AssignActiveLabelToCurrentSample(int code)
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(code));
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(code));
 }
 
-specforge::SourceCollectionSessionIntent ClearActiveLabelForCurrentSample()
+spectiary::SourceCollectionSessionIntent ClearActiveLabelForCurrentSample()
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample());
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample());
 }
 
-specforge::SourceCollectionSessionIntent UndoLastLabelWrite()
+spectiary::SourceCollectionSessionIntent UndoLastLabelWrite()
 {
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::UndoLastLabelWrite());
+    return spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        spectiary::ActiveSampleWorkflowIntent::UndoLastLabelWrite());
 }
 
-specforge::SourceCollectionSessionIntent SetFilterValueSelected(
+spectiary::SourceCollectionSessionIntent SetFilterValueSelected(
     std::string source_id,
     std::string value_key,
     bool selected)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-        specforge::SampleFilteringIntent::SetFilterValueSelected(
+    return spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+        spectiary::SampleFilteringIntent::SetFilterValueSelected(
             std::move(source_id),
             std::move(value_key),
             selected));
 }
 
-specforge::SourceCollectionSessionIntent ClearSampleSorting()
+spectiary::SourceCollectionSessionIntent ClearSampleSorting()
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
-        specforge::SampleSortingIntent::Clear());
+    return spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::Clear());
 }
 
-specforge::SourceCollectionSessionIntent AddSampleSortSource(std::string source_id)
+spectiary::SourceCollectionSessionIntent AddSampleSortSource(std::string source_id)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
-        specforge::SampleSortingIntent::AddSource(std::move(source_id)));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::AddSource(std::move(source_id)));
 }
 
-specforge::SourceCollectionSessionIntent RemoveSampleSortSource(std::string source_id)
+spectiary::SourceCollectionSessionIntent RemoveSampleSortSource(std::string source_id)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
-        specforge::SampleSortingIntent::RemoveSource(std::move(source_id)));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::RemoveSource(std::move(source_id)));
 }
 
-specforge::SourceCollectionSessionIntent SetSampleSortSource(std::string source_id)
+spectiary::SourceCollectionSessionIntent SetSampleSortSource(std::string source_id)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
-        specforge::SampleSortingIntent::SetSortSource(std::move(source_id)));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::SetSortSource(std::move(source_id)));
 }
 
-specforge::SourceCollectionSessionIntent SetSampleSortDirection(
-    specforge::SampleNavigationSortDirection direction)
+spectiary::SourceCollectionSessionIntent SetSampleSortDirection(
+    spectiary::SampleNavigationSortDirection direction)
 {
-    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
-        specforge::SampleSortingIntent::SetSortDirection(direction));
+    return spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::SetSortDirection(direction));
 }
 
 void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
@@ -1003,29 +1003,29 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
-    const specforge::SourceCollectionSessionResult open_result =
+    const spectiary::SourceCollectionSessionResult open_result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    const specforge::SourceCollectionSessionAction& open_action = open_result.action;
+    const spectiary::SourceCollectionSessionAction& open_action = open_result.action;
     Require(open_action.snapshot_changed, "opening a source should change the displayed snapshot");
     Require(open_action.workflow_changed, "opening a source should activate a workflow identity");
     Require(open_action.navigation_inputs_changed, "opening a source should refresh navigation inputs");
     Require(open_result.view_invalidated, "opening a source should report session-view invalidation");
     Require(session.View().sources.size() == 1, "opening a source should add one source entry");
-    const specforge::SourceCollectionSourceView& source =
+    const spectiary::SourceCollectionSourceView& source =
         session.View().sources.front();
     Require(
         source.type && *source.type == "test",
         "session projection should preserve the source type semantic value");
     Require(
         source.state ==
-            specforge::SourceCollectionSourceState::Loaded,
+            spectiary::SourceCollectionSourceState::Loaded,
         "session projection should expose a typed source state");
     Require(session.View().snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
     const auto& open_transition = session.View().sample_transition;
     Require(
         open_transition &&
             open_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::SourceActivation &&
+                spectiary::SourceCollectionSampleTransitionReason::SourceActivation &&
             !open_transition->from_sample_index &&
             open_transition->current_sample_index == 0 &&
             !open_transition->accepted_label_value,
@@ -1034,9 +1034,9 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "active source should accept a labeling task");
 
-    const specforge::SourceCollectionSessionResult next_result =
+    const spectiary::SourceCollectionSessionResult next_result =
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::Next()));
+                            spectiary::SampleNavigationRequest::Next()));
     Require(next_result.navigation.target_found, "next navigation should find a target");
     Require(next_result.navigation.current_index == 1, "next navigation should move to row 1");
     Require(next_result.action.snapshot_changed, "moving to another sample should reload the snapshot");
@@ -1047,13 +1047,13 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(
         next_transition &&
             next_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::Next &&
+                spectiary::SourceCollectionSampleTransitionReason::Next &&
             next_transition->from_sample_index == 0 &&
             next_transition->current_sample_index == 1 &&
             !next_transition->accepted_label_value,
         "manual next should replace the presentation transition without label feedback");
 
-    const specforge::SourceCollectionLabelingView active_labeling = session.View().labeling;
+    const spectiary::SourceCollectionLabelingView active_labeling = session.View().labeling;
     Require(active_labeling.has_active_task, "labeling task should remain active after navigation");
     Require(
         active_labeling.remembered_position && *active_labeling.remembered_position == 1,
@@ -1070,7 +1070,7 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    const specforge::SourceCollectionSessionResult workflow_result =
+    const spectiary::SourceCollectionSessionResult workflow_result =
         Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         workflow_result.view_invalidated,
@@ -1079,21 +1079,21 @@ void TestAssigningLabelAutoAdvancesInsideSession()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "bad", 'b'}))
+                spectiary::SampleLabelDefinition{1, "bad", 'b'}))
             .changed,
         "bad label should be accepted");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
 
-    const specforge::SourceCollectionSessionResult assign_result =
+    const spectiary::SourceCollectionSessionResult assign_result =
         Submit(session, AssignActiveLabelToCurrentSample(1));
-    const specforge::SourceCollectionSessionAction& assign_action = assign_result.action;
+    const spectiary::SourceCollectionSessionAction& assign_action = assign_result.action;
     Require(
         assign_result.label_write &&
             assign_result.label_write->write.accepted &&
             assign_result.label_write->write.changed &&
             assign_result.label_write->write.sample_index == 0 &&
             assign_result.label_write->write.previous_code ==
-                specforge::kUnlabeledSampleLabelCode &&
+                spectiary::kUnlabeledSampleLabelCode &&
             assign_result.label_write->write.current_code == 1 &&
             assign_result.label_write->write.advance_requested &&
             assign_result.label_write->operation.state_save_scheduled,
@@ -1106,7 +1106,7 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     Require(
         auto_advance_transition &&
             auto_advance_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     LabelingAutoAdvance &&
             auto_advance_transition->from_sample_index == 0 &&
             auto_advance_transition->current_sample_index == 1 &&
@@ -1114,14 +1114,14 @@ void TestAssigningLabelAutoAdvancesInsideSession()
         "auto-advance should expose the written label and its real source and target rows");
 
     Require(session.View().labeling.has_active_task, "task should remain active after auto-advance");
-    const specforge::SourceCollectionSessionResult locate_result =
+    const spectiary::SourceCollectionSessionResult locate_result =
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::LocateRow(0)));
+                            spectiary::SampleNavigationRequest::LocateRow(0)));
     const auto& locate_transition = session.View().sample_transition;
     Require(
         locate_transition &&
             locate_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::LocateRow &&
+                spectiary::SourceCollectionSampleTransitionReason::LocateRow &&
             locate_transition->from_sample_index == 1 &&
             locate_transition->current_sample_index == 0 &&
             !locate_transition->accepted_label_value,
@@ -1150,7 +1150,7 @@ void TestTaskRenameIntentPreservesExactNameAndRejectsStaleTarget()
         session.View().labeling.task_id;
     const std::string original_name =
         session.View().labeling.task_name;
-    const specforge::SourceCollectionSessionResult stale =
+    const spectiary::SourceCollectionSessionResult stale =
         Submit(
             session,
             RenameActiveLabelingTask(
@@ -1159,7 +1159,7 @@ void TestTaskRenameIntentPreservesExactNameAndRejectsStaleTarget()
     Require(
         !stale.changed &&
             stale.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditTargetChanged &&
             session.View().labeling.task_id == task_id &&
             session.View().labeling.task_name == original_name,
@@ -1167,7 +1167,7 @@ void TestTaskRenameIntentPreservesExactNameAndRejectsStaleTarget()
 
     const std::string requested_name =
         "  \xE5\xA4\x8D\xE6\xA0\xB8 \xF0\x9F\x99\x82  ";
-    const specforge::SourceCollectionSessionResult renamed =
+    const spectiary::SourceCollectionSessionResult renamed =
         Submit(
             session,
             RenameActiveLabelingTask(
@@ -1190,16 +1190,16 @@ std::string ReadBinaryFile(const std::filesystem::path& path)
         std::istreambuf_iterator<char>());
 }
 
-std::vector<specforge::CsvRecord> ReadCsvRecords(
+std::vector<spectiary::CsvRecord> ReadCsvRecords(
     const std::filesystem::path& path)
 {
-    specforge::BoundedCsvFileReader reader(path);
-    std::vector<specforge::CsvRecord> records;
+    spectiary::BoundedCsvFileReader reader(path);
+    std::vector<spectiary::CsvRecord> records;
     while (true) {
-        specforge::CsvRecordReadResult result =
+        spectiary::CsvRecordReadResult result =
             reader.ReadRecord();
         if (result.status ==
-            specforge::CsvRecordReadStatus::End) {
+            spectiary::CsvRecordReadStatus::End) {
             return records;
         }
         Require(
@@ -1213,10 +1213,10 @@ std::vector<specforge::CsvRecord> ReadCsvRecords(
 
 void WriteCsvRecords(
     const std::filesystem::path& path,
-    const std::vector<specforge::CsvRecord>& records)
+    const std::vector<spectiary::CsvRecord>& records)
 {
-    const specforge::CsvRecordWriteResult result =
-        specforge::WriteCsvRecordsAtomically(
+    const spectiary::CsvRecordWriteResult result =
+        spectiary::WriteCsvRecordsAtomically(
             path,
             records);
     Require(
@@ -1256,11 +1256,11 @@ void TestLabelAutoAdvanceExposesNonAdjacentFilteredTransition()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+                spectiary::SampleLabelDefinition{1, "accepted", 'a'}))
             .changed,
         "filtered auto-advance fixture should add its label");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
-    const specforge::SourceCollectionSessionResult labeled =
+    const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     const auto& transition = session.View().sample_transition;
     Require(
@@ -1269,7 +1269,7 @@ void TestLabelAutoAdvanceExposesNonAdjacentFilteredTransition()
             session.View().navigation.current_index == 2 &&
             transition &&
             transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     LabelingAutoAdvance &&
             transition->from_sample_index == 0 &&
             transition->current_sample_index == 2 &&
@@ -1285,10 +1285,10 @@ void TestLabelUndoRestoresValueAndAutoAdvancePosition()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "first undo fixture label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{2, "good", 'g'})).changed,
         "second undo fixture label should be accepted");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
 
@@ -1297,18 +1297,18 @@ void TestLabelUndoRestoresValueAndAutoAdvancePosition()
     (void)Submit(session, AssignActiveLabelToCurrentSample(2));
     Require(session.View().snapshot->collection.current_index == 2, "second label should auto-advance to row 2");
 
-    specforge::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
+    spectiary::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
     Require(undo_result.action.snapshot_changed, "undo should reload the sample affected by auto-advance");
     Require(session.View().snapshot->collection.current_index == 1, "undo should return to the second labeled row");
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "undo should restore the second row's previous unlabeled value");
 
     undo_result = Submit(session, UndoLastLabelWrite());
     Require(undo_result.action.snapshot_changed, "repeated undo should reload the previous affected sample");
     Require(session.View().snapshot->collection.current_index == 0, "repeated undo should return to the first row");
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "repeated undo should restore the first row's previous unlabeled value");
     Require(
         session.View().labeling.remembered_position && *session.View().labeling.remembered_position == 0,
@@ -1327,10 +1327,10 @@ void TestLabelUndoRestoresExistingValueAfterOverwriteAndClear()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "overwrite undo fixture should accept the first label");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{2, "good", 'g'})).changed,
         "overwrite undo fixture should accept the second label");
 
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
@@ -1343,7 +1343,7 @@ void TestLabelUndoRestoresExistingValueAfterOverwriteAndClear()
 
     (void)Submit(session, ClearActiveLabelForCurrentSample());
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "clear fixture should remove the existing label");
     (void)Submit(session, UndoLastLabelWrite());
     Require(
@@ -1359,7 +1359,7 @@ void TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "sample-navigation-sequence undo fixture should accept a sample label");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
 
@@ -1372,7 +1372,7 @@ void TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence()
         session.View().snapshot->collection.current_index == 1,
         "sample filtering should move away from the labeled row excluded by the active sample navigation sequence");
 
-    const specforge::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
+    const spectiary::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
     Require(
         undo_result.action.snapshot_changed,
         "undo should reload its affected row outside the active sample navigation sequence");
@@ -1380,7 +1380,7 @@ void TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence()
         session.View().snapshot->collection.current_index == 0,
         "session undo should restore the affected row even when it is outside the active sample navigation sequence");
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "session undo outside the sample navigation sequence should restore the previous value");
     Require(
         session.View().navigation.filter_active && !session.View().navigation.current_sample_in_filter,
@@ -1395,7 +1395,7 @@ void TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "history invalidation fixture should accept the first label");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
 
@@ -1409,7 +1409,7 @@ void TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions()
     (void)Submit(session, ClearActiveLabelForCurrentSample());
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{2, "good", 'g'})).changed,
         "changing label definitions should succeed");
     (void)Submit(session, UndoLastLabelWrite());
     Require(
@@ -1425,10 +1425,10 @@ void TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "one", 'o'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "one", 'o'})).changed,
         "capacity fixture should accept label one");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "two", 't'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{2, "two", 't'})).changed,
         "capacity fixture should accept label two");
 
     for (int write_index = 0; write_index < 257; ++write_index) {
@@ -1443,7 +1443,7 @@ void TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites()
     Require(
         session.View().labeling.current_code == 1,
         "undoing the retained 256 entries should stop at the state after the discarded oldest write");
-    const specforge::SourceCollectionSessionResult exhausted = Submit(session, UndoLastLabelWrite());
+    const spectiary::SourceCollectionSessionResult exhausted = Submit(session, UndoLastLabelWrite());
     Require(!exhausted.action.snapshot_changed, "a 257th undo should find no retained history entry");
     Require(session.View().labeling.current_code == 1, "exhausted bounded history should preserve the current value");
 }
@@ -1460,18 +1460,18 @@ void TestSavingCanonicalOwnerKeepsLabelUndoHistory()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "companion-save undo fixture should accept its sample label");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
 
-    const specforge::SourceCollectionSessionResult save_result =
+    const spectiary::SourceCollectionSessionResult save_result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
     Require(save_result.action.navigation_inputs_changed, "canonical save should resync sample workflow inputs");
     Require(std::filesystem::exists(output_path), "canonical ASDF owner should be written");
 
     (void)Submit(session, UndoLastLabelWrite());
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "formalizing the active task as canonical ASDF must preserve label undo history");
 }
 
@@ -1482,15 +1482,15 @@ void TestNoOpLabelUpsertKeepsLabelUndoHistory()
     PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
-    const specforge::SampleLabelDefinition label{1, "bad", 'b'};
+    const spectiary::SampleLabelDefinition label{1, "bad", 'b'};
     Require(Submit(session, UpsertActiveLabel(label)).changed, "no-op fixture should accept its initial sample label");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
 
-    const specforge::SourceCollectionSessionResult no_op = Submit(session, UpsertActiveLabel(label));
+    const spectiary::SourceCollectionSessionResult no_op = Submit(session, UpsertActiveLabel(label));
     Require(!no_op.changed, "saving an identical sample label definition should report no change");
     (void)Submit(session, UndoLastLabelWrite());
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "an identical sample label save must preserve label undo history");
 }
 
@@ -1505,12 +1505,12 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
         AddPlainIntegerFilterAnnotation(session, {1, 2, 2}, "_quality.npy");
     const std::string source_id = AnnotationSourceId(annotation_path);
 
-    specforge::SourceCollectionFilterView filter_view = session.View().filter;
+    spectiary::SourceCollectionFilterView filter_view = session.View().filter;
     Require(filter_view.sources.empty(), "annotation filter sources should not be selected by default");
     Require(filter_view.available_sources.size() == 1, "filterable annotation should be available to add");
     Require(filter_view.available_sources[0].id == source_id, "available source should use the annotation id");
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddSampleFilterSource(source_id));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddSampleFilterSource(source_id));
     Require(
         result.view_invalidated,
         "adding a filter source should report its complete view-invalidating outcome");
@@ -1535,7 +1535,7 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
         result.view_invalidated,
         "filter reconciliation should report its complete view-invalidating outcome");
     filter_view = session.View().filter;
-    specforge::SourceCollectionNavigationView navigation_view = session.View().navigation;
+    spectiary::SourceCollectionNavigationView navigation_view = session.View().navigation;
     const std::uint64_t filtered_topology_revision =
         navigation_view.sequence_topology_revision;
     Require(
@@ -1561,16 +1561,16 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(
         filter_transition &&
             filter_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     NavigationInputReconciliation &&
             filter_transition->from_sample_index == 0 &&
             filter_transition->current_sample_index == 1 &&
             !filter_transition->accepted_label_value,
         "sample-filter reconciliation should replace any previous label feedback");
 
-    const specforge::SourceCollectionSessionResult locate_action =
+    const spectiary::SourceCollectionSessionResult locate_action =
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::LocateRow(0)));
+                            spectiary::SampleNavigationRequest::LocateRow(0)));
     Require(locate_action.navigation.blocked_by_filter, "row locate should be blocked while filtering changes order");
     Require(!locate_action.navigation.target_found, "blocked row locate should not resolve");
     Require(locate_action.navigation.current_index == 1, "blocked row locate should keep the sequence current row");
@@ -1579,9 +1579,9 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
             filtered_topology_revision,
         "a blocked cursor request must not change the sequence topology revision");
 
-    const specforge::SourceCollectionSessionResult next_action =
+    const spectiary::SourceCollectionSessionResult next_action =
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::Next()));
+                            spectiary::SampleNavigationRequest::Next()));
     Require(next_action.navigation.target_found, "filtered next should find a visible target");
     Require(next_action.navigation.current_index == 2, "filtered next should move to the next matching sample");
     Require(
@@ -1668,9 +1668,9 @@ void TestResolvedSequencePositionTracksFinalNavigationSequence()
         4,
         "clearing derived navigation inputs should restore source-order position");
 
-    specforge::SourceCollectionSession& deferred_session =
+    spectiary::SourceCollectionSession& deferred_session =
         session;
-    const specforge::SourceCollectionSessionResult reconciled =
+    const spectiary::SourceCollectionSessionResult reconciled =
         deferred_session.Submit(
             SetFilterValueSelected(
                 filter_source_id,
@@ -1712,19 +1712,19 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "bad label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{2, "good", 'g'})).changed,
         "good label should be accepted");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(1)));
     (void)Submit(session, AssignActiveLabelToCurrentSample(2));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(2)));
     (void)Submit(session, AssignActiveLabelToCurrentSample(2));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(0)));
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
     const std::string canonical_bytes_after_formalization =
         ReadBinaryFile(output_path);
@@ -1733,7 +1733,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
             session.View().navigation.current_annotations[0].relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+                spectiary::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "local labeling task should appear as an annotation row");
     Require(
         session.View().navigation.current_annotations[0].can_filter_samples,
@@ -1771,7 +1771,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     result = Submit(
         session,
         SetSampleSortDirection(
-            specforge::SampleNavigationSortDirection::Descending));
+            spectiary::SampleNavigationSortDirection::Descending));
     Require(
         result.action.navigation_inputs_changed &&
             session.View().navigation.current_sequence_position &&
@@ -1793,15 +1793,15 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{4, "keep", 'k'})).changed,
         "keep label should be accepted");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(1)));
     (void)Submit(session, AssignActiveLabelToCurrentSample(4));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
     const std::string source_id =
@@ -1816,7 +1816,7 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
         session.View().snapshot && session.View().snapshot->collection.current_index == 0,
         "test snapshot should start on the sample using the label to remove");
 
-    const specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
+    const spectiary::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
     Require(result.changed, "removing the label selected by a sample filter should change the task");
     Require(
         session.View().navigation.current_index && *session.View().navigation.current_index == 1,
@@ -1842,13 +1842,13 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{4, "keep", 'k'})).changed,
         "keep label should be accepted");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(1)));
     (void)Submit(session, AssignActiveLabelToCurrentSample(4));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
@@ -1858,7 +1858,7 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
     (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
 
-    const specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
+    const spectiary::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
     Require(result.changed, "removing the selected label should change the task");
     Require(session.View().filter.sources.size() == 1, "the labeling sample-filter source should stay selected");
     const std::unordered_set<std::string> selected_keys =
@@ -1883,15 +1883,15 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{4, "keep", 'k'})).changed,
         "keep label should be accepted");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(1)));
     (void)Submit(session, AssignActiveLabelToCurrentSample(4));
-    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
     const std::string source_id =
@@ -1899,20 +1899,20 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
 
-    specforge::SourceCollectionSessionResult result = Submit(
+    spectiary::SourceCollectionSessionResult result = Submit(
         session,
-        UpdateActiveLabel(3, specforge::SampleLabelDefinition{7, "accepted", 'a'}, false));
+        UpdateActiveLabel(3, spectiary::SampleLabelDefinition{7, "accepted", 'a'}, false));
     Require(!result.changed, "changing a used label code should be rejected without confirmation");
     Require(session.View().labeling.current_code == 3, "rejected recode should keep the current sample value");
 
     result = Submit(
         session,
-        UpdateActiveLabel(3, specforge::SampleLabelDefinition{7, "accepted", 'a'}, true));
+        UpdateActiveLabel(3, spectiary::SampleLabelDefinition{7, "accepted", 'a'}, true));
     Require(result.changed, "confirmed used label recode should flow through the session intent");
     Require(session.View().labeling.current_code == 7, "confirmed recode should migrate the current sample value");
     Require(
-        specforge::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr &&
-            specforge::FindSampleLabel(session.View().labeling.label_set, 7) != nullptr,
+        spectiary::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr &&
+            spectiary::FindSampleLabel(session.View().labeling.label_set, 7) != nullptr,
         "confirmed recode should atomically replace the label definition");
     Require(session.View().filter.sources.size() == 1, "confirmed recode should keep the sample filter source");
     const std::unordered_set<std::string> selected_keys =
@@ -1927,8 +1927,8 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
         session.View().snapshot && session.View().snapshot->collection.current_index == 0,
         "migrated sample filtering should keep the spectrum snapshot aligned");
 
-    const specforge::SampleLabelingAsdfReadResult persisted =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult persisted =
+        spectiary::ReadSampleLabelingAsdfDocument(
             output_path);
     Require(
         persisted.succeeded(),
@@ -1945,8 +1945,8 @@ void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_incomplete_metadata.npy");
-    specforge::SampleLabelSet label_set;
-    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "defined", 'd'});
+    spectiary::SampleLabelSet label_set;
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{5, "defined", 'd'});
     SaveLabelResultFixture(
         annotation_path,
         "incomplete-metadata",
@@ -1961,9 +1961,9 @@ void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "fixture annotation should load");
     (void)Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
 
-    const specforge::SourceCollectionLabelingView view = session.View().labeling;
+    const spectiary::SourceCollectionLabelingView view = session.View().labeling;
     Require(
-        specforge::FindSampleLabel(view.label_set, 9) == nullptr,
+        spectiary::FindSampleLabel(view.label_set, 9) == nullptr,
         "fixture metadata should intentionally omit sample value code 9");
     Require(view.label_usage_counts.at(9) == 1, "the labeling view should count undefined sample value code 9");
 
@@ -1973,7 +1973,7 @@ void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
     Require(
         !Submit(
              session,
-             UpdateActiveLabel(5, specforge::SampleLabelDefinition{9, "collision", 'c'}, true))
+             UpdateActiveLabel(5, spectiary::SampleLabelDefinition{9, "collision", 'c'}, true))
              .changed,
         "the session should reject recoding a label to an undefined code already present in sample values");
 }
@@ -1987,7 +1987,7 @@ void TestResumeLocateRespectsActiveFilterSequence()
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "2", true));
     Require(session.View().navigation.sequence_active, "test should activate the filtered sequence");
     Require(session.View().navigation.sequence_count == 2, "test should include only the two matching samples");
@@ -1995,17 +1995,17 @@ void TestResumeLocateRespectsActiveFilterSequence()
         session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "filter should reconcile to the first included row");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(2)));
     Require(!result.navigation.target_found, "ordinary row locate remains blocked when sequence order differs");
     Require(result.navigation.blocked_by_filter, "ordinary row locate should report the active filter block");
     Require(result.navigation.current_index == 1, "blocked ordinary locate should keep the current row");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(2)));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateSourceRowInSequence(2)));
     Require(result.navigation.target_found, "resume locate should allow a remembered row inside the sequence");
     Require(result.navigation.current_index == 2, "resume locate should jump to the remembered in-sequence row");
     Require(session.View().snapshot->collection.current_index == 2, "resume locate should load the remembered row snapshot");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(0)));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateSourceRowInSequence(0)));
     Require(!result.navigation.target_found, "resume locate should not bypass the active sequence");
     Require(result.navigation.blocked_by_filter, "out-of-sequence resume locate should report the filter block");
     Require(result.navigation.current_index == 2, "blocked resume locate should keep the current sequence row");
@@ -2018,9 +2018,9 @@ void TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 4);
 
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    const specforge::SourceCollectionNavigationView navigation = session.View().navigation;
+    const spectiary::SourceCollectionNavigationView navigation = session.View().navigation;
 
     Require(!navigation.sequence_active, "source order should not expose an active sequence");
     Require(navigation.sequence_count == 4, "source-order sequence count should still match sample count");
@@ -2041,11 +2041,11 @@ void TestRememberedPositionResumableTracksActiveSequence()
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "2", true));
     Require(session.View().navigation.sequence_count == 2, "annotation filter should include rows 1 and 2");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
     Require(result.navigation.target_found && result.navigation.current_index == 2, "next should remember row 2");
     Require(
         session.View().labeling.remembered_position && *session.View().labeling.remembered_position == 2,
@@ -2071,7 +2071,7 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
     Require(session.View().sorting.has_active_source, "sorting view should attach to the active source");
     Require(HasSortSource(session.View().sorting, "sample-name"), "sample names should be available as a sort source");
@@ -2092,40 +2092,40 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     Require(
         sorting_transition &&
             sorting_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     NavigationInputReconciliation &&
             sorting_transition->from_sample_index == 0 &&
             sorting_transition->current_sample_index == 0 &&
             !sorting_transition->accepted_label_value,
         "sorting reconciliation should clear label feedback even when the current source row stays selected");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(result.navigation.target_found && result.navigation.current_index == 2, "previous should follow sorted order");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(!result.navigation.target_found, "ordinary row locate should be blocked for sorted sequence");
     Require(result.navigation.current_index == 2, "blocked row locate should keep the sorted current row");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(1)));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::LocateSourceRowInSequence(1)));
     Require(result.navigation.target_found && result.navigation.current_index == 1, "sequence locate should allow sorted in-sequence rows");
 
-    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    result = Submit(session, SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Descending));
     Require(
         session.View().navigation.current_sequence_position &&
             *session.View().navigation.current_sequence_position == 2,
         "descending sample-name sorting should place alpha after gamma and beta");
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(result.navigation.target_found && result.navigation.current_index == 2, "previous should follow descending sorted order");
 
     result = Submit(session, ClearSampleSorting());
     Require(!session.View().sorting.active, "clearing sorting should return sorting view to source order");
     Require(
-        session.View().sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        session.View().sorting.direction == spectiary::SampleNavigationSortDirection::Ascending,
         "clearing sorting should restore ascending source order");
     Require(!session.View().navigation.sequence_active, "clearing sorting without filters should deactivate sequence state");
     Require(session.View().navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
 
-    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    result = Submit(session, SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Descending));
     result = Submit(session, SetSampleSortSource("source-order"));
     Require(session.View().sorting.active, "descending source-order sorting should activate sorting view state");
     Require(
@@ -2139,17 +2139,17 @@ void TestSampleSortingIntentAppliesNavigationSequence()
         "descending source order should place row 2 at the first sequence position");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
-    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Ascending));
+    result = Submit(session, SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Ascending));
     Require(
-        session.View().sorting.source_order_direction == specforge::SampleNavigationSortDirection::Descending,
+        session.View().sorting.source_order_direction == spectiary::SampleNavigationSortDirection::Descending,
         "inactive source-order sorting should retain its own descending direction");
 
     result = Submit(session, SetSampleSortSource("source-order"));
     Require(
-        session.View().sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+        session.View().sorting.direction == spectiary::SampleNavigationSortDirection::Descending,
         "reactivating source-order sorting should use its cached direction");
 
-    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+    result = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
     Require(
         result.navigation.target_found && result.navigation.current_index == 1,
         "next should follow descending source order");
@@ -2167,16 +2167,16 @@ void TestSampleSortingSourcesRequireExplicitAddition()
         "rank",
         "Rank",
         {2, 1, 1},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
     Require(result.loaded, "plain integer annotation should load");
-    specforge::SourceCollectionSessionView view = session.View();
+    spectiary::SourceCollectionSessionView view = session.View();
     Require(HasSortSource(view.sorting, "sample-name"), "sample-name should be a default sort entry");
     Require(!HasSortSource(view.sorting, rank_source_id), "annotation sorting should not be selected by default");
     Require(
@@ -2193,13 +2193,13 @@ void TestSampleSortingSourcesRequireExplicitAddition()
     Require(view.sorting.sources.back().removable, "added annotation sorting should be removable");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
-    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    result = Submit(session, SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Descending));
     view = session.View();
-    const specforge::SourceCollectionSampleSortSourceView* rank_before_activation =
+    const spectiary::SourceCollectionSampleSortSourceView* rank_before_activation =
         FindSortSource(view.sorting, rank_source_id);
     Require(rank_before_activation != nullptr, "added annotation sorting should remain visible");
     Require(
-        rank_before_activation->direction == specforge::SampleNavigationSortDirection::Ascending,
+        rank_before_activation->direction == spectiary::SampleNavigationSortDirection::Ascending,
         "inactive annotation sorting should keep its own ascending direction");
 
     result = Submit(session, SetSampleSortSource(rank_source_id));
@@ -2209,13 +2209,13 @@ void TestSampleSortingSourcesRequireExplicitAddition()
         view.sorting.active_source_id == rank_source_id,
         "the added annotation should become the active sort source");
     Require(
-        view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        view.sorting.direction == spectiary::SampleNavigationSortDirection::Ascending,
         "activating annotation sorting should use its cached direction");
-    const specforge::SourceCollectionSampleSortSourceView* sample_name_after_activation =
+    const spectiary::SourceCollectionSampleSortSourceView* sample_name_after_activation =
         FindSortSource(view.sorting, "sample-name");
     Require(sample_name_after_activation != nullptr, "sample-name sorting should stay visible");
     Require(
-        sample_name_after_activation->direction == specforge::SampleNavigationSortDirection::Descending,
+        sample_name_after_activation->direction == spectiary::SampleNavigationSortDirection::Descending,
         "inactive sample-name sorting should retain its own descending direction");
     Require(view.navigation.sequence_active, "active annotation sorting should reorder navigation");
 
@@ -2244,7 +2244,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         "quality",
         "Quality",
         {1, 2, 2},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     {
@@ -2258,7 +2258,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
             3);
 
         (void)Submit(session, OpenSourceCollection(source_path, 0));
-        specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+        spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
         Require(result.loaded, "test annotation should load before selecting sample filters");
         result = Submit(session, AddSampleFilterSource(annotation_source_id));
         Require(session.View().filter.sources.size() == 1, "test should add the annotation sample filter source");
@@ -2268,9 +2268,9 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
 
         result = Submit(session, SetSampleSortSource("sample-name"));
         Require(session.View().sorting.active, "test should activate sample-name sorting");
-        result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+        result = Submit(session, SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Descending));
         Require(
-            session.View().sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+            session.View().sorting.direction == spectiary::SampleNavigationSortDirection::Descending,
             "test should switch sorting to descending");
         Require(
             session.View().navigation.current_sequence_position &&
@@ -2294,7 +2294,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         source_path,
         1,
         {annotation_path});
-    const specforge::SourceCollectionSessionView& view = restored.View();
+    const spectiary::SourceCollectionSessionView& view = restored.View();
     Require(view.filter.sources.size() == 1, "restored workflow should expose the annotation sample filter source");
     Require(
         view.filter.sources[0].id == annotation_source_id,
@@ -2306,7 +2306,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
     Require(view.navigation.sequence_count == 2, "restored filter should still include two samples");
     Require(view.sorting.active, "restored workflow should reactivate sample sorting");
     Require(
-        view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+        view.sorting.direction == spectiary::SampleNavigationSortDirection::Descending,
         "restored workflow should preserve descending sorting direction");
     Require(
         std::any_of(view.sorting.sources.begin(), view.sorting.sources.end(), [](const auto& source) {
@@ -2326,8 +2326,8 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         view.snapshot->collection.current_index == 1,
         "restored source should load the reconciled filtered sample snapshot");
 
-    const specforge::SourceCollectionSessionResult previous_result =
-        Submit(restored, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    const spectiary::SourceCollectionSessionResult previous_result =
+        Submit(restored, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(
         previous_result.navigation.target_found && previous_result.navigation.current_index == 2,
         "restored previous navigation should follow the descending filtered sequence");
@@ -2348,7 +2348,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         "rank",
         "Rank",
         {2, 1, 3},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     {
@@ -2362,7 +2362,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
             3);
 
         (void)Submit(session, OpenSourceCollection(source_path, 0));
-        specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+        spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
         Require(result.loaded, "test annotation should load before renaming");
         Require(session.View().navigation.current_annotations.size() == 1, "loaded annotation should be visible");
         Require(session.View().navigation.current_annotations[0].name != "Quality score", "test should start from the default name");
@@ -2370,7 +2370,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
 
         result = Submit(session, RenameAnnotationDisplayName(annotation_path, "  Quality score  "));
         Require(result.action.workflow_changed, "renaming an annotation display name should report workflow change");
-        specforge::SourceCollectionSessionView view = session.View();
+        spectiary::SourceCollectionSessionView view = session.View();
         Require(
             view.navigation.current_annotations[0].name == "Quality score",
             "annotation row should use the custom display name");
@@ -2394,7 +2394,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
 
         result = Submit(session, SetSampleSortSource(annotation_source_id));
         view = session.View();
-        const specforge::SourceCollectionSampleSortSourceView* sort_source =
+        const spectiary::SourceCollectionSampleSortSourceView* sort_source =
             FindSortSource(view.sorting, annotation_source_id);
         Require(sort_source != nullptr, "renamed annotation should still be selectable as a sort source");
         Require(sort_source->name == "Quality score", "selected sample sort source should keep the custom name");
@@ -2446,7 +2446,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         source_path,
         0,
         {annotation_path});
-    const specforge::SourceCollectionSessionView restored_view = restored.View();
+    const spectiary::SourceCollectionSessionView restored_view = restored.View();
     Require(
         restored_view.navigation.current_annotations[0].name == utf8_display_name,
         "restored workflow should keep the UTF-8 annotation display name");
@@ -2454,7 +2454,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         restored_view.filter.sources.size() == 1 &&
             restored_view.filter.sources[0].name == utf8_display_name,
         "restored selected sample filter source should keep the UTF-8 annotation display name");
-    const specforge::SourceCollectionSampleSortSourceView*
+    const spectiary::SourceCollectionSampleSortSourceView*
         restored_sort_source =
             FindSortSource(
                 restored_view.sorting,
@@ -2476,12 +2476,12 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
         "rank",
         "Rank",
         {2, 1, 1},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
-    specforge::SampleLabelSet label_set;
-    label_set.labels.push_back(specforge::SampleLabelDefinition{1, "bad", 'b'});
-    label_set.labels.push_back(specforge::SampleLabelDefinition{2, "good", 'g'});
+    spectiary::SampleLabelSet label_set;
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{1, "bad", 'b'});
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{2, "good", 'g'});
     SaveLabelResultFixture(
         label_result_path,
         "quality",
@@ -2494,7 +2494,7 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
     Require(result.loaded, "plain integer annotation should load");
     Require(
         !HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
@@ -2551,7 +2551,7 @@ void TestSourceSessionRestoresAnnotationSortingState()
         "rank",
         "Rank",
         {3, 1, 2},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     {
@@ -2568,7 +2568,7 @@ void TestSourceSessionRestoresAnnotationSortingState()
             workflow_cache);
 
         (void)Submit(session, OpenSourceCollection(source_path, 0));
-        specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+        spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
         Require(result.loaded, "plain integer annotation should load before selecting ordering");
         result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
         Require(session.View().sorting.active, "annotation ordering should be active before saving");
@@ -2591,7 +2591,7 @@ void TestSourceSessionRestoresAnnotationSortingState()
         labeling_cache,
         workflow_cache);
 
-    const specforge::SourceCollectionSessionView view = restored.View();
+    const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.sources.size() == 1, "restored session should restore the source entry");
     Require(
         view.navigation.current_annotations.size() == 1 &&
@@ -2609,8 +2609,8 @@ void TestSourceSessionRestoresAnnotationSortingState()
         view.navigation.current_sequence_position && *view.navigation.current_sequence_position == 2,
         "restored annotation ordering should put row 0 last");
 
-    const specforge::SourceCollectionSessionResult previous_result =
-        Submit(restored, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    const spectiary::SourceCollectionSessionResult previous_result =
+        Submit(restored, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(
         previous_result.navigation.target_found && previous_result.navigation.current_index == 2,
         "restored previous navigation should follow the annotation ordering");
@@ -2625,9 +2625,9 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {2, 2, 2});
 
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "1", true));
-    const specforge::SourceCollectionNavigationView navigation = session.View().navigation;
+    const spectiary::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.filter_active, "zero-match condition should still activate navigation filtering");
     Require(navigation.sequence_active && navigation.sequence_empty, "zero-match condition should expose empty sequence");
     Require(navigation.sequence_count == 0, "empty sequence should expose zero sequence rows");
@@ -2655,14 +2655,14 @@ void TestDeactivatingLabelingTaskKeepsAnnotationFilter()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "1", true));
     Require(session.View().navigation.filter_active, "annotation sample filter should affect navigation");
     Require(session.View().navigation.filtered_sample_count == 1, "filter should include the one matching sample");
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "label should be accepted");
     result = Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(session.View().labeling.can_deactivate_task, "draft-only active task should be closable");
@@ -2686,16 +2686,16 @@ void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    spectiary::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "temporary labeling task should become active");
     Require(session.View().labeling.has_temporary_task, "active draft should be exposed as the temporary task");
     Require(session.View().labeling.active_task_is_temporary, "new labeling task should remain temporary");
     Require(
-        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        session.View().labeling.task_name == spectiary::kTemporarySampleLabelingTaskName,
         "temporary task should use the fixed default name");
     const std::string temporary_task_id = session.View().labeling.task_id;
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "review", 'r'})).changed,
         "temporary task should accept labels");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
 
@@ -2752,20 +2752,20 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         directory / "workflow.json",
         {},
         [&fail_canonical_values_publication](
-            specforge::SampleLabelingAsdfOpenSnapshot&
+            spectiary::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
-            const specforge::SampleLabelingDocument& document) {
+            const spectiary::SampleLabelingDocument& document) {
             if (fail_canonical_values_publication) {
-                return specforge::
+                return spectiary::
                     SampleLabelingAsdfStoreWriteResult{
                         .error = {
-                            .kind = specforge::
+                            .kind = spectiary::
                                 SampleLabelingAsdfStoreErrorKind::
                                     AtomicWriteFailure,
                             .message =
                                 "injected label export matrix publication failure"}};
             }
-            return specforge::
+            return spectiary::
                 RewriteSampleLabelingAsdfValuesAtomically(
                     owner_snapshot,
                     document);
@@ -2786,7 +2786,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     5,
                     special_label,
                     's'}))
@@ -2794,13 +2794,13 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
             Submit(
                 session,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         6,
                         "unlabeled",
                         'u'}))
                 .changed,
         "label export matrix should accept stable edge-case labels");
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         first_assignment = Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
@@ -2811,9 +2811,9 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(2)));
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         second_assignment = Submit(
             session,
             AssignActiveLabelToCurrentSample(6));
@@ -2824,9 +2824,9 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(0)));
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         formalized = Submit(
             session,
             SetActiveLabelingOutputPath(owner_path));
@@ -2836,7 +2836,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
             !session.View().labeling.active_task_is_temporary &&
             session.View().labeling.output_path == owner_path &&
             session.View().labeling.output_format ==
-                specforge::
+                spectiary::
                     SampleLabelingOutputArtifactFormat::
                         CanonicalAsdf,
         "label export matrix should establish a canonical ASDF owner");
@@ -2845,9 +2845,9 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(3)));
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         pending_write = Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
@@ -2862,22 +2862,22 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         "label export matrix should exercise the injected canonical publication failure");
     Require(
             session.View().labeling.save_state.kind ==
-                specforge::SampleLabelSaveStateKind::Failed &&
+                spectiary::SampleLabelSaveStateKind::Failed &&
             session.View().labeling.save_state.pending_count == 1,
         "label export matrix should retain one pending canonical overlay");
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(0)));
 
     const std::vector<int> expected_values{
         5,
-        specforge::kUnlabeledSampleLabelCode,
+        spectiary::kUnlabeledSampleLabelCode,
         6,
         5,
     };
-    const std::vector<specforge::CsvRecord>
+    const std::vector<spectiary::CsvRecord>
         expected_csv{
             {"sample", "label"},
             {"zeta,\r\nsample", special_label},
@@ -2893,13 +2893,13 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         directory / "reference.npy";
 
     const auto require_export_state_unchanged =
-        [&](const specforge::SourceCollectionSessionView& before,
+        [&](const spectiary::SourceCollectionSessionView& before,
             const std::string& cache_bytes,
             const std::string& owner_bytes,
             const std::vector<std::filesystem::path>&
                 attachment_paths,
             std::string_view message) {
-            const specforge::SourceCollectionSessionView& after =
+            const spectiary::SourceCollectionSessionView& after =
                 session.View();
             const bool labels_unchanged =
                 after.labeling.label_set.labels.size() ==
@@ -2946,7 +2946,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
                 message);
         };
 
-    const specforge::SourceCollectionSessionView
+    const spectiary::SourceCollectionSessionView
         state_before_first_export = session.View();
     const std::string cache_before_first_export =
         ReadBinaryFile(labeling_cache);
@@ -2955,24 +2955,24 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
     const std::vector<std::filesystem::path>
         attachments_before_first_export =
             session.AnnotationPathsForSource(source_path);
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         first_csv_result = Submit(
             session,
             ExportActiveLabels(
                 csv_before,
-                specforge::SampleLabelExportFormat::Csv));
-    const specforge::SourceCollectionSessionResult
+                spectiary::SampleLabelExportFormat::Csv));
+    const spectiary::SourceCollectionSessionResult
         first_npy_result = Submit(
             session,
             ExportActiveLabels(
                 npy_before,
-                specforge::SampleLabelExportFormat::Npy));
+                spectiary::SampleLabelExportFormat::Npy));
     Require(
         first_csv_result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             first_npy_result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             !first_csv_result.changed &&
             !first_npy_result.changed &&
@@ -2986,7 +2986,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         "CSV export should preserve comma, quote, Unicode, CR/LF, unlabeled, and escaped label fields in canonical order");
     std::string export_error;
     Require(
-        specforge::ExportLabelValuesToNpy(
+        spectiary::ExportLabelValuesToNpy(
             npy_reference,
             expected_values,
             &export_error) &&
@@ -3025,7 +3025,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
             Submit(
                 session,
                 SetSampleSortDirection(
-                    specforge::
+                    spectiary::
                         SampleNavigationSortDirection::
                             Descending))
                 .action.navigation_inputs_changed &&
@@ -3037,7 +3037,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         directory / "after-sequence.csv";
     const std::filesystem::path npy_after =
         directory / "after-sequence.npy";
-    const specforge::SourceCollectionSessionView
+    const spectiary::SourceCollectionSessionView
         state_before_sequence_export = session.View();
     const std::string cache_before_sequence_export =
         ReadBinaryFile(labeling_cache);
@@ -3050,12 +3050,12 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         session,
         ExportActiveLabels(
             csv_after,
-            specforge::SampleLabelExportFormat::Csv));
+            spectiary::SampleLabelExportFormat::Csv));
     (void)Submit(
         session,
         ExportActiveLabels(
             npy_after,
-            specforge::SampleLabelExportFormat::Npy));
+            spectiary::SampleLabelExportFormat::Npy));
     Require(
         ReadBinaryFile(csv_after) ==
                 ReadBinaryFile(csv_before) &&
@@ -3069,7 +3069,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
         attachments_before_sequence_export,
         "sequence-active export must remain stateless across every labeling and source-session owner");
 
-    const specforge::SourceCollectionSessionResult attached =
+    const spectiary::SourceCollectionSessionResult attached =
         Submit(
             session,
             AddReadOnlyAnnotation(csv_before));
@@ -3124,7 +3124,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
             {"beta\nsample", "C"},
             {"delta", "D"},
         });
-    const specforge::SourceCollectionSessionResult duplicate =
+    const spectiary::SourceCollectionSessionResult duplicate =
         Submit(
             session,
             AddReadOnlyAnnotation(duplicate_path));
@@ -3147,7 +3147,7 @@ void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
             {"alpha\"sample", "B"},
             {"beta\nsample", "C"},
         });
-    const specforge::SourceCollectionSessionResult missing =
+    const spectiary::SourceCollectionSessionResult missing =
         Submit(
             session,
             AddReadOnlyAnnotation(missing_path));
@@ -3192,7 +3192,7 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
         directory / "navigation.json",
         labeling_cache,
         directory / "workflow.json");
-    const specforge::SourceCollectionSessionResult opened =
+    const spectiary::SourceCollectionSessionResult opened =
         session.Open(source_path);
     Require(
         opened.loaded,
@@ -3207,13 +3207,13 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     5,
                     "selected",
                     's'}))
             .changed,
         "folder export matrix should add its label");
-    const specforge::SourceCollectionSessionResult assigned =
+    const spectiary::SourceCollectionSessionResult assigned =
         Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
@@ -3222,7 +3222,7 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
             assigned.label_write->write.changed,
         "folder export matrix should label its first canonical filename");
 
-    const specforge::SourceCollectionSessionView before =
+    const spectiary::SourceCollectionSessionView before =
         session.View();
     const std::string cache_before =
         ReadBinaryFile(labeling_cache);
@@ -3233,27 +3233,27 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
         directory / "folder-default.csv";
     const std::filesystem::path npy_path =
         directory / "folder-override.npy";
-    const specforge::SourceCollectionSessionResult csv_result =
+    const spectiary::SourceCollectionSessionResult csv_result =
         Submit(
             session,
             ExportActiveLabels(
                 csv_path,
-                specforge::SampleLabelExportFormat::Csv));
-    const specforge::SourceCollectionSessionResult npy_result =
+                spectiary::SampleLabelExportFormat::Csv));
+    const spectiary::SourceCollectionSessionResult npy_result =
         Submit(
             session,
             ExportActiveLabels(
                 npy_path,
-                specforge::SampleLabelExportFormat::Npy));
+                spectiary::SampleLabelExportFormat::Npy));
     Require(
         csv_result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             npy_result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             ReadCsvRecords(csv_path) ==
-                std::vector<specforge::CsvRecord>({
+                std::vector<spectiary::CsvRecord>({
                     {"filename", "label"},
                     {"row-0.fits", "selected"},
                     {"row-1.fits", "unlabeled"},
@@ -3265,10 +3265,10 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
     std::string export_error;
     const std::vector<int> expected_values{
         5,
-        specforge::kUnlabeledSampleLabelCode,
+        spectiary::kUnlabeledSampleLabelCode,
     };
     Require(
-        specforge::ExportLabelValuesToNpy(
+        spectiary::ExportLabelValuesToNpy(
             npy_reference,
             expected_values,
             &export_error) &&
@@ -3278,7 +3278,7 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
             ? "folder NPY override should retain existing exporter bytes"
             : export_error);
 
-    const specforge::SourceCollectionSessionView& after =
+    const spectiary::SourceCollectionSessionView& after =
         session.View();
     Require(
         after.labeling.task_id == before.labeling.task_id &&
@@ -3328,7 +3328,7 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
     (void)Submit(
         session,
         OpenSourceCollection(source_path, 0));
-    const specforge::SourceCollectionSessionResult attached =
+    const spectiary::SourceCollectionSessionResult attached =
         Submit(
             session,
             AddReadOnlyAnnotation(csv_path));
@@ -3337,7 +3337,7 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
         "CSV unlabeled semantics fixture should attach");
 
     const auto current_annotation = [&]()
-        -> const specforge::SourceCollectionAnnotationValueView& {
+        -> const spectiary::SourceCollectionAnnotationValueView& {
         const auto& annotations =
             session.View().navigation.current_annotations;
         const auto match = std::find_if(
@@ -3359,7 +3359,7 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(1)));
     Require(
         !current_annotation().missing &&
@@ -3368,7 +3368,7 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
     (void)Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateRow(2)));
     Require(
         !current_annotation().missing &&
@@ -3407,21 +3407,21 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
                 labeled_unlabeled_option->key,
         "CSV sentinel and labeled text unlabeled must retain different sample filter keys");
 
-    const specforge::SourceCollectionSessionResult activated =
+    const spectiary::SourceCollectionSessionResult activated =
         Submit(
             session,
             ActivateLabelingTaskFromAnnotation(csv_path));
-    const specforge::SourceCollectionSessionView& active_view =
+    const spectiary::SourceCollectionSessionView& active_view =
         session.View();
     Require(
         activated.action.workflow_changed &&
             active_view.labeling.has_active_task &&
-            specforge::IsCanonicalUuidV4(
+            spectiary::IsCanonicalUuidV4(
                 active_view.labeling.task_id) &&
             active_view.labeling.active_task_is_temporary &&
             !active_view.labeling.output_path &&
             active_view.labeling.output_format ==
-                specforge::SampleLabelingOutputArtifactFormat::None,
+                spectiary::SampleLabelingOutputArtifactFormat::None,
         "CSV activation should create a fresh outputless canonical draft");
     Require(
         active_view.labeling.label_set.labels.size() == 2 &&
@@ -3437,20 +3437,20 @@ void TestAttachedCsvPreservesUnlabeledSemantics()
         ReadBinaryFile(csv_path) == original_csv_bytes,
         "CSV activation must not overwrite or adopt the source artifact");
 
-    const specforge::SourceCollectionSessionResult formalized =
+    const spectiary::SourceCollectionSessionResult formalized =
         Submit(
             session,
             SetActiveLabelingOutputPath(asdf_path));
     Require(
         formalized.action.navigation_inputs_changed &&
             formalized.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::None &&
+                spectiary::SampleLabelingOperationResult::Issue::None &&
             session.View().labeling.output_path == asdf_path &&
             session.View().labeling.output_format ==
-                specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
+                spectiary::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
         "the promoted CSV draft should formalize only at an explicit ASDF path");
-    const specforge::SampleLabelingAsdfReadResult saved =
-        specforge::ReadSampleLabelingAsdfDocument(asdf_path);
+    const spectiary::SampleLabelingAsdfReadResult saved =
+        spectiary::ReadSampleLabelingAsdfDocument(asdf_path);
     Require(
         saved.succeeded() &&
             saved.document->annotation.values ==
@@ -3483,7 +3483,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
     const std::filesystem::path csv_export_path =
         UniqueTempPath("_export_labels.csv");
     const std::filesystem::path sidecar_path =
-        specforge::test_support::LegacyFixtureIo::
+        spectiary::test_support::LegacyFixtureIo::
             MetadataPathForResult(export_path);
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(
@@ -3500,7 +3500,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     8,
                     "exported",
                     'e'}))
@@ -3512,13 +3512,13 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
 
     const std::string task_id_before =
         session.View().labeling.task_id;
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(
             session,
             ExportActiveLabels(export_path));
     Require(
         result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             !result.changed &&
             !result.action.workflow_changed &&
@@ -3527,9 +3527,9 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         "one-shot export should not mutate workflow or navigation state");
 
     std::string load_error;
-    const std::optional<specforge::LoadedSampleLabelResult>
+    const std::optional<spectiary::LoadedSampleLabelResult>
         exported =
-            specforge::test_support::LegacyFixtureIo{}
+            spectiary::test_support::LegacyFixtureIo{}
                 .LoadLabelResult(
                     export_path,
                     3,
@@ -3546,41 +3546,41 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         !std::filesystem::exists(sidecar_path),
         "session export must not write a canonical metadata sidecar");
 
-    const specforge::SourceCollectionSessionResult csv_result =
+    const spectiary::SourceCollectionSessionResult csv_result =
         Submit(
             session,
             ExportActiveLabels(
                 csv_export_path,
-                specforge::SampleLabelExportFormat::Csv));
+                spectiary::SampleLabelExportFormat::Csv));
     Require(
         csv_result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::
+                spectiary::SampleLabelingOperationResult::
                     Issue::None &&
             !csv_result.changed &&
             !csv_result.action.workflow_changed,
         "CSV interchange export should use the same stateless session path");
-    specforge::BoundedCsvFileReader csv_reader(
+    spectiary::BoundedCsvFileReader csv_reader(
         csv_export_path);
-    const specforge::CsvRecordReadResult csv_header =
+    const spectiary::CsvRecordReadResult csv_header =
         csv_reader.ReadRecord();
-    const specforge::CsvRecordReadResult csv_first =
+    const spectiary::CsvRecordReadResult csv_first =
         csv_reader.ReadRecord();
-    const specforge::CsvRecordReadResult csv_second =
+    const spectiary::CsvRecordReadResult csv_second =
         csv_reader.ReadRecord();
-    const specforge::CsvRecordReadResult csv_third =
+    const spectiary::CsvRecordReadResult csv_third =
         csv_reader.ReadRecord();
     Require(
         csv_header.record ==
-                specforge::CsvRecord({"sample", "label"}) &&
+                spectiary::CsvRecord({"sample", "label"}) &&
             csv_first.record ==
-                specforge::CsvRecord({"0", "exported"}) &&
+                spectiary::CsvRecord({"0", "exported"}) &&
             csv_second.record ==
-                specforge::CsvRecord({"1", "unlabeled"}) &&
+                spectiary::CsvRecord({"1", "unlabeled"}) &&
             csv_third.record ==
-                specforge::CsvRecord({"2", "unlabeled"}),
+                spectiary::CsvRecord({"2", "unlabeled"}),
         "session CSV intent should preserve canonical source-index order and stable label text");
 
-    const specforge::SourceCollectionLabelingView& labeling =
+    const spectiary::SourceCollectionLabelingView& labeling =
         session.View().labeling;
     Require(
         labeling.task_id == task_id_before &&
@@ -3590,7 +3590,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
             labeling.active_task_is_temporary &&
             !labeling.output_path &&
             labeling.output_format ==
-                specforge::
+                spectiary::
                     SampleLabelingOutputArtifactFormat::None,
         "session export must not formalize the task or change its autosave owner");
     Require(
@@ -3634,7 +3634,7 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
         (void)Submit(
             seed,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{
+                spectiary::SampleLabelDefinition{
                     3,
                     "review",
                     'r'}));
@@ -3652,18 +3652,18 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
 
     {
         PreparedSession restarted = make_session();
-        const specforge::SourceCollectionLabelingView& recovery_view =
+        const spectiary::SourceCollectionLabelingView& recovery_view =
             restarted.View().labeling;
         Require(
             recovery_view.source_identity == source_identity &&
                 recovery_view.recovery_drafts.size() == 1 &&
                 recovery_view.recovery_drafts[0].task_id == task_id &&
                 recovery_view.recovery_drafts[0].status ==
-                    specforge::SampleLabelingRecoveryDraftStatus::Recoverable &&
+                    spectiary::SampleLabelingRecoveryDraftStatus::Recoverable &&
                 recovery_view.recovery_drafts[0].labeled_count == 1,
             "restart should expose the paused draft with its source/task identity and recoverable status");
 
-        const specforge::SourceCollectionSessionResult recovered = Submit(
+        const spectiary::SourceCollectionSessionResult recovered = Submit(
             restarted,
             RecoverTemporaryLabelingTask(source_identity, task_id));
         Require(
@@ -3680,7 +3680,7 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
 
     {
         PreparedSession restarted = make_session();
-        const specforge::SourceCollectionSessionResult deleted = Submit(
+        const spectiary::SourceCollectionSessionResult deleted = Submit(
             restarted,
             DeleteTemporaryLabelingTask(source_identity, task_id));
         Require(
@@ -3694,12 +3694,12 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
             restarted.View().labeling.task_id;
         Require(
             restarted.View().labeling.has_active_task &&
-                specforge::IsCanonicalUuidV4(
+                spectiary::IsCanonicalUuidV4(
                     replacement_task_id) &&
                 replacement_task_id != task_id &&
                 Submit(restarted, DeactivateActiveLabelingTask()).action.workflow_changed,
             "restart recovery fixture should create and pause a replacement draft with a fresh UUID");
-        const specforge::SourceCollectionSessionResult recovered = Submit(
+        const spectiary::SourceCollectionSessionResult recovered = Submit(
             restarted,
             RecoverTemporaryLabelingTask(
                 source_identity,
@@ -3710,7 +3710,7 @@ void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
                 restarted.View().labeling.task_id ==
                     replacement_task_id &&
                 restarted.View().labeling.current_code ==
-                    specforge::kUnlabeledSampleLabelCode,
+                    spectiary::kUnlabeledSampleLabelCode,
             "the replacement recovery fixture should activate its empty fresh-ID draft");
     }
 }
@@ -3764,17 +3764,17 @@ void TestTemporaryDraftRecoveryViewReportsLeaseConflict()
         Submit(first, RecoverTemporaryLabelingTask(source_identity, task_id)).action.workflow_changed,
         "the first recovery instance should acquire the draft lease");
 
-    const specforge::SourceCollectionSessionResult conflict = Submit(
+    const spectiary::SourceCollectionSessionResult conflict = Submit(
         second,
         RecoverTemporaryLabelingTask(source_identity, task_id));
     Require(
         conflict.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable &&
             !second.View().labeling.has_active_task &&
             second.View().labeling.recovery_drafts.size() == 1 &&
             second.View().labeling.recovery_drafts[0].status ==
-                specforge::SampleLabelingRecoveryDraftStatus::Conflicting,
+                spectiary::SampleLabelingRecoveryDraftStatus::Conflicting,
         "a recovery attempt held by another instance should expose a conflicting draft and an error issue");
 }
 
@@ -3782,28 +3782,28 @@ void TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts()
 {
     const std::filesystem::path source_path = UniqueTempPath("_recovery_stale.npy");
     TouchFile(source_path);
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
     const std::filesystem::path labeling_cache =
         UniqueTempPath("_recovery_stale_labeling.json");
 
-    specforge::SampleLabelingSourceState source_state;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = 3;
     source_state.tasks = {
-        specforge::CreateSampleLabelingTask(
+        spectiary::CreateSampleLabelingTask(
             "44444444-4444-4444-8444-444444444444",
             "Recovered draft A",
             3),
-        specforge::CreateSampleLabelingTask(
+        spectiary::CreateSampleLabelingTask(
             "44444444-4444-4444-8444-444444444444",
             "Recovered draft B",
             3)};
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        !specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
+        !spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{}, labeling_cache, cache),
         "ambiguous task slots must be rejected before either owner is written");
     Require(!std::filesystem::exists(labeling_cache),
         "rejected ambiguous state must not become a recovery source");
@@ -3814,34 +3814,34 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
     const std::filesystem::path source_path =
         UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
     TouchFile(source_path);
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
     const std::filesystem::path labeling_cache =
         UniqueTempPath("_recovery_formal_task_identity_conflict_labeling.json");
 
-    specforge::SampleLabelingTask formal_task =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask formal_task =
+        spectiary::CreateSampleLabelingTask(
             "55555555-5555-4555-8555-555555555555",
             "Formal task",
             3);
     formal_task.persistence.output_path =
         UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
     formal_task.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    specforge::SampleLabelingSourceState source_state;
+        spectiary::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = 3;
     source_state.tasks = {
         std::move(formal_task),
-        specforge::CreateSampleLabelingTask(
+        spectiary::CreateSampleLabelingTask(
             "55555555-5555-4555-8555-555555555555",
             "Temporary draft",
             3)};
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        !specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache),
+        !spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{}, labeling_cache, cache),
         "ambiguous task slots must be rejected before either owner is written");
     Require(!std::filesystem::exists(labeling_cache),
         "rejected ambiguous state must not become a recovery source");
@@ -3855,32 +3855,32 @@ void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "used", 'u'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "used", 'u'})).changed,
         "used label should be accepted");
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "unused", 'n'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{4, "unused", 'n'})).changed,
         "unused label should be accepted");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
 
-    const specforge::SourceCollectionLabelingView labeling = session.View().labeling;
+    const spectiary::SourceCollectionLabelingView labeling = session.View().labeling;
     Require(labeling.label_usage_counts.at(3) == 1, "view should expose the used label count");
     Require(
         labeling.label_usage_counts.find(4) == labeling.label_usage_counts.end(),
         "view should omit zero-count labels from its usage map");
 
-    specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(4));
+    spectiary::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(4));
     Require(result.changed, "unused label removal should flow through the session intent");
     Require(
-        specforge::FindSampleLabel(session.View().labeling.label_set, 4) == nullptr,
+        spectiary::FindSampleLabel(session.View().labeling.label_set, 4) == nullptr,
         "unused label should disappear from the view");
 
     result = Submit(session, RemoveActiveLabel(3));
     Require(result.changed, "used label removal should flow through the session intent");
     Require(
-        specforge::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr,
+        spectiary::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr,
         "used label definition should disappear from the view");
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "removing a used label should clear the current sample value");
     Require(session.View().labeling.labeled_count == 0, "cleared values should update labeling progress");
 }
@@ -3894,12 +3894,12 @@ void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{3, "review", 'r'})).changed,
         "temporary task should accept a label before discard");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
 
     const std::string discarded_task_id = session.View().labeling.task_id;
-    specforge::SourceCollectionSessionResult result = Submit(session, DeleteActiveLabelingTask());
+    spectiary::SourceCollectionSessionResult result = Submit(session, DeleteActiveLabelingTask());
     Require(result.action.workflow_changed, "delete should report workflow change");
     Require(!session.View().labeling.has_active_task, "delete should clear the active task");
     Require(!session.View().labeling.has_temporary_task, "delete should discard the temporary task record");
@@ -3907,11 +3907,11 @@ void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
     result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "starting after discard should create a fresh task");
     Require(
-        specforge::IsCanonicalUuidV4(session.View().labeling.task_id) &&
+        spectiary::IsCanonicalUuidV4(session.View().labeling.task_id) &&
             session.View().labeling.task_id != discarded_task_id,
         "starting after discard should generate a fresh canonical task id");
     Require(
-        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == spectiary::kUnlabeledSampleLabelCode,
         "deleted draft values should not come back");
 }
 
@@ -3925,27 +3925,27 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.active_task_is_temporary, "task should start as a local temporary draft");
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
     Require(!session.View().labeling.has_temporary_task, "choosing output should formalize the temporary task");
     Require(!session.View().labeling.active_task_is_temporary, "saved task should become a formal annotation");
     Require(
-        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        session.View().labeling.task_name == spectiary::kTemporarySampleLabelingTaskName,
         "choosing an output path should not rename canonical task metadata");
     Require(session.View().navigation.current_annotations.size() == 1, "local task output should appear in annotations");
     Require(
         session.View().navigation.current_annotations[0].name ==
-            specforge::kTemporarySampleLabelingTaskName,
+            spectiary::kTemporarySampleLabelingTaskName,
         "local labeling annotation should default to the canonical task name");
     Require(
         session.View().filter.available_sources.size() == 1 &&
             session.View().filter.available_sources[0].name ==
-                specforge::kTemporarySampleLabelingTaskName,
+                spectiary::kTemporarySampleLabelingTaskName,
         "local labeling filter source should default to the canonical task name");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
     Require(
-        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        session.View().labeling.task_name == spectiary::kTemporarySampleLabelingTaskName,
         "display-name customization should not rename metadata");
     Require(
         session.View().navigation.current_annotations[0].name == "Hard cases",
@@ -3958,7 +3958,7 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     Require(result.action.workflow_changed, "clearing local-task annotation display name should report workflow change");
     Require(
         session.View().navigation.current_annotations[0].name ==
-            specforge::kTemporarySampleLabelingTaskName,
+            spectiary::kTemporarySampleLabelingTaskName,
         "cleared local-task annotation display name should restore the canonical task name");
 
     result = Submit(session, DeactivateActiveLabelingTask());
@@ -3968,7 +3968,7 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
             session.View().navigation.current_annotations[0].name ==
-                specforge::kTemporarySampleLabelingTaskName,
+                spectiary::kTemporarySampleLabelingTaskName,
         "starting a new temporary task should keep the formal annotation available");
 
     const std::string fresh_temporary_task_id = session.View().labeling.task_id;
@@ -3983,16 +3983,16 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{11, "formal-review", 'f'}))
+                spectiary::SampleLabelDefinition{11, "formal-review", 'f'}))
             .changed,
         "formal task should accept a label before deleting an unrelated paused draft");
-    const specforge::SourceCollectionSessionResult formal_assignment =
+    const spectiary::SourceCollectionSessionResult formal_assignment =
         Submit(session, AssignActiveLabelToCurrentSample(11));
     Require(
         formal_assignment.label_write &&
             formal_assignment.label_write->write.changed,
         "formal task should record a label before deleting an unrelated paused draft");
-    const specforge::SourceCollectionSessionResult deleted_paused_draft =
+    const spectiary::SourceCollectionSessionResult deleted_paused_draft =
         Submit(
             session,
             DeleteTemporaryLabelingTask(
@@ -4007,13 +4007,13 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     (void)Submit(session, UndoLastLabelWrite());
     Require(
         session.View().labeling.current_code ==
-            specforge::kUnlabeledSampleLabelCode,
+            spectiary::kUnlabeledSampleLabelCode,
         "deleting an unrelated paused draft must preserve the formal task undo history");
 
     result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         session.View().labeling.active_task_is_temporary &&
-            specforge::IsCanonicalUuidV4(session.View().labeling.task_id) &&
+            spectiary::IsCanonicalUuidV4(session.View().labeling.task_id) &&
             session.View().labeling.task_id != fresh_temporary_task_id,
         "starting after deleting the paused draft should create a fresh canonical task");
 }
@@ -4055,7 +4055,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
             Submit(
                 session,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         5,
                         "accepted",
                         'a'}))
@@ -4064,7 +4064,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
         (void)Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
-        const specforge::SourceCollectionSessionResult rejected =
+        const spectiary::SourceCollectionSessionResult rejected =
             Submit(
                 session,
                 SetActiveLabelingOutputPath(
@@ -4076,7 +4076,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 session.View().navigation.current_annotations.empty() &&
                 !std::filesystem::exists(invalid_output_path),
             "canonical formalization must reject a non-ASDF path before publishing or attaching it");
-        const specforge::SourceCollectionSessionResult saved =
+        const spectiary::SourceCollectionSessionResult saved =
             Submit(
                 session,
                 SetActiveLabelingOutputPath(output_path));
@@ -4089,10 +4089,10 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
             Submit(
                 session,
                 MoveSampleNavigation(
-                    specforge::SampleNavigationRequest::LocateRow(1)))
+                    spectiary::SampleNavigationRequest::LocateRow(1)))
                 .action.navigation_inputs_changed,
             "canonical lifecycle fixture should navigate before its first formal value edit");
-        const specforge::SourceCollectionSessionResult value_edit =
+        const spectiary::SourceCollectionSessionResult value_edit =
             Submit(
                 session,
                 AssignActiveLabelToCurrentSample(5));
@@ -4101,8 +4101,8 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 value_edit.label_write->write.changed &&
                 value_edit.label_write->operation.output_saved,
             "a formal canonical owner should autosave a value edit before restart");
-        const specforge::SampleLabelingAsdfReadResult edited =
-            specforge::ReadSampleLabelingAsdfDocument(output_path);
+        const spectiary::SampleLabelingAsdfReadResult edited =
+            spectiary::ReadSampleLabelingAsdfDocument(output_path);
         Require(
             edited.succeeded() &&
                 edited.document->annotation.values ==
@@ -4118,8 +4118,8 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
             "formal attachment fixture should flush all owners before restart");
     }
 
-    const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCache persisted =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             source_session_cache)
             .cache;
     Require(
@@ -4152,7 +4152,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 restored.View().navigation.current_annotations[0].path ==
                     output_path,
             "restart should restore the newly formalized canonical attachment without manual reattachment");
-        const specforge::SourceCollectionSessionResult activated =
+        const spectiary::SourceCollectionSessionResult activated =
             Submit(
                 restored,
                 ActivateLabelingTaskFromAnnotation(output_path));
@@ -4161,8 +4161,8 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 restored.View().labeling.has_active_task &&
                 restored.View().labeling.output_path == output_path,
             "the restored canonical attachment should remain selectable as its formal task owner");
-        const specforge::SampleLabelingAsdfReadResult hydrated =
-            specforge::ReadSampleLabelingAsdfDocument(output_path);
+        const spectiary::SampleLabelingAsdfReadResult hydrated =
+            spectiary::ReadSampleLabelingAsdfDocument(output_path);
         Require(
             hydrated.succeeded() &&
                 hydrated.document->annotation.values ==
@@ -4173,7 +4173,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
             Submit(
                 restored,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         9,
                         Utf8(u8"复核 ✓"),
                         'r'}))
@@ -4184,7 +4184,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 restored,
                 UpdateActiveLabel(
                     5,
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         5,
                         Utf8(u8"已接受 ✓"),
                         'v'},
@@ -4212,14 +4212,14 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
             ActivateLabelingTaskFromAnnotation(output_path))
             .action.workflow_changed,
         "the metadata generation should remain activatable after a second restart");
-    const specforge::SourceCollectionLabelingView& final_view =
+    const spectiary::SourceCollectionLabelingView& final_view =
         metadata_restart.View().labeling;
-    const specforge::SampleLabelDefinition* accepted =
-        specforge::FindSampleLabel(final_view.label_set, 5);
-    const specforge::SampleLabelDefinition* reviewed =
-        specforge::FindSampleLabel(final_view.label_set, 9);
-    const specforge::SampleLabelingAsdfReadResult final_document =
-        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    const spectiary::SampleLabelDefinition* accepted =
+        spectiary::FindSampleLabel(final_view.label_set, 5);
+    const spectiary::SampleLabelDefinition* reviewed =
+        spectiary::FindSampleLabel(final_view.label_set, 9);
+    const spectiary::SampleLabelingAsdfReadResult final_document =
+        spectiary::ReadSampleLabelingAsdfDocument(output_path);
     Require(
         final_view.has_active_task &&
             accepted != nullptr &&
@@ -4234,7 +4234,7 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
 }
 
 void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
-    const specforge::RuntimePaths& runtime_paths = {},
+    const spectiary::RuntimePaths& runtime_paths = {},
     std::string_view output_child = {})
 {
     const std::filesystem::path source_session_cache =
@@ -4272,7 +4272,7 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
             Submit(
                 session,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         5,
                         "accepted",
                         'a'}))
@@ -4298,8 +4298,8 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
         // the attachment-roster debounce fires.
     }
 
-    const specforge::SourceCollectionSessionStateCache before_repair =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCache before_repair =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             source_session_cache)
             .cache;
     Require(
@@ -4330,11 +4330,11 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
         Require(std::any_of(view.navigation.annotation_diagnostics.begin(),
                     view.navigation.annotation_diagnostics.end(), [&](const auto& diagnostic) {
                         return diagnostic.path == output_path &&
-                            diagnostic.kind == specforge::SourceCollectionManifestDiagnosticKind::AnnotationIgnored;
+                            diagnostic.kind == spectiary::SourceCollectionManifestDiagnosticKind::AnnotationIgnored;
                     }),
             "reserved canonical registration must retain a rejection diagnostic");
         Require(restored.FlushStateCaches(), "rejected attachment roster should flush");
-        const auto after = specforge::LoadSourceCollectionSessionStateCache(runtime_paths, source_session_cache).cache;
+        const auto after = spectiary::LoadSourceCollectionSessionStateCache(runtime_paths, source_session_cache).cache;
         Require(after.sources.size() == 1 && after.sources[0].annotation_paths.empty(),
             "rejected canonical registration must not enter the persisted attachment roster");
         Require(ReadTextFile(output_path) == canonical_before,
@@ -4350,8 +4350,8 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
     Require(
         restored.FlushStateCaches(),
         "prepared attachment repair should be durable after the restore batch completes");
-    const specforge::SourceCollectionSessionStateCache after_repair =
-        specforge::LoadSourceCollectionSessionStateCache(runtime_paths,
+    const spectiary::SourceCollectionSessionStateCache after_repair =
+        spectiary::LoadSourceCollectionSessionStateCache(runtime_paths,
             source_session_cache)
             .cache;
     Require(
@@ -4363,9 +4363,9 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
 
 void TestCanonicalRegistrationRestoreChecksReservedStorage()
 {
-    for (const auto profile : {specforge::StorageProfile::Portable, specforge::StorageProfile::LocalAppData}) {
+    for (const auto profile : {spectiary::StorageProfile::Portable, spectiary::StorageProfile::LocalAppData}) {
         const auto root = UniqueTempPath("_registration_storage_admission");
-        const auto paths = specforge::RuntimePathsForDeployment({.storage_profile = profile}, {
+        const auto paths = spectiary::RuntimePathsForDeployment({.storage_profile = profile}, {
             .executable_path = root / "app.exe",
             .local_app_data_user_state_root = root,
         });
@@ -4413,7 +4413,7 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
             Submit(
                 session,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         5,
                         "accepted",
                         'a'}))
@@ -4457,18 +4457,18 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
         navigation_cache,
         labeling_cache,
         {{source_path, 3}});
-    const specforge::SourceCollectionSessionView view =
+    const spectiary::SourceCollectionSessionView view =
         restored.View();
     Require(
         !view.labeling.has_active_task &&
             view.navigation.current_annotations.size() == 1,
         "an unavailable canonical owner must remain visible as one inactive annotation task row after restart");
-    const specforge::SourceCollectionAnnotationValueView& owner =
+    const spectiary::SourceCollectionAnnotationValueView& owner =
         view.navigation.current_annotations.front();
     Require(
         owner.path == output_path &&
             owner.relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     LocalLabelingTask &&
             owner.output_missing &&
             !owner.missing &&
@@ -4486,17 +4486,17 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
             view.navigation.annotation_diagnostics.begin(),
             view.navigation.annotation_diagnostics.end(),
             [&output_path](
-                const specforge::SourceCollectionManifestDiagnostic&
+                const spectiary::SourceCollectionManifestDiagnostic&
                     diagnostic) {
                 return diagnostic.path == output_path &&
                     diagnostic.kind ==
-                        specforge::
+                        spectiary::
                             SourceCollectionManifestDiagnosticKind::
                                 AnnotationIgnored;
             }),
         "the unavailable canonical row should retain its controlled attachment failure diagnostic");
     if (!corrupt_owner) {
-        const specforge::SourceCollectionSessionResult abandoned =
+        const spectiary::SourceCollectionSessionResult abandoned =
             Submit(
                 restored,
                 RemoveReadOnlyAnnotation(output_path));
@@ -4510,29 +4510,29 @@ void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
                     restored.View().navigation
                         .annotation_diagnostics.end(),
                     [&output_path](
-                        const specforge::
+                        const spectiary::
                             SourceCollectionManifestDiagnostic&
                                 diagnostic) {
                         return diagnostic.path == output_path &&
                             diagnostic.kind ==
-                                specforge::
+                                spectiary::
                                     SourceCollectionManifestDiagnosticKind::
                                         AnnotationIgnored;
                     }),
             "removing a missing local owner row should abandon its task record and clear both the ghost annotation and its warning without requiring relink");
-        const specforge::SampleLabelingStateCacheLoadResult
+        const spectiary::SampleLabelingStateCacheLoadResult
             abandoned_cache =
-                specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+                spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
                     labeling_cache,
                     {},
-                    specforge::SampleLabelingStateCacheLoadPolicy::
+                    spectiary::SampleLabelingStateCacheLoadPolicy::
                         AllowPersistentOutputsWithoutResultHydration);
         const auto abandoned_source =
             abandoned_cache.cache.sources.find(
                 restored.View().labeling.source_identity);
         Require(
             abandoned_cache.issue_kind ==
-                    specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+                    spectiary::SampleLabelingStateCacheLoadIssueKind::None &&
                 abandoned_source !=
                     abandoned_cache.cache.sources.end() &&
                 abandoned_source->second.tasks.empty(),
@@ -4560,17 +4560,17 @@ void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const std::string temporary_task_id = session.View().labeling.task_id;
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(blocked_output_path));
     Require(session.View().labeling.has_active_task, "failed first save should keep the draft active");
     Require(session.View().labeling.has_temporary_task, "failed first save should keep a resumable draft");
     Require(session.View().labeling.active_task_is_temporary, "failed first save must not formalize the task");
     Require(!session.View().labeling.output_path, "failed first save must not retain the rejected output target");
     Require(
-        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        session.View().labeling.task_name == spectiary::kTemporarySampleLabelingTaskName,
         "failed first save should retain the temporary task name");
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::Failed,
         "failed first save should surface the write failure");
     Require(session.View().labeling.can_deactivate_task, "failed first save should still allow pausing the draft");
     Require(session.View().labeling.can_delete_task, "failed first save should still allow deleting the draft");
@@ -4589,7 +4589,7 @@ void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
         session.View().labeling.output_path == replacement_output_path,
         "replacement output should become the formal task target");
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::AutosavedToOutput,
         "replacement output should save successfully");
 }
 
@@ -4605,14 +4605,14 @@ void TestMalformedExistingAsdfKeepsRecoverableTemporaryTask()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
-    specforge::SourceCollectionSessionResult result = Submit(session, SetActiveLabelingOutputPath(output_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, SetActiveLabelingOutputPath(output_path));
     Require(session.View().labeling.has_temporary_task, "malformed target failure should retain the draft");
     Require(
         session.View().labeling.active_task_is_temporary,
         "malformed ASDF target must not formalize the task");
     Require(!session.View().labeling.output_path, "malformed ASDF target must not bind an owner");
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::Failed,
         "malformed ASDF target should surface the controlled publication failure");
     Require(
         session.View().labeling.can_deactivate_task && session.View().labeling.can_delete_task,
@@ -4636,9 +4636,9 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         UniqueTempPath("_quality_labeling.json");
     const std::filesystem::path workflow_cache =
         UniqueTempPath("_quality_workflow.json");
-    specforge::SampleLabelSet label_set;
-    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
-    label_set.labels.push_back(specforge::SampleLabelDefinition{9, "good", 'g'});
+    spectiary::SampleLabelSet label_set;
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{5, "bad", 'b'});
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{9, "good", 'g'});
     SaveLabelResultFixture(
         annotation_path,
         "quality-review",
@@ -4663,17 +4663,17 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         workflow_cache);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "external label result annotation should load");
     Require(session.View().navigation.current_annotations.size() == 1, "loaded annotation should appear in navigation");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+            spectiary::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "metadata-backed annotation should start as external");
     Require(
         session.View().navigation.current_annotations[0]
                 .labeling_owner_format ==
-            specforge::SampleLabelingOutputArtifactFormat::
+            spectiary::SampleLabelingOutputArtifactFormat::
                 LegacyNpyWithSidecar,
         "legacy external annotation confirmation should retain NPY plus sidecar ownership");
     Require(
@@ -4692,7 +4692,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         "explicit Save As should establish a canonical owner");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+            spectiary::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "activated annotation should be shown as a local labeling task");
     const std::string labeling_filter_source_id =
         "labeling:" + session.View().labeling.task_id;
@@ -4702,7 +4702,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     Require(session.View().navigation.current_annotations.size() == 1, "local task should remain visible after annotation removal");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+            spectiary::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "remaining row should come from the local task record");
     Require(session.View().labeling.has_active_task, "removing an annotation should not remove the active local task");
 
@@ -4740,7 +4740,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     result = Submit(
         session,
         RemoveReadOnlyAnnotation(output_path));
-    const specforge::SourceCollectionSessionView abandoned_view =
+    const spectiary::SourceCollectionSessionView abandoned_view =
         session.View();
     Require(
         result.action.workflow_changed &&
@@ -4754,8 +4754,8 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
     Require(
         session.FlushStateCaches(),
         "abandoning the synthetic missing task should persist its workflow cleanup");
-    const specforge::SampleWorkflowStateCacheLoadResult workflow =
-        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{},
+    const spectiary::SampleWorkflowStateCacheLoadResult workflow =
+        spectiary::LoadSampleWorkflowStateCache(spectiary::RuntimePaths{},
             workflow_cache);
     const auto workflow_source =
         workflow.cache.sources_by_identity.find(
@@ -4778,7 +4778,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
                   workflow_source->second
                       .filter_conditions.end(),
                   [&labeling_filter_source_id](
-                      const specforge::SampleFilterCondition&
+                      const spectiary::SampleFilterCondition&
                           condition) {
                       return condition.source_id ==
                           labeling_filter_source_id;
@@ -4792,8 +4792,8 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     const std::filesystem::path annotation_path = UniqueTempPath("_blocked_activation.npy");
     const std::filesystem::path formal_output_path = UniqueTempPath("_formal_output.asdf");
 
-    specforge::SampleLabelSet label_set;
-    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
+    spectiary::SampleLabelSet label_set;
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{5, "bad", 'b'});
     SaveLabelResultFixture(
         annotation_path,
         "external-task",
@@ -4805,18 +4805,18 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    spectiary::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "current task should be active before activation attempt");
     result = Submit(session, SetActiveLabelingOutputPath(formal_output_path));
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::AutosavedToOutput,
         "current task should be formal before its later autosave failure");
     const std::string current_task_id = session.View().labeling.task_id;
     std::filesystem::remove(formal_output_path);
     std::filesystem::create_directories(formal_output_path);
-    result = Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{7, "review", 'r'}));
+    result = Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{7, "review", 'r'}));
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::Failed,
         "formal task should have a failed autosave guard");
 
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
@@ -4825,20 +4825,20 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     Require(session.View().labeling.has_active_task, "blocked activation should keep the active task");
     Require(session.View().labeling.task_id == current_task_id, "annotation activation must not switch active tasks");
     Require(
-        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::Failed,
         "blocked activation should preserve the failed save state");
     const auto external = std::find_if(
         session.View().navigation.current_annotations.begin(),
         session.View().navigation.current_annotations.end(),
         [&annotation_path](
-            const specforge::SourceCollectionAnnotationValueView& annotation) {
+            const spectiary::SourceCollectionAnnotationValueView& annotation) {
             return annotation.path == annotation_path;
         });
     Require(
         external !=
                 session.View().navigation.current_annotations.end() &&
             external->relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     ExternalLabelResult,
         "blocked activation should leave the requested annotation external");
 }
@@ -4858,16 +4858,16 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "plain integer annotation should load");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+            spectiary::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "annotation without metadata should start as plain");
     Require(
         session.View().navigation.current_annotations[0]
                 .labeling_owner_format ==
-            specforge::SampleLabelingOutputArtifactFormat::None,
+            spectiary::SampleLabelingOutputArtifactFormat::None,
         "plain annotation should not claim a labeling output owner before activation");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
@@ -4881,11 +4881,11 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
         "plain annotation activation should create an output-free draft");
     Require(
         !std::filesystem::exists(
-            specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
+            spectiary::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
         "plain annotation activation must not create a metadata sidecar");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+            spectiary::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "draft import must not claim ownership of its plain annotation source");
 }
 
@@ -4896,11 +4896,11 @@ void TestLegacyImportCanSaveAsCanonicalAsdf()
     const std::filesystem::path legacy_path =
         UniqueTempPath("_migration_labels.npy");
     const std::filesystem::path metadata_path =
-        specforge::test_support::LegacyFixtureIo::
+        spectiary::test_support::LegacyFixtureIo::
             MetadataPathForResult(legacy_path);
     const std::filesystem::path canonical_path =
         UniqueTempPath("_migration_labels.asdf");
-    specforge::SampleLabelSet labels;
+    spectiary::SampleLabelSet labels;
     labels.labels = {
         {5, "bad", 'b'},
         {7, "good", 'g'},
@@ -4939,7 +4939,7 @@ void TestLegacyImportCanSaveAsCanonicalAsdf()
         session.View().labeling.task_id;
     Require(
         !session.View().labeling.output_path &&
-            specforge::IsCanonicalUuidV4(promoted_task_id) &&
+            spectiary::IsCanonicalUuidV4(promoted_task_id) &&
             promoted_task_id != "session-legacy-task" &&
             session.View().labeling.task_name ==
                 "Session legacy task",
@@ -4950,7 +4950,7 @@ void TestLegacyImportCanSaveAsCanonicalAsdf()
         promoted_metadata_bytes == metadata_bytes,
         "legacy import must preserve original sidecar identity metadata");
 
-    const specforge::SourceCollectionSessionResult migrated =
+    const spectiary::SourceCollectionSessionResult migrated =
         Submit(
             session,
             SetActiveLabelingOutputPath(canonical_path));
@@ -4965,8 +4965,8 @@ void TestLegacyImportCanSaveAsCanonicalAsdf()
             ReadBinaryFile(metadata_path) ==
                 promoted_metadata_bytes,
         "session migration must leave the legacy NPY and promoted sidecar bytes unchanged");
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(
             canonical_path);
     Require(
         read.succeeded() &&
@@ -4985,11 +4985,11 @@ void TestLegacyImportCanSaveAsCanonicalAsdf()
             session.View()
                 .navigation.current_annotations.end(),
             [&canonical_path](
-                const specforge::
+                const spectiary::
                     SourceCollectionAnnotationValueView& annotation) {
                 return annotation.path == canonical_path &&
                     annotation.relationship ==
-                        specforge::
+                        spectiary::
                             SampleAnnotationWorkflowRelationship::
                                 LocalLabelingTask;
             }),
@@ -5012,13 +5012,13 @@ void TestImportedDraftDoesNotRequireMetadataSidecar()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, AddReadOnlyAnnotation(annotation_path));
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(session.View().labeling.has_active_task, "plain annotation should become a local task");
     Require(!session.View().labeling.output_path,
         "imported draft must remain independent of the original annotation");
     Require(!std::filesystem::exists(
-        specforge::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
+        spectiary::test_support::LegacyFixtureIo::MetadataPathForResult(annotation_path)),
         "import must not create a sidecar");
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(
@@ -5026,7 +5026,7 @@ void TestImportedDraftDoesNotRequireMetadataSidecar()
         "same loaded output path should render as one annotation row");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+            spectiary::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "reloading the original annotation should leave it read-only and independent");
     Require(
         !session.View().navigation.current_annotations[0].metadata_missing,
@@ -5044,8 +5044,8 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
     TouchFile(source_path);
 
-    specforge::SampleLabelSet label_set;
-    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
+    spectiary::SampleLabelSet label_set;
+    label_set.labels.push_back(spectiary::SampleLabelDefinition{5, "bad", 'b'});
     SaveLabelResultFixture(
         annotation_path,
         "external-task",
@@ -5054,27 +5054,27 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
         label_set,
         true);
 
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*MakeSnapshot(source_path, 2, 0));
-    specforge::SampleLabelingTask local_task =
-        specforge::CreateSampleLabelingTask(
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*MakeSnapshot(source_path, 2, 0));
+    spectiary::SampleLabelingTask local_task =
+        spectiary::CreateSampleLabelingTask(
             "66666666-6666-4666-8666-666666666666",
             "Local task",
             2);
     local_task.persistence.output_path = annotation_path;
     local_task.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+        spectiary::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     local_task.values.Complete() = {5, -1};
 
-    specforge::SampleLabelingSourceState source_state;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
     source_state.source_name = identity.source_name;
     source_state.source_fingerprint = identity.source_fingerprint;
     source_state.context_fingerprint = identity.context_fingerprint;
     source_state.tasks.push_back(std::move(local_task));
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
-    Require(specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache, cache), "labeling cache fixture should save");
+    Require(spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{}, labeling_cache, cache), "labeling cache fixture should save");
 
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
     PreparedSession session(
@@ -5089,12 +5089,12 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
         UniqueTempPath("_workflow.json"));
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    spectiary::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "metadata-backed annotation should load");
     Require(!session.View().labeling.has_active_task, "mismatch fixture should start without an active task");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+            spectiary::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "same path and sample count should not make a local match without matching sidecar task id");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
@@ -5103,7 +5103,7 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
         "activation must not bind an inactive same-path task when the sidecar task id differs");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+            spectiary::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "mismatched sidecar task id should keep the annotation external");
 }
 
@@ -5125,10 +5125,10 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "bad", 'b'}))
+                spectiary::SampleLabelDefinition{1, "bad", 'b'}))
             .changed,
         "first source collection should accept a label definition");
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(session.View().labeling.current_code == 1, "first sample should be labeled before filtering");
     const std::filesystem::path annotation_path =
@@ -5163,7 +5163,7 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
     Require(
         source_transition &&
             source_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     SourceActivation &&
             source_transition->current_sample_index == 0 &&
             !source_transition->accepted_label_value,
@@ -5204,13 +5204,13 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         workflow_cache);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSourceSnapshot();
     Require(snapshot != nullptr, "ASDF read-only fixture needs an active source");
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
 
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = identity.id;
     document.source.kind = "test";
     document.source.name = identity.source_name;
@@ -5218,7 +5218,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
     document.source.sample_count = identity.spectrum_count;
     document.source.roster.identity_kind =
         std::string{
-            specforge::kSampleLabelingDocumentSourceIndexRoster};
+            spectiary::kSampleLabelingDocumentSourceIndexRoster};
     document.annotation.values = {5, -1, 9};
     document.labeling.id = "33333333-3333-4333-8333-333333333333";
     document.labeling.name = "Canonical quality";
@@ -5231,8 +5231,8 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document);
         Require(
@@ -5243,7 +5243,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
     }
     const std::string original_bytes = ReadBinaryFile(annotation_path);
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "compatible ASDF annotation should attach");
     Require(
@@ -5252,7 +5252,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                  .can_activate_labeling &&
             session.View().navigation.current_annotations[0]
                     .labeling_owner_format ==
-                specforge::SampleLabelingOutputArtifactFormat::
+                spectiary::SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             session.View().navigation.current_annotations[0]
                     .display_text == "bad (5)",
@@ -5276,23 +5276,23 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         ReadBinaryFile(annotation_path) == original_bytes,
         "adoption must not rewrite the standalone ASDF document");
 
-    const specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+    const spectiary::SampleLabelingStateCacheLoadResult cache =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             {},
-            specforge::SampleLabelingStateCacheLoadPolicy::
+            spectiary::SampleLabelingStateCacheLoadPolicy::
                 AllowPersistentOutputsWithoutResultHydration);
     const auto source = cache.cache.sources.find(identity.id);
     Require(
         cache.issue_kind ==
-                specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+                spectiary::SampleLabelingStateCacheLoadIssueKind::None &&
             source != cache.cache.sources.end() &&
             source->second.tasks.size() == 1 &&
             source->second.tasks[0].task_id ==
                 "33333333-3333-4333-8333-333333333333" &&
             source->second.tasks[0].persistence.output_path == annotation_path &&
             source->second.tasks[0].persistence.output_format ==
-                specforge::SampleLabelingOutputArtifactFormat::
+                spectiary::SampleLabelingOutputArtifactFormat::
                     CanonicalAsdf &&
             !source->second.tasks[0]
                  .values.IsComplete(),
@@ -5301,12 +5301,12 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
     result = Submit(
         session,
         AssignActiveLabelToCurrentSample(9));
-    const specforge::SampleLabelingAsdfReadResult edited =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult edited =
+        spectiary::ReadSampleLabelingAsdfDocument(
             annotation_path);
     Require(
         result.labeling_issue ==
-            specforge::SampleLabelingOperationResult::Issue::None,
+            spectiary::SampleLabelingOperationResult::Issue::None,
         "the first edit after adoption should retain its task and output leases");
     Require(
         result.label_write &&
@@ -5332,7 +5332,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             conflicting_path,
             std::ios::binary | std::ios::trunc);
         Require(
-            specforge::WriteSampleLabelingAsdfDocument(
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document)
                 .succeeded(),
@@ -5344,14 +5344,14 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             AddReadOnlyAnnotation(conflicting_path))
             .loaded,
         "same-id conflict ASDF should attach read-only");
-    const specforge::SourceCollectionSessionResult conflict =
+    const spectiary::SourceCollectionSessionResult conflict =
         Submit(
             session,
             ActivateLabelingTaskFromAnnotation(
                 conflicting_path));
     Require(
         conflict.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditTargetChanged &&
             session.View().labeling.task_id ==
                 "33333333-3333-4333-8333-333333333333" &&
@@ -5360,11 +5360,11 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             session.View().labeling.task_ids.size() == 1,
         "a same-id different-owner adoption should report a conflict instead of inventing another task identity");
 
-    specforge::SampleLabelingController competing(
+    spectiary::SampleLabelingController competing(
         labeling_cache);
     competing.ActivateSource(
         identity,
-        specforge::SampleLabelingCanonicalSourceDescriptor{
+        spectiary::SampleLabelingCanonicalSourceDescriptor{
             .base_identity = identity.id,
             .source_kind = "test",
             .source_name = identity.source_name,
@@ -5372,12 +5372,12 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 identity.source_fingerprint,
             .sample_count = identity.spectrum_count,
         });
-    const specforge::SampleLabelingOperationResult blocked =
+    const spectiary::SampleLabelingOperationResult blocked =
         competing.ActivateTask("33333333-3333-4333-8333-333333333333");
     Require(
         !blocked.accepted &&
             blocked.issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable,
         "an adopted task should retain its canonical edit ownership lease");
 
@@ -5396,24 +5396,24 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
         removed_original_owner && !remove_error,
         "the original canonical owner fixture should be deleted externally");
 
-    const specforge::SourceCollectionSessionResult recovered_conflict =
+    const spectiary::SourceCollectionSessionResult recovered_conflict =
         Submit(
             session,
             ActivateLabelingTaskFromAnnotation(
                 conflicting_path));
-    const specforge::SourceCollectionSessionView recovered_view =
+    const spectiary::SourceCollectionSessionView recovered_view =
         session.View();
     const auto recovered_owner = std::find_if(
         recovered_view.navigation.current_annotations.begin(),
         recovered_view.navigation.current_annotations.end(),
         [&conflicting_path](
-            const specforge::SourceCollectionAnnotationValueView&
+            const spectiary::SourceCollectionAnnotationValueView&
                 annotation) {
             return annotation.path == conflicting_path;
         });
     Require(
         recovered_conflict.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::None &&
+                spectiary::SampleLabelingOperationResult::Issue::None &&
             recovered_view.labeling.has_active_task &&
             recovered_view.labeling.output_path ==
                 conflicting_path &&
@@ -5421,13 +5421,13 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             recovered_owner !=
                 recovered_view.navigation.current_annotations.end() &&
             recovered_owner->relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     LocalLabelingTask &&
             std::none_of(
                 recovered_view.navigation.current_annotations.begin(),
                 recovered_view.navigation.current_annotations.end(),
                 [&annotation_path](
-                    const specforge::
+                    const spectiary::
                         SourceCollectionAnnotationValueView& annotation) {
                     return annotation.path == annotation_path;
                 }) &&
@@ -5435,10 +5435,10 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 recovered_view.navigation.annotation_diagnostics.begin(),
                 recovered_view.navigation.annotation_diagnostics.end(),
                 [&annotation_path, &conflicting_path](
-                    const specforge::
+                    const spectiary::
                         SourceCollectionManifestDiagnostic& diagnostic) {
                     return diagnostic.kind ==
-                            specforge::
+                            spectiary::
                                 SourceCollectionManifestDiagnosticKind::
                                     AnnotationIgnored &&
                         (diagnostic.path == annotation_path ||
@@ -5495,29 +5495,29 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             relinking.View().navigation
                 .annotation_diagnostics.end(),
             [&conflicting_path](
-                const specforge::
+                const spectiary::
                     SourceCollectionManifestDiagnostic& diagnostic) {
                 return diagnostic.path == conflicting_path &&
                     diagnostic.kind ==
-                        specforge::
+                        spectiary::
                             SourceCollectionManifestDiagnosticKind::
                                 AnnotationIgnored;
             }),
         "the moved-path restart should expose the old attachment warning before relink");
-    const specforge::SourceCollectionSessionResult imported =
+    const spectiary::SourceCollectionSessionResult imported =
         Submit(
             relinking,
             AddReadOnlyAnnotation(moved_path));
     Require(
         imported.loaded,
         "the moved canonical owner should attach as an imported annotation");
-    const specforge::SourceCollectionSessionView imported_view =
+    const spectiary::SourceCollectionSessionView imported_view =
         relinking.View();
     const auto moved_annotation = std::find_if(
         imported_view.navigation.current_annotations.begin(),
         imported_view.navigation.current_annotations.end(),
         [&moved_path](
-            const specforge::SourceCollectionAnnotationValueView&
+            const spectiary::SourceCollectionAnnotationValueView&
                 annotation) {
             return annotation.path == moved_path;
         });
@@ -5527,14 +5527,14 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             moved_annotation !=
                 imported_view.navigation.current_annotations.end() &&
             moved_annotation->relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     LocalLabelingTask &&
             moved_annotation->can_activate_labeling &&
             std::none_of(
                 imported_view.navigation.current_annotations.begin(),
                 imported_view.navigation.current_annotations.end(),
                 [&annotation_path, &conflicting_path](
-                    const specforge::SourceCollectionAnnotationValueView&
+                    const spectiary::SourceCollectionAnnotationValueView&
                         annotation) {
                     return annotation.path == annotation_path ||
                         annotation.path == conflicting_path;
@@ -5545,11 +5545,11 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 imported_view.navigation
                     .annotation_diagnostics.end(),
                 [&annotation_path, &conflicting_path, &moved_path](
-                    const specforge::
+                    const spectiary::
                         SourceCollectionManifestDiagnostic&
                             diagnostic) {
                     return diagnostic.kind ==
-                            specforge::
+                            spectiary::
                                 SourceCollectionManifestDiagnosticKind::
                                     AnnotationIgnored &&
                         (diagnostic.path == annotation_path ||
@@ -5584,16 +5584,16 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             source_path,
             0,
             {moved_path});
-        const specforge::SourceCollectionSessionView restarted_view =
+        const spectiary::SourceCollectionSessionView restarted_view =
             restarted.View();
         const std::size_t restarted_local_count =
             static_cast<std::size_t>(std::count_if(
                 restarted_view.navigation.current_annotations.begin(),
                 restarted_view.navigation.current_annotations.end(),
-                [](const specforge::
+                [](const spectiary::
                        SourceCollectionAnnotationValueView& annotation) {
                     return annotation.relationship ==
-                        specforge::
+                        spectiary::
                             SampleAnnotationWorkflowRelationship::
                                 LocalLabelingTask;
                 }));
@@ -5601,7 +5601,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             restarted_view.navigation.current_annotations.begin(),
             restarted_view.navigation.current_annotations.end(),
             [&moved_path](
-                const specforge::SourceCollectionAnnotationValueView&
+                const spectiary::SourceCollectionAnnotationValueView&
                     annotation) {
                 return annotation.path == moved_path;
             });
@@ -5610,7 +5610,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                 restarted_owner !=
                     restarted_view.navigation.current_annotations.end() &&
                 restarted_owner->relationship ==
-                    specforge::
+                    spectiary::
                         SampleAnnotationWorkflowRelationship::
                             LocalLabelingTask &&
                 restarted_owner->can_activate_labeling &&
@@ -5618,7 +5618,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                     restarted_view.navigation.current_annotations.begin(),
                     restarted_view.navigation.current_annotations.end(),
                     [&annotation_path, &conflicting_path](
-                        const specforge::
+                        const spectiary::
                             SourceCollectionAnnotationValueView&
                                 annotation) {
                         return annotation.path == annotation_path ||
@@ -5626,7 +5626,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                     }),
             "after restart the replacement path should remain the unique activatable local owner and the old path should stay retired");
 
-        const specforge::SourceCollectionSessionResult
+        const spectiary::SourceCollectionSessionResult
             restarted_activation =
                 Submit(
                     restarted,
@@ -5634,7 +5634,7 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
                         moved_path));
         Require(
             restarted_activation.labeling_issue ==
-                    specforge::SampleLabelingOperationResult::
+                    spectiary::SampleLabelingOperationResult::
                         Issue::None &&
                 restarted.View().labeling.has_active_task &&
                 restarted.View().labeling.output_path ==
@@ -5645,16 +5645,16 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             DeactivateActiveLabelingTask());
     }
 
-    const specforge::SourceCollectionSessionResult relinked =
+    const spectiary::SourceCollectionSessionResult relinked =
         Submit(
             relinking,
             ActivateLabelingTaskFromAnnotation(moved_path));
-    const specforge::SourceCollectionSessionView relinked_view =
+    const spectiary::SourceCollectionSessionView relinked_view =
         relinking.View();
     Require(
         relinked.action.workflow_changed &&
             relinked.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::None &&
+                spectiary::SampleLabelingOperationResult::Issue::None &&
             relinked_view.labeling.has_active_task &&
             relinked_view.labeling.task_id ==
                 "33333333-3333-4333-8333-333333333333" &&
@@ -5666,31 +5666,31 @@ void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
             relinked_view.navigation.current_annotations.begin(),
             relinked_view.navigation.current_annotations.end(),
             [&annotation_path, &conflicting_path](
-                const specforge::SourceCollectionAnnotationValueView&
+                const spectiary::SourceCollectionAnnotationValueView&
                     annotation) {
                 return annotation.path == annotation_path ||
                     annotation.path == conflicting_path;
             }),
         "successful relink should retire the missing old-path attachment row");
 
-    const specforge::SampleLabelingStateCacheLoadResult relinked_cache =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+    const spectiary::SampleLabelingStateCacheLoadResult relinked_cache =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             {},
-            specforge::SampleLabelingStateCacheLoadPolicy::
+            spectiary::SampleLabelingStateCacheLoadPolicy::
                 AllowPersistentOutputsWithoutResultHydration);
     const auto relinked_source =
         relinked_cache.cache.sources.find(identity.id);
     Require(
         relinked_cache.issue_kind ==
-                specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+                spectiary::SampleLabelingStateCacheLoadIssueKind::None &&
             relinked_source != relinked_cache.cache.sources.end() &&
             relinked_source->second.tasks.size() == 1 &&
             relinked_source->second.tasks.front().persistence.output_path ==
                 moved_path,
         "automatic relink should durably replace the missing owner path");
 
-    const specforge::SourceCollectionSessionResult deleted =
+    const spectiary::SourceCollectionSessionResult deleted =
         Submit(
             relinking,
             DeleteActiveLabelingTask());
@@ -5716,15 +5716,15 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
         session,
         OpenSourceCollection(source_path, 0));
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSourceSnapshot();
     Require(
         snapshot != nullptr,
         "adoption reopen fixture needs an active source");
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
 
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = identity.id;
     document.source.kind = "test";
     document.source.name = identity.source_name;
@@ -5734,7 +5734,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
         identity.spectrum_count;
     document.source.roster.identity_kind =
         std::string{
-            specforge::
+            spectiary::
                 kSampleLabelingDocumentSourceIndexRoster};
     document.annotation.values = {5, -1, 9};
     document.labeling.id = "44444444-4444-4444-8444-444444444444";
@@ -5749,7 +5749,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
             annotation_path,
             std::ios::binary | std::ios::trunc);
         Require(
-            specforge::WriteSampleLabelingAsdfDocument(
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document)
                 .succeeded(),
@@ -5769,7 +5769,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
             annotation_path,
             std::ios::binary | std::ios::trunc);
         Require(
-            specforge::WriteSampleLabelingAsdfDocument(
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document)
                 .succeeded(),
@@ -5778,7 +5778,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
     const std::string replacement_bytes =
         ReadBinaryFile(annotation_path);
 
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(
             session,
             ActivateLabelingTaskFromAnnotation(
@@ -5786,7 +5786,7 @@ void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
     Require(
         !session.View().labeling.has_active_task &&
             result.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditTargetChanged,
         "adoption must fail closed when the leased durable generation no longer has the attached task identity");
     Require(
@@ -5805,13 +5805,13 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         UniqueTempPath("_canonical_owner_labeling.json");
     TouchFile(source_path);
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(
             *snapshot);
 
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = identity.id;
     document.source.kind = "test";
     document.source.name = identity.source_name;
@@ -5820,7 +5820,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     document.source.sample_count = identity.spectrum_count;
     document.source.roster.identity_kind =
         std::string{
-            specforge::
+            spectiary::
                 kSampleLabelingDocumentSourceIndexRoster};
     document.annotation.values = {5, -1, 9};
     document.labeling.id = "33333333-3333-4333-8333-333333333333";
@@ -5834,8 +5834,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document);
         Require(
@@ -5847,8 +5847,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     const std::string original_bytes =
         ReadBinaryFile(annotation_path);
 
-    specforge::SampleLabelingTask cached =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask cached =
+        spectiary::CreateSampleLabelingTask(
             "33333333-3333-4333-8333-333333333333",
             "stale cache name",
             3);
@@ -5861,12 +5861,12 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.output_path = annotation_path;
     cached.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     cached.persistence.save_state.kind =
-        specforge::SampleLabelSaveStateKind::Pending;
+        spectiary::SampleLabelSaveStateKind::Pending;
 
-    specforge::SampleLabelingSourceState source_state;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
     source_state.source_name = identity.source_name;
     source_state.source_fingerprint =
@@ -5874,12 +5874,12 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     source_state.context_fingerprint =
         identity.context_fingerprint;
     source_state.tasks.push_back(std::move(cached));
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(
         identity.id,
         std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             cache),
         "canonical owner cache fixture should save");
@@ -5907,47 +5907,47 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         UniqueTempPath(
             "_canonical_owner_workflow.json"),
         [&canonical_document_publication_attempts](
-            const specforge::SampleLabelingAsdfOpenSnapshot&
+            const spectiary::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
-            const specforge::SampleLabelingDocument& document,
-            const specforge::
+            const spectiary::SampleLabelingDocument& document,
+            const spectiary::
                 SampleLabelingCanonicalSourceDescriptor& source) {
             ++canonical_document_publication_attempts;
             if (canonical_document_publication_attempts == 1) {
-                const specforge::SampleLabelingAsdfStoreWriteResult
-                    write = specforge::
+                const spectiary::SampleLabelingAsdfStoreWriteResult
+                    write = spectiary::
                         RewriteSampleLabelingAsdfDocumentAtomically(
                             owner_snapshot,
                             document);
                 if (!write.succeeded()) {
-                    return specforge::
+                    return spectiary::
                         SampleLabelingAsdfStoreGenerationWriteResult{
                             .error = write.error};
                 }
-                return specforge::
+                return spectiary::
                     SampleLabelingAsdfStoreGenerationWriteResult{
                         .document_replaced = true,
                         .error = {
-                            .kind = specforge::
+                            .kind = spectiary::
                                 SampleLabelingAsdfStoreErrorKind::
                                     AtomicWriteFailure,
                             .message =
                                 "injected session metadata reopen failure"}};
             }
-            return specforge::
+            return spectiary::
                 RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
                     owner_snapshot,
                     document,
-                    specforge::SampleLabelingCompatibilityView(
+                    spectiary::SampleLabelingCompatibilityView(
                         source));
         },
         [&canonical_values_publication_attempts](
-            specforge::SampleLabelingAsdfOpenSnapshot&
+            spectiary::SampleLabelingAsdfOpenSnapshot&
                 owner_snapshot,
-            const specforge::SampleLabelingDocument& document) {
+            const spectiary::SampleLabelingDocument& document) {
             ++canonical_values_publication_attempts;
             if (canonical_values_publication_attempts == 1) {
-                return specforge::
+                return spectiary::
                     sample_labeling_asdf_store_test_seam::
                         RewriteWithBeforeReplace(
                             owner_snapshot,
@@ -5958,12 +5958,12 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                                     "injected canonical session publication failure");
                             });
             }
-            return specforge::
+            return spectiary::
                 RewriteSampleLabelingAsdfValuesAtomically(
                     owner_snapshot,
                     document);
         });
-    const specforge::SourceCollectionSessionResult opened =
+    const spectiary::SourceCollectionSessionResult opened =
         session.Open(
             source_path,
             0,
@@ -5973,7 +5973,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             !session.View().labeling.has_active_task,
         "an inactive canonical owner should attach without becoming editable before activation");
 
-    const specforge::SourceCollectionSessionView before =
+    const spectiary::SourceCollectionSessionView before =
         session.View();
     Require(
         before.navigation.current_annotations.size() == 1 &&
@@ -5992,7 +5992,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     const auto good_filter = std::find_if(
         before.filter.available_sources[0].options.begin(),
         before.filter.available_sources[0].options.end(),
-        [](const specforge::SampleFilterValueOption& option) {
+        [](const spectiary::SampleFilterValueOption& option) {
             return option.key == "9";
         });
     Require(
@@ -6003,7 +6003,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             good_filter->sample_count == 1,
         "canonical filter projection must use ASDF values without persisted pending edits");
 
-    specforge::SampleLabelingDocument newer_document =
+    spectiary::SampleLabelingDocument newer_document =
         document;
     newer_document.annotation.values = {9, -1, 9};
     newer_document.labeling.name =
@@ -6016,8 +6016,8 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 newer_document);
         Require(
@@ -6032,12 +6032,12 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         newer_generation_bytes != original_bytes,
         "generation fixture should replace the ASDF bytes after attachment and before activation");
 
-    const specforge::SourceCollectionSessionResult activated =
+    const spectiary::SourceCollectionSessionResult activated =
         Submit(
             session,
             ActivateLabelingTaskFromAnnotation(
                 annotation_path));
-    const specforge::SourceCollectionLabelingView& labeling =
+    const spectiary::SourceCollectionLabelingView& labeling =
         session.View().labeling;
     Require(
         activated.action.workflow_changed &&
@@ -6053,7 +6053,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                     annotation_path},
         "activating the attached owner should hydrate its editable task from the leased ASDF generation");
 
-    const specforge::SourceCollectionSessionView after_activation =
+    const spectiary::SourceCollectionSessionView after_activation =
         session.View();
     Require(
         after_activation.navigation.current_annotations.size() == 1 &&
@@ -6069,7 +6069,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     const auto generation_b_filter = std::find_if(
         after_activation.filter.available_sources[0].options.begin(),
         after_activation.filter.available_sources[0].options.end(),
-        [](const specforge::SampleFilterValueOption& option) {
+        [](const spectiary::SampleFilterValueOption& option) {
             return option.key == "9";
         });
     Require(
@@ -6098,11 +6098,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             .action.navigation_inputs_changed,
         "canonical retry fixture should activate an existing sorting source");
 
-    const specforge::SourceCollectionSessionResult edited =
+    const spectiary::SourceCollectionSessionResult edited =
         Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
-    const specforge::SourceCollectionSessionView after_edit =
+    const spectiary::SourceCollectionSessionView after_edit =
         session.View();
     Require(
         edited.label_write &&
@@ -6125,11 +6125,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 "bad generation B (5)",
         "failed canonical publication should still present the newest runtime overlay while the task is active");
 
-    specforge::SourceCollectionSessionResult maintenance;
+    spectiary::SourceCollectionSessionResult maintenance;
     bool retry_published = false;
     for (int attempt = 0; attempt < 8; ++attempt) {
         const std::optional<
-            specforge::LocalUserStateSaveScheduler::
+            spectiary::LocalUserStateSaveScheduler::
                 TimePoint>
             deadline = session.NextMaintenanceDeadline();
         Require(
@@ -6142,11 +6142,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         }
     }
 
-    const specforge::SampleLabelingAsdfReadResult
+    const spectiary::SampleLabelingAsdfReadResult
         persisted_generation =
-            specforge::ReadSampleLabelingAsdfDocument(
+            spectiary::ReadSampleLabelingAsdfDocument(
                 annotation_path);
-    const specforge::SourceCollectionSessionView after_retry =
+    const spectiary::SourceCollectionSessionView after_retry =
         session.View();
     const auto refreshed_filter_source = std::find_if(
         after_retry.filter.sources.begin(),
@@ -6159,7 +6159,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             std::string_view key) {
             if (refreshed_filter_source ==
                 after_retry.filter.sources.end()) {
-                return static_cast<const specforge::
+                return static_cast<const spectiary::
                     SampleFilterValueOption*>(nullptr);
             }
             const auto option = std::find_if(
@@ -6173,9 +6173,9 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 ? nullptr
                 : &*option;
         };
-    const specforge::SampleFilterValueOption*
+    const spectiary::SampleFilterValueOption*
         refreshed_bad = find_refreshed_option("5");
-    const specforge::SampleFilterValueOption*
+    const spectiary::SampleFilterValueOption*
         refreshed_good = find_refreshed_option("9");
     Require(
         retry_published &&
@@ -6200,33 +6200,33 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 "source-order",
         "canonical retry publication should rebuild filter and sorting projections from the advanced generation");
 
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         metadata_edited =
             Submit(
                 session,
                 UpdateActiveLabel(
                     9,
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         11,
                         "excellent generation C",
                         'e'},
                     true));
-    const specforge::SourceCollectionSessionView
+    const spectiary::SourceCollectionSessionView
         after_failed_metadata_edit = session.View();
     Require(
         metadata_edited.changed &&
             canonical_values_publication_attempts == 2 &&
             canonical_document_publication_attempts == 1 &&
             after_failed_metadata_edit.labeling.save_state.kind ==
-                specforge::SampleLabelSaveStateKind::Failed,
+                spectiary::SampleLabelSaveStateKind::Failed,
         "a session metadata rewrite whose replacement cannot reopen should remain visibly failed and retryable");
 
-    specforge::SourceCollectionSessionResult
+    spectiary::SourceCollectionSessionResult
         metadata_maintenance;
     bool metadata_retry_published = false;
     for (int attempt = 0; attempt < 8; ++attempt) {
         const std::optional<
-            specforge::LocalUserStateSaveScheduler::TimePoint>
+            spectiary::LocalUserStateSaveScheduler::TimePoint>
             deadline = session.NextMaintenanceDeadline();
         Require(
             deadline.has_value(),
@@ -6238,11 +6238,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             break;
         }
     }
-    const specforge::SampleLabelingAsdfReadResult
+    const spectiary::SampleLabelingAsdfReadResult
         metadata_generation =
-            specforge::ReadSampleLabelingAsdfDocument(
+            spectiary::ReadSampleLabelingAsdfDocument(
                 annotation_path);
-    const specforge::SourceCollectionSessionView
+    const spectiary::SourceCollectionSessionView
         after_metadata_edit = session.View();
     const auto metadata_filter_source = std::find_if(
         after_metadata_edit.filter.sources.begin(),
@@ -6253,7 +6253,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
     const auto generation_c_option =
         metadata_filter_source ==
                 after_metadata_edit.filter.sources.end()
-        ? static_cast<const specforge::SampleFilterValueOption*>(
+        ? static_cast<const spectiary::SampleFilterValueOption*>(
               nullptr)
         : [&metadata_filter_source]() {
               const auto option = std::find_if(
@@ -6264,7 +6264,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                   });
               return option ==
                       metadata_filter_source->options.end()
-                  ? static_cast<const specforge::
+                  ? static_cast<const spectiary::
                         SampleFilterValueOption*>(nullptr)
                   : &*option;
           }();
@@ -6275,7 +6275,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             canonical_values_publication_attempts == 2 &&
             canonical_document_publication_attempts == 2 &&
             after_metadata_edit.labeling.save_state.kind ==
-                specforge::SampleLabelSaveStateKind::
+                spectiary::SampleLabelSaveStateKind::
                     AutosavedToOutput &&
             metadata_generation.succeeded() &&
             metadata_generation.document->labeling.labels.size() == 2 &&
@@ -6292,11 +6292,11 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             generation_c_option->sample_count == 1,
         "session retry should reopen a replaced metadata generation, publish recoded values and definitions together, and refresh the attached generation");
 
-    const specforge::SourceCollectionSessionResult deactivated =
+    const spectiary::SourceCollectionSessionResult deactivated =
         Submit(
             session,
             DeactivateActiveLabelingTask());
-    const specforge::SourceCollectionSessionView after_deactivation =
+    const spectiary::SourceCollectionSessionView after_deactivation =
         session.View();
     Require(
         deactivated.action.workflow_changed &&
@@ -6318,12 +6318,12 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         UniqueTempPath("_canonical_deactivation_owner_labeling.json");
     TouchFile(source_path);
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
 
-    specforge::SampleLabelingDocument generation_a;
+    spectiary::SampleLabelingDocument generation_a;
     generation_a.source.base_identity = identity.id;
     generation_a.source.kind = "test";
     generation_a.source.name = identity.source_name;
@@ -6333,7 +6333,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         identity.spectrum_count;
     generation_a.source.roster.identity_kind =
         std::string{
-            specforge::
+            spectiary::
                 kSampleLabelingDocumentSourceIndexRoster};
     generation_a.annotation.values = {5, -1, 9};
     generation_a.labeling.id =
@@ -6349,8 +6349,8 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 generation_a);
         Require(
@@ -6360,16 +6360,16 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
                 : write.error.message);
     }
 
-    specforge::SampleLabelingTask cached =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask cached =
+        spectiary::CreateSampleLabelingTask(
             "33333333-3333-4333-8333-333333333333",
             "structural cache owner",
             3);
     cached.persistence.output_path = annotation_path;
     cached.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
-    specforge::SampleLabelingSourceState source_state;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
     source_state.source_name = identity.source_name;
     source_state.source_fingerprint =
@@ -6377,12 +6377,12 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
     source_state.context_fingerprint =
         identity.context_fingerprint;
     source_state.tasks.push_back(std::move(cached));
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(
         identity.id,
         std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             cache),
         "canonical deactivation owner cache should save");
@@ -6415,7 +6415,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
             .loaded,
         "canonical deactivation generation A should attach");
 
-    specforge::SampleLabelingDocument generation_b =
+    spectiary::SampleLabelingDocument generation_b =
         generation_a;
     generation_b.annotation.values = {9, 9, -1};
     generation_b.labeling.name =
@@ -6428,8 +6428,8 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 generation_b);
         Require(
@@ -6453,7 +6453,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
             .action.workflow_changed,
         "clean canonical generation B should deactivate");
 
-    const specforge::SourceCollectionSessionView view =
+    const spectiary::SourceCollectionSessionView view =
         session.View();
     Require(
         !view.labeling.has_active_task &&
@@ -6470,7 +6470,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
     const auto generation_b_filter = std::find_if(
         view.filter.available_sources[0].options.begin(),
         view.filter.available_sources[0].options.end(),
-        [](const specforge::SampleFilterValueOption& option) {
+        [](const spectiary::SampleFilterValueOption& option) {
             return option.key == "9";
         });
     Require(
@@ -6493,12 +6493,12 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
         UniqueTempPath("_inactive_canonical_owner_labeling.json");
     TouchFile(source_path);
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    const specforge::SourceCollectionIdentity identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const spectiary::SourceCollectionIdentity identity =
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
 
-    specforge::SampleLabelingDocument document;
+    spectiary::SampleLabelingDocument document;
     document.source.base_identity = identity.id;
     document.source.kind = "test";
     document.source.name = identity.source_name;
@@ -6507,7 +6507,7 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     document.source.sample_count = identity.spectrum_count;
     document.source.roster.identity_kind =
         std::string{
-            specforge::
+            spectiary::
                 kSampleLabelingDocumentSourceIndexRoster};
     document.annotation.values = {5, -1, 9};
     document.labeling.id = "66666666-6666-4666-8666-666666666666";
@@ -6521,8 +6521,8 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
         std::ofstream stream(
             annotation_path,
             std::ios::binary | std::ios::trunc);
-        const specforge::SampleLabelingAsdfWriteResult write =
-            specforge::WriteSampleLabelingAsdfDocument(
+        const spectiary::SampleLabelingAsdfWriteResult write =
+            spectiary::WriteSampleLabelingAsdfDocument(
                 stream,
                 document);
         Require(
@@ -6532,8 +6532,8 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
                 : write.error.message);
     }
 
-    specforge::SampleLabelingTask cached =
-        specforge::CreateSampleLabelingTask(
+    spectiary::SampleLabelingTask cached =
+        spectiary::CreateSampleLabelingTask(
             "66666666-6666-4666-8666-666666666666",
             "structural cache placeholder",
             3);
@@ -6543,12 +6543,12 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     cached.persistence.pending_sample_indices.insert(1);
     cached.persistence.output_path = annotation_path;
     cached.persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::
+        spectiary::SampleLabelingOutputArtifactFormat::
             CanonicalAsdf;
     cached.persistence.save_state.kind =
-        specforge::SampleLabelSaveStateKind::Pending;
+        spectiary::SampleLabelSaveStateKind::Pending;
 
-    specforge::SampleLabelingSourceState source_state;
+    spectiary::SampleLabelingSourceState source_state;
     source_state.sample_count = identity.spectrum_count;
     source_state.source_name = identity.source_name;
     source_state.source_fingerprint =
@@ -6556,10 +6556,10 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     source_state.context_fingerprint =
         identity.context_fingerprint;
     source_state.tasks.push_back(std::move(cached));
-    specforge::SampleLabelingStateCache cache;
+    spectiary::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             labeling_cache,
             cache),
         "inactive canonical owner cache fixture should save");
@@ -6584,14 +6584,14 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
         labeling_cache,
         UniqueTempPath(
             "_inactive_canonical_owner_workflow.json"));
-    const specforge::SourceCollectionSessionResult opened =
+    const spectiary::SourceCollectionSessionResult opened =
         session.Open(source_path, 0, {});
     Require(
         opened.loaded &&
             !session.View().labeling.has_active_task,
         "inactive canonical owner should restore only as structural task state");
 
-    const specforge::SourceCollectionSessionView view =
+    const spectiary::SourceCollectionSessionView view =
         session.View();
     Require(
         view.navigation.current_annotations.size() == 1 &&
@@ -6606,7 +6606,7 @@ void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
     const auto good = std::find_if(
         view.filter.available_sources[0].options.begin(),
         view.filter.available_sources[0].options.end(),
-        [](const specforge::SampleFilterValueOption& option) {
+        [](const spectiary::SampleFilterValueOption& option) {
             return option.key == "9";
         });
     Require(
@@ -6621,8 +6621,8 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
         UniqueTempPath("_same_identity_activation_a.npy");
     const std::filesystem::path source_b =
         UniqueTempPath("_same_identity_activation_b.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    const specforge::SourceCollectionIdentity shared_identity = {
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    const spectiary::SourceCollectionIdentity shared_identity = {
         "same-identity-activation",
         "shared-source",
         "shared-source-fingerprint",
@@ -6633,12 +6633,12 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
     const auto open_new_source =
         [&](const std::filesystem::path& path,
             std::size_t spectrum_index) {
-            const specforge::SpectrumSnapshotHandle snapshot =
+            const spectiary::SpectrumSnapshotHandle snapshot =
                 MakeSnapshot(path, 2, spectrum_index);
-            specforge::SourceCollectionContext context;
+            spectiary::SourceCollectionContext context;
             context.identity = shared_identity;
             context.manifest.sample_names = {"alpha", "beta"};
-            specforge::PreparedSampleWorkflowState prepared =
+            spectiary::PreparedSampleWorkflowState prepared =
                 PrepareWorkflow(
                     snapshot,
                     context,
@@ -6660,17 +6660,17 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "source A should request row 1 before it is cached");
-    const specforge::SpectrumSnapshotHandle source_a_row_one =
+    const spectiary::SpectrumSnapshotHandle source_a_row_one =
         MakeSnapshot(source_a, 2, 1);
     Require(
         session.OpenPreparedSource(
                    source_a,
                    1,
                    source_a_row_one,
-                   specforge::PreparedSourceCollectionReuse{
+                   spectiary::PreparedSourceCollectionReuse{
                        shared_identity})
             .loaded,
         "source A row 1 should become its cached presentation");
@@ -6683,7 +6683,7 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+                spectiary::SampleLabelDefinition{1, "accepted", 'a'}))
             .changed,
         "source B should add its accepted label");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
@@ -6691,26 +6691,26 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
         Submit(session, AssignActiveLabelToCurrentSample(1))
                 .follow_up_spectrum_index == 1,
         "source B should auto-advance from row 0 to row 1");
-    const specforge::SpectrumSnapshotHandle source_b_row_one =
+    const spectiary::SpectrumSnapshotHandle source_b_row_one =
         MakeSnapshot(source_b, 2, 1);
     Require(
         session.OpenPreparedSource(
                    source_b,
                    1,
                    source_b_row_one,
-                   specforge::PreparedSourceCollectionReuse{
+                   spectiary::PreparedSourceCollectionReuse{
                        shared_identity})
             .loaded,
         "source B auto-advance target should commit");
     Require(
         session.View().sample_transition &&
             session.View().sample_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     LabelingAutoAdvance &&
             session.View().sample_transition->accepted_label_value == 1,
         "source B should expose its committed auto-advance feedback before activation");
 
-    const specforge::SourceCollectionSessionResult activated =
+    const spectiary::SourceCollectionSessionResult activated =
         Submit(session, SwitchSourceCollection(0));
     const auto& transition = session.View().sample_transition;
     Require(
@@ -6718,7 +6718,7 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
             session.CurrentSampleSnapshot() == source_a_row_one &&
             transition &&
             transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     SourceActivation &&
             !transition->from_sample_index &&
             transition->current_sample_index == 1 &&
@@ -6732,9 +6732,9 @@ void TestNavigationViewSeparatesSampleNameFromDisplayName()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionNavigationView navigation = session.View().navigation;
+    spectiary::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.current_sample_display_name == "sample-1", "view should expose the current display name");
     Require(navigation.current_sample_name.empty(), "unnamed samples should not expose a searchable sample name");
 
@@ -6755,9 +6755,9 @@ void TestNavigationViewExposesSourceProvidedSampleName()
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 2);
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionNavigationView navigation = session.View().navigation;
+    spectiary::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.has_sample_names, "folder source should expose source-provided sample names");
     Require(navigation.current_sample_name == "alpha.csv", "view should expose the current source-provided sample name");
     Require(navigation.current_sample_display_name == "sample-1", "display text should remain separate from sample name");
@@ -6783,7 +6783,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         second_source_path,
         2);
 
-    specforge::SourceCollectionSessionResult result =
+    spectiary::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(first_source_path, 1));
     Require(session.View().current_source_index && *session.View().current_source_index == 0, "first source should be active");
     Require(session.View().snapshot->source.path == first_source_path, "first source snapshot should be visible");
@@ -6793,7 +6793,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{10, "first-label", 'f'}))
+                spectiary::SampleLabelDefinition{10, "first-label", 'f'}))
             .changed,
         "first source should accept its own active label");
 
@@ -6805,7 +6805,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{20, "second-label", 's'}))
+                spectiary::SampleLabelDefinition{20, "second-label", 's'}))
             .changed,
         "second source should accept its own active label");
 
@@ -6871,7 +6871,7 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
         (void)Submit(session, OpenSourceCollection(second_source_path, 0));
         (void)Submit(session, AddReadOnlyAnnotation(second_annotation_path));
         (void)Submit(session, SwitchSourceCollection(0));
-        (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+        (void)Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
         Require(session.View().snapshot->source.path == first_source_path, "first source should be active");
         Require(session.View().snapshot->collection.current_index == 2, "first source should reach row 2");
         Require(session.FlushStateCaches(), "session state caches should flush");
@@ -6888,7 +6888,7 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
         second_source_path,
         2);
 
-    const specforge::SourceCollectionSessionView view = restored.View();
+    const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.sources.size() == 2, "restored session should reload both source entries");
     Require(view.sources[0].path == first_source_path, "first restored source should keep its path");
     Require(view.sources[1].path == second_source_path, "second restored source should keep its path");
@@ -6898,7 +6898,7 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
     Require(
         view.sample_transition &&
             view.sample_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::Restore &&
+                spectiary::SourceCollectionSampleTransitionReason::Restore &&
             view.sample_transition->current_sample_index == 2 &&
             !view.sample_transition->accepted_label_value,
         "source-session restore should expose a restore transition without previous-label feedback");
@@ -6932,17 +6932,17 @@ void TestSourceSessionStateCacheRoundTrip()
     const std::filesystem::path second_source_path = UniqueTempPath("_adapter_second.npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_adapter_annotation.npy");
 
-    specforge::SourceCollectionSessionStateCache cache;
-    specforge::SourceCollectionSavedSource first_source{first_source_path, 2};
+    spectiary::SourceCollectionSessionStateCache cache;
+    spectiary::SourceCollectionSavedSource first_source{first_source_path, 2};
     first_source.annotation_paths.push_back(annotation_path);
-    cache.sources = {first_source, specforge::SourceCollectionSavedSource{second_source_path, 0}};
+    cache.sources = {first_source, spectiary::SourceCollectionSavedSource{second_source_path, 0}};
     cache.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, cache),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, cache),
         "source session cache should save");
 
-    const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
+    const spectiary::SourceCollectionSessionStateCache loaded =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache)
             .cache;
     Require(loaded.sources.size() == 2, "source session cache should restore all sources");
     Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
@@ -6962,8 +6962,8 @@ void TestSourceSessionStateCacheIgnoresCorruptJson()
     const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_corrupt_sources.json");
     WriteTextFile(source_session_cache, "{ invalid json");
 
-    const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCacheLoadResult loaded =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             source_session_cache);
     Require(loaded.cache.sources.empty(), "corrupt source session cache should be ignored");
     Require(
@@ -6986,21 +6986,21 @@ void TestMissingPersistenceCachesAreHealthyDefaults()
         UniqueTempPath("_missing_workflow.json");
 
     Require(
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             source_session_cache)
             .warning.empty(),
         "missing source-session cache should be a healthy default");
     Require(
-        specforge::LoadSampleNavigationStateCache(
+        spectiary::LoadSampleNavigationStateCache(
             navigation_cache)
             .warning.empty(),
         "missing navigation cache should be a healthy default");
     Require(
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, labeling_cache)
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{}, labeling_cache)
             .warning.empty(),
         "missing labeling cache should be a healthy default");
     Require(
-        specforge::LoadSampleWorkflowStateCache(specforge::RuntimePaths{},
+        spectiary::LoadSampleWorkflowStateCache(spectiary::RuntimePaths{},
             workflow_cache)
             .warning.empty(),
         "missing workflow cache should be a healthy default");
@@ -7018,8 +7018,8 @@ void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
         "  \"sources\": []\n"
         "}\n");
 
-    const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+    const spectiary::SourceCollectionSessionStateCacheLoadResult loaded =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{},
             source_session_cache);
     Require(loaded.cache.sources.empty(), "unsupported source session cache schema should be ignored");
     Require(
@@ -7081,15 +7081,15 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         navigation_cache,
         labeling_cache,
         workflow_cache);
-    const specforge::SourceCollectionSessionResult opened =
+    const spectiary::SourceCollectionSessionResult opened =
         session.Open(source_path);
     Require(opened.loaded, "cache warnings must not block source opening");
 
-    const specforge::LocalUserStateHealthView& health =
+    const spectiary::LocalUserStateHealthView& health =
         session.View().persistence;
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Warning,
+            spectiary::LocalUserStateHealthKind::Warning,
         "corrupt and unsupported caches should produce overall warning health");
     Require(
         health.messages.size() == 4,
@@ -7098,36 +7098,36 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     Require(
         HasPersistenceMessage(
             health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SourceSession,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     LoadWarning),
         "source-session warning should reach the session view");
     Require(
         HasPersistenceMessage(
             health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SampleNavigation,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     LoadWarning),
         "navigation unsupported-schema warning should reach the session view");
     Require(
         HasPersistenceMessage(
             health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SampleLabeling,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     LoadWarning),
         "labeling warning should remain part of overall health");
     Require(
         HasPersistenceMessage(
             health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SampleWorkflow,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     LoadWarning),
         "workflow unsupported-schema warning should reach the session view");
@@ -7137,12 +7137,12 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         StartOrResumeTemporaryLabelingTask());
     (void)session.SubmitAndService(
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::LocateRow(1)));
+            spectiary::SampleNavigationRequest::LocateRow(1)));
     (void)Submit(
         session,
-        specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-            specforge::SampleFilteringIntent::Clear()));
-    const specforge::SourceCollectionStateFlushResult flush =
+        spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+            spectiary::SampleFilteringIntent::Clear()));
+    const spectiary::SourceCollectionStateFlushResult flush =
         session.FlushStateCachesWithStatus();
     Require(
         flush.source_session_saved &&
@@ -7153,8 +7153,8 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     Require(
         !HasPersistenceMessage(
             session.View().persistence,
-            specforge::LocalUserStateArea::SourceSession,
-            specforge::LocalUserStateHealthMessageKind::LoadWarning),
+            spectiary::LocalUserStateArea::SourceSession,
+            spectiary::LocalUserStateHealthMessageKind::LoadWarning),
         "a successful source-session flush should clear only its load warning");
     Require(
         ReadTextFile(labeling_cache) ==
@@ -7163,9 +7163,9 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     Require(
         HasPersistenceMessage(
             session.View().persistence,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SampleLabeling,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     SaveRetrying),
         "fail-closed labeling persistence should report a retrying save");
@@ -7188,7 +7188,7 @@ void TestRejectedAnnotationImportRefreshesDiagnosticProjection()
         "rejected-annotation",
         "Rejected annotation",
         {1, 2},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     std::vector<std::size_t> loaded_indices;
@@ -7196,20 +7196,20 @@ void TestRejectedAnnotationImportRefreshesDiagnosticProjection()
         MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    const specforge::SourceCollectionSessionView before =
+    const spectiary::SourceCollectionSessionView before =
         session.View();
     Require(
         before.navigation.current_annotations.empty() &&
             before.navigation.annotation_diagnostics.empty(),
         "rejected-import fixture should start without annotations or diagnostics");
 
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(
         !result.loaded,
         "an annotation whose value count does not match the active source must be rejected");
 
-    const specforge::SourceCollectionSessionView after =
+    const spectiary::SourceCollectionSessionView after =
         session.View();
     Require(
         after.navigation.current_annotations.empty(),
@@ -7219,10 +7219,10 @@ void TestRejectedAnnotationImportRefreshesDiagnosticProjection()
             after.navigation.annotation_diagnostics.begin(),
             after.navigation.annotation_diagnostics.end(),
             [&annotation_path](
-                const specforge::SourceCollectionManifestDiagnostic&
+                const spectiary::SourceCollectionManifestDiagnostic&
                     diagnostic) {
                 return diagnostic.kind ==
-                           specforge::
+                           spectiary::
                                SourceCollectionManifestDiagnosticKind::
                                    AnnotationIgnored &&
                     diagnostic.path == annotation_path &&
@@ -7242,15 +7242,15 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
     const std::filesystem::path labeling_cache =
         UniqueTempPath("_lease_switch_labeling.json");
     TouchFile(source_path);
-    specforge::SampleLabelSet first_labels;
+    spectiary::SampleLabelSet first_labels;
     first_labels.labels.push_back(
-        specforge::SampleLabelDefinition{
+        spectiary::SampleLabelDefinition{
             5,
             "first",
             'f'});
-    specforge::SampleLabelSet second_labels;
+    spectiary::SampleLabelSet second_labels;
     second_labels.labels.push_back(
-        specforge::SampleLabelDefinition{
+        spectiary::SampleLabelDefinition{
             7,
             "second",
             's'});
@@ -7305,7 +7305,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 first_annotation));
         Require(
             seed.View().labeling.has_active_task &&
-                specforge::IsCanonicalUuidV4(
+                spectiary::IsCanonicalUuidV4(
                     seed.View().labeling.task_id),
             "lease-switch seed should register the first task");
         first_task_id = seed.View().labeling.task_id;
@@ -7325,7 +7325,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 second_annotation));
         Require(
             seed.View().labeling.has_active_task &&
-                specforge::IsCanonicalUuidV4(
+                spectiary::IsCanonicalUuidV4(
                     seed.View().labeling.task_id) &&
                 seed.View().labeling.task_id != first_task_id,
             "lease-switch seed should register the second task");
@@ -7378,7 +7378,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
                 second_task_id,
         "second instance should activate the second task");
 
-    const specforge::SourceCollectionSessionResult rejected =
+    const spectiary::SourceCollectionSessionResult rejected =
         Submit(
             first,
             ActivateLabelingTaskFromAnnotation(
@@ -7386,7 +7386,7 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
     Require(
         !rejected.changed &&
             rejected.labeling_issue ==
-                specforge::SampleLabelingOperationResult::Issue::
+                spectiary::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable &&
             rejected.message.empty(),
         "occupied annotation activation should report only the stable target lease issue");
@@ -7424,14 +7424,14 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
         "  \"sources\": []\n"
         "}\n");
 
-    const specforge::SpectrumSnapshotHandle warning_snapshot =
+    const spectiary::SpectrumSnapshotHandle warning_snapshot =
         MakeSnapshot(warning_source, 3, 0);
-    specforge::SourceCollectionContext warning_context;
+    spectiary::SourceCollectionContext warning_context;
     warning_context.identity =
-        specforge::BuildSourceCollectionIdentity(*warning_snapshot);
+        spectiary::BuildSourceCollectionIdentity(*warning_snapshot);
     warning_context.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState warning_prepared =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState warning_prepared =
+        spectiary::PrepareSampleWorkflowState(
             *warning_snapshot,
             warning_context,
             0,
@@ -7444,7 +7444,7 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
         warning_prepared.preparation_cache != nullptr,
         "the direct preparation helper should retain its loaded cache bundle");
 
-    specforge::SourceCollectionSession warning_session(
+    spectiary::SourceCollectionSession warning_session(
         {},
         warning_navigation_cache,
         warning_labeling_cache,
@@ -7458,24 +7458,24 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
                            std::move(warning_prepared))
             .loaded,
         "the direct prepared source should open despite cache warnings");
-    const specforge::LocalUserStateHealthView warning_health =
+    const spectiary::LocalUserStateHealthView warning_health =
         warning_session.View().persistence;
     Require(
         warning_health.kind ==
-            specforge::LocalUserStateHealthKind::Warning,
+            spectiary::LocalUserStateHealthKind::Warning,
         "direct preparation cache warnings should reach Session health");
     Require(
         HasPersistenceMessage(
             warning_health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SampleNavigation) &&
             HasPersistenceMessage(
                 warning_health,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleLabeling) &&
             HasPersistenceMessage(
                 warning_health,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleWorkflow),
         "direct preparation should adopt every owner warning");
 
@@ -7488,25 +7488,25 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
     const std::filesystem::path source =
         UniqueTempPath("_direct_base_source.npy");
     TouchFile(source);
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity =
-        specforge::BuildSourceCollectionIdentity(*snapshot);
+        spectiary::BuildSourceCollectionIdentity(*snapshot);
     context.manifest.sample_names = {"a", "b", "c"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
+    const spectiary::SourceCollectionIdentity identity = context.identity;
 
-    specforge::SampleNavigationStateCache navigation_fixture;
+    spectiary::SampleNavigationStateCache navigation_fixture;
     navigation_fixture.last_indices_by_source_identity.emplace(
         "unrelated-source",
         2);
     Require(
-        specforge::SaveSampleNavigationStateCache(
+        spectiary::SaveSampleNavigationStateCache(
             navigation_cache,
             navigation_fixture),
         "the direct navigation base fixture should save");
-    specforge::PreparedSampleWorkflowState prepared =
-        specforge::PrepareSampleWorkflowState(
+    spectiary::PreparedSampleWorkflowState prepared =
+        spectiary::PrepareSampleWorkflowState(
             *snapshot,
             context,
             0,
@@ -7516,7 +7516,7 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
                 navigation_cache,
             });
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         navigation_cache,
         labeling_cache,
@@ -7530,11 +7530,11 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
                    std::move(prepared))
             .loaded,
         "the direct navigation-base source should open");
-    const specforge::SourceCollectionSessionResult pending =
+    const spectiary::SourceCollectionSessionResult pending =
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::LocateRow(1)));
+                spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
         pending.follow_up_spectrum_index == 1,
         "the direct navigation-base fixture should request row 1");
@@ -7543,15 +7543,15 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
                    source,
                    1,
                    MakeSnapshot(source, 3, 1),
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the direct navigation-base row should commit without another cache load");
     Require(
         session.FlushStateCachesWithStatus().all_saved(),
         "the direct navigation-base fixture should flush");
 
-    const specforge::SampleNavigationStateCache restored =
-        specforge::LoadSampleNavigationStateCache(navigation_cache).cache;
+    const spectiary::SampleNavigationStateCache restored =
+        spectiary::LoadSampleNavigationStateCache(navigation_cache).cache;
     Require(
         restored.last_indices_by_source_identity.at("unrelated-source") == 2,
         "direct preparation should preserve an unrelated navigation entry");
@@ -7578,13 +7578,13 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
     TouchFile(source_b);
     TouchFile(source_c);
 
-    const specforge::SpectrumSnapshotHandle snapshot_a =
+    const spectiary::SpectrumSnapshotHandle snapshot_a =
         MakeSnapshot(source_a, 3, 0);
-    const specforge::SpectrumSnapshotHandle snapshot_b =
+    const spectiary::SpectrumSnapshotHandle snapshot_b =
         MakeSnapshot(source_b, 3, 0);
-    const specforge::SpectrumSnapshotHandle snapshot_c =
+    const spectiary::SpectrumSnapshotHandle snapshot_c =
         MakeSnapshot(source_c, 3, 0);
-    specforge::SourceCollectionContext context_a;
+    spectiary::SourceCollectionContext context_a;
     context_a.identity = {
         "stale-warning-a",
         "a",
@@ -7593,7 +7593,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         3,
     };
     context_a.manifest.sample_names = {"a0", "a1", "a2"};
-    specforge::SourceCollectionContext context_b;
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {
         "stale-warning-b",
         "b",
@@ -7602,9 +7602,9 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         3,
     };
     context_b.manifest.sample_names = {"b0", "b1", "b2"};
-    const specforge::SourceCollectionIdentity identity_b =
+    const spectiary::SourceCollectionIdentity identity_b =
         context_b.identity;
-    specforge::SourceCollectionContext context_c;
+    spectiary::SourceCollectionContext context_c;
     context_c.identity = {
         "stale-warning-c",
         "c",
@@ -7615,7 +7615,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
     context_c.manifest.sample_names = {"c0", "c1", "c2"};
 
     auto shared_cache =
-        std::make_shared<specforge::SampleWorkflowPreparationCacheBundle>();
+        std::make_shared<spectiary::SampleWorkflowPreparationCacheBundle>();
     shared_cache->navigation.warning =
         "stale navigation cache warning";
     shared_cache->labeling.warning =
@@ -7623,25 +7623,25 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
     shared_cache->workflow_warning =
         "stale workflow cache warning";
     auto distinct_stale_cache =
-        std::make_shared<specforge::SampleWorkflowPreparationCacheBundle>(
+        std::make_shared<spectiary::SampleWorkflowPreparationCacheBundle>(
             *shared_cache);
 
-    specforge::PreparedSampleWorkflowState prepared_a =
-        specforge::PrepareSampleWorkflowStateFromCache(
+    spectiary::PreparedSampleWorkflowState prepared_a =
+        spectiary::PrepareSampleWorkflowStateFromCache(
             *snapshot_a,
             context_a,
             0,
             *shared_cache);
     prepared_a.preparation_cache = shared_cache;
-    specforge::PreparedSampleWorkflowState prepared_b =
-        specforge::PrepareSampleWorkflowStateFromCache(
+    spectiary::PreparedSampleWorkflowState prepared_b =
+        spectiary::PrepareSampleWorkflowStateFromCache(
             *snapshot_b,
             context_b,
             0,
             *shared_cache);
     prepared_b.preparation_cache = shared_cache;
-    specforge::PreparedSampleWorkflowState prepared_c =
-        specforge::PrepareSampleWorkflowStateFromCache(
+    spectiary::PreparedSampleWorkflowState prepared_c =
+        spectiary::PrepareSampleWorkflowStateFromCache(
             *snapshot_c,
             context_c,
             0,
@@ -7681,20 +7681,20 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         StartOrResumeTemporaryLabelingTask());
     (void)Submit(
         session,
-        specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
-            specforge::SampleFilteringIntent::Clear()));
+        spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+            spectiary::SampleFilteringIntent::Clear()));
     Require(
         session.FlushStateCachesWithStatus().all_saved(),
         "labeling and workflow repairs should save independently");
-    const specforge::LocalUserStateHealthView
+    const spectiary::LocalUserStateHealthView
         navigation_warning = session.View().persistence;
     Require(
         navigation_warning.kind ==
-                specforge::LocalUserStateHealthKind::Warning &&
+                spectiary::LocalUserStateHealthKind::Warning &&
             navigation_warning.messages.size() == 1 &&
             HasPersistenceMessage(
                 navigation_warning,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleNavigation),
         "only the navigation warning should remain before its first save");
 
@@ -7707,29 +7707,29 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
                    std::move(prepared_b))
             .loaded,
         "the same-batch stale source should open");
-    const specforge::LocalUserStateHealthView
+    const spectiary::LocalUserStateHealthView
         same_batch_health = session.View().persistence;
     Require(
         same_batch_health.messages.size() == 1 &&
             HasPersistenceMessage(
                 same_batch_health,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleNavigation) &&
             !HasPersistenceMessage(
                 same_batch_health,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleLabeling) &&
             !HasPersistenceMessage(
                 same_batch_health,
-                specforge::LocalUserStateArea::
+                spectiary::LocalUserStateArea::
                     SampleWorkflow),
         "same-batch activation must not resurrect repaired owner warnings");
 
-    specforge::SourceCollectionSession& base_session = session;
-    const specforge::SourceCollectionSessionResult moved =
+    spectiary::SourceCollectionSession& base_session = session;
+    const spectiary::SourceCollectionSessionResult moved =
         base_session.Submit(
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::LocateRow(1)));
+                spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
         moved.follow_up_spectrum_index == 1,
         "the navigation repair should request its prepared row");
@@ -7738,7 +7738,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
                    source_b,
                    1,
                    MakeSnapshot(source_b, 3, 1),
-                   specforge::PreparedSourceCollectionReuse{identity_b})
+                   spectiary::PreparedSourceCollectionReuse{identity_b})
             .loaded,
         "the navigation repair should commit its prepared row");
     Require(
@@ -7746,7 +7746,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "the navigation repair should save");
     Require(
         session.View().persistence.kind ==
-            specforge::LocalUserStateHealthKind::Healthy,
+            spectiary::LocalUserStateHealthKind::Healthy,
         "all repaired cache owners should become healthy");
 
     Require(
@@ -7760,7 +7760,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "the distinct stale-bundle source should open");
     Require(
         session.View().persistence.kind ==
-                specforge::LocalUserStateHealthKind::Healthy &&
+                spectiary::LocalUserStateHealthKind::Healthy &&
             session.View().persistence.messages.empty(),
         "a distinct pre-repair bundle must not resurrect cleared warnings");
 }
@@ -7774,14 +7774,14 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
     const std::filesystem::path existing_source_path = UniqueTempPath("_existing.npy");
     TouchFile(existing_source_path);
 
-    specforge::SourceCollectionSessionStateCache saved_state;
+    spectiary::SourceCollectionSessionStateCache saved_state;
     saved_state.sources = {
-        specforge::SourceCollectionSavedSource{missing_source_path, 3},
-        specforge::SourceCollectionSavedSource{existing_source_path, 1},
+        spectiary::SourceCollectionSavedSource{missing_source_path, 3},
+        spectiary::SourceCollectionSavedSource{existing_source_path, 1},
     };
     saved_state.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, saved_state),
         "source session fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -7792,7 +7792,7 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
         labeling_cache,
         {SourceFixture{existing_source_path, 3}});
 
-    const specforge::SourceCollectionSessionView view = restored.View();
+    const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.sources.size() == 1, "restore should skip missing source paths");
     Require(view.sources[0].path == existing_source_path, "existing source should remain after missing source skip");
     Require(view.current_source_index && *view.current_source_index == 0, "remaining source should become active");
@@ -7807,16 +7807,16 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
     const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
     std::vector<SourceFixture> fixtures;
-    specforge::SourceCollectionSessionStateCache saved_state;
+    spectiary::SourceCollectionSessionStateCache saved_state;
     for (std::size_t index = 0; index < 35; ++index) {
         std::filesystem::path source_path = UniqueTempPath(std::string("_cap_") + std::to_string(index) + ".npy");
         TouchFile(source_path);
         fixtures.push_back(SourceFixture{source_path, 4});
-        saved_state.sources.push_back(specforge::SourceCollectionSavedSource{source_path, index % 4});
+        saved_state.sources.push_back(spectiary::SourceCollectionSavedSource{source_path, index % 4});
     }
     saved_state.active_source_index = 34;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, saved_state),
         "source session cap fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -7827,7 +7827,7 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
         labeling_cache,
         fixtures);
 
-    const specforge::SourceCollectionSessionView view = restored.View();
+    const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.sources.size() == 32, "restore should cap the source list at 32 entries");
     Require(restored_loads.size() == 32, "restore should load only 32 source snapshots");
     Require(view.sources.back().path == saved_state.sources[31].path, "last restored source should be the 32nd entry");
@@ -7845,23 +7845,23 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
     const std::filesystem::path unavailable_path = UniqueTempPath("_offline.npy");
     TouchFile(source_path);
 
-    specforge::SourceCollectionSessionStateCache saved_state;
+    spectiary::SourceCollectionSessionStateCache saved_state;
     saved_state.sources = {
-        specforge::SourceCollectionSavedSource{source_path, 2},
-        specforge::SourceCollectionSavedSource{unavailable_path, 0},
+        spectiary::SourceCollectionSavedSource{source_path, 2},
+        spectiary::SourceCollectionSavedSource{unavailable_path, 0},
     };
     saved_state.active_source_index = 0;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, saved_state),
         "deferred source session fixture should save");
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         source_session_cache,
         navigation_cache,
         labeling_cache,
         workflow_cache);
 
-    std::optional<specforge::SourceCollectionDeferredRestorePlan> plan = session.TakeDeferredRestorePlan();
+    std::optional<spectiary::SourceCollectionDeferredRestorePlan> plan = session.TakeDeferredRestorePlan();
     Require(plan.has_value(), "deferred restore should publish a background-load plan");
     Require(
         plan->sources.size() == 2,
@@ -7873,12 +7873,12 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
         "the background worker should decide whether a saved path is available");
     Require(plan->active_source_index == 0, "deferred restore plan should retain the active source");
 
-    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 4, 2);
-    specforge::SourceCollectionContext context;
-    context.identity = specforge::BuildSourceCollectionIdentity(*snapshot);
-    specforge::PreparedSampleWorkflowState prepared_workflow =
+    const spectiary::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 4, 2);
+    spectiary::SourceCollectionContext context;
+    context.identity = spectiary::BuildSourceCollectionIdentity(*snapshot);
+    spectiary::PreparedSampleWorkflowState prepared_workflow =
         PrepareWorkflow(snapshot, context, 2, labeling_cache, workflow_cache);
-    const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
         source_path,
         2,
         snapshot,
@@ -7891,11 +7891,11 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
     session.FinishDeferredRestore();
     (void)Submit(
         session,
-        specforge::SourceCollectionSessionIntent::EditSourceCollection(
-            specforge::SourceCollectionIntent::Remove(0)));
+        spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+            spectiary::SourceCollectionIntent::Remove(0)));
     Require(session.FlushStateCaches(), "user mutation after deferred restore should persist");
-    const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
+    const spectiary::SourceCollectionSessionStateCache persisted =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache)
             .cache;
     Require(persisted.sources.size() == 1, "unresolved deferred source intent should remain persisted");
     Require(
@@ -7915,32 +7915,32 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
     const std::filesystem::path annotation_a = UniqueTempPath("_historical_a_annotation.npy");
     const std::filesystem::path annotation_b = UniqueTempPath("_historical_b_annotation.npy");
 
-    specforge::SourceCollectionSessionStateCache saved_state;
+    spectiary::SourceCollectionSessionStateCache saved_state;
     saved_state.sources = {
-        specforge::SourceCollectionSavedSource{source_a, 3, {annotation_a}},
-        specforge::SourceCollectionSavedSource{source_b, 7, {annotation_b}},
+        spectiary::SourceCollectionSavedSource{source_a, 3, {annotation_a}},
+        spectiary::SourceCollectionSavedSource{source_b, 7, {annotation_b}},
     };
     saved_state.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache, saved_state),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, saved_state),
         "superseded restore fixture should save");
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         source_session_cache,
         navigation_cache,
         labeling_cache,
         workflow_cache);
-    const std::optional<specforge::SourceCollectionDeferredRestorePlan> plan =
+    const std::optional<spectiary::SourceCollectionDeferredRestorePlan> plan =
         session.TakeDeferredRestorePlan();
     Require(plan && plan->sources.size() == 2, "fixture should produce two deferred restore tasks");
 
     // Mirrors ShellUi superseding the background restore before either A or B
     // commits, then accepting a newer explicit user source D.
     session.FinishDeferredRestore();
-    const specforge::SpectrumSnapshotHandle snapshot_d = MakeSnapshot(source_d, 1, 0);
-    specforge::SourceCollectionContext context_d;
-    context_d.identity = specforge::BuildSourceCollectionIdentity(*snapshot_d);
-    specforge::PreparedSampleWorkflowState prepared_workflow_d =
+    const spectiary::SpectrumSnapshotHandle snapshot_d = MakeSnapshot(source_d, 1, 0);
+    spectiary::SourceCollectionContext context_d;
+    context_d.identity = spectiary::BuildSourceCollectionIdentity(*snapshot_d);
+    spectiary::PreparedSampleWorkflowState prepared_workflow_d =
         PrepareWorkflow(snapshot_d, context_d, 0, labeling_cache, workflow_cache);
     Require(
         session.OpenPreparedSource(
@@ -7952,8 +7952,8 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
         "new explicit source should commit");
     Require(session.FlushStateCaches(), "new explicit source should flush the source-session cache");
 
-    const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
+    const spectiary::SourceCollectionSessionStateCache persisted =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache)
             .cache;
     Require(persisted.sources.size() == 3, "superseding restore must preserve A and B while adding D");
     const auto find_source = [&persisted](const std::filesystem::path& path) {
@@ -7986,17 +7986,17 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
     const std::filesystem::path source_cache = UniqueTempPath("_forget_unavailable_sources.json");
     const std::filesystem::path unavailable_a = UniqueTempPath("_unavailable_a.npy");
     const std::filesystem::path unavailable_b = UniqueTempPath("_unavailable_b.npy");
-    specforge::SourceCollectionSessionStateCache saved;
+    spectiary::SourceCollectionSessionStateCache saved;
     saved.sources = {
-        specforge::SourceCollectionSavedSource{unavailable_a, 2, {}},
-        specforge::SourceCollectionSavedSource{unavailable_b, 4, {}},
+        spectiary::SourceCollectionSavedSource{unavailable_a, 2, {}},
+        spectiary::SourceCollectionSavedSource{unavailable_b, 4, {}},
     };
     saved.active_source_index = 0;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_cache, saved),
+        spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_cache, saved),
         "unavailable source fixture should save");
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         source_cache,
         std::filesystem::path{},
         std::filesystem::path{},
@@ -8014,8 +8014,8 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
         session.FlushStateCaches(),
         "closing during deferred restore must flush an explicit Forget immediately");
 
-    const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_cache)
+    const spectiary::SourceCollectionSessionStateCache persisted =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_cache)
             .cache;
     Require(persisted.sources.size() == 1, "forgotten unavailable source must not return on restart");
     Require(persisted.sources.front().path == unavailable_b, "unrelated unresolved source B must remain persisted");
@@ -8035,7 +8035,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         "quality",
         "Quality",
         {1, 2, 2},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
 
     {
@@ -8054,29 +8054,29 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         Require(source.FlushStateCaches(), "workflow fixture should save");
     }
 
-    specforge::SourceCollectionSession restored(
+    spectiary::SourceCollectionSession restored(
         std::filesystem::path{},
         navigation_cache,
         labeling_cache,
         workflow_cache);
-    const specforge::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 2);
-    specforge::SourceCollectionContext context;
-    context.identity = specforge::BuildSourceCollectionIdentity(*prepared_snapshot);
+    const spectiary::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 2);
+    spectiary::SourceCollectionContext context;
+    context.identity = spectiary::BuildSourceCollectionIdentity(*prepared_snapshot);
     std::string annotation_error;
-    std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "prepared restore annotation fixture should load");
     context.manifest.annotations.push_back(std::move(*annotation));
-    specforge::PreparedSampleWorkflowState prepared_workflow =
+    spectiary::PreparedSampleWorkflowState prepared_workflow =
         PrepareWorkflow(prepared_snapshot, context, 2, labeling_cache, workflow_cache);
 
-    const specforge::SourceCollectionSessionResult result = restored.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult result = restored.OpenPreparedSource(
         source_path,
         2,
         prepared_snapshot,
         std::move(context),
         std::move(prepared_workflow));
-    const specforge::SourceCollectionSessionView view = restored.View();
+    const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.navigation.current_index == 0, "restored filter should reconcile navigation to row 0");
     Require(
         restored.CurrentSampleSnapshot() == nullptr && view.current_sample_snapshot == nullptr,
@@ -8084,16 +8084,16 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     Require(result.follow_up_spectrum_index == 0, "prepared restore should request a background row 0 load");
     Require(result.loaded, "prepared source should still be accepted while the corrected row is pending");
 
-    const specforge::SpectrumSnapshotHandle corrected_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext corrected_context;
-    corrected_context.identity = specforge::BuildSourceCollectionIdentity(*corrected_snapshot);
-    std::optional<specforge::SampleAnnotationResult> corrected_annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    const spectiary::SpectrumSnapshotHandle corrected_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext corrected_context;
+    corrected_context.identity = spectiary::BuildSourceCollectionIdentity(*corrected_snapshot);
+    std::optional<spectiary::SampleAnnotationResult> corrected_annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(corrected_annotation.has_value(), "corrected prepared annotation fixture should load");
     corrected_context.manifest.annotations.push_back(std::move(*corrected_annotation));
-    specforge::PreparedSampleWorkflowState corrected_workflow =
+    spectiary::PreparedSampleWorkflowState corrected_workflow =
         PrepareWorkflow(corrected_snapshot, corrected_context, 0, labeling_cache, workflow_cache);
-    const specforge::SourceCollectionSessionResult corrected = restored.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult corrected = restored.OpenPreparedSource(
         source_path,
         0,
         corrected_snapshot,
@@ -8117,11 +8117,11 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_deferred_transition_return.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "deferred-transition-return",
         "source",
@@ -8130,7 +8130,7 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
         3,
     };
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8146,18 +8146,18 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "next should queue row 1 while row 0 stays presented");
     Require(
         !session.View().sample_transition,
         "a tentative transition should stay hidden while its target snapshot is pending");
 
-    const specforge::SourceCollectionSessionResult returned =
+    const spectiary::SourceCollectionSessionResult returned =
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Previous()));
+                spectiary::SampleNavigationRequest::Previous()));
     Require(
         !returned.follow_up_spectrum_index &&
             session.CurrentSampleSnapshot() == initial_snapshot,
@@ -8171,11 +8171,11 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_deferred_transition_source.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "deferred-transition-source",
         "source",
@@ -8184,9 +8184,9 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
         3,
     };
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity =
+    const spectiary::SourceCollectionIdentity identity =
         context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8202,25 +8202,25 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "first next should queue row 1");
     Require(
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 2,
         "second next should advance the pending cursor to row 2");
 
-    const specforge::SpectrumSnapshotHandle final_snapshot =
+    const spectiary::SpectrumSnapshotHandle final_snapshot =
         MakeSnapshot(source_path, 3, 2);
     Require(
         session.OpenPreparedSource(
                    source_path,
                    2,
                    final_snapshot,
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the final pending row should commit directly");
     const auto& transition =
@@ -8228,7 +8228,7 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
     Require(
         transition &&
             transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::Next &&
+                spectiary::SourceCollectionSampleTransitionReason::Next &&
             transition->from_sample_index == 0 &&
             transition->current_sample_index == 2,
         "a committed deferred transition must use the last presented row rather than an unseen pending cursor as its source");
@@ -8238,11 +8238,11 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_empty_prepared_reconciliation.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext initial_context;
+    spectiary::SourceCollectionContext initial_context;
     initial_context.identity = {
         "empty-prepared-reconciliation",
         "source",
@@ -8251,7 +8251,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
         3,
     };
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState initial_workflow =
+    spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(
             initial_snapshot,
             initial_context,
@@ -8271,13 +8271,13 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "next should queue the intermediate row");
 
-    const specforge::SpectrumSnapshotHandle intermediate_snapshot =
+    const spectiary::SpectrumSnapshotHandle intermediate_snapshot =
         MakeSnapshot(source_path, 3, 1);
-    specforge::SourceCollectionContext changed_context;
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = {
         "empty-prepared-reconciliation",
         "source",
@@ -8286,7 +8286,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
         3,
     };
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState empty_workflow =
+    spectiary::PreparedSampleWorkflowState empty_workflow =
         PrepareWorkflow(
             intermediate_snapshot,
             changed_context,
@@ -8298,7 +8298,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
     empty_workflow.navigation_sequence.current_source_row.reset();
     empty_workflow.navigation_sequence.current_sequence_position.reset();
 
-    const specforge::SourceCollectionSessionResult reconciled =
+    const spectiary::SourceCollectionSessionResult reconciled =
         session.OpenPreparedSource(
             source_path,
             1,
@@ -8307,7 +8307,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
             std::move(empty_workflow));
     Require(
         reconciled.load_error.kind ==
-                specforge::SourceCollectionLoadErrorKind::
+                spectiary::SourceCollectionLoadErrorKind::
                     PreparedNavigationUnavailable &&
             !reconciled.follow_up_spectrum_index,
         "empty reconciliation should cancel the pending target");
@@ -8323,14 +8323,14 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
 void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_navigation.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {"deferred-navigation", "source", "source-fingerprint", "context-fingerprint", 3};
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8341,11 +8341,11 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
             std::move(prepared)).loaded,
         "initial prepared source should commit");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
-    const specforge::SourceCollectionLabelingView initial_labeling = session.View().labeling;
+    const spectiary::SourceCollectionLabelingView initial_labeling = session.View().labeling;
 
-    const specforge::SourceCollectionSessionResult pending =
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
-    const specforge::SourceCollectionSessionView pending_view = session.View();
+    const spectiary::SourceCollectionSessionResult pending =
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
+    const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(pending.follow_up_spectrum_index == 1, "next should request row 1 in the background");
     Require(
         pending_view.navigation.current_index == 0,
@@ -8361,8 +8361,8 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         pending_view.labeling.remembered_position == initial_labeling.remembered_position,
         "labeling controls should not expose the pending row before its snapshot commits");
 
-    const specforge::SourceCollectionSessionResult reversed =
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    const spectiary::SourceCollectionSessionResult reversed =
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(
         reversed.canceled_source_follow_up_path == source_path &&
             !reversed.follow_up_spectrum_index,
@@ -8373,14 +8373,14 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         "canceling pending navigation should leave the committed presentation unchanged");
 
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "navigation should be able to request row 1 again after cancellation");
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 2,
         "a repeated next should advance from the pending target instead of the presented row");
-    const specforge::SourceCollectionSessionView&
+    const spectiary::SourceCollectionSessionView&
         row_two_pending_view = session.View();
     Require(
         row_two_pending_view.navigation.can_move_previous &&
@@ -8388,7 +8388,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         "navigation buttons should use pending row 2 while the visible presentation remains on row 0");
     (void)session.TakeViewRetirement();
     Require(
-        !Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        !Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
              .follow_up_spectrum_index,
         "repeating next at the pending sequence boundary should retain the existing row 2 ticket");
     Require(
@@ -8398,7 +8398,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     Require(
         session.CancelPendingSampleNavigation(source_path, 2),
         "a failed latest background load should cancel its matching pending navigation");
-    const specforge::SourceCollectionSessionView&
+    const spectiary::SourceCollectionSessionView&
         canceled_pending_view = session.View();
     Require(
         &canceled_pending_view !=
@@ -8415,17 +8415,17 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
             &session.View() == &canceled_pending_view,
         "pending cancellation should retire exactly one old projection");
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "navigation after a failed load should resume from the presented row");
 
-    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
-    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+    const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
         source_path,
         1,
         next_snapshot,
-        specforge::PreparedSourceCollectionReuse{identity});
-    const specforge::SourceCollectionSessionView committed_view = session.View();
+        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionView committed_view = session.View();
     Require(committed.loaded, "prepared row 1 should commit");
     Require(!committed.follow_up_spectrum_index, "the committed row should need no corrective follow-up");
     Require(
@@ -8449,16 +8449,16 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
         "deferred-filter-values",
         "Deferred filter values",
         {0, 0, 1},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {"deferred-filter-retarget", "source", "source-fingerprint", "context", 3};
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8473,13 +8473,13 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
     const std::string filter_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "manual next should initially queue row 1");
 
-    const specforge::SourceCollectionSessionResult filtered =
+    const spectiary::SourceCollectionSessionResult filtered =
         Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
-    const specforge::SourceCollectionSessionView pending_view = session.View();
+    const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(filtered.follow_up_spectrum_index == 2, "filter reconciliation should replace row 1 with row 2");
     Require(
         pending_view.navigation.current_index == 0 &&
@@ -8487,13 +8487,13 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
             pending_view.labeling.current_index == 0,
         "filter reconciliation should retain the complete committed row 0 presentation");
 
-    const specforge::SpectrumSnapshotHandle filtered_snapshot = MakeSnapshot(source_path, 3, 2);
-    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+    const spectiary::SpectrumSnapshotHandle filtered_snapshot = MakeSnapshot(source_path, 3, 2);
+    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
         source_path,
         2,
         filtered_snapshot,
-        specforge::PreparedSourceCollectionReuse{identity});
-    const specforge::SourceCollectionSessionView committed_view = session.View();
+        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionView committed_view = session.View();
     Require(committed.loaded && !committed.follow_up_spectrum_index, "filtered row 2 should commit once");
     Require(
         committed_view.navigation.current_index == 2 &&
@@ -8505,11 +8505,11 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_deferred_sequence_cancel.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "deferred-sequence-cancel",
         "source",
@@ -8518,7 +8518,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
         3,
     };
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8538,10 +8538,10 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
             session.View().navigation.current_sequence_position == 0,
         "sample-name sorting should expose committed sequence position A");
 
-    const specforge::SourceCollectionSessionResult pending = Submit(
+    const spectiary::SourceCollectionSessionResult pending = Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateSequencePosition(1)));
     Require(
         pending.follow_up_spectrum_index == 1 &&
@@ -8552,10 +8552,10 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
             session.View().navigation.current_sequence_position == 0,
         "the pending B request must not replace the committed A presentation");
 
-    const specforge::SourceCollectionSessionResult canceled = Submit(
+    const spectiary::SourceCollectionSessionResult canceled = Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::
+            spectiary::SampleNavigationRequest::
                 LocateSequencePosition(0)));
     Require(
         !canceled.follow_up_spectrum_index &&
@@ -8570,14 +8570,14 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
 void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_label_advance.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {"deferred-label-advance", "source", "source-fingerprint", "context", 3};
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8590,17 +8590,17 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
         "deferred label fixture should load");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "accepted", 'a'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "accepted", 'a'})).changed,
         "deferred label fixture should add its label");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "manual next should queue row 1 before labeling row 0");
 
-    const specforge::SourceCollectionSessionResult labeled =
+    const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
-    const specforge::SourceCollectionSessionView pending_view = session.View();
+    const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(
         !labeled.follow_up_spectrum_index,
         "auto-advance from visible row 0 should retain the existing row 1 ticket instead of jumping to row 2");
@@ -8611,13 +8611,13 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
             !pending_view.sample_transition,
         "the label write should remain visibly attached to committed row 0 while row 1 loads");
 
-    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
     Require(
         session.OpenPreparedSource(
                    source_path,
                    1,
                    next_snapshot,
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the retained row 1 ticket should still commit");
     Require(
@@ -8629,7 +8629,7 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
     Require(
         committed_transition &&
             committed_transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::
+                spectiary::SourceCollectionSampleTransitionReason::
                     LabelingAutoAdvance &&
             committed_transition->from_sample_index == 0 &&
             committed_transition->current_sample_index == 1 &&
@@ -8641,11 +8641,11 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_manual_matching_auto_advance.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 2, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "manual-matching-auto-advance",
         "source",
@@ -8654,8 +8654,8 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
         2,
     };
     context.manifest.sample_names = {"alpha", "beta"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8671,7 +8671,7 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+                spectiary::SampleLabelDefinition{1, "accepted", 'a'}))
             .changed,
         "manual matching-target fixture should add its label");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
@@ -8684,30 +8684,30 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
         !session.View().sample_transition,
         "auto-advance feedback should stay hidden while row 1 is pending");
 
-    const specforge::SourceCollectionSessionResult located = Submit(
+    const spectiary::SourceCollectionSessionResult located = Submit(
         session,
         MoveSampleNavigation(
-            specforge::SampleNavigationRequest::LocateRow(1)));
+            spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
         !located.follow_up_spectrum_index &&
             session.EffectiveSampleNavigationIndex() == 1,
         "explicitly locating the same pending row should retain its worker ticket");
 
-    const specforge::SpectrumSnapshotHandle next_snapshot =
+    const spectiary::SpectrumSnapshotHandle next_snapshot =
         MakeSnapshot(source_path, 2, 1);
     Require(
         session.OpenPreparedSource(
                    source_path,
                    1,
                    next_snapshot,
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the manually claimed row 1 ticket should commit");
     const auto& transition = session.View().sample_transition;
     Require(
         transition &&
             transition->reason ==
-                specforge::SourceCollectionSampleTransitionReason::LocateRow &&
+                spectiary::SourceCollectionSampleTransitionReason::LocateRow &&
             transition->from_sample_index == 0 &&
             transition->current_sample_index == 1 &&
             !transition->accepted_label_value,
@@ -8718,11 +8718,11 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_pending_transition_cancellation.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 2, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "pending-transition-cancellation",
         "source",
@@ -8731,7 +8731,7 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
         2,
     };
     context.manifest.sample_names = {"alpha", "beta"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8745,10 +8745,10 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
 
     Require(
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::Next()))
+                            spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "path-bound cancellation fixture should queue row 1");
-    const specforge::SourceCollectionSessionView& path_pending_view =
+    const spectiary::SourceCollectionSessionView& path_pending_view =
         session.View();
     (void)session.TakeViewRetirement();
     Require(
@@ -8762,10 +8762,10 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
 
     Require(
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::Next()))
+                            spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "active cancellation fixture should queue row 1 again");
-    const specforge::SourceCollectionSessionView& active_pending_view =
+    const spectiary::SourceCollectionSessionView& active_pending_view =
         session.View();
     (void)session.TakeViewRetirement();
     Require(
@@ -8787,16 +8787,16 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
         "deferred-label-merge-filter",
         "Deferred label merge filter",
         {0, 1, 0},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {"deferred-label-merge", "source", "source-fingerprint", "context", 3};
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8817,22 +8817,22 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "accepted", 'a'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "accepted", 'a'})).changed,
         "deferred label merge fixture should add its label");
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
-    const specforge::SourceCollectionSessionResult labeled =
+    const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
         !labeled.follow_up_spectrum_index,
         "auto-advance to the same pending row should retain the filter's existing worker ticket");
 
-    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
     Require(
         session.OpenPreparedSource(
                    source_path,
                    1,
                    next_snapshot,
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the merged row 1 request should commit through the retained ticket");
     Require(
@@ -8846,11 +8846,11 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
         UniqueTempPath("_deferred_local_label_filter.npy");
     const std::filesystem::path output_path =
         UniqueTempPath("_deferred_local_label_filter_result.asdf");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot =
+    const spectiary::SpectrumSnapshotHandle initial_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "deferred-local-label-filter",
         "source",
@@ -8859,8 +8859,8 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
         3,
     };
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8877,7 +8877,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+                spectiary::SampleLabelDefinition{1, "accepted", 'a'}))
             .changed,
         "deferred local label filter fixture should add its label");
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
@@ -8885,13 +8885,13 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     const std::string filter_source_id =
         "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
-    const specforge::SourceCollectionSessionResult filtered =
+    const spectiary::SourceCollectionSessionResult filtered =
         Submit(
             session,
             SetFilterValueSelected(
                 filter_source_id,
                 std::to_string(
-                    specforge::kUnlabeledSampleLabelCode),
+                    spectiary::kUnlabeledSampleLabelCode),
                 true));
     Require(
         !filtered.follow_up_spectrum_index &&
@@ -8899,7 +8899,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
         "unlabeled filter should initially retain visible row 0");
 
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
-    const specforge::SourceCollectionSessionResult labeled =
+    const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
         labeled.follow_up_spectrum_index == 1,
@@ -8910,14 +8910,14 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
             session.View().labeling.current_code == 1,
         "the committed row 0 presentation should remain complete while filtered row 1 loads");
 
-    const specforge::SpectrumSnapshotHandle next_snapshot =
+    const spectiary::SpectrumSnapshotHandle next_snapshot =
         MakeSnapshot(source_path, 3, 1);
     Require(
         session.OpenPreparedSource(
                    source_path,
                    1,
                    next_snapshot,
-                   specforge::PreparedSourceCollectionReuse{
+                   spectiary::PreparedSourceCollectionReuse{
                        identity})
             .loaded,
         "the preserved row 1 follow-up should commit");
@@ -8933,11 +8933,11 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         UniqueTempPath("_deferred_local_label_undo_filter.npy");
     const std::filesystem::path output_path =
         UniqueTempPath("_deferred_local_label_undo_filter_result.asdf");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle row_zero_snapshot =
+    const spectiary::SpectrumSnapshotHandle row_zero_snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "deferred-local-label-undo-filter",
         "source",
@@ -8946,8 +8946,8 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         3,
     };
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(row_zero_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -8964,7 +8964,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         Submit(
             session,
             UpsertActiveLabel(
-                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+                spectiary::SampleLabelDefinition{1, "accepted", 'a'}))
             .changed,
         "deferred local label undo filter fixture should add its label");
 
@@ -8972,7 +8972,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::LocateRow(1)))
+                spectiary::SampleNavigationRequest::LocateRow(1)))
                 .follow_up_spectrum_index == 1,
         "undo fixture should request row 1");
     Require(
@@ -8980,7 +8980,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                    source_path,
                    1,
                    MakeSnapshot(source_path, 3, 1),
-                   specforge::PreparedSourceCollectionReuse{
+                   spectiary::PreparedSourceCollectionReuse{
                        identity})
             .loaded,
         "undo fixture should commit row 1");
@@ -8990,7 +8990,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::LocateRow(0)))
+                spectiary::SampleNavigationRequest::LocateRow(0)))
                 .follow_up_spectrum_index == 0,
         "undo fixture should request row 0");
     Require(
@@ -8998,7 +8998,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                    source_path,
                    0,
                    row_zero_snapshot,
-                   specforge::PreparedSourceCollectionReuse{
+                   spectiary::PreparedSourceCollectionReuse{
                        identity})
             .loaded,
         "undo fixture should commit row 0");
@@ -9008,7 +9008,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
     const std::string filter_source_id =
         "labeling:" + session.View().labeling.task_id;
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
-    const specforge::SourceCollectionSessionResult filtered =
+    const spectiary::SourceCollectionSessionResult filtered =
         Submit(
             session,
             SetFilterValueSelected(
@@ -9020,7 +9020,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
             session.View().navigation.sequence_count == 2,
         "label-one filter should initially retain visible row 0");
 
-    const specforge::SourceCollectionSessionResult undone =
+    const spectiary::SourceCollectionSessionResult undone =
         Submit(session, UndoLastLabelWrite());
     Require(
         !undone.follow_up_spectrum_index,
@@ -9030,7 +9030,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                 row_zero_snapshot &&
             session.View().labeling.current_index == 0 &&
             session.View().labeling.current_code ==
-                specforge::kUnlabeledSampleLabelCode &&
+                spectiary::kUnlabeledSampleLabelCode &&
             !session.View().navigation.current_sample_in_filter,
         "undo should keep the complete restored row 0 presentation outside the active filter");
     Require(
@@ -9041,10 +9041,10 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
 void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_plan_reconcile.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext initial_context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext initial_context;
     initial_context.identity = {
         "deferred-plan-reconcile",
         "source",
@@ -9053,7 +9053,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         3,
     };
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState initial_workflow =
+    spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9068,12 +9068,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     const std::optional<std::size_t> initial_remembered_position =
         session.View().labeling.remembered_position;
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "next should initially request row 1");
 
-    const specforge::SpectrumSnapshotHandle intermediate_snapshot = MakeSnapshot(source_path, 3, 1);
-    specforge::SourceCollectionContext changed_context;
+    const spectiary::SpectrumSnapshotHandle intermediate_snapshot = MakeSnapshot(source_path, 3, 1);
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = {
         "deferred-plan-reconcile",
         "source",
@@ -9082,18 +9082,18 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         3,
     };
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState reconciled_workflow =
+    spectiary::PreparedSampleWorkflowState reconciled_workflow =
         PrepareWorkflow(intermediate_snapshot, changed_context, 1, {}, {});
     reconciled_workflow.current_index = 2;
     reconciled_workflow.navigation_sequence.current_source_row = 2;
 
-    const specforge::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
         source_path,
         1,
         intermediate_snapshot,
         std::move(changed_context),
         std::move(reconciled_workflow));
-    const specforge::SourceCollectionSessionView pending_view = session.View();
+    const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(reconciled.loaded, "the intermediate prepared plan should be accepted");
     Require(
         reconciled.follow_up_spectrum_index == 2,
@@ -9123,12 +9123,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         "failed plan reconciliation must not leak a labeling-position commit");
 
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "navigation should remain usable after the reconciled final row fails");
-    const specforge::SpectrumSnapshotHandle second_intermediate_snapshot =
+    const spectiary::SpectrumSnapshotHandle second_intermediate_snapshot =
         MakeSnapshot(source_path, 3, 1);
-    specforge::SourceCollectionContext second_changed_context;
+    spectiary::SourceCollectionContext second_changed_context;
     second_changed_context.identity = {
         "deferred-plan-reconcile",
         "source",
@@ -9137,7 +9137,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         3,
     };
     second_changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState second_reconciled_workflow =
+    spectiary::PreparedSampleWorkflowState second_reconciled_workflow =
         PrepareWorkflow(second_intermediate_snapshot, second_changed_context, 1, {}, {});
     second_reconciled_workflow.current_index = 2;
     second_reconciled_workflow.navigation_sequence.current_source_row = 2;
@@ -9151,8 +9151,8 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
                 .follow_up_spectrum_index == 2,
         "a retried intermediate plan should again request its reconciled final row");
 
-    const specforge::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
-    specforge::SourceCollectionContext final_context;
+    const spectiary::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
+    spectiary::SourceCollectionContext final_context;
     final_context.identity = {
         "deferred-plan-reconcile",
         "source",
@@ -9161,15 +9161,15 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         3,
     };
     final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState final_workflow =
+    spectiary::PreparedSampleWorkflowState final_workflow =
         PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
-    const specforge::SourceCollectionSessionResult final_result = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult final_result = session.OpenPreparedSource(
         source_path,
         2,
         final_snapshot,
         std::move(final_context),
         std::move(final_workflow));
-    const specforge::SourceCollectionSessionView final_view = session.View();
+    const spectiary::SourceCollectionSessionView final_view = session.View();
     Require(final_result.loaded && !final_result.follow_up_spectrum_index, "the final row should commit once");
     Require(
         final_view.snapshot == final_snapshot &&
@@ -9185,10 +9185,10 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
 void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
 {
     const std::filesystem::path source_path = UniqueTempPath("_stale_prepared_plan.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext initial_context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext initial_context;
     initial_context.identity = {
         "stale-prepared-plan",
         "source",
@@ -9197,7 +9197,7 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         3,
     };
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState initial_workflow =
+    spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9209,15 +9209,15 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
             .loaded,
         "stale prepared plan fixture should commit its initial source");
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "stale prepared plan fixture should queue row 1");
-    const std::optional<specforge::SourceCollectionLoadHint> load_hint =
+    const std::optional<spectiary::SourceCollectionLoadHint> load_hint =
         session.LoadHintForSource(source_path);
     Require(load_hint.has_value(), "known source navigation should expose its workflow revision");
 
-    const specforge::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 1);
-    specforge::SourceCollectionContext changed_context;
+    const spectiary::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 1);
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = {
         "stale-prepared-plan",
         "source",
@@ -9226,25 +9226,25 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         3,
     };
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    specforge::PreparedSampleWorkflowState stale_workflow =
+    spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(prepared_snapshot, changed_context, 1, {}, {});
 
     (void)Submit(session, AddSampleSortSource("sample-name"));
-    const specforge::SourceCollectionSessionResult sorted =
+    const spectiary::SourceCollectionSessionResult sorted =
         Submit(session, SetSampleSortSource("sample-name"));
     Require(
         !sorted.follow_up_spectrum_index && session.View().sorting.active,
         "new live sorting should retain the existing row 1 worker");
 
-    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
         source_path,
         1,
         prepared_snapshot,
-        specforge::PreparedSourceCollectionPlan{
+        spectiary::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
             load_hint->reuse.live_workflow_revision()});
-    const specforge::SourceCollectionSessionView view = session.View();
+    const spectiary::SourceCollectionSessionView view = session.View();
     Require(committed.loaded && !committed.follow_up_spectrum_index, "row 1 should commit once");
     Require(
         view.current_sample_snapshot == prepared_snapshot &&
@@ -9265,12 +9265,12 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
         "live-context-values",
         "Live context values",
         {1, 1, 0},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext initial_context;
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext initial_context;
     initial_context.identity = {
         "live-context-reconcile",
         "source",
@@ -9280,11 +9280,11 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     };
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::string annotation_error;
-    std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> initial_annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(initial_annotation.has_value(), "initial context annotation should load");
     initial_context.manifest.annotations.push_back(std::move(*initial_annotation));
-    specforge::PreparedSampleWorkflowState initial_workflow =
+    spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9299,17 +9299,17 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     (void)Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "the original context should queue row 1");
-    const specforge::SourceCollectionSessionView presentation_before_context_change =
+    const spectiary::SourceCollectionSessionView presentation_before_context_change =
         session.View();
     Require(
         presentation_before_context_change.filter.evaluation.included_count == 2 &&
             presentation_before_context_change.navigation.sequence_count == 2 &&
             presentation_before_context_change.navigation.current_sample_in_filter,
         "the committed presentation should still expose the original context projections");
-    const std::optional<specforge::SourceCollectionLoadHint> load_hint =
+    const std::optional<spectiary::SourceCollectionLoadHint> load_hint =
         session.LoadHintForSource(source_path);
     Require(load_hint.has_value(), "context reconciliation should capture a live revision");
 
@@ -9318,11 +9318,11 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
         "live-context-values",
         "Live context values",
         {0, 0, 1},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
-    const specforge::SpectrumSnapshotHandle intermediate_snapshot =
+    const spectiary::SpectrumSnapshotHandle intermediate_snapshot =
         MakeSnapshot(source_path, 3, 1);
-    specforge::SourceCollectionContext changed_context;
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = {
         "live-context-reconcile",
         "source",
@@ -9330,27 +9330,27 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
         "context-v2",
         3,
     };
-    const specforge::SourceCollectionIdentity changed_identity = changed_context.identity;
+    const spectiary::SourceCollectionIdentity changed_identity = changed_context.identity;
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    std::optional<specforge::SampleAnnotationResult> changed_annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> changed_annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(changed_annotation.has_value(), "changed context annotation should load");
     changed_context.manifest.annotations.push_back(std::move(*changed_annotation));
-    specforge::PreparedSampleWorkflowState stale_workflow =
+    spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(intermediate_snapshot, changed_context, 1, {}, {});
 
-    const specforge::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
         source_path,
         1,
         intermediate_snapshot,
-        specforge::PreparedSourceCollectionPlan{
+        spectiary::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
             load_hint->reuse.live_workflow_revision()});
     Require(
         reconciled.loaded && reconciled.follow_up_spectrum_index == 2,
         "the live filter should retarget the changed context to row 2");
-    const specforge::SourceCollectionSessionView presentation_while_waiting = session.View();
+    const spectiary::SourceCollectionSessionView presentation_while_waiting = session.View();
     Require(
         session.CurrentSourceSnapshot() == initial_snapshot &&
             session.CurrentSampleSnapshot() == initial_snapshot &&
@@ -9362,22 +9362,22 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
             presentation_while_waiting.navigation.current_sample_in_filter,
         "the old manifest, filter, and navigation projections must remain committed while final row 2 loads");
 
-    const specforge::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
-    specforge::SourceCollectionContext final_context;
+    const spectiary::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
+    spectiary::SourceCollectionContext final_context;
     final_context.identity = changed_identity;
     final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    std::optional<specforge::SampleAnnotationResult> final_annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> final_annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(final_annotation.has_value(), "final context annotation should load");
     final_context.manifest.annotations.push_back(std::move(*final_annotation));
-    specforge::PreparedSampleWorkflowState final_workflow =
+    spectiary::PreparedSampleWorkflowState final_workflow =
         PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
     Require(
         session.OpenPreparedSource(
                    source_path,
                    2,
                    final_snapshot,
-                   specforge::PreparedSourceCollectionPlan{
+                   spectiary::PreparedSourceCollectionPlan{
                        std::move(final_context),
                        std::move(final_workflow),
                        load_hint->reuse.live_workflow_revision()})
@@ -9394,13 +9394,13 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
 {
     const std::filesystem::path source_a = UniqueTempPath("_deferred_switch_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_deferred_switch_b.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
     auto open_prepared = [&session](
                              const std::filesystem::path& path,
                              std::string identity,
-                             const specforge::SpectrumSnapshotHandle& snapshot) {
-        specforge::SourceCollectionContext context;
+                             const spectiary::SpectrumSnapshotHandle& snapshot) {
+        spectiary::SourceCollectionContext context;
         context.identity = {
             std::move(identity),
             "source",
@@ -9409,7 +9409,7 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
             3,
         };
         context.manifest.sample_names = {"alpha", "beta", "gamma"};
-        specforge::PreparedSampleWorkflowState workflow =
+        spectiary::PreparedSampleWorkflowState workflow =
             PrepareWorkflow(snapshot, context, 0, {}, {});
         return session.OpenPreparedSource(
             path,
@@ -9419,26 +9419,26 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
             std::move(workflow));
     };
 
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
     Require(open_prepared(source_a, "deferred-switch-a", snapshot_a).loaded, "source A should load");
     Require(open_prepared(source_b, "deferred-switch-b", snapshot_b).loaded, "source B should load");
     (void)Submit(session, SwitchSourceCollection(0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const std::optional<std::size_t> remembered_a = session.View().labeling.remembered_position;
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "source A should queue row 1");
 
-    const specforge::SourceCollectionSessionResult switched_to_b =
+    const spectiary::SourceCollectionSessionResult switched_to_b =
         Submit(session, SwitchSourceCollection(1));
     Require(
         switched_to_b.canceled_source_follow_up_path == source_a,
         "switching to B should cancel A's pending source-follow-up ticket");
-    const specforge::SourceCollectionSessionResult switched_back_to_a =
+    const spectiary::SourceCollectionSessionResult switched_back_to_a =
         Submit(session, SwitchSourceCollection(0));
-    const specforge::SourceCollectionSessionView restored_a = session.View();
+    const spectiary::SourceCollectionSessionView restored_a = session.View();
     Require(
         !switched_back_to_a.follow_up_spectrum_index,
         "switching back to A must not resurrect its canceled row 1 navigation");
@@ -9456,14 +9456,14 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
 {
     const std::filesystem::path source_a = UniqueTempPath("_preserve_pending_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_preserve_pending_b.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
 
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    specforge::SourceCollectionContext context_a;
+    const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    spectiary::SourceCollectionContext context_a;
     context_a.identity = {"preserve-pending-a", "a", "a-source", "a-context", 3};
     context_a.manifest.sample_names = {"a0", "a1", "a2"};
-    const specforge::SourceCollectionIdentity identity_a = context_a.identity;
-    specforge::PreparedSampleWorkflowState workflow_a =
+    const spectiary::SourceCollectionIdentity identity_a = context_a.identity;
+    spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9475,11 +9475,11 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
             .loaded,
         "source A should load");
 
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
-    specforge::SourceCollectionContext context_b;
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {"preserve-pending-b", "b", "b-source", "b-context", 3};
     context_b.manifest.sample_names = {"b0", "b1", "b2"};
-    specforge::PreparedSampleWorkflowState workflow_b =
+    spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9492,29 +9492,29 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
         "source B should load");
     (void)Submit(session, SwitchSourceCollection(0));
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "source A should queue row 1");
 
-    const specforge::SourceCollectionSessionResult removed_b =
+    const spectiary::SourceCollectionSessionResult removed_b =
         Submit(session, RemoveSourceCollection(1));
     Require(
         removed_b.canceled_source_follow_up_path == source_b &&
             !removed_b.follow_up_spectrum_index,
         "removing inactive source B should cancel only B's tickets and retain source A's pending ticket");
-    const specforge::SourceCollectionSessionResult reselected_a =
+    const spectiary::SourceCollectionSessionResult reselected_a =
         Submit(session, SwitchSourceCollection(0));
     Require(
         !reselected_a.canceled_source_follow_up_path && !reselected_a.follow_up_spectrum_index,
         "reselecting active source A should retain its pending ticket");
 
-    const specforge::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
+    const spectiary::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
     Require(
         session.OpenPreparedSource(
                    source_a,
                    1,
                    row_one_snapshot,
-                   specforge::PreparedSourceCollectionReuse{identity_a})
+                   spectiary::PreparedSourceCollectionReuse{identity_a})
             .loaded,
         "the retained source A ticket should still commit row 1");
     Require(
@@ -9533,17 +9533,17 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         "reload-values",
         "Reload values",
         {1, 2, 3},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
     std::string annotation_error;
-    std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "same-identity reload annotation fixture should load");
 
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
-    context.identity = specforge::SourceCollectionIdentity{
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
+    context.identity = spectiary::SourceCollectionIdentity{
         .id = "same-identity-reload",
         .source_name = "reload",
         .source_fingerprint = "same-source",
@@ -9552,8 +9552,8 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     };
     context.manifest.sample_names = {"a", "b", "c"};
     context.manifest.annotations.push_back(std::move(*annotation));
-    const specforge::SourceCollectionIdentity identity = context.identity;
-    specforge::PreparedSampleWorkflowState prepared =
+    const spectiary::SourceCollectionIdentity identity = context.identity;
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
         session.OpenPreparedSource(
@@ -9567,7 +9567,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
 
     const std::string annotation_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(annotation_source_id));
-    const specforge::SourceCollectionSessionResult filter_result =
+    const spectiary::SourceCollectionSessionResult filter_result =
         Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
     Require(filter_result.follow_up_spectrum_index == 1, "live filter should move navigation to row 1");
     Require(
@@ -9575,25 +9575,25 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
                    source_path,
                    1,
                    MakeSnapshot(source_path, 3, 1),
-                   specforge::PreparedSourceCollectionReuse{identity})
+                   spectiary::PreparedSourceCollectionReuse{identity})
             .loaded,
         "the filtered row should commit only after its complete snapshot is prepared");
     (void)Submit(session, AddSampleSortSource(annotation_source_id));
     (void)Submit(session, SetSampleSortSource(annotation_source_id));
     (void)Submit(
         session,
-        SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+        SetSampleSortDirection(spectiary::SampleNavigationSortDirection::Descending));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{7, "live", 'l'})).changed,
+        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{7, "live", 'l'})).changed,
         "live non-active labeling fixture should accept its label");
     (void)Submit(session, AssignActiveLabelToCurrentSample(7));
 
-    const specforge::SpectrumSnapshotHandle other_snapshot = MakeSnapshot(other_source_path, 3, 0);
-    specforge::SourceCollectionContext other_context;
+    const spectiary::SpectrumSnapshotHandle other_snapshot = MakeSnapshot(other_source_path, 3, 0);
+    spectiary::SourceCollectionContext other_context;
     other_context.identity = {"same-identity-other", "other", "other-source", "other-context", 3};
     other_context.manifest.sample_names = {"x", "y", "z"};
-    specforge::PreparedSampleWorkflowState other_workflow =
+    spectiary::PreparedSampleWorkflowState other_workflow =
         PrepareWorkflow(other_snapshot, other_context, 0, {}, {});
     (void)session.OpenPreparedSource(
         other_source_path,
@@ -9602,20 +9602,20 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         std::move(other_context),
         std::move(other_workflow));
 
-    const std::optional<specforge::SourceCollectionLoadHint> hint =
+    const std::optional<spectiary::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint && hint->spectrum_index == 1, "non-active source reload should capture its live row");
     Require(
         hint->reuse.identity().id == identity.id,
         "non-active source reload should expose its stable generation");
 
-    const specforge::SpectrumSnapshotHandle reloaded_snapshot = MakeSnapshot(source_path, 3, 1);
-    const specforge::SourceCollectionSessionResult reload_result = session.OpenPreparedSource(
+    const spectiary::SpectrumSnapshotHandle reloaded_snapshot = MakeSnapshot(source_path, 3, 1);
+    const spectiary::SourceCollectionSessionResult reload_result = session.OpenPreparedSource(
         source_path,
         1,
         reloaded_snapshot,
-        specforge::PreparedSourceCollectionReuse{identity});
-    const specforge::SourceCollectionSessionView view = session.View();
+        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionView view = session.View();
     Require(reload_result.loaded, "matching same-identity snapshot-only reload should commit");
     Require(
         reload_result.background_retirement.size() >= 1,
@@ -9630,56 +9630,56 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
 {
     std::size_t labeling_cache_loads = 0;
     std::size_t workflow_cache_loads = 0;
-    specforge::SampleWorkflowCoordinator coordinator(
+    spectiary::SampleWorkflowCoordinator coordinator(
         {},
         {},
         {},
         [&labeling_cache_loads](const std::filesystem::path&) {
             ++labeling_cache_loads;
-            return specforge::SampleLabelingStateCacheLoadResult{};
+            return spectiary::SampleLabelingStateCacheLoadResult{};
         },
         [&workflow_cache_loads](const std::filesystem::path&) {
             ++workflow_cache_loads;
-            return specforge::SampleWorkflowStateCacheLoadResult{};
+            return spectiary::SampleWorkflowStateCacheLoadResult{};
         });
 
     const std::filesystem::path source_a = UniqueTempPath("_prepared_cache_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_prepared_cache_b.npy");
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
-    specforge::SourceCollectionContext context_a;
+    const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    spectiary::SourceCollectionContext context_a;
     context_a.identity = {"prepared-cache-a", "a", "a-source", "a-context", 3};
     context_a.manifest.sample_names = {"a0", "a1", "a2"};
-    specforge::SourceCollectionContext context_b;
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {"prepared-cache-b", "b", "b-source", "b-context", 3};
     context_b.manifest.sample_names = {"b0", "b1", "b2"};
 
-    auto cache = std::make_shared<specforge::SampleWorkflowPreparationCacheBundle>();
-    specforge::SampleLabelingSourceState labeling_a;
+    auto cache = std::make_shared<spectiary::SampleWorkflowPreparationCacheBundle>();
+    spectiary::SampleLabelingSourceState labeling_a;
     labeling_a.sample_count = 3;
     labeling_a.source_name = "a";
     cache->labeling.cache.sources.emplace(context_a.identity.id, labeling_a);
-    specforge::SampleWorkflowSourceState workflow_a_state;
+    spectiary::SampleWorkflowSourceState workflow_a_state;
     workflow_a_state.annotation_display_names.push_back({"annotation:cache", "Cached name"});
     cache->workflow.sources_by_identity.emplace(context_a.identity.id, std::move(workflow_a_state));
 
-    specforge::PreparedSampleWorkflowState prepared_a =
-        specforge::PrepareSampleWorkflowStateFromCache(*snapshot_a, context_a, 0, *cache);
+    spectiary::PreparedSampleWorkflowState prepared_a =
+        spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_a, context_a, 0, *cache);
     prepared_a.preparation_cache = cache;
-    specforge::PreparedSampleWorkflowActivationResult activation_a =
+    spectiary::PreparedSampleWorkflowActivationResult activation_a =
         coordinator.SyncPreparedActiveSource("prepared-cache-a-key", snapshot_a, context_a, std::move(prepared_a));
 
-    specforge::PreparedSampleWorkflowState prepared_b =
-        specforge::PrepareSampleWorkflowStateFromCache(*snapshot_b, context_b, 0, *cache);
+    spectiary::PreparedSampleWorkflowState prepared_b =
+        spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_b, context_b, 0, *cache);
     prepared_b.preparation_cache = cache;
-    specforge::PreparedSampleWorkflowActivationResult activation_b =
+    spectiary::PreparedSampleWorkflowActivationResult activation_b =
         coordinator.SyncPreparedActiveSource("prepared-cache-b-key", snapshot_b, context_b, std::move(prepared_b));
     (void)activation_a;
     (void)activation_b;
 
-    const std::optional<specforge::SampleWorkflowSourceState> workflow_a =
+    const std::optional<spectiary::SampleWorkflowSourceState> workflow_a =
         coordinator.WorkflowStateForSourceIdentity(context_a.identity.id);
-    const std::optional<specforge::SampleLabelingSourceState> restored_labeling_a =
+    const std::optional<spectiary::SampleLabelingSourceState> restored_labeling_a =
         coordinator.LabelingStateForSourceIdentity(context_a.identity.id);
     Require(workflow_a.has_value(), "prepared workflow cache state should remain available in memory");
     Require(
@@ -9692,12 +9692,12 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
 
 void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
 {
-    specforge::SampleWorkflowCoordinator coordinator({}, {}, {});
+    spectiary::SampleWorkflowCoordinator coordinator({}, {}, {});
     const std::filesystem::path source_path =
         UniqueTempPath("_known_source_generation.npy");
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "known-source-generation",
         "known source",
@@ -9705,7 +9705,7 @@ void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
         "known-context-generation",
         3};
     context.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(snapshot, context, 0, {}, {});
     Require(
         coordinator
@@ -9717,7 +9717,7 @@ void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
             .action.workflow_changed,
         "known-source generation fixture should activate");
 
-    const specforge::SampleWorkflowTransitionOutcome reused =
+    const spectiary::SampleWorkflowTransitionOutcome reused =
         coordinator.SyncKnownActiveSource(
             "known-source-key",
             snapshot);
@@ -9730,35 +9730,35 @@ void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
 void TestPreparedProjectionsMoveIntoTheSessionView()
 {
     const std::filesystem::path source_path = UniqueTempPath("_prepared_projection.npy");
-    specforge::SourceCollectionSession session({}, {}, {}, {});
-    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    const spectiary::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 3, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {"prepared-projection", "projection", "source", "context", 3};
     context.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(snapshot, context, 0, {}, {});
     prepared.filter_view.sources.push_back(
-        specforge::SourceCollectionFilterSourceView{.id = "filter-source", .name = "Filter source"});
+        spectiary::SourceCollectionFilterSourceView{.id = "filter-source", .name = "Filter source"});
     prepared.sorting_view.sources.push_back(
-        specforge::SourceCollectionSampleSortSourceView{.id = "sort-source", .name = "Sort source"});
+        spectiary::SourceCollectionSampleSortSourceView{.id = "sort-source", .name = "Sort source"});
     const auto* prepared_filter_storage = prepared.filter_view.sources.data();
     const auto* prepared_sorting_storage = prepared.sorting_view.sources.data();
 
-    const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
         source_path,
         0,
         snapshot,
         std::move(context),
         std::move(prepared));
     Require(result.loaded, "prepared projection fixture should load");
-    const specforge::SourceCollectionSessionView& view = session.View();
+    const spectiary::SourceCollectionSessionView& view = session.View();
     Require(
         view.filter.sources.data() == prepared_filter_storage,
         "prepared filter projection should move into the UI session view");
     Require(
         view.sorting.sources.data() == prepared_sorting_storage,
         "prepared sorting projection should move into the UI session view");
-    const specforge::SourceCollectionSessionView& repeated_view =
+    const spectiary::SourceCollectionSessionView& repeated_view =
         session.View();
     Require(
         &repeated_view == &view &&
@@ -9773,21 +9773,21 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_session_view_revision.npy");
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         UniqueTempPath("_session_view_sources.json"),
         UniqueTempPath("_session_view_navigation.json"),
         UniqueTempPath("_session_view_labeling.json"),
         UniqueTempPath("_session_view_workflow.json"));
 
-    const specforge::SourceCollectionSessionView& empty_view =
+    const spectiary::SourceCollectionSessionView& empty_view =
         session.View();
     Require(
         &session.View() == &empty_view,
         "unchanged session reads should reuse one projection");
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(source_path, 3, 0);
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "session-view-revision",
         "revision",
@@ -9795,9 +9795,9 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         "context",
         3};
     context.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(snapshot, context, 0, {}, {});
-    const specforge::SourceCollectionSessionResult load_result =
+    const spectiary::SourceCollectionSessionResult load_result =
         session.OpenPreparedSource(
             source_path,
             0,
@@ -9810,7 +9810,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     Require(
         empty_view.sources.empty(),
         "session should retain the stale projection until its reader frame ends");
-    const specforge::SourceCollectionSessionView& loaded_view =
+    const spectiary::SourceCollectionSessionView& loaded_view =
         session.View();
     Require(
         &loaded_view != &empty_view,
@@ -9818,18 +9818,18 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     Require(
         &session.View() == &loaded_view,
         "repeated loaded-session reads should not rebuild");
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         retained_view_generations =
             session.TakeViewRetirement();
     Require(
         retained_view_generations.size() == 1,
         "load completion should expose one stale projection for end-of-frame retirement");
 
-    const specforge::SourceCollectionSessionResult command_result =
+    const spectiary::SourceCollectionSessionResult command_result =
         session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::
+                    spectiary::SampleNavigationIntent::
                         SetSampleNameQuery("b")));
     Require(
         command_result.action.navigation_inputs_changed,
@@ -9840,7 +9840,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     Require(
         loaded_view.navigation.exact_sample_name.empty(),
         "session should retain the prior command projection until the frame ends");
-    const specforge::SourceCollectionSessionView& command_view =
+    const spectiary::SourceCollectionSessionView& command_view =
         session.View();
     Require(
         &command_view != &loaded_view &&
@@ -9850,7 +9850,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     Require(
         &session.View() == &command_view,
         "repeated command projection reads should not rebuild");
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         command_retirement =
             session.TakeViewRetirement();
     Require(
@@ -9863,11 +9863,11 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         std::make_move_iterator(
             command_retirement.end()));
 
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         repeated_query_result = session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::
+                    spectiary::SampleNavigationIntent::
                         SetSampleNameQuery("b")));
     Require(
         !repeated_query_result.action.snapshot_changed &&
@@ -9878,12 +9878,12 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             session.TakeViewRetirement().empty(),
         "a repeated query must not invalidate or rebuild the projection");
 
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         boundary_navigation_result = session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 UpdateSampleNavigation(
-                    specforge::SampleNavigationIntent::Move(
-                        specforge::SampleNavigationRequest::
+                    spectiary::SampleNavigationIntent::Move(
+                        spectiary::SampleNavigationRequest::
                             Previous())));
     Require(
         !boundary_navigation_result.navigation.moved &&
@@ -9892,18 +9892,18 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             session.TakeViewRetirement().empty(),
         "boundary navigation must not invalidate or rebuild the projection");
 
-    const specforge::SourceCollectionSessionResult workflow_result =
+    const spectiary::SourceCollectionSessionResult workflow_result =
         session.Submit(
-            specforge::SourceCollectionSessionIntent::
+            spectiary::SourceCollectionSessionIntent::
                 ChangeActiveSampleWorkflow(
-                    specforge::ActiveSampleWorkflowIntent::
+                    spectiary::ActiveSampleWorkflowIntent::
                         StartOrResumeTemporaryLabelingTask()));
     Require(
         workflow_result.action.workflow_changed &&
             workflow_result.view_invalidated,
         "maintenance fixture should create a temporary task");
     (void)session.View();
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         workflow_retirement =
             session.TakeViewRetirement();
     Require(
@@ -9915,12 +9915,12 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             workflow_retirement.begin()),
         std::make_move_iterator(
             workflow_retirement.end()));
-    const specforge::SourceCollectionSessionResult
+    const spectiary::SourceCollectionSessionResult
         scheduled_labeling_result =
             Submit(
                 session,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         7,
                         "scheduled",
                         's'}));
@@ -9928,9 +9928,9 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         scheduled_labeling_result.changed &&
             scheduled_labeling_result.view_invalidated,
         "maintenance fixture should schedule a draft task save");
-    const specforge::SourceCollectionSessionView*
+    const spectiary::SourceCollectionSessionView*
         maintenance_view_before = &session.View();
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         scheduled_labeling_retirement =
             session.TakeViewRetirement();
     Require(
@@ -9943,16 +9943,16 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         std::make_move_iterator(
             scheduled_labeling_retirement.end()));
     bool maintenance_changed_projection = false;
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         maintenance_retirement;
     for (int attempt = 0; attempt < 8; ++attempt) {
         const std::optional<
-            specforge::LocalUserStateSaveScheduler::TimePoint>
+            spectiary::LocalUserStateSaveScheduler::TimePoint>
             deadline = session.NextMaintenanceDeadline();
         Require(
             deadline.has_value(),
             "scheduled labeling state should expose a maintenance deadline");
-        specforge::SourceCollectionSessionResult
+        spectiary::SourceCollectionSessionResult
             maintenance =
                 session.RunMaintenance(*deadline);
         maintenance_retirement.insert(
@@ -9967,7 +9967,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             break;
         }
     }
-    std::vector<specforge::BackgroundRetirementHandle>
+    std::vector<spectiary::BackgroundRetirementHandle>
         view_retirement =
             session.TakeViewRetirement();
     Require(
@@ -9980,7 +9980,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             view_retirement.begin()),
         std::make_move_iterator(
             view_retirement.end()));
-    const specforge::SourceCollectionSessionView*
+    const spectiary::SourceCollectionSessionView*
         maintenance_view = &session.View();
     Require(
         &session.View() == maintenance_view,
@@ -10008,7 +10008,7 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
         session,
         OpenSourceCollection(source_b));
 
-    const specforge::SourceCollectionSessionView& before =
+    const spectiary::SourceCollectionSessionView& before =
         session.View();
     Require(
         before.sources.size() == 2 &&
@@ -10016,12 +10016,12 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
             *before.current_source_index == 1,
         "inactive-source removal fixture should present source B");
 
-    const specforge::SourceCollectionSessionResult result =
+    const spectiary::SourceCollectionSessionResult result =
         session.Submit(RemoveSourceCollection(0));
     Require(
         result.action.source_roster_changed,
         "removing an inactive source should report a roster mutation");
-    const specforge::SourceCollectionSessionView& after =
+    const spectiary::SourceCollectionSessionView& after =
         session.View();
     Require(
         &after != &before &&
@@ -10038,7 +10038,7 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
 
 void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
 {
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
@@ -10051,9 +10051,9 @@ void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
         "an unavailable source removal cannot supersede the active source");
     Require(
         !session.SupersedesPendingSourceActivation(
-            specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-                specforge::SampleNavigationIntent::Move(
-                    specforge::SampleNavigationRequest::Next()))),
+            spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                spectiary::SampleNavigationIntent::Move(
+                    spectiary::SampleNavigationRequest::Next()))),
         "navigation should retain its own replacement follow-up");
 }
 
@@ -10061,17 +10061,17 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
 {
     const std::filesystem::path source_a = UniqueTempPath("_rejected_reuse_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_rejected_reuse_b.npy");
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
 
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    specforge::SourceCollectionContext context_a;
+    const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    spectiary::SourceCollectionContext context_a;
     context_a.identity = {"reuse-a", "a", "a-source", "a-context", 3};
     context_a.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState workflow_a =
+    spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
     (void)session.OpenPreparedSource(
         source_a,
@@ -10080,11 +10080,11 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         std::move(context_a),
         std::move(workflow_a));
 
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
-    specforge::SourceCollectionContext context_b;
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {"reuse-b", "b", "b-source", "b-context", 3};
     context_b.manifest.sample_names = {"x", "y", "z"};
-    specforge::PreparedSampleWorkflowState workflow_b =
+    spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
     (void)session.OpenPreparedSource(
         source_b,
@@ -10093,11 +10093,11 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         std::move(context_b),
         std::move(workflow_b));
 
-    const std::optional<specforge::SourceCollectionLoadHint> stale_plan_hint =
+    const std::optional<spectiary::SourceCollectionLoadHint> stale_plan_hint =
         session.LoadHintForSource(source_a);
     Require(stale_plan_hint.has_value(), "known inactive source should expose its plan revision");
 
-    const specforge::SourceCollectionSessionResult removed = Submit(session, RemoveSourceCollection(0));
+    const spectiary::SourceCollectionSessionResult removed = Submit(session, RemoveSourceCollection(0));
     Require(
         removed.background_retirement.size() >= 2,
         "removing a prepared source should hand its snapshot and workflow context to the reclaimer");
@@ -10105,17 +10105,17 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         removed.canceled_source_follow_up_path == source_a,
         "removing an inactive source should cancel that source's non-explicit Shell tickets");
 
-    const specforge::SpectrumSnapshotHandle stale_snapshot = MakeSnapshot(source_a, 3, 1);
-    const specforge::SourceCollectionSessionResult rejected = session.OpenPreparedSource(
+    const spectiary::SpectrumSnapshotHandle stale_snapshot = MakeSnapshot(source_a, 3, 1);
+    const spectiary::SourceCollectionSessionResult rejected = session.OpenPreparedSource(
         source_a,
         1,
         stale_snapshot,
-        specforge::PreparedSourceCollectionReuse{{"reuse-a", "a", "a-source", "a-context", 3}});
+        spectiary::PreparedSourceCollectionReuse{{"reuse-a", "a", "a-source", "a-context", 3}});
     Require(!rejected.loaded, "reuse for a removed source must be rejected");
     Require(
         rejected.message.empty() &&
             rejected.load_error.kind ==
-                specforge::
+                spectiary::
                     SourceCollectionLoadErrorKind::
                         PreparedReuseTargetUnavailable,
         "prepared-source rejection should expose a stable semantic instead of application-authored English");
@@ -10126,17 +10126,17 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         session.CurrentSourceSnapshot() == snapshot_b,
         "rejecting reuse for a removed source must leave the newer active source untouched");
 
-    const specforge::SpectrumSnapshotHandle stale_plan_snapshot = MakeSnapshot(source_a, 3, 1);
-    specforge::SourceCollectionContext stale_context;
+    const spectiary::SpectrumSnapshotHandle stale_plan_snapshot = MakeSnapshot(source_a, 3, 1);
+    spectiary::SourceCollectionContext stale_context;
     stale_context.identity = {"reuse-a", "a", "a-source", "a-context-new", 3};
     stale_context.manifest.sample_names = {"a", "b", "c"};
-    specforge::PreparedSampleWorkflowState stale_workflow =
+    spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(stale_plan_snapshot, stale_context, 1, {}, {});
-    const specforge::SourceCollectionSessionResult rejected_plan = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult rejected_plan = session.OpenPreparedSource(
         source_a,
         1,
         stale_plan_snapshot,
-        specforge::PreparedSourceCollectionPlan{
+        spectiary::PreparedSourceCollectionPlan{
             std::move(stale_context),
             std::move(stale_workflow),
             stale_plan_hint->reuse.live_workflow_revision()});
@@ -10144,7 +10144,7 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     Require(
         rejected_plan.message.empty() &&
             rejected_plan.load_error.kind ==
-                specforge::
+                spectiary::
                     SourceCollectionLoadErrorKind::
                         PreparedKnownSourcePlanStale,
         "stale prepared-plan rejection should expose a stable semantic instead of English diagnostic text");
@@ -10167,25 +10167,25 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         "follow-up-values",
         "Follow-up values",
         {1, 2, 3},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
     std::string annotation_error;
-    std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
+    std::optional<spectiary::SampleAnnotationResult> annotation =
+        spectiary::test_support::LegacyFixtureIo{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "interrupted follow-up annotation fixture should load");
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         std::filesystem::path{},
         std::filesystem::path{},
         std::filesystem::path{},
         workflow_cache);
 
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    specforge::SourceCollectionContext context_a;
+    const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    spectiary::SourceCollectionContext context_a;
     context_a.identity = {"interrupted-a", "a", "a-source", "a-context", 3};
     context_a.manifest.sample_names = {"a", "b", "c"};
     context_a.manifest.annotations.push_back(std::move(*annotation));
-    specforge::PreparedSampleWorkflowState workflow_a =
+    spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
     (void)session.OpenPreparedSource(
         source_a,
@@ -10205,11 +10205,11 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         session.CurrentSampleSnapshot() == snapshot_a,
         "the complete committed row 0 snapshot should remain visible while row 1 is pending");
 
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
-    specforge::SourceCollectionContext context_b;
+    const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    spectiary::SourceCollectionContext context_b;
     context_b.identity = {"interrupted-b", "b", "b-source", "b-context", 3};
     context_b.manifest.sample_names = {"x", "y", "z"};
-    specforge::PreparedSampleWorkflowState workflow_b =
+    spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
     (void)session.OpenPreparedSource(
         source_b,
@@ -10218,7 +10218,7 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         std::move(context_b),
         std::move(workflow_b));
 
-    const specforge::SourceCollectionSessionResult reactivated =
+    const spectiary::SourceCollectionSessionResult reactivated =
         Submit(session, SwitchSourceCollection(0));
     Require(
         reactivated.follow_up_spectrum_index == 1,
@@ -10244,7 +10244,7 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         "prepared-filter",
         "Prepared filter",
         {1, 2, 2},
-        specforge::SampleLabelSet{},
+        spectiary::SampleLabelSet{},
         false);
     TouchFile(source_a);
     TouchFile(source_b);
@@ -10275,7 +10275,7 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         loaded_snapshots.size();
     (void)Submit(session, SwitchSourceCollection(0));
 
-    const specforge::SourceCollectionSessionView view = session.View();
+    const spectiary::SourceCollectionSessionView view = session.View();
     Require(view.filter.sources.size() == 1, "prepared source activation should retain its cached manifest");
     Require(view.navigation.filter_active, "prepared source activation should restore its workflow identity");
     Require(
@@ -10291,13 +10291,13 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_resident_rows.npy");
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
 
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "resident-rows",
         "source",
@@ -10305,13 +10305,13 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
         "context-fingerprint",
         12,
     };
-    const specforge::SourceCollectionIdentity identity =
+    const spectiary::SourceCollectionIdentity identity =
         context.identity;
     context.manifest.sample_names = {
         "00", "01", "02", "03", "04", "05",
         "06", "07", "08", "09", "10", "11",
     };
-    const specforge::SourceCollectionContextReuseProof proof{
+    const spectiary::SourceCollectionContextReuseProof proof{
         identity,
         {
             .source_stat_fingerprint = "stable-source",
@@ -10325,7 +10325,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
     std::future<std::thread::id> payload_destroyed =
         payload_destroyed_promise->get_future();
     auto* payload = new std::vector<double>(1U << 20U, 1.0);
-    specforge::SpectrumValueVector payload_handle(
+    spectiary::SpectrumValueVector payload_handle(
         payload,
         [payload_destroyed_promise](
             const std::vector<double>* value) {
@@ -10334,21 +10334,21 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
                 std::this_thread::get_id());
         });
     auto first_mutable =
-        std::make_shared<specforge::SpectrumSnapshot>(
+        std::make_shared<spectiary::SpectrumSnapshot>(
             *MakeSnapshot(source_path, 12, 0));
     first_mutable->current_spectrum.x_values =
         std::move(payload_handle);
     first_mutable->current_spectrum.point_count = 1U << 20U;
-    specforge::SpectrumSnapshotHandle first_snapshot =
+    spectiary::SpectrumSnapshotHandle first_snapshot =
         first_mutable;
-    specforge::PreparedSampleWorkflowState workflow =
+    spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
-    specforge::SourceCollectionSessionResult initial =
+    spectiary::SourceCollectionSessionResult initial =
         session.OpenPreparedSource(
             source_path,
             0,
             first_snapshot,
-            specforge::PreparedSourceCollectionPlan{
+            spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
             {},
@@ -10359,37 +10359,37 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
 
     const std::thread::id caller_thread =
         std::this_thread::get_id();
-    specforge::SourceCollectionLoadQueue retirement_queue;
-    for (specforge::BackgroundRetirementHandle& resource :
+    spectiary::SourceCollectionLoadQueue retirement_queue;
+    for (spectiary::BackgroundRetirementHandle& resource :
          initial.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
     for (std::size_t row = 1; row <= 8; ++row) {
-        const specforge::SourceCollectionSessionResult navigation =
+        const spectiary::SourceCollectionSessionResult navigation =
             Submit(
                 session,
                 MoveSampleNavigation(
-                    specforge::SampleNavigationRequest::Next()));
+                    spectiary::SampleNavigationRequest::Next()));
         Require(
             navigation.follow_up_spectrum_index == row,
             "resident history should request the next raw row");
-        specforge::SourceCollectionSessionResult loaded =
+        spectiary::SourceCollectionSessionResult loaded =
             session.OpenPreparedSource(
                 source_path,
                 row,
                 MakeSnapshot(source_path, 12, row),
-                specforge::PreparedSourceCollectionReuse{
+                spectiary::PreparedSourceCollectionReuse{
                     identity},
                 {},
                 proof);
         Require(loaded.loaded, "resident history row should load");
-        for (specforge::BackgroundRetirementHandle& resource :
+        for (spectiary::BackgroundRetirementHandle& resource :
              loaded.background_retirement) {
             retirement_queue.RetireResource(
                 std::move(resource));
         }
     }
-    const std::optional<specforge::SourceCollectionLoadHint>
+    const std::optional<spectiary::SourceCollectionLoadHint>
         row_seven_before_view_changes =
             session.LoadHintForSource(source_path, 7);
     Require(
@@ -10410,7 +10410,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
     (void)Submit(
         session,
         SetSampleSortSource("sample-name"));
-    const std::optional<specforge::SourceCollectionLoadHint>
+    const std::optional<spectiary::SourceCollectionLoadHint>
         row_seven_after_view_changes =
             session.LoadHintForSource(source_path, 7);
     Require(
@@ -10429,19 +10429,19 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 9,
         "resident eviction should be driven by a committed row 9 navigation");
-    specforge::SourceCollectionSessionResult eviction =
+    spectiary::SourceCollectionSessionResult eviction =
         session.OpenPreparedSource(
             source_path,
             9,
             MakeSnapshot(source_path, 12, 9),
-            specforge::PreparedSourceCollectionReuse{identity},
+            spectiary::PreparedSourceCollectionReuse{identity},
             {},
             proof);
     Require(eviction.loaded, "row 9 should commit");
-    const std::optional<specforge::SourceCollectionLoadHint>
+    const std::optional<spectiary::SourceCollectionLoadHint>
         row_zero_after_eviction =
             session.LoadHintForSource(source_path, 0);
     Require(
@@ -10449,7 +10449,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             !row_zero_after_eviction
                  ->reuse.resident_snapshot(),
         "the ninth non-current row should evict untouched raw row 0");
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          eviction.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10461,7 +10461,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
         payload_destroyed.get() != caller_thread,
         "evicted snapshot payload must be destroyed by background retirement");
 
-    specforge::SourceCollectionContext changed_context;
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = identity;
     changed_context.identity.context_fingerprint =
         "changed-context";
@@ -10469,11 +10469,11 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
         "00", "01", "02", "03", "04", "05",
         "06", "07", "08", "09", "10", "11",
     };
-    const specforge::SourceCollectionContextReuseProof
+    const spectiary::SourceCollectionContextReuseProof
         changed_proof{
             changed_context.identity,
             proof.dependency_state};
-    specforge::PreparedSampleWorkflowState changed_workflow =
+    spectiary::PreparedSampleWorkflowState changed_workflow =
         PrepareWorkflow(
             MakeSnapshot(source_path, 12, 10),
             changed_context,
@@ -10484,21 +10484,21 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 10,
         "context invalidation should be driven by row 10 navigation");
-    specforge::SourceCollectionSessionResult changed =
+    spectiary::SourceCollectionSessionResult changed =
         session.OpenPreparedSource(
             source_path,
             10,
             MakeSnapshot(source_path, 12, 10),
-            specforge::PreparedSourceCollectionPlan{
+            spectiary::PreparedSourceCollectionPlan{
                 std::move(changed_context),
                 std::move(changed_workflow)},
             {},
             changed_proof);
     Require(changed.loaded, "changed context row should load");
-    const std::optional<specforge::SourceCollectionLoadHint>
+    const std::optional<spectiary::SourceCollectionLoadHint>
         invalidated_old_row =
             session.LoadHintForSource(source_path, 8);
     Require(
@@ -10506,7 +10506,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             !invalidated_old_row
                  ->reuse.resident_snapshot(),
         "context generation changes must invalidate old resident rows");
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          changed.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10522,7 +10522,7 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
         std::make_shared<std::promise<std::thread::id>>();
     std::future<std::thread::id> payload_destroyed =
         payload_destroyed_promise->get_future();
-    specforge::SpectrumValueVector payload(
+    spectiary::SpectrumValueVector payload(
         new std::vector<double>(1024, 1.0),
         [payload_destroyed_promise](
             const std::vector<double>* value) {
@@ -10531,19 +10531,19 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
                 std::this_thread::get_id());
         });
     auto first_mutable =
-        std::make_shared<specforge::SpectrumSnapshot>(
+        std::make_shared<spectiary::SpectrumSnapshot>(
             *MakeSnapshot(source_path, 3, 0));
     first_mutable->current_spectrum.x_values = std::move(payload);
     first_mutable->current_spectrum.point_count = 1024;
-    specforge::SpectrumSnapshotHandle first_snapshot =
+    spectiary::SpectrumSnapshotHandle first_snapshot =
         first_mutable;
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "prepared-resident-retirement",
         "source",
@@ -10552,9 +10552,9 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
         3,
     };
     context.manifest.sample_names = {"0", "1", "2"};
-    const specforge::SourceCollectionIdentity identity =
+    const spectiary::SourceCollectionIdentity identity =
         context.identity;
-    const specforge::SourceCollectionContextReuseProof proof{
+    const spectiary::SourceCollectionContextReuseProof proof{
         identity,
         {
             .source_stat_fingerprint = "stable-source",
@@ -10562,20 +10562,20 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
             .companion_annotation_fingerprint =
                 "stable-annotation",
         }};
-    specforge::PreparedSampleWorkflowState workflow =
+    spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
-    specforge::SourceCollectionLoadQueue retirement_queue;
-    specforge::SourceCollectionSessionResult initial =
+    spectiary::SourceCollectionLoadQueue retirement_queue;
+    spectiary::SourceCollectionSessionResult initial =
         session.OpenPreparedSource(
             source_path,
             0,
             first_snapshot,
-            specforge::PreparedSourceCollectionPlan{
+            spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
             {},
             proof);
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          initial.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10583,18 +10583,18 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()))
+                spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "prepared retirement fixture should prepare row 1");
-    specforge::SourceCollectionSessionResult second =
+    spectiary::SourceCollectionSessionResult second =
         session.OpenPreparedSource(
             source_path,
             1,
             MakeSnapshot(source_path, 3, 1),
-            specforge::PreparedSourceCollectionReuse{identity},
+            spectiary::PreparedSourceCollectionReuse{identity},
             {},
             proof);
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          second.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10603,9 +10603,9 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
 
     const std::thread::id caller_thread =
         std::this_thread::get_id();
-    const specforge::SpectrumSnapshotHandle changed_snapshot =
+    const spectiary::SpectrumSnapshotHandle changed_snapshot =
         MakeSnapshot(source_path, 3, 2);
-    specforge::SourceCollectionContext changed_context;
+    spectiary::SourceCollectionContext changed_context;
     changed_context.identity = {
         "prepared-resident-retirement-v2",
         "source",
@@ -10614,24 +10614,24 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
         3,
     };
     changed_context.manifest.sample_names = {"0", "1", "2"};
-    specforge::PreparedSampleWorkflowState changed_workflow =
+    spectiary::PreparedSampleWorkflowState changed_workflow =
         PrepareWorkflow(
             changed_snapshot,
             changed_context,
             2,
             {},
             {});
-    const specforge::SourceCollectionContextReuseProof
+    const spectiary::SourceCollectionContextReuseProof
         changed_proof{
             changed_context.identity,
             proof.dependency_state,
         };
-    specforge::SourceCollectionSessionResult prepared =
+    spectiary::SourceCollectionSessionResult prepared =
         session.OpenPreparedSource(
             source_path,
             2,
             changed_snapshot,
-            specforge::PreparedSourceCollectionPlan{
+            spectiary::PreparedSourceCollectionPlan{
                 std::move(changed_context),
                 std::move(changed_workflow)},
             {},
@@ -10643,7 +10643,7 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
     Require(
         !prepared.background_retirement.empty(),
         "prepared invalidation should return background-retirement ownership");
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          prepared.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10661,12 +10661,12 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_resident_byte_cap.npy");
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         {},
         {},
         {});
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "resident-byte-cap",
         "source",
@@ -10675,9 +10675,9 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
         3,
     };
     context.manifest.sample_names = {"0", "1", "2"};
-    const specforge::SourceCollectionIdentity identity =
+    const spectiary::SourceCollectionIdentity identity =
         context.identity;
-    const specforge::SourceCollectionContextReuseProof proof{
+    const spectiary::SourceCollectionContextReuseProof proof{
         identity,
         {
             .source_stat_fingerprint = "stable-source",
@@ -10694,31 +10694,31 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
     const auto make_large_snapshot =
         [&source_path, &large_values](std::size_t row) {
             auto snapshot =
-                std::make_shared<specforge::SpectrumSnapshot>(
+                std::make_shared<spectiary::SpectrumSnapshot>(
                     *MakeSnapshot(source_path, 3, row));
             snapshot->current_spectrum.x_values = large_values;
             snapshot->current_spectrum.point_count =
                 large_values->size();
-            return specforge::SpectrumSnapshotHandle{
+            return spectiary::SpectrumSnapshotHandle{
                 std::move(snapshot)};
         };
 
-    specforge::SpectrumSnapshotHandle first_snapshot =
+    spectiary::SpectrumSnapshotHandle first_snapshot =
         make_large_snapshot(0);
-    specforge::PreparedSampleWorkflowState workflow =
+    spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
-    specforge::SourceCollectionLoadQueue retirement_queue;
-    specforge::SourceCollectionSessionResult initial =
+    spectiary::SourceCollectionLoadQueue retirement_queue;
+    spectiary::SourceCollectionSessionResult initial =
         session.OpenPreparedSource(
             source_path,
             0,
             first_snapshot,
-            specforge::PreparedSourceCollectionPlan{
+            spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
             {},
             proof);
-    for (specforge::BackgroundRetirementHandle& resource :
+    for (spectiary::BackgroundRetirementHandle& resource :
          initial.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10729,19 +10729,19 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
             Submit(
                 session,
                 MoveSampleNavigation(
-                    specforge::SampleNavigationRequest::Next()))
+                    spectiary::SampleNavigationRequest::Next()))
                     .follow_up_spectrum_index == row,
             "resident byte-cap fixture should request the next row");
-        specforge::SourceCollectionSessionResult loaded =
+        spectiary::SourceCollectionSessionResult loaded =
             session.OpenPreparedSource(
                 source_path,
                 row,
                 make_large_snapshot(row),
-                specforge::PreparedSourceCollectionReuse{
+                spectiary::PreparedSourceCollectionReuse{
                     identity},
                 {},
                 proof);
-        for (specforge::BackgroundRetirementHandle& resource :
+        for (spectiary::BackgroundRetirementHandle& resource :
              loaded.background_retirement) {
             retirement_queue.RetireResource(
                 std::move(resource));
@@ -10765,14 +10765,14 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
 void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
 {
     const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         std::filesystem::path{},
         std::filesystem::path{},
         std::filesystem::path{},
         std::filesystem::path{});
 
-    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 2, 0);
-    specforge::SourceCollectionContext context;
+    const spectiary::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 2, 0);
+    spectiary::SourceCollectionContext context;
     context.identity = {
         "folder-listing-hint",
         "folder",
@@ -10780,12 +10780,12 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         "context-fingerprint",
         2,
     };
-    const specforge::SourceCollectionIdentity identity = context.identity;
+    const spectiary::SourceCollectionIdentity identity = context.identity;
     context.manifest.sample_names = {"a.csv", "b.csv"};
-    specforge::PreparedSampleWorkflowState workflow =
+    spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(snapshot, context, 0, {}, {});
     auto* listing_generation_value =
-        new specforge::SourceCollectionFolderListingGeneration();
+        new spectiary::SourceCollectionFolderListingGeneration();
     listing_generation_value->listing.spectra = {
         {source_path / "a.csv", "csv", "a-stat"},
         {source_path / "b.csv", "csv", "b-stat"},
@@ -10794,14 +10794,14 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         std::make_shared<std::promise<std::thread::id>>();
     std::future<std::thread::id> listing_destroyed =
         listing_destroyed_promise->get_future();
-    specforge::SourceCollectionFolderListingGenerationHandle verified_generation(
+    spectiary::SourceCollectionFolderListingGenerationHandle verified_generation(
         listing_generation_value,
         [listing_destroyed_promise](
-            const specforge::SourceCollectionFolderListingGeneration* value) {
+            const spectiary::SourceCollectionFolderListingGeneration* value) {
             delete value;
             listing_destroyed_promise->set_value(std::this_thread::get_id());
         });
-    const specforge::SourceCollectionContextReuseProof reuse_proof{
+    const spectiary::SourceCollectionContextReuseProof reuse_proof{
         identity,
         {
             .source_stat_fingerprint = "folder-stat",
@@ -10809,17 +10809,17 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
             .companion_annotation_fingerprint = "none",
         }};
 
-    const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
+    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
         source_path,
         0,
         snapshot,
-        specforge::PreparedSourceCollectionPlan{
+        spectiary::PreparedSourceCollectionPlan{
             std::move(context),
             std::move(workflow)},
         verified_generation,
         reuse_proof);
     Require(result.loaded, "prepared folder generation should load");
-    std::optional<specforge::SourceCollectionLoadHint> hint =
+    std::optional<spectiary::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint.has_value(), "known folder source should expose a subsequent load hint");
     Require(
@@ -10835,7 +10835,7 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
                 reuse_proof.dependency_state,
         "subsequent navigation should carry the proof accepted with that generation");
 
-    const std::weak_ptr<const specforge::SourceCollectionFolderListingGeneration>
+    const std::weak_ptr<const spectiary::SourceCollectionFolderListingGeneration>
         retired_listing_generation = verified_generation;
     hint.reset();
     verified_generation.reset();
@@ -10843,23 +10843,23 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         !retired_listing_generation.expired(),
         "the roster should own the active listing generation");
     Require(
-        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
         "the listing retirement fixture should prepare a row replacement");
 
-    specforge::SourceCollectionSessionResult replacement = session.OpenPreparedSource(
+    spectiary::SourceCollectionSessionResult replacement = session.OpenPreparedSource(
         source_path,
         1,
         MakeSnapshot(source_path, 2, 1),
-        specforge::PreparedSourceCollectionReuse{identity},
-        std::make_shared<const specforge::SourceCollectionFolderListingGeneration>());
+        spectiary::PreparedSourceCollectionReuse{identity},
+        std::make_shared<const spectiary::SourceCollectionFolderListingGeneration>());
     Require(replacement.loaded, "the replacement folder generation should load");
     Require(
         !retired_listing_generation.expired(),
         "the replaced listing generation should remain owned until background retirement");
     const std::thread::id caller_thread = std::this_thread::get_id();
-    specforge::SourceCollectionLoadQueue retirement_queue;
-    for (specforge::BackgroundRetirementHandle& resource :
+    spectiary::SourceCollectionLoadQueue retirement_queue;
+    for (spectiary::BackgroundRetirementHandle& resource :
          replacement.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
@@ -10895,7 +10895,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
-    const specforge::SourceCollectionStateFlushResult failed_flush =
+    const spectiary::SourceCollectionStateFlushResult failed_flush =
         session.FlushStateCachesWithStatus();
     Require(
         !failed_flush.source_session_saved,
@@ -10905,18 +10905,18 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
             failed_flush.labeling_saved &&
             failed_flush.workflow_saved,
         "source-session failure must not block the other three cache flushes");
-    const specforge::LocalUserStateHealthView failed_health =
+    const spectiary::LocalUserStateHealthView failed_health =
         session.View().persistence;
     Require(
         failed_health.kind ==
-            specforge::LocalUserStateHealthKind::Retrying,
+            spectiary::LocalUserStateHealthKind::Retrying,
         "a save failure should expose retrying overall health");
     Require(
         HasPersistenceMessage(
             failed_health,
-            specforge::LocalUserStateArea::
+            spectiary::LocalUserStateArea::
                 SourceSession,
-            specforge::
+            spectiary::
                 LocalUserStateHealthMessageKind::
                     SaveRetrying),
         "retrying health should identify the failed cache owner");
@@ -10944,18 +10944,18 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
-    const specforge::SourceCollectionStateFlushResult recovered_flush =
+    const spectiary::SourceCollectionStateFlushResult recovered_flush =
         session.FlushStateCachesWithStatus();
     Require(
         recovered_flush.all_saved(),
         "flush should retry dirty source state after the path is fixed");
     Require(
         session.View().persistence.kind ==
-            specforge::LocalUserStateHealthKind::Recovered,
+            spectiary::LocalUserStateHealthKind::Recovered,
         "the first successful retry should expose recovered health");
 
-    const specforge::SourceCollectionSessionStateCache restored_state =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{}, source_session_cache)
+    const spectiary::SourceCollectionSessionStateCache restored_state =
+        spectiary::LoadSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache)
             .cache;
     Require(restored_state.sources.size() == 1, "retry flush should write the source session cache");
     Require(restored_state.sources[0].path == source_path, "retry flush should persist the source path");
@@ -10963,7 +10963,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     (void)Submit(session, RemoveSourceCollection(0));
     Require(
         session.View().persistence.kind ==
-            specforge::LocalUserStateHealthKind::Healthy,
+            spectiary::LocalUserStateHealthKind::Healthy,
         "the next source-session mutation should clear recovered health");
 }
 
@@ -10973,7 +10973,7 @@ struct LabelingProjectionHandoffFixture {
     std::filesystem::path navigation_cache;
     std::filesystem::path labeling_cache;
     std::filesystem::path workflow_cache;
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     std::string task_id;
 };
 
@@ -11007,14 +11007,14 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
     };
 
     {
-        specforge::SourceCollectionSession seed(
+        spectiary::SourceCollectionSession seed(
             {},
             fixture.navigation_cache,
             fixture.labeling_cache,
             fixture.workflow_cache);
-        const specforge::SpectrumSnapshotHandle row_zero =
+        const spectiary::SpectrumSnapshotHandle row_zero =
             MakeSnapshot(fixture.source_path, 3, 0);
-        specforge::PreparedSampleWorkflowState prepared =
+        spectiary::PreparedSampleWorkflowState prepared =
             PrepareWorkflow(
                 row_zero,
                 fixture.context,
@@ -11033,13 +11033,13 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
         (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
         fixture.task_id = seed.View().labeling.task_id;
         Require(
-            specforge::IsCanonicalUuidV4(fixture.task_id),
+            spectiary::IsCanonicalUuidV4(fixture.task_id),
             "labeling projection handoff fixture should create a canonical task id");
         Require(
             Submit(
                 seed,
                 UpsertActiveLabel(
-                    specforge::SampleLabelDefinition{
+                    spectiary::SampleLabelDefinition{
                         1,
                         "first",
                         'f'}))
@@ -11047,7 +11047,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                 Submit(
                     seed,
                     UpsertActiveLabel(
-                        specforge::SampleLabelDefinition{
+                        spectiary::SampleLabelDefinition{
                             2,
                             "second",
                             's'}))
@@ -11058,7 +11058,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
             Submit(
                 seed,
                 MoveSampleNavigation(
-                    specforge::SampleNavigationRequest::LocateRow(1)))
+                    spectiary::SampleNavigationRequest::LocateRow(1)))
                     .follow_up_spectrum_index == 1,
             "labeling projection handoff fixture should request row 1");
         Require(
@@ -11066,7 +11066,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                     fixture.source_path,
                     1,
                     MakeSnapshot(fixture.source_path, 3, 1),
-                    specforge::PreparedSourceCollectionReuse{
+                    spectiary::PreparedSourceCollectionReuse{
                         fixture.context.identity})
                 .loaded,
             "labeling projection handoff fixture should commit row 1");
@@ -11099,7 +11099,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                     true));
         }
         (void)Submit(seed, SetSampleSortSource("sample-name"));
-        const specforge::SourceCollectionSessionView seeded_view =
+        const spectiary::SourceCollectionSessionView seeded_view =
             seed.View();
         Require(
             seeded_view.filter.evaluation.included_count ==
@@ -11127,7 +11127,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
         IngestReadOnlySampleAnnotation(
             fixture.context.manifest,
             fixture.output_path,
-            specforge::SampleAnnotationSourceCompatibility{
+            spectiary::SampleAnnotationSourceCompatibility{
                 .base_identity = fixture.context.identity.id,
                 .source_kind = "test",
                 .source_name = fixture.context.identity.source_name,
@@ -11148,7 +11148,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
 void WriteLatestLabelingProjection(
     const LabelingProjectionHandoffFixture& fixture)
 {
-    specforge::SampleLabelingController editor(
+    spectiary::SampleLabelingController editor(
         fixture.labeling_cache);
     ActivateCanonicalFixtureSource(
         editor,
@@ -11177,7 +11177,7 @@ struct TemporaryDraftNavigationRefreshFixture {
     std::filesystem::path navigation_cache;
     std::filesystem::path labeling_cache;
     std::filesystem::path workflow_cache;
-    specforge::SourceCollectionContext context;
+    spectiary::SourceCollectionContext context;
     std::string formal_task_id;
     std::string draft_task_id;
 };
@@ -11207,7 +11207,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
     };
 
     {
-        specforge::SampleLabelingController seed(fixture.labeling_cache);
+        spectiary::SampleLabelingController seed(fixture.labeling_cache);
         ActivateCanonicalFixtureSource(
             seed,
             fixture.source_path,
@@ -11215,7 +11215,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         Require(
             seed.CreateTask("Formal task").accepted &&
                 seed.UpsertActiveLabel(
-                       specforge::SampleLabelDefinition{1, "one", 'o'})
+                       spectiary::SampleLabelDefinition{1, "one", 'o'})
                     .changed,
             "navigation refresh fixture should create the unrelated formal task");
         Require(
@@ -11239,10 +11239,10 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         fixture.draft_task_id = seed.View().active_task->task_id;
         Require(
             seed.UpsertActiveLabel(
-                       specforge::SampleLabelDefinition{1, "one", 'o'})
+                       spectiary::SampleLabelDefinition{1, "one", 'o'})
                     .changed &&
                 seed.UpsertActiveLabel(
-                       specforge::SampleLabelDefinition{2, "two", 't'})
+                       spectiary::SampleLabelDefinition{2, "two", 't'})
                     .changed &&
                 seed.AssignLabel(0, 1).write.changed &&
                 seed.AssignLabel(1, 2).write.changed &&
@@ -11255,15 +11255,15 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             "navigation refresh fixture should persist and select the formal task");
     }
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 0);
     {
-        specforge::SourceCollectionSession configured(
+        spectiary::SourceCollectionSession configured(
             {},
             fixture.navigation_cache,
             fixture.labeling_cache,
             fixture.workflow_cache);
-        const specforge::PreparedSampleWorkflowState prepared =
+        const spectiary::PreparedSampleWorkflowState prepared =
             PrepareWorkflow(
                 snapshot,
                 fixture.context,
@@ -11303,8 +11303,8 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             "navigation refresh fixture should persist its workflow caches");
     }
 
-    specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{}, fixture.labeling_cache);
+    spectiary::SampleLabelingStateCacheLoadResult cache =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{}, fixture.labeling_cache);
     auto source = cache.cache.sources.find(fixture.context.identity.id);
     Require(
         source != cache.cache.sources.end(),
@@ -11312,32 +11312,32 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
     auto draft = std::find_if(
         source->second.tasks.begin(),
         source->second.tasks.end(),
-        [&fixture](const specforge::SampleLabelingTask& task) {
+        [&fixture](const spectiary::SampleLabelingTask& task) {
             return task.task_id == fixture.draft_task_id;
         });
     Require(
         draft != source->second.tasks.end() && draft->persistence.output_path,
         "navigation refresh fixture should find its formalized draft");
-    const specforge::SampleLabelingAsdfReadResult draft_document =
-        specforge::ReadSampleLabelingAsdfDocument(
+    const spectiary::SampleLabelingAsdfReadResult draft_document =
+        spectiary::ReadSampleLabelingAsdfDocument(
             fixture.draft_output_path);
     Require(
         draft_document.succeeded(),
         draft_document.error.message.empty()
             ? "navigation refresh fixture should reopen its canonical draft values"
             : draft_document.error.message);
-    auto projected_draft = specforge::ProjectSampleLabelingDocumentTask(
+    auto projected_draft = spectiary::ProjectSampleLabelingDocumentTask(
         *draft_document.document, *draft);
     Require(projected_draft.has_value(),
         "navigation refresh fixture should project complete canonical values");
     *draft = std::move(*projected_draft);
 
-    specforge::RebuildSampleLabelingTaskStatistics(*draft);
+    spectiary::RebuildSampleLabelingTaskStatistics(*draft);
     draft->persistence.output_path.reset();
     draft->persistence.output_format =
-        specforge::SampleLabelingOutputArtifactFormat::None;
+        spectiary::SampleLabelingOutputArtifactFormat::None;
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             fixture.labeling_cache,
             cache.cache),
         "navigation refresh fixture should restore the draft-only projection");
@@ -11351,7 +11351,7 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
 void FormalizeTemporaryDraftFromAnotherInstance(
     const TemporaryDraftNavigationRefreshFixture& fixture)
 {
-    specforge::SampleLabelingController formalizer(fixture.labeling_cache);
+    spectiary::SampleLabelingController formalizer(fixture.labeling_cache);
     ActivateCanonicalFixtureSource(
         formalizer,
         fixture.source_path,
@@ -11374,13 +11374,13 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
             delete_temporary_draft
                 ? "_coordinator_delete_formalized_draft"
                 : "_coordinator_recover_formalized_draft");
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 0);
-    specforge::SampleWorkflowCoordinator coordinator(
+    spectiary::SampleWorkflowCoordinator coordinator(
         fixture.navigation_cache,
         fixture.labeling_cache,
         fixture.workflow_cache);
-    specforge::PreparedSampleWorkflowState prepared =
+    spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(
             snapshot,
             fixture.context,
@@ -11396,9 +11396,9 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
                     std::move(prepared))
                 .action.workflow_changed,
         "coordinator recovery fixture should open the paused-draft projection");
-    const specforge::SourceCollectionFilterView initial_filter =
+    const spectiary::SourceCollectionFilterView initial_filter =
         coordinator.BuildFilterView(snapshot);
-    const specforge::SourceCollectionSampleSortingView initial_sorting =
+    const spectiary::SourceCollectionSampleSortingView initial_sorting =
         coordinator.BuildSortingView(snapshot);
     Require(
         coordinator.LabelingView(snapshot).has_active_task &&
@@ -11416,33 +11416,33 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
     Require(
         coordinator
                 .Apply(
-                    specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(
-                        specforge::SampleLabelDefinition{7, "seven", 's'}),
+                    spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel(
+                        spectiary::SampleLabelDefinition{7, "seven", 's'}),
                     snapshot)
                 .changed,
         "the active formal task should accept the undo test label");
-    const specforge::SampleWorkflowTransitionOutcome edit_result =
+    const spectiary::SampleWorkflowTransitionOutcome edit_result =
         coordinator.Apply(
-            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7),
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7),
             snapshot);
     Require(
         edit_result.label_write && edit_result.label_write->write.changed,
         "the active formal task should have undoable local editing");
 
     FormalizeTemporaryDraftFromAnotherInstance(fixture);
-    const specforge::SampleWorkflowTransitionOutcome result =
+    const spectiary::SampleWorkflowTransitionOutcome result =
         coordinator.Apply(
             delete_temporary_draft
-                ? specforge::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
+                ? spectiary::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
                       fixture.context.identity.id,
                       fixture.draft_task_id)
-                : specforge::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
+                : spectiary::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
                       fixture.context.identity.id,
                       fixture.draft_task_id),
             snapshot);
     Require(
         result.labeling_issue ==
-            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged,
+            spectiary::SampleLabelingOperationResult::Issue::EditTargetChanged,
         "external formalization should reject the stale recovery command");
     Require(
         result.action.navigation_inputs_changed &&
@@ -11450,17 +11450,17 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
             !result.action.workflow_changed,
         "task projection convergence should reconcile filter, sort, and navigation inputs");
 
-    const specforge::SourceCollectionFilterView refreshed_filter =
+    const spectiary::SourceCollectionFilterView refreshed_filter =
         coordinator.BuildFilterView(snapshot);
-    const specforge::SourceCollectionSampleSortingView refreshed_sorting =
+    const spectiary::SourceCollectionSampleSortingView refreshed_sorting =
         coordinator.BuildSortingView(snapshot);
-    const specforge::SourceCollectionNavigationView refreshed_navigation =
+    const spectiary::SourceCollectionNavigationView refreshed_navigation =
         coordinator.NavigationView(snapshot);
     const auto restored_annotation = std::find_if(
         refreshed_navigation.current_annotations.begin(),
         refreshed_navigation.current_annotations.end(),
         [&fixture](
-            const specforge::SourceCollectionAnnotationValueView&
+            const spectiary::SourceCollectionAnnotationValueView&
                 annotation) {
             return annotation.path ==
                 fixture.draft_output_path;
@@ -11469,7 +11469,7 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         restored_annotation !=
                 refreshed_navigation.current_annotations.end() &&
             restored_annotation->relationship ==
-                specforge::SampleAnnotationWorkflowRelationship::
+                spectiary::SampleAnnotationWorkflowRelationship::
                     LocalLabelingTask,
         "task projection convergence must attach the canonical owner created by another instance");
     const std::string refreshed_source_id =
@@ -11479,7 +11479,7 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
             refreshed_filter.sources.begin(),
             refreshed_filter.sources.end(),
             [&refreshed_source_id](
-                const specforge::SourceCollectionFilterSourceView& source) {
+                const spectiary::SourceCollectionFilterSourceView& source) {
                 return source.id ==
                     refreshed_source_id;
             }),
@@ -11496,9 +11496,9 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
     Require(
         result.snapshot_index_to_load == 1,
         "task projection convergence should request the filtered sample row");
-    const specforge::SampleWorkflowTransitionOutcome undone =
+    const spectiary::SampleWorkflowTransitionOutcome undone =
         coordinator.Apply(
-            specforge::ActiveSampleWorkflowIntent::UndoLastLabelWrite(),
+            spectiary::ActiveSampleWorkflowIntent::UndoLastLabelWrite(),
             snapshot);
     Require(
         undone.label_write && undone.label_write->write.changed &&
@@ -11523,9 +11523,9 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
         SeedLabelingProjectionHandoffFixture(
             "_prepared_labeling_handoff",
             true);
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 1);
-    specforge::PreparedSampleWorkflowState stale_workflow =
+    spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(
             snapshot,
             fixture.context,
@@ -11535,7 +11535,7 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
 
     WriteLatestLabelingProjection(fixture);
 
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         fixture.navigation_cache,
         fixture.labeling_cache,
@@ -11549,7 +11549,7 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
                 std::move(stale_workflow))
             .loaded,
         "prepared labeling handoff should commit the source");
-    const specforge::SourceCollectionSessionView view =
+    const spectiary::SourceCollectionSessionView view =
         session.View();
     Require(
         view.labeling.current_code == 1,
@@ -11559,11 +11559,11 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
             view.navigation.sequence_count == 3 &&
             view.navigation.current_sequence_position == 1,
         "prepared filter, sorting, and navigation projections must be rebuilt from the lease-refreshed task");
-    const specforge::SourceCollectionSessionResult next =
+    const spectiary::SourceCollectionSessionResult next =
         Submit(
             session,
             MoveSampleNavigation(
-                specforge::SampleNavigationRequest::Next()));
+                spectiary::SampleNavigationRequest::Next()));
     Require(
         next.follow_up_spectrum_index == 2,
         "prepared handoff navigation must follow the latest labeling sort order");
@@ -11575,8 +11575,8 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         SeedLabelingProjectionHandoffFixture(
             "_deleted_labeling_handoff",
             false);
-    specforge::SampleLabelingStateCacheLoadResult cache =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+    spectiary::SampleLabelingStateCacheLoadResult cache =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             fixture.labeling_cache);
     auto source = cache.cache.sources.find(
         fixture.context.identity.id);
@@ -11585,21 +11585,21 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         "stale deletion fixture should load its source");
     source->second.active_task_id.reset();
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             fixture.labeling_cache,
             cache.cache),
         "stale deletion fixture should leave the task inactive");
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 1);
-    specforge::PreparedSampleWorkflowState stale_workflow =
+    spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(
             snapshot,
             fixture.context,
             1,
             fixture.labeling_cache,
             fixture.workflow_cache);
-    specforge::SourceCollectionSession stale(
+    spectiary::SourceCollectionSession stale(
         {},
         fixture.navigation_cache,
         fixture.labeling_cache,
@@ -11618,7 +11618,7 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
             stale.View().navigation.sequence_count == 1,
         "stale deletion fixture should preheat the old filtered sequence");
 
-    specforge::SampleLabelingController deleting(
+    spectiary::SampleLabelingController deleting(
         fixture.labeling_cache);
     ActivateCanonicalFixtureSource(
         deleting,
@@ -11632,17 +11632,17 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         deleting.DeleteActiveTask().state_saved,
         "deleting editor should commit the task tombstone");
 
-    const specforge::SourceCollectionSessionResult rejected =
+    const spectiary::SourceCollectionSessionResult rejected =
         Submit(
             stale,
             ActivateLabelingTaskFromAnnotation(
                 fixture.output_path));
     Require(
         rejected.labeling_issue ==
-            specforge::SampleLabelingOperationResult::Issue::
+            spectiary::SampleLabelingOperationResult::Issue::
                 EditTargetChanged,
         "stale activation should report that the deleted target changed");
-    const specforge::SourceCollectionSessionView reconciled =
+    const spectiary::SourceCollectionSessionView reconciled =
         stale.View();
     Require(
         rejected.action.navigation_inputs_changed &&
@@ -11658,8 +11658,8 @@ void TestReloadedFormalOwnerDoesNotReplayPendingValues()
         SeedLabelingProjectionHandoffFixture(
             "_retry_labeling_handoff",
             false);
-    specforge::SampleLabelingStateCacheLoadResult pending_cache =
-        specforge::LoadSampleLabelingStateCache(specforge::RuntimePaths{},
+    spectiary::SampleLabelingStateCacheLoadResult pending_cache =
+        spectiary::LoadSampleLabelingStateCache(spectiary::RuntimePaths{},
             fixture.labeling_cache);
     auto source = pending_cache.cache.sources.find(
         fixture.context.identity.id);
@@ -11671,24 +11671,24 @@ void TestReloadedFormalOwnerDoesNotReplayPendingValues()
     source->second.tasks[0].persistence.pending_sample_indices.insert(0);
     source->second.tasks[0].values.SetPendingValue(0, -1);
     source->second.tasks[0].persistence.save_state.kind =
-        specforge::SampleLabelSaveStateKind::Pending;
+        spectiary::SampleLabelSaveStateKind::Pending;
     source->second.tasks[0].persistence.save_state.pending_count = 1;
     Require(
-        specforge::SaveSampleLabelingStateCache(specforge::RuntimePaths{},
+        spectiary::SaveSampleLabelingStateCache(spectiary::RuntimePaths{},
             fixture.labeling_cache,
             pending_cache.cache),
         "retry projection fixture should persist its pending task");
 
-    const specforge::SpectrumSnapshotHandle snapshot =
+    const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 1);
-    specforge::PreparedSampleWorkflowState workflow =
+    spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(
             snapshot,
             fixture.context,
             1,
             fixture.labeling_cache,
             fixture.workflow_cache);
-    specforge::SourceCollectionSession session(
+    spectiary::SourceCollectionSession session(
         {},
         fixture.navigation_cache,
         fixture.labeling_cache,
@@ -11711,7 +11711,7 @@ void TestReloadedFormalOwnerDoesNotReplayPendingValues()
     const auto latest_bytes = ReadBinaryFile(fixture.output_path);
     Require(!session.NextMaintenanceDeadline().has_value(),
         "ordinary registration must never restore a formal pending retry");
-    (void)session.RunMaintenance(specforge::LocalUserStateSaveScheduler::Clock::now());
+    (void)session.RunMaintenance(spectiary::LocalUserStateSaveScheduler::Clock::now());
     Require(ReadBinaryFile(fixture.output_path) == latest_bytes,
         "restarting must not replay application-managed values over the latest ASDF");
 }

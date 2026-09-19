@@ -20,13 +20,13 @@
 当前 native loader 是同步 UI 路径，只面向单条光谱级别文件。为避免误开大型 catalog FITS 时卡 UI 或占用过多内存，FITS/FITS.GZ 在读取和解压前有大小上限；超过上限时应返回 domain error snapshot，而不是继续尝试整文件解析。
 
 当前只有一套 FITS 实现：`fits_file_reader` 用 CFITSIO 解析 FITS container，
-`fits_spectrum_loader` 在它之上识别 SpecForge 支持的光谱语义，通用
+`fits_spectrum_loader` 在它之上识别 Spectiary 支持的光谱语义，通用
 `spectrum_loader` 只负责格式分派和统一 snapshot 边界。`.fits.gz` 先经过
 有压缩输入与解压输出上限的 transport 解压，再把内存中的 FITS 字节交给
 CFITSIO；没有第二套手写 reader 或 fallback。
 
 这仍不是通用 FITS 承诺。当前语义层继续支持已验证的 SDSS/LAMOST 与 generic
-image/table 单光谱结构；CFITSIO 能打开一个 container，不代表 SpecForge 能把
+image/table 单光谱结构；CFITSIO 能打开一个 container，不代表 Spectiary 能把
 它解释成光谱。网络 URL、FITS 写入和任意 catalog/table/image 解释都不支持，
 不能把底层库的能力直接提升为产品格式合同。
 
@@ -229,14 +229,14 @@ LAMOST DR13 -> SDSS DR17 -> SDSS DR19
 ## Sample labeling canonical ASDF
 
 新建的正式 sample labeling task 使用单文件 `.asdf` canonical owner。这里有三套
-彼此独立的版本号：YAML 中 `schema_version: 2.0.0` 是 SpecForge sample-labeling
+彼此独立的版本号：YAML 中 `schema_version: 2.0.0` 是 Spectiary sample-labeling
 语义版本；文件头 `#ASDF 1.0.0` 是 ASDF file-format 版本；
 `#ASDF_STANDARD 1.5.0` 是 ASDF Standard 版本。ASDF 版本号中的 `1.0.0` 不表示
-SpecForge labeling schema 1.0，`!core/asdf-1.1.0` 也只是 ASDF core tag。
+Spectiary labeling schema 1.0，`!core/asdf-1.1.0` 也只是 ASDF core tag。
 GitHub issue #82 是纳入 `schema_version: 2.0.0` 的 bounded self-description
 patch，没有引入 `2.1.0`。
 
-每个当前 generation 都直接声明 producer：`asdf_library.name` 为 `SpecForge`，
+每个当前 generation 都直接声明 producer：`asdf_library.name` 为 `Spectiary`，
 `asdf_library.version` 为 `0.8.0`。相邻的 `spectiary_build` 只包含构建源码状态：
 `source_mode: head` 必须同时包含完整 40 位小写十六进制 `source_revision`；
 `source_mode: working_tree` 必须完全省略 `source_revision`，不能写成 `null`。
@@ -291,11 +291,11 @@ binary blocks、任意 sequence schema、metadata 原始字节、padding 或旧
 index/trailer。semantic mutation/retry 时间戳规则和 preservation 边界也由上述
 Sample Labeling 合同定义。
 
-SpecForge labeling schema `1.0.0` 不读取迁移为 `2.0.0`；本地 labeling cache
+Spectiary labeling schema `1.0.0` 不读取迁移为 `2.0.0`；本地 labeling cache
 schemas 1–3 也不迁移，当前 cache schema 是 4。Canonical 文档不包含 task copy
 lineage、持久 edit history、document revision、incremental patch 或 workflow
 status；这些概念不能从 output filename 或 ASDF container version 推断。
 
 ## 一句话总结
 
-程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵；FITS table/image 都先由唯一的 CFITSIO reader 解析 container，再由语义层识别波长列或受限 `COEFF0/COEFF1` image 路径，`mask/ivar` 决定有效点；`X.npy` 是处理后的特征而不是原始流量；sample labeling canonical `.asdf` 则是带独立 SpecForge schema 版本的 task/source/roster/value 原子文档。
+程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵；FITS table/image 都先由唯一的 CFITSIO reader 解析 container，再由语义层识别波长列或受限 `COEFF0/COEFF1` image 路径，`mask/ivar` 决定有效点；`X.npy` 是处理后的特征而不是原始流量；sample labeling canonical `.asdf` 则是带独立 Spectiary schema 版本的 task/source/roster/value 原子文档。

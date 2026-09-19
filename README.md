@@ -1,11 +1,14 @@
 <p align="center">
-  <img src="resources/branding/specforge.svg" width="128" alt="SpecForge logo">
+  <img src="resources/branding/spectiary.svg" width="128" alt="Spectiary logo">
 </p>
 
-<h1 align="center">SpecForge</h1>
+<h1 align="center">Spectiary</h1>
+
+Formerly SpecForge. See [project identity and rename contracts](docs/project_rename.md)
+for the pre-1.0 format cutover and historical compatibility boundaries.
 
 <p align="center">
-  <a href="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml"><img src="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="SpecForge automation status"></a>
+  <a href="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml"><img src="https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="Spectiary automation status"></a>
   <a href="https://github.com/SW26010/SpecForge/releases/tag/v0.9.0"><img src="https://img.shields.io/badge/Release-v0.9.0-2ea44f?logo=github&amp;logoColor=white" alt="Latest release: v0.9.0"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus" alt="C++20">
   <img src="https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE" alt="Dear ImGui with docking">
@@ -18,18 +21,18 @@
   A native Windows spectrum viewer for fast, focused inspection of LAMOST and SDSS spectra.
 </p>
 
-SpecForge is built for the part of spectral analysis that happens with your eyes and hands: opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
+Spectiary is built for the part of spectral analysis that happens with your eyes and hands: opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
 
 It is designed as a focused desktop tool rather than a general scientific platform. The main plot stays at the center of the experience, interaction latency is treated as a product requirement, and features are expected to preserve the responsiveness of pan, zoom, navigation, and spectrum switching.
 
 > [!NOTE]
-> SpecForge is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while FITS coverage and higher-level analysis workflows are still evolving.
+> Spectiary is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while FITS coverage and higher-level analysis workflows are still evolving.
 
-## Why SpecForge
+## Why Spectiary
 
 ### Lightweight
 
-SpecForge is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to inspect spectra, and it avoids a large cross-platform UI framework in the hot path.
+Spectiary is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to inspect spectra, and it avoids a large cross-platform UI framework in the hot path.
 
 The application also uses an event-driven render policy: when nothing is changing, it does not keep redrawing just to look alive.
 
@@ -50,7 +53,7 @@ The main plot is designed around direct manipulation:
 - wavelength and flux range navigation
 - fast previous/next spectrum switching for supported multi-spectrum sources
 
-On supported Windows 11 systems, SpecForge can integrate with **Dynamic Refresh Rate (DRR)** through the Windows compositor clock so active plot interaction can request a higher-refresh presentation path and return to the base rate afterwards.
+On supported Windows 11 systems, Spectiary can integrate with **Dynamic Refresh Rate (DRR)** through the Windows compositor clock so active plot interaction can request a higher-refresh presentation path and return to the base rate afterwards.
 
 ## What You Can Do
 
@@ -66,7 +69,7 @@ On supported Windows 11 systems, SpecForge can integrate with **Dynamic Refresh 
 
 ## Designed For
 
-SpecForge is especially suited to workflows such as:
+Spectiary is especially suited to workflows such as:
 
 - visually inspecting **LAMOST and SDSS FITS spectra** on a local Windows workstation
 - rapidly reviewing many observations for quality control, candidate triage, or manual inspection
@@ -77,7 +80,7 @@ SpecForge is especially suited to workflows such as:
 
 ## FITS First
 
-SpecForge's user-facing data path is centered on astronomical FITS spectra, with **LAMOST and SDSS as the primary compatibility targets**.
+Spectiary's user-facing data path is centered on astronomical FITS spectra, with **LAMOST and SDSS as the primary compatibility targets**.
 
 | Source | Current support |
 | --- | --- |
@@ -86,17 +89,17 @@ SpecForge's user-facing data path is centered on astronomical FITS spectra, with
 | Generic FITS | Restricted single-spectrum table/image semantics with explicit wavelength metadata |
 | Folder of spectra | Non-recursive browsing of supported first-level FITS sources |
 
-FITS is a broad ecosystem, so support is intentionally explicit rather than claiming that every FITS layout will work. A single CFITSIO reader parses both table and image containers; the spectrum semantics layer then recognizes only the restricted LAMOST, SDSS, and generic single-spectrum structures described by the format contract. Opening a container is not itself a promise that SpecForge can interpret it as a spectrum.
+FITS is a broad ecosystem, so support is intentionally explicit rather than claiming that every FITS layout will work. A single CFITSIO reader parses both table and image containers; the spectrum semantics layer then recognizes only the restricted LAMOST, SDSS, and generic single-spectrum structures described by the format contract. Opening a container is not itself a promise that Spectiary can interpret it as a spectrum.
 
-For `.fits.gz`, SpecForge first performs bounded transport decompression and then gives the resulting FITS bytes to that same CFITSIO reader. FITS network URLs and FITS writing are not supported.
+For `.fits.gz`, Spectiary first performs bounded transport decompression and then gives the resulting FITS bytes to that same CFITSIO reader. FITS network URLs and FITS writing are not supported.
 
-SpecForge also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
+Spectiary also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
 
 For the exact loader and data-boundary behavior, see [Spectrum Snapshot Contract](docs/spectrum_snapshot_contract.md).
 
 ## A Native, Performance-First Stack
 
-SpecForge deliberately uses a small native stack:
+Spectiary deliberately uses a small native stack:
 
 - **C++20** for the application and domain layer
 - **Win32** for native Windows integration
@@ -131,7 +134,7 @@ The presentation path uses modern DXGI flip-model behavior and does not target W
 
 README is intentionally kept user-facing. Build configuration, implementation contracts, profiling details, automation interfaces, and packaging rules live in the documentation instead.
 
-Start here if you want to build or work on SpecForge:
+Start here if you want to build or work on Spectiary:
 
 - [Engineering setup](docs/engineering_setup.md) — toolchain, vcpkg, CMake presets, build and test guidance
 - [Technical direction](docs/technical_direction.md) — architecture and performance constraints
@@ -146,5 +149,5 @@ The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/1
 ---
 
 <p align="center">
-  <strong>SpecForge is about one thing first: making spectrum inspection feel light, fast, and fluid.</strong>
+  <strong>Spectiary is about one thing first: making spectrum inspection feel light, fast, and fluid.</strong>
 </p>

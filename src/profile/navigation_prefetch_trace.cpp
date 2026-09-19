@@ -5,7 +5,7 @@
 #include <chrono>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::int64_t ToNanoseconds(NavigationLatencyTimePoint at) noexcept
@@ -95,4 +95,4 @@ bool WriteNavigationPrefetchProfileEvent(
     });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

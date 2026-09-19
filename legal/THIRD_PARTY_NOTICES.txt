@@ -1,6 +1,6 @@
-SPECFORGE THIRD-PARTY NOTICES
+SPECTIARY THIRD-PARTY NOTICES
 
-This file covers third-party software incorporated into the SpecForge binary.
+This file covers third-party software incorporated into the Spectiary binary.
 
 ==============================================================================
 Dear ImGui 1.92.8, including docking, Win32, and DirectX 11 backends
@@ -328,7 +328,7 @@ Modified stb headers bundled with Dear ImGui
 https://github.com/nothings/stb
 ==============================================================================
 
-Dear ImGui includes modified versions of stb_rect_pack.h, stb_textedit.h, and stb_truetype.h. SpecForge elects the MIT alternative offered by these files.
+Dear ImGui includes modified versions of stb_rect_pack.h, stb_textedit.h, and stb_truetype.h. Spectiary elects the MIT alternative offered by these files.
 
 MIT License
 
@@ -371,7 +371,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-SpecForge does not redistribute separate font files. The font data above is embedded in the Dear ImGui code linked into SpecForge. Optional UI glyphs are loaded at runtime from fonts already installed by Windows.
+Spectiary does not redistribute separate font files. The font data above is embedded in the Dear ImGui code linked into Spectiary. Optional UI glyphs are loaded at runtime from fonts already installed by Windows.
 
 ==============================================================================
 nlohmann/json 3.12.0

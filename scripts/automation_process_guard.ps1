@@ -2,12 +2,12 @@
 # Keep the Win32 Job Object definition in one place so the sample runner and
 # the CTest wrapper cannot drift into competing process-tree implementations.
 
-if (-not ('SpecForgeAutomationProcessGuard.NativeMethods' -as [type])) {
+if (-not ('SpectiaryAutomationProcessGuard.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-namespace SpecForgeAutomationProcessGuard
+namespace SpectiaryAutomationProcessGuard
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
@@ -82,28 +82,28 @@ function Close-AutomationNativeHandle {
     )
 
     if ($Handle -ne [IntPtr]::Zero) {
-        [void][SpecForgeAutomationProcessGuard.NativeMethods]::CloseHandle($Handle)
+        [void][SpectiaryAutomationProcessGuard.NativeMethods]::CloseHandle($Handle)
     }
 }
 
 function New-AutomationKillOnCloseJob {
-    $jobHandle = [SpecForgeAutomationProcessGuard.NativeMethods]::CreateJobObject(
+    $jobHandle = [SpectiaryAutomationProcessGuard.NativeMethods]::CreateJobObject(
         [IntPtr]::Zero,
         $null)
     if ($jobHandle -eq [IntPtr]::Zero) {
         throw "CreateJobObject failed: $(Get-AutomationWin32ErrorMessage)"
     }
 
-    $info = New-Object SpecForgeAutomationProcessGuard.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info = New-Object SpectiaryAutomationProcessGuard.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
     $info.BasicLimitInformation.LimitFlags =
-        [SpecForgeAutomationProcessGuard.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        [SpectiaryAutomationProcessGuard.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     $length = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
     $buffer = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($length)
     try {
         [System.Runtime.InteropServices.Marshal]::StructureToPtr($info, $buffer, $false)
-        $ok = [SpecForgeAutomationProcessGuard.NativeMethods]::SetInformationJobObject(
+        $ok = [SpectiaryAutomationProcessGuard.NativeMethods]::SetInformationJobObject(
             $jobHandle,
-            [SpecForgeAutomationProcessGuard.NativeMethods]::JobObjectExtendedLimitInformation,
+            [SpectiaryAutomationProcessGuard.NativeMethods]::JobObjectExtendedLimitInformation,
             $buffer,
             [uint32]$length)
         if (-not $ok) {
@@ -137,7 +137,7 @@ function Assign-AutomationProcessToJob {
         # process is already gone; there is no live child left for the Job.
         return
     }
-    if (-not [SpecForgeAutomationProcessGuard.NativeMethods]::AssignProcessToJobObject(
+    if (-not [SpectiaryAutomationProcessGuard.NativeMethods]::AssignProcessToJobObject(
             $JobHandle,
             $ProcessHandle.Handle)) {
         throw "AssignProcessToJobObject failed: $(Get-AutomationWin32ErrorMessage)"

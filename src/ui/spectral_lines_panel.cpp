@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kSpectralLinesWindow =
@@ -542,4 +542,4 @@ void SpectralLinesPanelUi::Render(
     ImGui::End();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

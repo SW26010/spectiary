@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 using LoadLatencyClock = std::chrono::steady_clock;
 using LoadLatencyTimePoint = LoadLatencyClock::time_point;
@@ -264,4 +264,4 @@ private:
 
 }  // namespace profile_internal
 
-}  // namespace specforge
+}  // namespace spectiary

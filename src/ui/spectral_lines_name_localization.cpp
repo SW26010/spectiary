@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace specforge {
+namespace spectiary {
 
 std::string LocalizedSpectralLineName(
     UiLanguage language,
@@ -77,4 +77,4 @@ std::string SpectralLineCatalogOptionLabel(
     return label;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

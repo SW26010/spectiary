@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string LowerAscii(std::string value)
@@ -49,4 +49,4 @@ bool ShouldRestoreSampleNameSearch(
     return search_active && !search_committed && !input_active && !dropdown_interacting;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

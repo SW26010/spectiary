@@ -1,12 +1,12 @@
 #pragma once
 
-#include "app/specforge_metadata.h"
+#include "app/spectiary_metadata.h"
 
 #include <filesystem>
 #include <functional>
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 struct RuntimePathInputs {
     // Absolute actual executable location; package_root is its parent only.
@@ -59,28 +59,28 @@ struct RuntimePaths {
     std::filesystem::path spectral_line_user_state_path;
 };
 
-class SpecForgeStartup {
+class SpectiaryStartup {
 public:
-    SpecForgeStartup(const SpecForgeStartup&) = default;
-    SpecForgeStartup& operator=(const SpecForgeStartup&) = default;
-    SpecForgeStartup(SpecForgeStartup&&) noexcept = default;
-    SpecForgeStartup& operator=(SpecForgeStartup&&) noexcept =
+    SpectiaryStartup(const SpectiaryStartup&) = default;
+    SpectiaryStartup& operator=(const SpectiaryStartup&) = default;
+    SpectiaryStartup(SpectiaryStartup&&) noexcept = default;
+    SpectiaryStartup& operator=(SpectiaryStartup&&) noexcept =
         default;
 
     [[nodiscard]] const RuntimePaths& runtime_paths() const noexcept;
-    [[nodiscard]] const SpecForgeMetadataReadResult& metadata()
+    [[nodiscard]] const SpectiaryMetadataReadResult& metadata()
         const noexcept;
 
 private:
-    SpecForgeStartup(
+    SpectiaryStartup(
         RuntimePaths runtime_paths,
-        SpecForgeMetadataReadResult metadata);
+        SpectiaryMetadataReadResult metadata);
 
-    friend SpecForgeStartup PrepareSpecForgeStartup(
+    friend SpectiaryStartup PrepareSpectiaryStartup(
         RuntimePathInputs inputs);
 
     RuntimePaths runtime_paths_;
-    SpecForgeMetadataReadResult metadata_;
+    SpectiaryMetadataReadResult metadata_;
 };
 
 [[nodiscard]] std::filesystem::path CurrentExecutablePath();
@@ -90,13 +90,13 @@ private:
 [[nodiscard]] RuntimePaths RuntimePathsForDeployment(
     DeploymentMetadata deployment,
     RuntimePathInputs inputs);
-[[nodiscard]] SpecForgeStartup PrepareSpecForgeStartup(
+[[nodiscard]] SpectiaryStartup PrepareSpectiaryStartup(
     RuntimePathInputs inputs);
-[[nodiscard]] const SpecForgeStartup& DefaultSpecForgeStartup();
+[[nodiscard]] const SpectiaryStartup& DefaultSpectiaryStartup();
 [[nodiscard]] RuntimePaths DefaultRuntimePaths();
 
 // Startup-only, bounded best-effort import. Existing destinations always win.
 // Never scans, moves or deletes a directory or user-owned documents.
 void MigrateLegacyApplicationStorage(const RuntimePaths& paths);
 
-}  // namespace specforge
+}  // namespace spectiary

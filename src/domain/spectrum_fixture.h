@@ -2,8 +2,8 @@
 
 #include "domain/spectrum_snapshot.h"
 
-namespace specforge {
+namespace spectiary {
 
 SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot();
 
-}  // namespace specforge
+}  // namespace spectiary

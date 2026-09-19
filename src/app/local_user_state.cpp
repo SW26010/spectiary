@@ -21,7 +21,7 @@
 #endif
 #include <windows.h>
 
-namespace specforge {
+namespace spectiary {
 void HideUnsavedCheckpointDirectory(const std::filesystem::path& directory) noexcept
 {
     // Avoid allocating a filename inside this best-effort noexcept helper.
@@ -598,4 +598,4 @@ LocalUserStatePersistenceLifecycle::CompleteSave(
     return FlushOutcome::Failed;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

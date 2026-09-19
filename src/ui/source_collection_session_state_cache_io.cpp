@@ -8,7 +8,7 @@
 #include <optional>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kSourceSessionStateFormatKind = "spectiary.source_collection_session.cache";
@@ -131,4 +131,4 @@ bool SaveSourceCollectionSessionStateCache(
         });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

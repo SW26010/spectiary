@@ -5,7 +5,7 @@
 #include <functional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 enum class Win32WindowActivation {
     Default,
@@ -72,4 +72,4 @@ private:
     UINT client_height_ = 0;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

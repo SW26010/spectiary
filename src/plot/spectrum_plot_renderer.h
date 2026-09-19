@@ -9,7 +9,7 @@
 
 #include <optional>
 
-namespace specforge {
+namespace spectiary {
 
 struct SpectrumSmoothingCache {
     SpectrumValueVector source;
@@ -66,4 +66,4 @@ struct SpectrumPlotRenderResult {
     const SpectrumPlotDisplayOptions& display,
     PlotTouchpadGestureSource* touchpad_gestures);
 
-}  // namespace specforge
+}  // namespace spectiary

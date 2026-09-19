@@ -1,6 +1,6 @@
 #pragma once
 
-namespace specforge {
+namespace spectiary {
 
 // Semantic application state shared by settings, automation observations, and
 // the persistence codec. The codec itself remains owned by the sessions
@@ -19,4 +19,4 @@ struct PanelVisibilityState {
     [[nodiscard]] bool operator==(const PanelVisibilityState&) const = default;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

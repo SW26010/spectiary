@@ -21,7 +21,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionIdentity;
 enum class SampleLabelExportFormat;
@@ -658,4 +658,4 @@ private:
     std::string state_cache_load_warning_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

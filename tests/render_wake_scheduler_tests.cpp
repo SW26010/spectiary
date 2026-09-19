@@ -12,10 +12,10 @@
 namespace {
 
 using namespace std::chrono_literals;
-using Scheduler = specforge::RenderWakeScheduler;
-using Action = specforge::RenderWakeAction;
-using FrameOutcome = specforge::RenderFrameOutcome;
-using TickOutcome = specforge::CompositorClockTickOutcome;
+using Scheduler = spectiary::RenderWakeScheduler;
+using Action = spectiary::RenderWakeAction;
+using FrameOutcome = spectiary::RenderFrameOutcome;
+using TickOutcome = spectiary::CompositorClockTickOutcome;
 
 void Require(bool condition, std::string_view message)
 {
@@ -508,25 +508,25 @@ void TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance()
 
 void TestPanPacingConfigurationIsExactAndDefaultsToDisplay()
 {
-    const specforge::PanPacingConfiguration missing =
-        specforge::ResolvePanPacing(std::nullopt);
+    const spectiary::PanPacingConfiguration missing =
+        spectiary::ResolvePanPacing(std::nullopt);
     Require(
-        missing.effective == specforge::PanPacingMode::Display &&
+        missing.effective == spectiary::PanPacingMode::Display &&
             missing.requested == "display" &&
             missing.recognized,
         "a missing pacing environment value should preserve display pacing");
 
-    const specforge::PanPacingConfiguration uncapped =
-        specforge::ResolvePanPacing("uncapped");
+    const spectiary::PanPacingConfiguration uncapped =
+        spectiary::ResolvePanPacing("uncapped");
     Require(
-        uncapped.effective == specforge::PanPacingMode::Uncapped &&
+        uncapped.effective == spectiary::PanPacingMode::Uncapped &&
             uncapped.recognized,
         "the exact uncapped value should enable diagnostic pacing");
 
-    const specforge::PanPacingConfiguration unknown =
-        specforge::ResolvePanPacing("Uncapped");
+    const spectiary::PanPacingConfiguration unknown =
+        spectiary::ResolvePanPacing("Uncapped");
     Require(
-        unknown.effective == specforge::PanPacingMode::Display &&
+        unknown.effective == spectiary::PanPacingMode::Display &&
             !unknown.recognized &&
             unknown.requested == "Uncapped",
         "unknown or differently-cased values must not silently enable uncapped pacing");
@@ -535,17 +535,17 @@ void TestPanPacingConfigurationIsExactAndDefaultsToDisplay()
 void TestImGuiDragBoostRespectsCaptureAndUncappedPan()
 {
     Require(
-        !specforge::ShouldBoostForImGuiDrag(false, true, false),
+        !spectiary::ShouldBoostForImGuiDrag(false, true, false),
         "an uncaptured drag should not request compositor-clock pacing");
     Require(
-        !specforge::ShouldBoostForImGuiDrag(true, false, false),
+        !spectiary::ShouldBoostForImGuiDrag(true, false, false),
         "captured mouse input without a left drag should not request "
         "compositor-clock pacing");
     Require(
-        specforge::ShouldBoostForImGuiDrag(true, true, false),
+        spectiary::ShouldBoostForImGuiDrag(true, true, false),
         "a captured left drag should request compositor-clock pacing");
     Require(
-        !specforge::ShouldBoostForImGuiDrag(true, true, true),
+        !spectiary::ShouldBoostForImGuiDrag(true, true, true),
         "uncapped ImPlot pan must take precedence over the general ImGui "
         "drag boost");
 }

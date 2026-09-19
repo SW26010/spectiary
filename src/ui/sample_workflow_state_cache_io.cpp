@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kStateFormatKind = "spectiary.sample_workflow_state.cache";
@@ -505,4 +505,4 @@ bool SaveSampleWorkflowStateCache(
         });
 }
 
-}  // namespace specforge
+}  // namespace spectiary

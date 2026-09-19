@@ -12,7 +12,7 @@
 #include <mutex>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -668,4 +668,4 @@ bool Win32TouchpadGestureSource::NeedsContinuousUpdates() const
     return impl_->context != nullptr && impl_->context->NeedsContinuousUpdates();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

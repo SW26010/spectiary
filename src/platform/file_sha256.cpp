@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::size_t kHashBufferSize = 64U * 1024U;
@@ -83,4 +83,4 @@ std::optional<std::string> ComputeFileSha256(
     }
 }
 
-}  // namespace specforge
+}  // namespace spectiary

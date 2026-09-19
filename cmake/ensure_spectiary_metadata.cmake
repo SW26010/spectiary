@@ -1,26 +1,26 @@
-if(NOT DEFINED SPECFORGE_EXECUTABLE OR
-   NOT DEFINED SPECFORGE_METADATA OR
-   NOT DEFINED SPECFORGE_FINALIZER)
+if(NOT DEFINED SPECTIARY_EXECUTABLE OR
+   NOT DEFINED SPECTIARY_METADATA OR
+   NOT DEFINED SPECTIARY_FINALIZER)
     message(FATAL_ERROR
-        "SpecForge metadata freshness check requires executable, metadata, and finalizer paths.")
+        "Spectiary metadata freshness check requires executable, metadata, and finalizer paths.")
 endif()
 
-if(NOT EXISTS "${SPECFORGE_EXECUTABLE}")
+if(NOT EXISTS "${SPECTIARY_EXECUTABLE}")
     message(FATAL_ERROR
-        "SpecForge executable is missing: ${SPECFORGE_EXECUTABLE}")
+        "Spectiary executable is missing: ${SPECTIARY_EXECUTABLE}")
 endif()
-if(NOT EXISTS "${SPECFORGE_FINALIZER}")
+if(NOT EXISTS "${SPECTIARY_FINALIZER}")
     message(FATAL_ERROR
-        "SpecForge metadata finalizer is missing: ${SPECFORGE_FINALIZER}")
+        "Spectiary metadata finalizer is missing: ${SPECTIARY_FINALIZER}")
 endif()
 
 file(READ "${CMAKE_CURRENT_LIST_DIR}/../config/project_identity.json" identity_json)
 string(JSON application_id GET "${identity_json}" founding_identity)
 string(JSON artifact_basename GET "${identity_json}" artifact_basename)
-file(SHA256 "${SPECFORGE_EXECUTABLE}" executable_sha256)
+file(SHA256 "${SPECTIARY_EXECUTABLE}" executable_sha256)
 set(metadata_current FALSE)
-if(EXISTS "${SPECFORGE_METADATA}")
-    file(READ "${SPECFORGE_METADATA}" metadata_json)
+if(EXISTS "${SPECTIARY_METADATA}")
+    file(READ "${SPECTIARY_METADATA}" metadata_json)
     string(JSON schema_version ERROR_VARIABLE schema_error
         GET "${metadata_json}" schema_version)
     string(JSON metadata_application_id ERROR_VARIABLE identity_error
@@ -46,15 +46,15 @@ endif()
 
 if(NOT metadata_current)
     execute_process(
-        COMMAND "${SPECFORGE_FINALIZER}"
-            "${SPECFORGE_EXECUTABLE}"
-            "${SPECFORGE_METADATA}"
+        COMMAND "${SPECTIARY_FINALIZER}"
+            "${SPECTIARY_EXECUTABLE}"
+            "${SPECTIARY_METADATA}"
         RESULT_VARIABLE finalizer_result
         OUTPUT_VARIABLE finalizer_output
         ERROR_VARIABLE finalizer_error)
     if(NOT finalizer_result EQUAL 0)
         message(FATAL_ERROR
-            "SpecForge metadata finalization failed with exit code ${finalizer_result}.\n"
+            "Spectiary metadata finalization failed with exit code ${finalizer_result}.\n"
             "stdout: ${finalizer_output}\n"
             "stderr: ${finalizer_error}")
     endif()

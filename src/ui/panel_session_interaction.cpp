@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 PanelSessionInteraction::PanelSessionInteraction(
     SourceCollectionSession& session,
@@ -114,4 +114,4 @@ PanelSessionInteraction::Update PanelSessionInteraction::Submit(
     };
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -16,7 +16,7 @@
 #include <fitsio.h>
 #include <zlib.h>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 
 struct FitsFile::Impl {
     fitsfile* handle = nullptr;
@@ -813,7 +813,7 @@ FitsFile FitsFile::Open(
         impl->memory_size = impl->memory.size();
         fits_open_memfile(
             &impl->handle,
-            "SpecForge gzip transport",
+            "Spectiary gzip transport",
             READONLY,
             &impl->memory_address,
             &impl->memory_size,
@@ -1046,4 +1046,4 @@ std::vector<double> FitsFile::ReadImageRow(
     return values;
 }
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

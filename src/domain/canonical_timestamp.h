@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 class CanonicalTimestamp final {
 public:
@@ -36,4 +36,4 @@ private:
 [[nodiscard]] std::optional<CanonicalTimestamp> ParseCanonicalTimestamp(
     std::string_view value) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

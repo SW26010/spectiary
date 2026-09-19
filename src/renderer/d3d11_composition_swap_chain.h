@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct D3D11CompositionFeedback {
     std::uint64_t present_submissions = 0;
@@ -169,4 +169,4 @@ private:
     std::string_view last_error_operation_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

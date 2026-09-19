@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kCacheFormatKind = "spectiary.catalog_user_state.cache";
@@ -1292,4 +1292,4 @@ bool SaveCatalogUserStateCache(
 }
 
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 enum class SpectrumSmoothingMethod {
     None,
@@ -30,4 +30,4 @@ struct SpectrumSmoothingSettings {
     const std::vector<double>& values,
     const SpectrumSmoothingSettings& settings);
 
-}  // namespace specforge
+}  // namespace spectiary

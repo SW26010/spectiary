@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleLabelingCanonicalSourceDescriptor;
 
@@ -196,4 +196,4 @@ ProjectSampleLabelingDocumentTask(
 ValidateSampleLabelingDocumentFailFast(
     const SampleLabelingDocument& document);
 
-}  // namespace specforge
+}  // namespace spectiary

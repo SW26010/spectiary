@@ -11,7 +11,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr std::string_view kSourceOrderSortSourceId = "source-order";
@@ -240,4 +240,4 @@ std::optional<SampleSortingSource> BuildSampleSortingSource(
     return std::nullopt;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

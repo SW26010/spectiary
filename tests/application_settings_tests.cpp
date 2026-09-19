@@ -28,7 +28,7 @@ public:
                                 .time_since_epoch()
                                 .count();
         path_ = std::filesystem::temp_directory_path() /
-                ("specforge-application-settings-tests-" +
+                ("spectiary-application-settings-tests-" +
                  std::to_string(suffix));
         std::filesystem::create_directories(path_);
     }
@@ -56,7 +56,7 @@ std::string ReadFile(const std::filesystem::path& path)
         std::istreambuf_iterator<char>());
 }
 
-specforge::ApplicationSettingsStorage MakeStorage(
+spectiary::ApplicationSettingsStorage MakeStorage(
     const std::filesystem::path& root,
     std::optional<std::filesystem::path> environment_override =
         std::nullopt)
@@ -81,21 +81,21 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
 {
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
-    const specforge::ApplicationSettingsView initial =
+    const spectiary::ApplicationSettingsView initial =
         settings.View();
     Require(
-        initial.language == specforge::UiLanguage::English,
+        initial.language == spectiary::UiLanguage::English,
         "missing language settings should default to English");
     Require(
         initial.theme_selection ==
-                specforge::ThemeSelection::FollowSystem() &&
+                spectiary::ThemeSelection::FollowSystem() &&
             initial
                     .StatusFor(
-                        specforge::ApplicationSetting::Appearance)
+                        spectiary::ApplicationSetting::Appearance)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "missing appearance settings should follow the system theme");
     Require(
         initial.ui_scale_percentage == 100,
@@ -112,31 +112,31 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         "missing profile settings should use the default directory");
 
     const auto language_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetLanguage(
-            specforge::UiLanguage::SimplifiedChinese),
+        spectiary::ApplicationSettingsIntent::SetLanguage(
+            spectiary::UiLanguage::SimplifiedChinese),
         {});
     Require(
         language_result.applied(),
         "language intent should apply");
 
     const auto appearance_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetThemeSelection(
-            specforge::ThemeSelection::Explicit(
-                specforge::BuiltInDarkThemeId())),
+        spectiary::ApplicationSettingsIntent::SetThemeSelection(
+            spectiary::ThemeSelection::Explicit(
+                spectiary::BuiltInDarkThemeId())),
         {});
     Require(
         appearance_result.applied(),
         "explicit theme intent should apply");
 
     const auto ui_scale_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetUiScale(125),
+        spectiary::ApplicationSettingsIntent::SetUiScale(125),
         {});
     Require(
         ui_scale_result.applied(),
         "UI scale intent should apply");
 
     const auto input_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetLiveNumericNavigation(false),
         {});
     Require(
@@ -144,7 +144,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         "live numeric navigation intent should apply");
 
     const auto external_source_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetOpenExternalSourceAsFolder(true),
         {});
     Require(
@@ -154,7 +154,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     const std::filesystem::path custom_directory =
         temporary.path() / "custom profiles";
     const auto directory_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetProfileOutputDirectory(custom_directory),
         {});
     Require(
@@ -195,17 +195,17 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
                 std::string::npos,
         "external source settings should retain the generic persisted key");
 
-    specforge::ApplicationSettings reloaded(storage);
-    const specforge::ApplicationSettingsView reloaded_view =
+    spectiary::ApplicationSettings reloaded(storage);
+    const spectiary::ApplicationSettingsView reloaded_view =
         reloaded.View();
     Require(
         reloaded_view.language ==
-            specforge::UiLanguage::SimplifiedChinese,
+            spectiary::UiLanguage::SimplifiedChinese,
         "language should reload through the application settings owner");
     Require(
         reloaded_view.theme_selection ==
-            specforge::ThemeSelection::Explicit(
-                specforge::BuiltInDarkThemeId()),
+            spectiary::ThemeSelection::Explicit(
+                spectiary::BuiltInDarkThemeId()),
         "explicit theme identity should reload through the application settings owner");
     Require(
         reloaded_view.ui_scale_percentage == 125,
@@ -221,11 +221,11 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         "profile directory should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory_source ==
-            specforge::ProfileOutputDirectorySource::UserSetting,
+            spectiary::ProfileOutputDirectorySource::UserSetting,
         "reloaded custom profile directory should retain its source");
 
     const auto restore_result = reloaded.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             RestoreDefaultProfileOutputDirectory(),
         {});
     Require(
@@ -246,18 +246,18 @@ void TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings()
         stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_fits_as_folder":true})";
     }
 
-    const specforge::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettings settings(storage);
     Require(
         settings.View().open_external_source_as_folder &&
             settings.View()
-                    .StatusFor(specforge::ApplicationSetting::ExternalSource)
-                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+                    .StatusFor(spectiary::ApplicationSetting::ExternalSource)
+                    .kind == spectiary::ApplicationSettingsStatusKind::Ready,
         "the application settings owner should retain an enabled legacy external source preference");
 
-    specforge::ApplicationSettings mutable_settings(storage);
+    spectiary::ApplicationSettings mutable_settings(storage);
     Require(
         mutable_settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(false),
             {})
             .applied(),
@@ -294,22 +294,22 @@ void TestCompactSingleValueFilesRemainReadableThroughApplicationSettings()
         stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":true})";
     }
 
-    const specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView view = settings.View();
     Require(
-        view.language == specforge::UiLanguage::SimplifiedChinese &&
+        view.language == spectiary::UiLanguage::SimplifiedChinese &&
             view.ui_scale_percentage == 150 &&
             !view.live_numeric_navigation &&
             view.open_external_source_as_folder,
         "compact version-1 setting files should remain readable through ApplicationSettings");
-    for (const specforge::ApplicationSetting setting : {
-             specforge::ApplicationSetting::Language,
-             specforge::ApplicationSetting::UiScale,
-             specforge::ApplicationSetting::Input,
-             specforge::ApplicationSetting::ExternalSource}) {
+    for (const spectiary::ApplicationSetting setting : {
+             spectiary::ApplicationSetting::Language,
+             spectiary::ApplicationSetting::UiScale,
+             spectiary::ApplicationSetting::Input,
+             spectiary::ApplicationSetting::ExternalSource}) {
         Require(
             view.StatusFor(setting).kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
             "valid compact setting files should load without warnings");
     }
 }
@@ -335,22 +335,22 @@ void TestInvalidSingleValuesFallBackThroughApplicationSettings()
         stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":"true"})";
     }
 
-    const specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView view = settings.View();
     Require(
-        view.language == specforge::UiLanguage::English &&
+        view.language == spectiary::UiLanguage::English &&
             view.ui_scale_percentage == 100 &&
             view.live_numeric_navigation &&
             !view.open_external_source_as_folder,
         "invalid stored values should retain the established defaults");
-    for (const specforge::ApplicationSetting setting : {
-             specforge::ApplicationSetting::Language,
-             specforge::ApplicationSetting::UiScale,
-             specforge::ApplicationSetting::Input,
-             specforge::ApplicationSetting::ExternalSource}) {
+    for (const spectiary::ApplicationSetting setting : {
+             spectiary::ApplicationSetting::Language,
+             spectiary::ApplicationSetting::UiScale,
+             spectiary::ApplicationSetting::Input,
+             spectiary::ApplicationSetting::ExternalSource}) {
         Require(
             view.StatusFor(setting).kind ==
-                specforge::ApplicationSettingsStatusKind::LoadWarning,
+                spectiary::ApplicationSettingsStatusKind::LoadWarning,
             "invalid stored values should surface through owner load warnings");
     }
 }
@@ -368,18 +368,18 @@ void TestUnsupportedSingleValueSchemasFallBackThroughApplicationSettings()
         stream << R"({"format_kind":"spectiary.ui_scale.settings","schema_version":2,"percentage":125})";
     }
 
-    const specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView view = settings.View();
     Require(
-        view.language == specforge::UiLanguage::English &&
+        view.language == spectiary::UiLanguage::English &&
             view.ui_scale_percentage == 100,
         "unsupported setting schemas should retain the established defaults");
-    for (const specforge::ApplicationSetting setting : {
-             specforge::ApplicationSetting::Language,
-             specforge::ApplicationSetting::UiScale}) {
+    for (const spectiary::ApplicationSetting setting : {
+             spectiary::ApplicationSetting::Language,
+             spectiary::ApplicationSetting::UiScale}) {
         Require(
             view.StatusFor(setting).kind ==
-                    specforge::ApplicationSettingsStatusKind::LoadWarning &&
+                    spectiary::ApplicationSettingsStatusKind::LoadWarning &&
                 !settings.PersistenceStatus(setting)
                      .load_warning.empty(),
             "unsupported setting schemas should surface through owner load warnings");
@@ -396,7 +396,7 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
         stream << "block settings directory creation";
     }
 
-    specforge::ApplicationSettings settings({
+    spectiary::ApplicationSettings settings({
         .language_settings_path = blocker / "ui-language.json",
         .ui_scale_settings_path = blocker / "ui-scale.json",
         .input_settings_path = blocker / "input-settings.json",
@@ -409,41 +409,41 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
     });
 
     const auto result = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetLanguage(
-            specforge::UiLanguage::SimplifiedChinese),
+        spectiary::ApplicationSettingsIntent::SetLanguage(
+            spectiary::UiLanguage::SimplifiedChinese),
         {});
     Require(
         result.outcome ==
-            specforge::ApplicationSettingsOutcome::
+            spectiary::ApplicationSettingsOutcome::
                 PersistenceFailed,
         "save failure should be a typed persistence outcome");
-    const specforge::ApplicationSettingsView view = settings.View();
-    const specforge::ApplicationSettingsStatus& language_status =
-        view.StatusFor(specforge::ApplicationSetting::Language);
+    const spectiary::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettingsStatus& language_status =
+        view.StatusFor(spectiary::ApplicationSetting::Language);
     Require(
-        view.language == specforge::UiLanguage::English,
+        view.language == spectiary::UiLanguage::English,
         "save failure should retain the previous language");
     Require(
         language_status.kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     PersistenceError &&
             language_status.setting ==
-                specforge::ApplicationSetting::Language &&
+                spectiary::ApplicationSetting::Language &&
             language_status.reason ==
-                specforge::ApplicationSettingsStatusReason::
+                spectiary::ApplicationSettingsStatusReason::
                     SettingsWriteFailed &&
             !language_status.detail.empty(),
         "save failure should remain structured on the owner view");
     Require(
         !settings
              .PersistenceStatus(
-                 specforge::ApplicationSetting::Language)
+                 spectiary::ApplicationSetting::Language)
              .save_message.empty(),
         "application persistence health should retain a failed setting save");
     Require(
         !settings
              .PersistenceStatus(
-                 specforge::ApplicationSetting::Language)
+                 spectiary::ApplicationSetting::Language)
              .retrying,
         "a terminal setting failure should not remain scheduled for retry");
     Require(
@@ -454,15 +454,15 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
     std::filesystem::create_directories(blocker);
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::SimplifiedChinese),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::SimplifiedChinese),
             {})
             .applied(),
         "the failed language save should succeed after repairing its path");
     Require(
         settings
             .PersistenceStatus(
-                specforge::ApplicationSetting::Language)
+                spectiary::ApplicationSetting::Language)
             .recovered,
         "a successful setting retry should expose recovery");
 }
@@ -471,22 +471,22 @@ void TestLanguageValidationUsesApplicationSettingsInterface()
 {
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
-    const specforge::ApplicationSettingsResult result =
+    const spectiary::ApplicationSettingsResult result =
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::Count),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::Count),
             {});
-    const specforge::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettingsView view = settings.View();
     Require(
         result.outcome ==
-                specforge::ApplicationSettingsOutcome::Rejected &&
-            result.setting == specforge::ApplicationSetting::Language &&
-            view.language == specforge::UiLanguage::English &&
-            view.StatusFor(specforge::ApplicationSetting::Language)
+                spectiary::ApplicationSettingsOutcome::Rejected &&
+            result.setting == spectiary::ApplicationSetting::Language &&
+            view.language == spectiary::UiLanguage::English &&
+            view.StatusFor(spectiary::ApplicationSetting::Language)
                     .reason ==
-                specforge::ApplicationSettingsStatusReason::
+                spectiary::ApplicationSettingsStatusReason::
                     UnsupportedLanguage &&
             !std::filesystem::exists(storage.language_settings_path),
         "unsupported languages should be rejected by ApplicationSettings before persistence");
@@ -496,47 +496,47 @@ void TestUiScaleValidationAndPersistenceFirstBehavior()
 {
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
     const auto unchanged = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetUiScale(100),
+        spectiary::ApplicationSettingsIntent::SetUiScale(100),
         {});
     Require(
         unchanged.outcome ==
-                specforge::ApplicationSettingsOutcome::Unchanged &&
+                spectiary::ApplicationSettingsOutcome::Unchanged &&
             unchanged.setting ==
-                specforge::ApplicationSetting::UiScale,
+                spectiary::ApplicationSetting::UiScale,
         "unchanged UI scale intent should be typed");
 
     for (const int percentage : {80, 100, 150}) {
         const auto result = settings.Apply(
-            specforge::ApplicationSettingsIntent::SetUiScale(
+            spectiary::ApplicationSettingsIntent::SetUiScale(
                 percentage),
             {});
         Require(
             result.outcome ==
-                    specforge::ApplicationSettingsOutcome::Applied ||
+                    spectiary::ApplicationSettingsOutcome::Applied ||
                 result.outcome ==
-                    specforge::ApplicationSettingsOutcome::Unchanged,
+                    spectiary::ApplicationSettingsOutcome::Unchanged,
             "supported UI scale should apply");
-        const specforge::ApplicationSettings reloaded(storage);
+        const spectiary::ApplicationSettings reloaded(storage);
         Require(
             reloaded.View().ui_scale_percentage == percentage,
             "supported UI scale should round-trip");
     }
 
     const auto rejected = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetUiScale(151),
+        spectiary::ApplicationSettingsIntent::SetUiScale(151),
         {});
     Require(
         rejected.outcome ==
-                specforge::ApplicationSettingsOutcome::Rejected &&
+                spectiary::ApplicationSettingsOutcome::Rejected &&
             settings.View().ui_scale_percentage == 150 &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::UiScale)
+                        spectiary::ApplicationSetting::UiScale)
                     .reason ==
-                specforge::ApplicationSettingsStatusReason::
+                spectiary::ApplicationSettingsStatusReason::
                     UiScaleOutOfRange,
         "out-of-range UI scale should be rejected without changing state");
 
@@ -549,24 +549,24 @@ void TestUiScaleValidationAndPersistenceFirstBehavior()
     auto failing_storage = MakeStorage(temporary.path());
     failing_storage.ui_scale_settings_path =
         blocker / "ui-scale.json";
-    specforge::ApplicationSettings failing_settings(
+    spectiary::ApplicationSettings failing_settings(
         failing_storage);
     const auto failure = failing_settings.Apply(
-        specforge::ApplicationSettingsIntent::SetUiScale(125),
+        spectiary::ApplicationSettingsIntent::SetUiScale(125),
         {});
-    const specforge::ApplicationSettingsView failed_view =
+    const spectiary::ApplicationSettingsView failed_view =
         failing_settings.View();
     Require(
         failure.outcome ==
-                specforge::ApplicationSettingsOutcome::
+                spectiary::ApplicationSettingsOutcome::
                     PersistenceFailed &&
             failed_view.ui_scale_percentage == 100,
         "UI scale save failure should retain the previous runtime value");
     Require(
         failed_view.StatusFor(
-                specforge::ApplicationSetting::UiScale)
+                spectiary::ApplicationSetting::UiScale)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError,
         "UI scale save failure should remain visible");
 }
@@ -584,23 +584,23 @@ void TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue()
     auto storage = MakeStorage(temporary.path());
     storage.input_settings_path =
         blocker / "input-settings.json";
-    specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsResult result =
+    spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsResult result =
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetLiveNumericNavigation(false),
             {});
-    const specforge::ApplicationSettingsView view =
+    const spectiary::ApplicationSettingsView view =
         settings.View();
     Require(
         result.outcome ==
-                specforge::ApplicationSettingsOutcome::
+                spectiary::ApplicationSettingsOutcome::
                     PersistenceFailed &&
             view.live_numeric_navigation,
         "input settings save failure should retain the enabled runtime value");
     Require(
-        view.StatusFor(specforge::ApplicationSetting::Input).kind ==
-            specforge::ApplicationSettingsStatusKind::
+        view.StatusFor(spectiary::ApplicationSetting::Input).kind ==
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError,
         "input settings save failure should remain visible on the owner view");
 }
@@ -620,39 +620,39 @@ void TestExternalSourceFolderPersistenceFailureRetainsDisabledValue()
     auto storage = MakeStorage(temporary.path());
     storage.external_source_settings_path =
         blocker / "external-source-settings.json";
-    specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsResult result =
+    spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsResult result =
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(true),
             {});
-    const specforge::ApplicationSettingsView view =
+    const spectiary::ApplicationSettingsView view =
         settings.View();
     Require(
         result.outcome ==
-                specforge::ApplicationSettingsOutcome::
+                spectiary::ApplicationSettingsOutcome::
                     PersistenceFailed &&
             !view.open_external_source_as_folder,
         "external source save failure should retain the disabled runtime value");
     Require(
         view.StatusFor(
-                specforge::ApplicationSetting::ExternalSource)
+                spectiary::ApplicationSetting::ExternalSource)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError,
         "external source save failure should remain visible on the owner view");
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
     settings.RunMaintenance(
-        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + 10s);
     Require(
         !settings.View().open_external_source_as_folder,
         "external source save failure should remain disabled after crossing the maintenance deadline");
 
-    const specforge::ApplicationSettingsResult retry =
+    const spectiary::ApplicationSettingsResult retry =
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetOpenExternalSourceAsFolder(true),
             {});
     Require(
@@ -669,39 +669,39 @@ void TestUiScaleResetRepairsDamagedFallbackState()
         std::ofstream stream(storage.ui_scale_settings_path);
         stream << R"({"format_kind":)";
     }
-    specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView fallback =
+    spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView fallback =
         settings.View();
     Require(
         fallback.ui_scale_percentage == 100 &&
             fallback.StatusFor(
-                    specforge::ApplicationSetting::UiScale)
+                    spectiary::ApplicationSetting::UiScale)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged UI scale settings should establish a warned 100% fallback");
 
     const auto repair = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetUiScale(100),
+        spectiary::ApplicationSettingsIntent::SetUiScale(100),
         {});
     Require(
         repair.outcome ==
-                specforge::ApplicationSettingsOutcome::Applied &&
+                spectiary::ApplicationSettingsOutcome::Applied &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::UiScale)
+                        spectiary::ApplicationSetting::UiScale)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "resetting the warned fallback should rewrite and clear its status");
 
-    const specforge::ApplicationSettings reloaded(storage);
+    const spectiary::ApplicationSettings reloaded(storage);
     Require(
         reloaded.View().ui_scale_percentage == 100 &&
             reloaded.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::UiScale)
+                        spectiary::ApplicationSetting::UiScale)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "the repaired 100% UI scale should reload without warning");
 }
 
@@ -718,67 +718,67 @@ void TestLanguageAndProfileFallbacksCanBeReapplied()
         stream << R"({"format_kind":)";
     }
 
-    specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView fallback =
+    spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView fallback =
         settings.View();
     Require(
-        fallback.language == specforge::UiLanguage::English &&
+        fallback.language == spectiary::UiLanguage::English &&
             fallback.StatusFor(
-                    specforge::ApplicationSetting::Language)
+                    spectiary::ApplicationSetting::Language)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged language settings should establish a warned English fallback");
     Require(
         fallback.profile_output_directory ==
                 storage.default_profile_output_directory &&
             fallback.StatusFor(
-                    specforge::ApplicationSetting::
+                    spectiary::ApplicationSetting::
                         ProfileOutputDirectory)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged profile settings should establish a warned default fallback");
 
     const auto language_repair = settings.Apply(
-        specforge::ApplicationSettingsIntent::SetLanguage(
-            specforge::UiLanguage::English),
+        spectiary::ApplicationSettingsIntent::SetLanguage(
+            spectiary::UiLanguage::English),
         {});
     const auto profile_repair = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             RestoreDefaultProfileOutputDirectory(),
         {});
     Require(
         language_repair.applied() &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::Language)
+                        spectiary::ApplicationSetting::Language)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "reapplying the warned language fallback should rewrite and clear its status");
     Require(
         profile_repair.applied() &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::
+                        spectiary::ApplicationSetting::
                             ProfileOutputDirectory)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "restoring the warned profile fallback should rewrite and clear its status");
 
-    const specforge::ApplicationSettings reloaded(storage);
+    const spectiary::ApplicationSettings reloaded(storage);
     Require(
         reloaded.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::Language)
+                        spectiary::ApplicationSetting::Language)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready &&
+                spectiary::ApplicationSettingsStatusKind::Ready &&
             reloaded.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::
+                        spectiary::ApplicationSetting::
                             ProfileOutputDirectory)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::Ready,
+                spectiary::ApplicationSettingsStatusKind::Ready,
         "repaired language and profile defaults should reload without warning");
 }
 
@@ -813,100 +813,100 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
         stream << R"({"format_kind":)";
     }
 
-    specforge::ApplicationSettings settings(storage);
-    const specforge::ApplicationSettingsView loaded = settings.View();
-    const specforge::ApplicationSettingsStatus& language_status =
-        loaded.StatusFor(specforge::ApplicationSetting::Language);
+    spectiary::ApplicationSettings settings(storage);
+    const spectiary::ApplicationSettingsView loaded = settings.View();
+    const spectiary::ApplicationSettingsStatus& language_status =
+        loaded.StatusFor(spectiary::ApplicationSetting::Language);
     Require(
         language_status.kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning &&
             language_status.setting ==
-                specforge::ApplicationSetting::Language &&
+                spectiary::ApplicationSetting::Language &&
             language_status.reason ==
-                specforge::ApplicationSettingsStatusReason::
+                spectiary::ApplicationSettingsStatusReason::
                     SavedValueUnreadable,
         "damaged language settings should produce a typed load warning");
-    const specforge::ApplicationSettingsStatus& ui_scale_status =
-        loaded.StatusFor(specforge::ApplicationSetting::UiScale);
+    const spectiary::ApplicationSettingsStatus& ui_scale_status =
+        loaded.StatusFor(spectiary::ApplicationSetting::UiScale);
     Require(
         loaded.ui_scale_percentage == 100 &&
             ui_scale_status.kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning &&
             ui_scale_status.setting ==
-                specforge::ApplicationSetting::UiScale,
+                spectiary::ApplicationSetting::UiScale,
         "damaged UI scale settings should fall back with a typed load warning");
     Require(
         loaded.live_numeric_navigation &&
             loaded
                     .StatusFor(
-                        specforge::ApplicationSetting::Input)
+                        spectiary::ApplicationSetting::Input)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged input settings should enable live navigation with a typed load warning");
     Require(
         !loaded.open_external_source_as_folder &&
             loaded
                     .StatusFor(
-                        specforge::ApplicationSetting::
+                        spectiary::ApplicationSetting::
                             ExternalSource)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged external source settings should disable the preference with a typed load warning");
     Require(
         loaded
                 .StatusFor(
-                    specforge::ApplicationSetting::
+                    spectiary::ApplicationSetting::
                         ProfileOutputDirectory)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 LoadWarning,
         "damaged profile settings should produce a typed load warning");
     Require(
         !settings
              .PersistenceStatus(
-                 specforge::ApplicationSetting::
+                 spectiary::ApplicationSetting::
                      ProfileOutputDirectory)
              .load_warning.empty(),
         "profile load warning should reach application persistence health");
     Require(
         loaded
                 .StatusFor(
-                    specforge::ApplicationSetting::
+                    spectiary::ApplicationSetting::
                         PanelVisibility)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 LoadWarning,
         "damaged panel visibility should produce a typed load warning");
     Require(
         !settings
              .PersistenceStatus(
-                 specforge::ApplicationSetting::
+                 spectiary::ApplicationSetting::
                      PanelVisibility)
              .load_warning.empty(),
         "panel visibility warning should reach application persistence health");
     Require(
         loaded.profile_output_directory_source ==
-            specforge::ProfileOutputDirectorySource::Environment,
+            spectiary::ProfileOutputDirectorySource::Environment,
         "environment profile directory should retain explicit precedence");
 
     const auto result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetProfileOutputDirectory(
                 temporary.path() / "ignored"),
         {});
     Require(
         result.outcome ==
-                specforge::ApplicationSettingsOutcome::Rejected &&
+                spectiary::ApplicationSettingsOutcome::Rejected &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::
+                        spectiary::ApplicationSetting::
                             ProfileOutputDirectory)
                     .reason ==
-                specforge::ApplicationSettingsStatusReason::
+                spectiary::ApplicationSettingsStatusReason::
                     EnvironmentOverrideActive,
         "environment-owned profile directory should reject edits");
     Require(
@@ -921,26 +921,26 @@ void TestPanelVisibilitySharesTheSettingsLifecycle()
 
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetPanelVisibility(
-                specforge::ApplicationPanel::Annotations,
+            spectiary::ApplicationSettingsIntent::SetPanelVisibility(
+                spectiary::ApplicationPanel::Annotations,
                 false),
             {})
             .applied(),
         "panel close intent should apply");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::TogglePanelVisibility(
-                specforge::ApplicationPanel::SpectralLines),
+            spectiary::ApplicationSettingsIntent::TogglePanelVisibility(
+                spectiary::ApplicationPanel::SpectralLines),
             {})
             .applied(),
         "panel toggle intent should apply");
     settings.RunMaintenance(
-        specforge::LocalUserStateSaveScheduler::Clock::now() + 1s);
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + 1s);
 
-    specforge::ApplicationSettings reloaded(storage);
+    spectiary::ApplicationSettings reloaded(storage);
     Require(
         !reloaded.View().panel_visibility.annotations &&
             !reloaded.View().panel_visibility.spectral_lines,
@@ -948,20 +948,20 @@ void TestPanelVisibilitySharesTheSettingsLifecycle()
 
     Require(
         reloaded.Apply(
-            specforge::ApplicationSettingsIntent::ShowAllPanels(),
+            spectiary::ApplicationSettingsIntent::ShowAllPanels(),
             {})
             .applied(),
         "show-all intent should apply atomically");
     Require(
         reloaded.View().panel_visibility ==
-            specforge::PanelVisibilityState{},
+            spectiary::PanelVisibilityState{},
         "show-all intent should update the complete projection");
     reloaded.RunMaintenance(
-        specforge::LocalUserStateSaveScheduler::Clock::now() + 1s);
-    const specforge::ApplicationSettings restored(storage);
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + 1s);
+    const spectiary::ApplicationSettings restored(storage);
     Require(
         restored.View().panel_visibility ==
-            specforge::PanelVisibilityState{},
+            spectiary::PanelVisibilityState{},
         "show-all intent should persist through maintenance and reload");
 }
 
@@ -969,8 +969,8 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
 {
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
-    specforge::AutomationPanelMutationChain chain;
+    spectiary::ApplicationSettings settings(storage);
+    spectiary::AutomationPanelMutationChain chain;
 
     const bool initial_visible =
         settings.View().panel_visibility.files;
@@ -980,9 +980,9 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
 
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     false),
             {})
             .applied(),
@@ -997,9 +997,9 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
         settings.View().panel_visibility.files;
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     true),
             {})
             .applied(),
@@ -1017,9 +1017,9 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
         "superseding an unpresented generation must preserve the pre-chain rollback baseline");
 
     (void)settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetPanelVisibility(
-                specforge::ApplicationPanel::Files,
+                spectiary::ApplicationPanel::Files,
                 chain.baseline_visible()),
         {});
     chain.Clear();
@@ -1030,22 +1030,22 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
         settings.Flush().all_saved(),
         "the restored production state should flush through the real panel cache owner");
 
-    const specforge::ApplicationSettings reloaded(storage);
+    const spectiary::ApplicationSettings reloaded(storage);
     Require(
         reloaded.View().panel_visibility.files,
         "the final panel cache must retain the pre-chain value after rollback and shutdown-style flush");
 
     const auto applied_storage =
         MakeStorage(temporary.path() / "applied-rollback");
-    specforge::ApplicationSettings applied_settings(
+    spectiary::ApplicationSettings applied_settings(
         applied_storage);
-    specforge::AutomationPanelMutationChain
+    spectiary::AutomationPanelMutationChain
         applied_chain;
     Require(
         applied_settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     false),
             {})
             .applied(),
@@ -1057,20 +1057,20 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
         20);
     const auto applied_rollback =
         applied_settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetPanelVisibility(
-                    specforge::ApplicationPanel::Files,
+                    spectiary::ApplicationPanel::Files,
                     applied_chain.baseline_visible()),
             {});
     applied_chain.Clear();
     Require(
         applied_rollback.outcome ==
-            specforge::ApplicationSettingsOutcome::Applied,
+            spectiary::ApplicationSettingsOutcome::Applied,
         "a single unpresented generation must exercise a real Applied restoration mutation");
     Require(
         applied_settings.Flush().all_saved(),
         "an Applied restoration should mark the real panel cache dirty and flush successfully");
-    const specforge::ApplicationSettings
+    const spectiary::ApplicationSettings
         applied_reloaded(applied_storage);
     Require(
         applied_reloaded.View().panel_visibility.files,
@@ -1081,17 +1081,17 @@ void TestProfileDirectoryChangeIsRejectedWhileRecording()
 {
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
     const auto result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             SetProfileOutputDirectory(
                 temporary.path() / "recording-target"),
         {.profile_recording_in_progress = true});
 
     Require(
         result.outcome ==
-            specforge::ApplicationSettingsOutcome::Rejected,
+            spectiary::ApplicationSettingsOutcome::Rejected,
         "recording should reject a profile directory change in the owner");
     Require(
         settings.View().profile_output_directory ==
@@ -1100,10 +1100,10 @@ void TestProfileDirectoryChangeIsRejectedWhileRecording()
     Require(
         settings.View()
                 .StatusFor(
-                    specforge::ApplicationSetting::
+                    spectiary::ApplicationSetting::
                         ProfileOutputDirectory)
                 .reason ==
-            specforge::ApplicationSettingsStatusReason::
+            spectiary::ApplicationSettingsStatusReason::
                 RecordingInProgress,
         "recording rejection should remain visible on the profile setting");
 
@@ -1111,18 +1111,18 @@ void TestProfileDirectoryChangeIsRejectedWhileRecording()
         temporary.path() / "custom-target";
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetProfileOutputDirectory(custom_directory),
             {})
             .applied(),
         "profile directory should remain editable when recording is inactive");
     const auto restore_result = settings.Apply(
-        specforge::ApplicationSettingsIntent::
+        spectiary::ApplicationSettingsIntent::
             RestoreDefaultProfileOutputDirectory(),
         {.profile_recording_in_progress = true});
     Require(
         restore_result.outcome ==
-            specforge::ApplicationSettingsOutcome::Rejected,
+            spectiary::ApplicationSettingsOutcome::Rejected,
         "recording should also reject restoring the profile directory");
     Require(
         settings.View().profile_output_directory ==
@@ -1142,39 +1142,39 @@ void TestSuccessfulSettingDoesNotClearAnotherSettingsStatus()
     auto storage = MakeStorage(temporary.path());
     storage.language_settings_path =
         blocker / "ui-language.json";
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::SimplifiedChinese),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::SimplifiedChinese),
             {})
                 .outcome ==
-            specforge::ApplicationSettingsOutcome::
+            spectiary::ApplicationSettingsOutcome::
                 PersistenceFailed,
         "language persistence failure should be observable");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetProfileOutputDirectory(
                     temporary.path() / "profiles-2"),
             {})
             .applied(),
         "independent profile directory change should apply");
 
-    const specforge::ApplicationSettingsView view = settings.View();
+    const spectiary::ApplicationSettingsView view = settings.View();
     Require(
-        view.StatusFor(specforge::ApplicationSetting::Language)
+        view.StatusFor(spectiary::ApplicationSetting::Language)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::
+            spectiary::ApplicationSettingsStatusKind::
                 PersistenceError,
         "successful profile change must not clear language failure");
     Require(
         view.StatusFor(
-                specforge::ApplicationSetting::
+                spectiary::ApplicationSetting::
                     ProfileOutputDirectory)
                 .kind ==
-            specforge::ApplicationSettingsStatusKind::Ready,
+            spectiary::ApplicationSettingsStatusKind::Ready,
         "successful profile change should clear only its own status");
 }
 
@@ -1192,27 +1192,27 @@ void TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure()
     auto storage = MakeStorage(temporary.path());
     storage.language_settings_path =
         blocker / "ui-language.json";
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::SimplifiedChinese),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::SimplifiedChinese),
             {})
                 .outcome ==
-            specforge::ApplicationSettingsOutcome::
+            spectiary::ApplicationSettingsOutcome::
                 PersistenceFailed,
         "a failed language owner should become a terminal setting failure");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetPanelVisibility(
-                specforge::ApplicationPanel::Annotations,
+            spectiary::ApplicationSettingsIntent::SetPanelVisibility(
+                spectiary::ApplicationPanel::Annotations,
                 false),
             {})
             .applied(),
         "an independent panel owner should still apply after a language failure");
 
-    const specforge::ApplicationSettingsFlushResult flushed =
+    const spectiary::ApplicationSettingsFlushResult flushed =
         settings.Flush();
     Require(
         flushed.language_saved &&
@@ -1223,16 +1223,16 @@ void TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure()
             flushed.panel_visibility_saved,
         "settings shutdown flush should not retry a terminal transactional setting failure");
     Require(
-        !specforge::LoadPanelVisibilityStateCache(
+        !spectiary::LoadPanelVisibilityStateCache(
              storage.panel_visibility_path)
              .state.annotations,
         "a successful panel owner must not be swallowed by a language failure");
     Require(
         !settings.PersistenceStatus(
-                     specforge::ApplicationSetting::Language)
+                     spectiary::ApplicationSetting::Language)
              .retrying &&
             !settings.PersistenceStatus(
-                     specforge::ApplicationSetting::Language)
+                     spectiary::ApplicationSetting::Language)
                  .save_message.empty(),
         "a terminal language failure should remain a warning without retrying after shutdown flush");
 
@@ -1242,22 +1242,22 @@ void TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure()
         !settings.NextMaintenanceDeadline().has_value(),
         "repairing the path must not resurrect a terminal language retry deadline");
     settings.RunMaintenance(
-        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + 10s);
     Require(
-        settings.View().language == specforge::UiLanguage::English,
+        settings.View().language == spectiary::UiLanguage::English,
         "maintenance after a repaired path must not publish the failed language setting");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetLanguage(
-                specforge::UiLanguage::SimplifiedChinese),
+            spectiary::ApplicationSettingsIntent::SetLanguage(
+                spectiary::UiLanguage::SimplifiedChinese),
             {})
             .applied(),
         "a new explicit language request should be allowed to retry after repair");
     Require(
         settings.View().language ==
-                specforge::UiLanguage::SimplifiedChinese &&
+                spectiary::UiLanguage::SimplifiedChinese &&
             settings.PersistenceStatus(
-                        specforge::ApplicationSetting::Language)
+                        spectiary::ApplicationSetting::Language)
                 .recovered,
         "the language owner should commit and report recovery after an explicit reapply");
 }
@@ -1276,17 +1276,17 @@ void TestProfileDirectoryPersistenceFailureDoesNotRetryIntoRecording()
     auto storage = MakeStorage(temporary.path());
     storage.profile_settings_path =
         blocker / "profile-settings.json";
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
     const std::filesystem::path requested_directory =
         temporary.path() / "recording-target";
 
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetProfileOutputDirectory(requested_directory),
             {})
             .outcome ==
-            specforge::ApplicationSettingsOutcome::PersistenceFailed,
+            spectiary::ApplicationSettingsOutcome::PersistenceFailed,
         "a blocked profile directory save should fail before publishing");
     Require(
         settings.View().profile_output_directory ==
@@ -1297,24 +1297,24 @@ void TestProfileDirectoryPersistenceFailureDoesNotRetryIntoRecording()
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
     settings.RunMaintenance(
-        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + 10s);
     Require(
         settings.View().profile_output_directory ==
             storage.default_profile_output_directory,
         "maintenance after repair must not publish the failed profile directory");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetProfileOutputDirectory(requested_directory),
             {.profile_recording_in_progress = true})
             .outcome ==
-            specforge::ApplicationSettingsOutcome::Rejected &&
+            spectiary::ApplicationSettingsOutcome::Rejected &&
             settings.View().profile_output_directory ==
                 storage.default_profile_output_directory,
         "a new profile directory request must still honor recording protection");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetProfileOutputDirectory(requested_directory),
             {})
             .applied() &&
@@ -1329,17 +1329,17 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
     TemporaryDirectory temporary;
     auto storage = MakeStorage(temporary.path());
     std::filesystem::create_directory(storage.panel_visibility_path);
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
     Require(
         settings.View()
-                .StatusFor(specforge::ApplicationSetting::PanelVisibility)
-                .kind == specforge::ApplicationSettingsStatusKind::LoadWarning,
+                .StatusFor(spectiary::ApplicationSetting::PanelVisibility)
+                .kind == spectiary::ApplicationSettingsStatusKind::LoadWarning,
         "a blocked panel cache should establish an owner load warning");
     Require(
         settings.Apply(
-            specforge::ApplicationSettingsIntent::SetPanelVisibility(
-                specforge::ApplicationPanel::Annotations,
+            spectiary::ApplicationSettingsIntent::SetPanelVisibility(
+                spectiary::ApplicationPanel::Annotations,
                 false),
             {})
             .applied(),
@@ -1354,7 +1354,7 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
         std::filesystem::is_directory(storage.panel_visibility_path),
         "panel visibility should not attempt its save before the debounce deadline");
 
-    const specforge::ApplicationSettingsFlushResult failed =
+    const spectiary::ApplicationSettingsFlushResult failed =
         settings.Flush();
     Require(
         failed.language_saved &&
@@ -1364,9 +1364,9 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
             failed.profile_output_directory_saved &&
             !failed.panel_visibility_saved,
         "panel failure should remain an independent ApplicationSettings flush result");
-    const specforge::LocalUserStatePersistenceStatus retrying =
+    const spectiary::LocalUserStatePersistenceStatus retrying =
         settings.PersistenceStatus(
-            specforge::ApplicationSetting::PanelVisibility);
+            spectiary::ApplicationSetting::PanelVisibility);
     Require(
         retrying.retrying &&
             !retrying.save_message.empty() &&
@@ -1384,28 +1384,28 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
         "panel retry should not run before its retry deadline");
     settings.RunMaintenance(*retry_deadline);
 
-    const specforge::LocalUserStatePersistenceStatus recovered =
+    const spectiary::LocalUserStatePersistenceStatus recovered =
         settings.PersistenceStatus(
-            specforge::ApplicationSetting::PanelVisibility);
+            spectiary::ApplicationSetting::PanelVisibility);
     Require(
         recovered.recovered &&
             !recovered.retrying &&
             recovered.load_warning.empty() &&
             !settings.NextMaintenanceDeadline().has_value() &&
             settings.View()
-                    .StatusFor(specforge::ApplicationSetting::PanelVisibility)
-                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+                    .StatusFor(spectiary::ApplicationSetting::PanelVisibility)
+                    .kind == spectiary::ApplicationSettingsStatusKind::Ready,
         "panel retry should recover the real owner status and clear its deadline");
     Require(
         std::filesystem::exists(storage.panel_visibility_path),
         "panel retry should write the cache through the real owner");
 
-    const specforge::ApplicationSettings reloaded(storage);
+    const spectiary::ApplicationSettings reloaded(storage);
     Require(
         !reloaded.View().panel_visibility.annotations &&
             reloaded.View()
-                    .StatusFor(specforge::ApplicationSetting::PanelVisibility)
-                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+                    .StatusFor(spectiary::ApplicationSetting::PanelVisibility)
+                    .kind == spectiary::ApplicationSettingsStatusKind::Ready,
         "reloaded ApplicationSettings should retain the recovered panel visibility");
 }
 
@@ -1419,36 +1419,36 @@ void TestAppearanceFallbackWarningsAndRepair()
     }
 
     {
-        specforge::ApplicationSettings damaged(storage);
-        const specforge::ApplicationSettingsView fallback =
+        spectiary::ApplicationSettings damaged(storage);
+        const spectiary::ApplicationSettingsView fallback =
             damaged.View();
         Require(
             fallback.theme_selection ==
-                    specforge::ThemeSelection::FollowSystem() &&
+                    spectiary::ThemeSelection::FollowSystem() &&
                 fallback
                         .StatusFor(
-                            specforge::ApplicationSetting::Appearance)
+                            spectiary::ApplicationSetting::Appearance)
                         .kind ==
-                    specforge::ApplicationSettingsStatusKind::LoadWarning &&
+                    spectiary::ApplicationSettingsStatusKind::LoadWarning &&
                 !damaged
                      .PersistenceStatus(
-                         specforge::ApplicationSetting::Appearance)
+                         spectiary::ApplicationSetting::Appearance)
                      .load_warning.empty(),
             "corrupt appearance settings should warn and fall back to following the system");
 
-        const specforge::ApplicationSettingsResult repaired =
+        const spectiary::ApplicationSettingsResult repaired =
             damaged.Apply(
-                specforge::ApplicationSettingsIntent::
+                spectiary::ApplicationSettingsIntent::
                     SetThemeSelection(
-                        specforge::ThemeSelection::FollowSystem()),
+                        spectiary::ThemeSelection::FollowSystem()),
                 {});
         Require(
             repaired.applied() &&
                 damaged.View()
                         .StatusFor(
-                            specforge::ApplicationSetting::Appearance)
+                            spectiary::ApplicationSetting::Appearance)
                         .kind ==
-                    specforge::ApplicationSettingsStatusKind::Ready,
+                    spectiary::ApplicationSettingsStatusKind::Ready,
             "re-selecting a warned follow-system fallback should repair its settings file");
         const std::string repaired_document =
             ReadFile(storage.appearance_settings_path);
@@ -1466,33 +1466,33 @@ void TestAppearanceFallbackWarningsAndRepair()
         stream
             << R"({"format_kind":"spectiary.appearance.settings","schema_version":1,"selection_policy":"explicit","theme_id":"spectiary.theme.future"})";
     }
-    specforge::ApplicationSettings unknown(storage);
+    spectiary::ApplicationSettings unknown(storage);
     Require(
         unknown.View().theme_selection ==
-                specforge::ThemeSelection::FollowSystem() &&
+                spectiary::ThemeSelection::FollowSystem() &&
             unknown.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::Appearance)
+                        spectiary::ApplicationSetting::Appearance)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::LoadWarning,
+                spectiary::ApplicationSettingsStatusKind::LoadWarning,
         "an unknown persisted theme ID should warn and fall back to following the system");
 
-    const specforge::ApplicationSettingsResult rejected =
+    const spectiary::ApplicationSettingsResult rejected =
         unknown.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetThemeSelection(
-                    specforge::ThemeSelection::Explicit(
-                        specforge::ThemeId(
+                    spectiary::ThemeSelection::Explicit(
+                        spectiary::ThemeId(
                             std::string_view(
                                 "spectiary.theme.future")))),
             {});
     Require(
         rejected.outcome ==
-                specforge::ApplicationSettingsOutcome::Rejected &&
+                spectiary::ApplicationSettingsOutcome::Rejected &&
             rejected.setting ==
-                specforge::ApplicationSetting::Appearance &&
+                spectiary::ApplicationSetting::Appearance &&
             unknown.View().theme_selection ==
-                specforge::ThemeSelection::FollowSystem(),
+                spectiary::ThemeSelection::FollowSystem(),
         "unsupported explicit theme intents should be rejected without changing the fallback");
 }
 
@@ -1508,26 +1508,26 @@ void TestAppearancePersistenceFailureRetainsPreviousSelection()
     auto storage = MakeStorage(temporary.path());
     storage.appearance_settings_path =
         blocker / "appearance-settings.json";
-    specforge::ApplicationSettings settings(storage);
+    spectiary::ApplicationSettings settings(storage);
 
-    const specforge::ApplicationSettingsResult result =
+    const spectiary::ApplicationSettingsResult result =
         settings.Apply(
-            specforge::ApplicationSettingsIntent::
+            spectiary::ApplicationSettingsIntent::
                 SetThemeSelection(
-                    specforge::ThemeSelection::Explicit(
-                        specforge::BuiltInLightThemeId())),
+                    spectiary::ThemeSelection::Explicit(
+                        spectiary::BuiltInLightThemeId())),
             {});
     Require(
         result.outcome ==
-                specforge::ApplicationSettingsOutcome::
+                spectiary::ApplicationSettingsOutcome::
                     PersistenceFailed &&
             settings.View().theme_selection ==
-                specforge::ThemeSelection::FollowSystem() &&
+                spectiary::ThemeSelection::FollowSystem() &&
             settings.View()
                     .StatusFor(
-                        specforge::ApplicationSetting::Appearance)
+                        spectiary::ApplicationSetting::Appearance)
                     .kind ==
-                specforge::ApplicationSettingsStatusKind::
+                spectiary::ApplicationSettingsStatusKind::
                     PersistenceError,
         "a failed appearance write should retain the previous selection and expose the shared persistence error");
 }

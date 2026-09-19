@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SampleSortingSource {
     std::string id;
@@ -42,4 +42,4 @@ struct SampleSortingSource {
     std::string_view source_id,
     const std::function<void()>& cancellation_checkpoint);
 
-}  // namespace specforge
+}  // namespace spectiary

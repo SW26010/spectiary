@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 [[nodiscard]] inline std::wstring Utf8ToWide(
     std::string_view value)
@@ -86,4 +86,4 @@ namespace specforge {
     return converted;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

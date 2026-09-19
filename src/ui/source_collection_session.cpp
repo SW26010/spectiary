@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 using namespace std::chrono_literals;
@@ -1923,4 +1923,4 @@ SourceCollectionSessionAction SourceCollectionSession::AdoptRosterOpenResult(
     return result.action;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

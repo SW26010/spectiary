@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 
 using SpectrumLoadCheckpoint = std::function<void()>;
 
@@ -100,4 +100,4 @@ SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(
     LoadedSpectrum loaded,
     const SpectrumLoadCheckpoint& cancellation_checkpoint = {});
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

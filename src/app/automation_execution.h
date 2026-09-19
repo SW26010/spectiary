@@ -7,7 +7,7 @@
 #include <optional>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 // Owns accepted source/navigation/label commands, never source or session data.
 // Callbacks run synchronously on the application thread. Terminal callbacks retire
@@ -87,4 +87,4 @@ private:
         automation_label_command_;
 
 };
-} // namespace specforge
+} // namespace spectiary

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 // Produces a process-local Windows source identity without probing the target.
 // It deliberately uses only absolute/lexical normalization: canonical() and
@@ -26,4 +26,4 @@ OutputPathIdentityKeys(
 [[nodiscard]] std::string OutputPathIdentityKey(
     const std::filesystem::path& path);
 
-}  // namespace specforge
+}  // namespace spectiary

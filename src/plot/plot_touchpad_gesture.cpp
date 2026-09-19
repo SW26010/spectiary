@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 bool UsesXAxis(PlotGestureAxes axes)
@@ -177,4 +177,4 @@ bool ApplyPlotTouchpadGestures(
     return changed;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -2,7 +2,7 @@
 
 ## 定位
 
-SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pan、wheel zoom、上一条/下一条、range navigation、labeling shortcut 和 panel 操作都必须保持跟手；sample filtering、sorting、labeling、annotation、source session view 或本地状态功能不能把重计算、IO、全量序列构造带进这些热路径。
+Spectiary 的 UI 响应速度是产品目标，不是后期优化项。主图 pan、wheel zoom、上一条/下一条、range navigation、labeling shortcut 和 panel 操作都必须保持跟手；sample filtering、sorting、labeling、annotation、source session view 或本地状态功能不能把重计算、IO、全量序列构造带进这些热路径。
 
 `docs/performance_testing.md` 记录如何采集和判断 ImPlot pan/drag profile。本文件记录实现层面的约束、已发生的退化原因、修复方式和后续设计规则。
 
@@ -143,7 +143,7 @@ load completion、maintenance、roster mutation 与 pending cancellation 的精�
 ## 复盘：2026-07-23 folder navigation 重复扫描
 
 现象：完整且 `dropped_events=0` 的
-`specforge-profile-20260723-110532-476.jsonl` 包含 385 次 folder load attempt。
+`spectiary-profile-20260723-110532-476.jsonl` 包含 385 次 folder load attempt。
 folder attempt 的 `source_inspection_ms` p50/p95 为 31.964/133.228ms，
 `source_revalidation_ms` p50/p95 为 18.106/137.465ms，而 decode p50/p95
 仅为 7.607/15.241ms。一次代表性翻页在解码前扫描 127.536ms、解码后扫描
@@ -174,7 +174,7 @@ folder attempt 的 `source_inspection_ms` p50/p95 为 31.964/133.228ms，
   generation 一次扫描。
 
 真实复测：完整且 `dropped_events=0` 的
-`specforge-profile-20260723-115613-134.jsonl` 包含 371 次 folder load attempt。
+`spectiary-profile-20260723-115613-134.jsonl` 包含 371 次 folder load attempt。
 `source_inspection_ms` p50/p95 已降为 0.266/1.082ms，证明 warm path 不再执行完整
 pre-decode 枚举；`source_revalidation_ms` p50/p95 为 18.103/137.226ms，证明一次完整
 post-decode scan 仍在。437 次 presented navigation 的总体 input-to-Present p95 为
@@ -192,7 +192,7 @@ listing generation handle 直接作为 opaque retirement token
 `navigation_latency.cache_hit` 仍保持原语义。
 
 随后完整且 `dropped_events=0` 的
-`specforge-profile-20260723-121328-397.jsonl` 再次确认剩余热点。312 次 presented
+`spectiary-profile-20260723-121328-397.jsonl` 再次确认剩余热点。312 次 presented
 navigation 中，keyboard Next 的 `source_revalidation_ms` p50/p95 为
 16.825/146.121ms，UI Next 为 142.839/146.576ms；相对地 keyboard Next 的
 `source_inspection_ms` p50/p95 仅为 0.235/0.323ms，decode 为 0.791/5.463ms。
@@ -225,9 +225,9 @@ scan、加载期间目录变化只扫描 replacement generation，以及 notific
 `source_revalidation_ms` 与 input-to-Present 的新分布；这些测试只证明调用次数和失效合同。
 
 第三阶段的修改前 Release 基线是
-`dist/SpecForge-portable/Data/logs/specforge-profile-20260723-155759-657.jsonl`。
+`dist/Spectiary-portable/Data/logs/spectiary-profile-20260723-155759-657.jsonl`。
 在重建会清空 package `Data` 的 Portable 包之前，已将同 SHA-256 的本地证据副本保存在
-`logs/specforge-profile-20260723-155759-657.jsonl`。
+`logs/spectiary-profile-20260723-155759-657.jsonl`。
 该日志 summary 完整、`dropped_events=0`，582 次导航中 578 次 presented、4 次正常
 superseded。navigation analyzer 的 `Result: PASS` 只证明日志结构、时间戳关联和录制完整，
 不表示达到某个导航预算；通用 pan analyzer 因只有一次 57.3ms 的偶发拖拽、没有合格测试
@@ -267,7 +267,7 @@ navigation 为 0；source、companion、annotation 或 generation 变化为 1；
 新增 `context_reused`，旧日志仍可由 analyzer 读取。
 
 修改后的同数据 Portable Release 记录为
-`logs/context-reuse-ab-after/specforge-profile-20260723-163115-308.jsonl`。日志 summary
+`logs/context-reuse-ab-after/spectiary-profile-20260723-163115-308.jsonl`。日志 summary
 完整、`dropped_events=0`，429 次导航中 421 次 presented、8 次正常 superseded；
 navigation analyzer 为 `PASS`。全部 421 个最终 attempt 都是 `context_reused=true`：
 file 110 个，`context_prepare` p50/p95 为 0.033/0.055ms；folder 311 个，

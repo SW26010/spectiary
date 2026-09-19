@@ -8,7 +8,7 @@
 #include <optional>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 struct D3D11FrameCaptureResult {
     HRESULT result = E_FAIL;
@@ -35,4 +35,4 @@ CaptureD3D11TextureToPng(
     const std::optional<std::filesystem::path>&
         allowed_root = std::nullopt);
 
-}  // namespace specforge
+}  // namespace spectiary

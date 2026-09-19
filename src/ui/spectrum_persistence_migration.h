@@ -3,7 +3,7 @@
 #include "ui/spectrum_plot_preferences_io.h"
 #include "ui/spectrum_viewport_state_io.h"
 
-namespace specforge {
+namespace spectiary {
 
 // One startup cutover, only into missing targets. Existing split documents,
 // including unreadable/unsupported ones, always retain their own authority.
@@ -13,4 +13,4 @@ void MigrateLegacySpectrumViewState(
     SpectrumPlotPreferencesLoadResult& preferences,
     SpectrumViewportStateLoadResult& viewport);
 
-}  // namespace specforge
+}  // namespace spectiary

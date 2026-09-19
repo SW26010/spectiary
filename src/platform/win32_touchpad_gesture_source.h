@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace specforge {
+namespace spectiary {
 
 enum class Win32TouchpadQueuedMessageAction {
     InvalidateRender,
@@ -75,4 +75,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

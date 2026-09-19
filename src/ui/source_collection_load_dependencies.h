@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <stop_token>
 
-namespace specforge {
+namespace spectiary {
 
 class SourceCollectionPreparationCanceled : public std::runtime_error {
 public:
@@ -52,4 +52,4 @@ struct SourceCollectionLoadDependencies {
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

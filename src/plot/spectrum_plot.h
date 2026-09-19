@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace specforge {
+namespace spectiary {
 
 class ProfileSink;
 
@@ -98,4 +98,4 @@ struct SpectralLineVisualColors {
     bool left_button_down,
     bool left_button_dragging) noexcept;
 
-}  // namespace specforge
+}  // namespace spectiary

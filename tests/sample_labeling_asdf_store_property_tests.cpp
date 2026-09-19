@@ -22,11 +22,11 @@
 
 namespace {
 
-using specforge::SampleLabelingAsdfOpenSnapshot;
-using specforge::SampleLabelingAsdfStoreErrorKind;
-using specforge::SampleLabelingAsdfStoreGenerationWriteResult;
-using specforge::SampleLabelingAsdfStoreWriteResult;
-using specforge::SampleLabelingDocument;
+using spectiary::SampleLabelingAsdfOpenSnapshot;
+using spectiary::SampleLabelingAsdfStoreErrorKind;
+using spectiary::SampleLabelingAsdfStoreGenerationWriteResult;
+using spectiary::SampleLabelingAsdfStoreWriteResult;
+using spectiary::SampleLabelingDocument;
 
 constexpr std::array<std::string_view, 9> kForwardUnknownTokens = {
     "future_vendor",
@@ -52,7 +52,7 @@ std::filesystem::path FreshTestDirectory(std::string_view name)
     static std::uint64_t sequence = 0;
     const std::filesystem::path directory =
         std::filesystem::temp_directory_path() /
-        ("specforge-asdf-store-property-" + std::string(name) + "-" +
+        ("spectiary-asdf-store-property-" + std::string(name) + "-" +
             std::to_string(++sequence));
     std::error_code error;
     std::filesystem::remove_all(directory, error);
@@ -64,7 +64,7 @@ std::filesystem::path FreshTestDirectory(std::string_view name)
 
 std::filesystem::path FixturePath(std::string_view name)
 {
-    return std::filesystem::path(SPECFORGE_ASDF_LABELING_FIXTURE_DIR) /
+    return std::filesystem::path(SPECTIARY_ASDF_LABELING_FIXTURE_DIR) /
         std::string(name);
 }
 
@@ -184,7 +184,7 @@ std::string FileSha256(const std::filesystem::path& path)
 {
     std::string error;
     const std::optional<std::string> digest =
-        specforge::ComputeFileSha256(path, &error);
+        spectiary::ComputeFileSha256(path, &error);
     Require(digest.has_value(), error.empty()
         ? "property test SHA-256 should succeed"
         : error);
@@ -200,7 +200,7 @@ SampleLabelingDocument MakeDocument()
     document.source.fingerprint = "source-fingerprint-v1";
     document.source.sample_count = 3;
     document.source.roster.identity_kind = std::string{
-        specforge::kSampleLabelingDocumentExplicitNamesRoster};
+        spectiary::kSampleLabelingDocumentExplicitNamesRoster};
     document.source.roster.sample_names = {
         "sample-a",
         "sample-b",
@@ -209,7 +209,7 @@ SampleLabelingDocument MakeDocument()
     document.annotation.values = {-1, 2, 7};
     document.labeling.id = "00000000-0000-4000-8000-000000000005";
     document.labeling.name = "Quality review";
-    const auto timestamp = specforge::ParseCanonicalTimestamp(
+    const auto timestamp = spectiary::ParseCanonicalTimestamp(
         "2026-08-30T08:00:00.000Z");
     Require(timestamp.has_value(), "property timestamp should parse");
     document.labeling.canonical_metadata.created_at = *timestamp;
@@ -222,10 +222,10 @@ SampleLabelingDocument MakeDocument()
     return document;
 }
 
-specforge::SampleLabelingSourceCompatibility CompatibleSource(
+spectiary::SampleLabelingSourceCompatibility CompatibleSource(
     const SampleLabelingDocument& document)
 {
-    return specforge::SampleLabelingSourceCompatibility{
+    return spectiary::SampleLabelingSourceCompatibility{
         .base_identity = document.source.base_identity,
         .source_kind = document.source.kind,
         .source_name = document.source.name,
@@ -235,11 +235,11 @@ specforge::SampleLabelingSourceCompatibility CompatibleSource(
     };
 }
 
-specforge::CanonicalTimestamp AdvancedTimestamp(
-    specforge::CanonicalTimestamp timestamp,
+spectiary::CanonicalTimestamp AdvancedTimestamp(
+    spectiary::CanonicalTimestamp timestamp,
     std::chrono::milliseconds delta = std::chrono::milliseconds{1})
 {
-    const auto advanced = specforge::CanonicalTimestamp::FromTimePoint(
+    const auto advanced = spectiary::CanonicalTimestamp::FromTimePoint(
         timestamp.time_point() + delta);
     Require(advanced.has_value(), "advanced property timestamp should fit");
     return *advanced;
@@ -335,8 +335,8 @@ void RequireTargetMatches(
     const SampleLabelingDocument& expected,
     std::string_view context)
 {
-    const specforge::SampleLabelingAsdfReadResult reread =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult reread =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(reread.succeeded() &&
             DocumentsEqual(*reread.document, expected),
         context);
@@ -347,7 +347,7 @@ struct TrustedGeneration {
     std::string sha256;
     SampleLabelingDocument document;
     std::vector<std::int32_t> values;
-    specforge::CanonicalTimestamp modified_at;
+    spectiary::CanonicalTimestamp modified_at;
     std::shared_ptr<const SampleLabelingDocument> document_handle;
     std::vector<std::string> unknown_tokens;
 };
@@ -405,8 +405,8 @@ void VerifyDurableBaseRepresentsTrustedGeneration(
     // publication had incorrectly advanced the in-memory durable base to T+1.
     probe.labeling.canonical_metadata.modified_at = trusted.modified_at;
     std::ostringstream output(std::ios::out | std::ios::binary);
-    const specforge::SampleLabelingAsdfWriteResult rewritten =
-        specforge::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
+    const spectiary::SampleLabelingAsdfWriteResult rewritten =
+        spectiary::RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
             snapshot.durable_base(), output, probe);
     Require(rewritten.succeeded() && rewritten.durable_base.has_value(),
         "old durable base should still encode from the trusted generation");
@@ -435,15 +435,15 @@ void RequireTrustedGenerationUnchanged(
     Require(snapshot.durable_base().valid(), context);
     RequireUnknownTokens(bytes, trusted.unknown_tokens, context);
     Require(!HasTemporarySibling(path), context);
-    const specforge::SampleLabelingAsdfReadResult reread =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult reread =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(reread.succeeded() &&
             DocumentsEqual(*reread.document, trusted.document),
         context);
     VerifyDurableBaseRepresentsTrustedGeneration(snapshot, trusted);
 }
 
-specforge::SampleLabelingAsdfStoreOpenResult OpenForwardUnknownFixture(
+spectiary::SampleLabelingAsdfStoreOpenResult OpenForwardUnknownFixture(
     const std::filesystem::path& path)
 {
     const std::vector<unsigned char> bytes =
@@ -451,17 +451,17 @@ specforge::SampleLabelingAsdfStoreOpenResult OpenForwardUnknownFixture(
     Require(PresentUnknownTokens(bytes).size() == kForwardUnknownTokens.size(),
         "forward fixture should contain every supported unknown mapping token");
     WriteAllBytes(path, bytes);
-    const specforge::SampleLabelingAsdfReadResult read =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult read =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(read.succeeded(), "forward fixture should read");
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(*read.document));
     Require(opened.succeeded(), "forward fixture should open as a store");
     return opened;
 }
 
-specforge::sample_labeling_asdf_store_test_seam::BeforeReplace
+spectiary::sample_labeling_asdf_store_test_seam::BeforeReplace
 InterruptBeforeReplace(bool& checkpoint_reached)
 {
     return [&checkpoint_reached](
@@ -484,7 +484,7 @@ void TestFirstFullPublicationOperation()
     const SampleLabelingDocument intended = MakeDocument();
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreGenerationWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             WriteAndOpenWithCheckpoints(
                 path,
                 intended,
@@ -502,7 +502,7 @@ void TestFirstFullPublicationOperation()
         "first publication interruption should leave no partial output");
 
     const SampleLabelingAsdfStoreGenerationWriteResult retry =
-        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+        spectiary::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
             path, intended, CompatibleSource(intended));
     Require(retry.succeeded() && retry.document_replaced &&
             DocumentsEqual(retry.snapshot->document(), intended),
@@ -516,11 +516,11 @@ void TestOverwriteExistingOperation()
     const std::filesystem::path path =
         FreshTestDirectory("overwrite-existing") / "labels.asdf";
     const SampleLabelingDocument original = MakeDocument();
-    Require(specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+    Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "overwrite fixture should write");
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(original));
     Require(opened.succeeded(), "overwrite fixture should open");
     const TrustedGeneration trusted =
@@ -532,7 +532,7 @@ void TestOverwriteExistingOperation()
 
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             WriteWithBeforeReplace(
                 path,
                 intended,
@@ -547,12 +547,12 @@ void TestOverwriteExistingOperation()
         "full overwrite interruption should preserve the trusted generation");
 
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, intended);
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, intended);
     Require(retry.succeeded(), retry.error.message.empty()
         ? "full overwrite retry should succeed"
         : retry.error.message);
-    const specforge::SampleLabelingAsdfReadResult reread =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult reread =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(reread.succeeded() && DocumentsEqual(*reread.document, intended),
         "full overwrite retry should publish the intended generation");
 }
@@ -561,7 +561,7 @@ void TestValuesRewriteOperation()
 {
     const std::filesystem::path path =
         FreshTestDirectory("values-rewrite") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -574,7 +574,7 @@ void TestValuesRewriteOperation()
 
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteWithBeforeReplace(
                 *opened.snapshot,
                 intended,
@@ -589,10 +589,10 @@ void TestValuesRewriteOperation()
         "values rewrite interruption should preserve the trusted generation");
 
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot, intended);
-    const specforge::SampleLabelingDocumentBuildSource current_build =
-        specforge::CurrentSampleLabelingDocumentBuildSource();
+    const spectiary::SampleLabelingDocumentBuildSource current_build =
+        spectiary::CurrentSampleLabelingDocumentBuildSource();
     Require(retry.succeeded() && retry.roster_block_reused &&
             DocumentsEqual(opened.snapshot->document(), intended) &&
             opened.snapshot->document().build_source.source_mode ==
@@ -610,7 +610,7 @@ void TestMetadataRewriteOperation()
 {
     const std::filesystem::path path =
         FreshTestDirectory("metadata-rewrite") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -621,7 +621,7 @@ void TestMetadataRewriteOperation()
 
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteDocumentWithBeforeReplace(
                 *opened.snapshot,
                 intended,
@@ -636,7 +636,7 @@ void TestMetadataRewriteOperation()
         "metadata rewrite interruption should preserve the trusted generation");
 
     const SampleLabelingAsdfStoreGenerationWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
             *opened.snapshot, intended, CompatibleSource(intended));
     Require(retry.succeeded() && retry.document_replaced &&
             DocumentsEqual(retry.snapshot->document(), intended),
@@ -653,7 +653,7 @@ void TestRewriteAndReopenOperation()
 {
     const std::filesystem::path path =
         FreshTestDirectory("rewrite-and-reopen") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -665,7 +665,7 @@ void TestRewriteAndReopenOperation()
 
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreGenerationWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteDocumentAndReopenWithCheckpoints(
                 *opened.snapshot,
                 intended,
@@ -684,7 +684,7 @@ void TestRewriteAndReopenOperation()
         "rewrite-and-reopen interruption should preserve the trusted generation");
 
     const SampleLabelingAsdfStoreGenerationWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
             *opened.snapshot, intended, CompatibleSource(intended));
     Require(retry.succeeded() && retry.document_replaced &&
             DocumentsEqual(retry.snapshot->document(), intended),
@@ -699,7 +699,7 @@ void TestRepeatedValuesThroughOneSnapshotOperation()
 {
     const std::filesystem::path path =
         FreshTestDirectory("repeated-values") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     SampleLabelingDocument first = opened.snapshot->document();
     const std::vector<std::int32_t> initial_values =
@@ -709,7 +709,7 @@ void TestRepeatedValuesThroughOneSnapshotOperation()
         "first repeated rewrite should intend a different values generation");
     first.labeling.canonical_metadata.modified_at = AdvancedTimestamp(
         first.labeling.canonical_metadata.modified_at);
-    Require(specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    Require(spectiary::RewriteSampleLabelingAsdfValuesAtomically(
                 *opened.snapshot, first)
             .succeeded(),
         "first repeated values rewrite should succeed");
@@ -725,7 +725,7 @@ void TestRepeatedValuesThroughOneSnapshotOperation()
         AdvancedTimestamp(trusted.modified_at);
     bool checkpoint_reached = false;
     const SampleLabelingAsdfStoreWriteResult interrupted =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteWithBeforeReplace(
                 *opened.snapshot,
                 second,
@@ -739,7 +739,7 @@ void TestRepeatedValuesThroughOneSnapshotOperation()
         path, *opened.snapshot, trusted,
         "second repeated rewrite should retain the first published generation");
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot, second);
     Require(retry.succeeded() && retry.roster_block_reused &&
             DocumentsEqual(opened.snapshot->document(), second),
@@ -777,11 +777,11 @@ void TestSemanticPreflightFailure()
     const std::filesystem::path path =
         FreshTestDirectory("semantic-preflight") / "labels.asdf";
     const SampleLabelingDocument original = MakeDocument();
-    Require(specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+    Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "semantic preflight fixture should write");
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(original));
     Require(opened.succeeded(), "semantic preflight fixture should open");
     const TrustedGeneration trusted =
@@ -791,13 +791,13 @@ void TestSemanticPreflightFailure()
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const SampleLabelingAsdfStoreWriteResult rejected =
-            specforge::RewriteSampleLabelingAsdfValuesAtomically(
+            spectiary::RewriteSampleLabelingAsdfValuesAtomically(
                 *opened.snapshot, invalid);
         RequireControlledError(rejected,
             SampleLabelingAsdfStoreErrorKind::CodecFailure,
             "semantic preflight should return a controlled codec error");
         Require(rejected.error.codec_kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     SemanticValidationFailed,
             "semantic preflight should identify semantic validation");
         RequireTrustedGenerationUnchanged(
@@ -811,11 +811,11 @@ void TestResourceLimitPreflightFailure()
     const std::filesystem::path path =
         FreshTestDirectory("resource-preflight") / "labels.asdf";
     const SampleLabelingDocument original = MakeDocument();
-    Require(specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+    Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "resource preflight fixture should write");
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(original));
     Require(opened.succeeded(), "resource preflight fixture should open");
     const TrustedGeneration trusted =
@@ -828,13 +828,13 @@ void TestResourceLimitPreflightFailure()
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const SampleLabelingAsdfStoreWriteResult rejected =
-            specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            spectiary::WriteSampleLabelingAsdfDocumentAtomically(
                 path, oversized);
         RequireControlledError(rejected,
             SampleLabelingAsdfStoreErrorKind::CodecFailure,
             "resource preflight should return a controlled codec error");
         Require(rejected.error.codec_kind ==
-                specforge::SampleLabelingAsdfErrorKind::
+                spectiary::SampleLabelingAsdfErrorKind::
                     ResourceLimitExceeded,
             "resource preflight should identify the codec resource limit");
         RequireTrustedGenerationUnchanged(
@@ -847,7 +847,7 @@ void TestPreservationIdentityMismatch()
 {
     const std::filesystem::path path =
         FreshTestDirectory("identity-mismatch") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -856,7 +856,7 @@ void TestPreservationIdentityMismatch()
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const SampleLabelingAsdfStoreWriteResult rejected =
-            specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+            spectiary::RewriteSampleLabelingAsdfDocumentAtomically(
                 *opened.snapshot, unrelated);
         RequireControlledError(rejected,
             SampleLabelingAsdfStoreErrorKind::PreservationIdentityMismatch,
@@ -872,7 +872,7 @@ void TestMissingDurableBase()
     const std::filesystem::path path =
         FreshTestDirectory("missing-durable-base") / "labels.asdf";
     const SampleLabelingDocument original = MakeDocument();
-    Require(specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+    Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original)
             .succeeded(),
         "missing durable-base fixture should write");
     std::vector<unsigned char> compatibility_bytes = ReadAllBytes(path);
@@ -886,8 +886,8 @@ void TestMissingDurableBase()
     compatibility_bytes[zlib_header + 1U] = 0x01U;
     WriteAllBytes(path, compatibility_bytes);
     const std::string trusted_sha = FileSha256(path);
-    const specforge::SampleLabelingAsdfReadResult compatible =
-        specforge::ReadSampleLabelingAsdfDocument(path);
+    const spectiary::SampleLabelingAsdfReadResult compatible =
+        spectiary::ReadSampleLabelingAsdfDocument(path);
     Require(compatible.succeeded() && !compatible.durable_base.has_value(),
         "compatibility fixture should read without a durable base");
     const SampleLabelingDocument trusted_document = *compatible.document;
@@ -898,7 +898,7 @@ void TestMissingDurableBase()
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const SampleLabelingAsdfStoreWriteResult rejected =
-            specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            spectiary::WriteSampleLabelingAsdfDocumentAtomically(
                 path, intended);
         RequireControlledError(rejected,
             SampleLabelingAsdfStoreErrorKind::DurableBaseUnavailable,
@@ -907,8 +907,8 @@ void TestMissingDurableBase()
                 FileSha256(path) == trusted_sha &&
                 !HasTemporarySibling(path),
             "missing durable base should preserve target bytes and SHA-256");
-        const specforge::SampleLabelingAsdfReadResult reread =
-            specforge::ReadSampleLabelingAsdfDocument(path);
+        const spectiary::SampleLabelingAsdfReadResult reread =
+            spectiary::ReadSampleLabelingAsdfDocument(path);
         Require(reread.succeeded() &&
                 DocumentsEqual(*reread.document, trusted_document),
             "missing durable base should preserve old values and metadata");
@@ -919,7 +919,7 @@ void TestTemporaryOutputStreamFailure()
 {
     const std::filesystem::path path =
         FreshTestDirectory("temporary-stream") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -929,7 +929,7 @@ void TestTemporaryOutputStreamFailure()
         AdvancedTimestamp(trusted.modified_at);
 
     const SampleLabelingAsdfStoreWriteResult failed =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             WriteWithBeforeCodecWrite(
                 path,
                 intended,
@@ -940,13 +940,13 @@ void TestTemporaryOutputStreamFailure()
         SampleLabelingAsdfStoreErrorKind::CodecFailure,
         "temporary stream failure should be controlled");
     Require(failed.error.codec_kind ==
-            specforge::SampleLabelingAsdfErrorKind::IoFailure,
+            spectiary::SampleLabelingAsdfErrorKind::IoFailure,
         "temporary stream failure should be an I/O codec error");
     RequireTrustedGenerationUnchanged(
         path, *opened.snapshot, trusted,
         "temporary stream failure should preserve the trusted generation");
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, intended);
+        spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, intended);
     Require(retry.succeeded(), retry.error.message.empty()
         ? "temporary stream failure should be retryable"
         : retry.error.message);
@@ -958,7 +958,7 @@ void TestReplacementFailureThenCoreRetry()
 {
     const std::filesystem::path path =
         FreshTestDirectory("replacement-failure") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -972,7 +972,7 @@ void TestReplacementFailureThenCoreRetry()
         AdvancedTimestamp(trusted.modified_at);
     bool removed_temporary = false;
     const SampleLabelingAsdfStoreWriteResult failed =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteWithBeforeReplace(
                 *opened.snapshot,
                 intended,
@@ -996,7 +996,7 @@ void TestReplacementFailureThenCoreRetry()
         "replacement failure should preserve the old encoded roster");
 
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *opened.snapshot, intended);
     const std::vector<unsigned char> published = ReadAllBytes(path);
     Require(retry.succeeded() && retry.roster_block_reused &&
@@ -1017,7 +1017,7 @@ void TestExternalReplacementDuringPublication()
     const std::filesystem::path directory =
         FreshTestDirectory("external-replacement");
     const std::filesystem::path path = directory / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration old_trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -1028,8 +1028,8 @@ void TestExternalReplacementDuringPublication()
     const std::filesystem::path external_path =
         directory / "external-generation.asdf";
     WriteAllBytes(external_path, external_bytes);
-    const specforge::SampleLabelingAsdfReadResult external_read =
-        specforge::ReadSampleLabelingAsdfDocument(external_path);
+    const spectiary::SampleLabelingAsdfReadResult external_read =
+        spectiary::ReadSampleLabelingAsdfDocument(external_path);
     Require(external_read.succeeded() && external_read.durable_base.has_value(),
         "external generation should be a valid durable document");
     const std::string external_sha = FileSha256(external_path);
@@ -1042,7 +1042,7 @@ void TestExternalReplacementDuringPublication()
 
     bool external_replaced = false;
     const SampleLabelingAsdfStoreWriteResult failed =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteWithBeforeReplace(
                 *opened.snapshot,
                 intended,
@@ -1050,7 +1050,7 @@ void TestExternalReplacementDuringPublication()
                     const std::filesystem::path&,
                     const std::filesystem::path& target) {
                     std::string error;
-                    external_replaced = specforge::ReplaceFileAtomically(
+                    external_replaced = spectiary::ReplaceFileAtomically(
                         external_path, target, &error,
                         "external property generation");
                     Require(external_replaced, error.empty()
@@ -1072,13 +1072,13 @@ void TestExternalReplacementDuringPublication()
             opened.snapshot->durable_base().valid(),
         "external replacement should not mutate the old in-memory snapshot");
 
-    specforge::SampleLabelingAsdfStoreOpenResult recovered =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult recovered =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(*external_read.document));
     Require(recovered.succeeded(),
         "owner should conservatively reopen after external replacement");
     const SampleLabelingAsdfStoreWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfValuesAtomically(
+        spectiary::RewriteSampleLabelingAsdfValuesAtomically(
             *recovered.snapshot, intended);
     Require(retry.succeeded() && retry.roster_block_reused &&
             DocumentsEqual(recovered.snapshot->document(), intended) &&
@@ -1095,7 +1095,7 @@ void TestReopenGenerationMismatchRequiresRecovery()
     const std::filesystem::path directory =
         FreshTestDirectory("generation-mismatch");
     const std::filesystem::path path = directory / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration old_trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -1103,8 +1103,8 @@ void TestReopenGenerationMismatchRequiresRecovery()
     const std::filesystem::path external_path =
         directory / "external-generation.asdf";
     WriteAllBytes(external_path, old_trusted.bytes);
-    specforge::SampleLabelingAsdfStoreOpenResult external_opened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult external_opened =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             external_path, CompatibleSource(old_trusted.document));
     Require(external_opened.succeeded(),
         "mismatch external generation should open");
@@ -1117,7 +1117,7 @@ void TestReopenGenerationMismatchRequiresRecovery()
         "generation mismatch replacement should publish different values");
     external_document.labeling.canonical_metadata.modified_at =
         AdvancedTimestamp(old_trusted.modified_at);
-    Require(specforge::RewriteSampleLabelingAsdfValuesAtomically(
+    Require(spectiary::RewriteSampleLabelingAsdfValuesAtomically(
                 *external_opened.snapshot, external_document)
             .succeeded(),
         "mismatch external generation should publish");
@@ -1131,7 +1131,7 @@ void TestReopenGenerationMismatchRequiresRecovery()
         old_trusted.modified_at, std::chrono::milliseconds{2});
     bool checkpoint_replaced = false;
     const SampleLabelingAsdfStoreGenerationWriteResult mismatch =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteDocumentAndReopenWithCheckpoints(
                 *opened.snapshot,
                 intended,
@@ -1140,7 +1140,7 @@ void TestReopenGenerationMismatchRequiresRecovery()
                 [&checkpoint_replaced, &external_path](
                     const std::filesystem::path& target) {
                     std::string error;
-                    checkpoint_replaced = specforge::ReplaceFileAtomically(
+                    checkpoint_replaced = spectiary::ReplaceFileAtomically(
                         external_path, target, &error,
                         "mismatched property generation");
                     Require(checkpoint_replaced, error.empty()
@@ -1163,13 +1163,13 @@ void TestReopenGenerationMismatchRequiresRecovery()
             opened.snapshot->durable_base().valid(),
         "generation mismatch must not advance the old owner snapshot");
 
-    specforge::SampleLabelingAsdfStoreOpenResult recovered =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
+    spectiary::SampleLabelingAsdfStoreOpenResult recovered =
+        spectiary::OpenSampleLabelingAsdfDocumentStore(
             path, CompatibleSource(external_document));
     Require(recovered.succeeded(),
         "generation mismatch should require and permit conservative reopen");
     const SampleLabelingAsdfStoreGenerationWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
             *recovered.snapshot, intended, CompatibleSource(intended));
     Require(retry.succeeded() && retry.document_replaced &&
             DocumentsEqual(retry.snapshot->document(), intended),
@@ -1192,13 +1192,13 @@ void TestUnsupportedChecksumProfile()
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         const SampleLabelingAsdfStoreWriteResult rejected =
-            specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            spectiary::WriteSampleLabelingAsdfDocumentAtomically(
                 path, intended);
         RequireControlledError(rejected,
             SampleLabelingAsdfStoreErrorKind::CodecFailure,
             "unsupported checksum/profile should be controlled");
         Require(rejected.error.codec_kind ==
-                specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+                spectiary::SampleLabelingAsdfErrorKind::UnsupportedProfile,
             "unsupported checksum/profile should retain its codec classification");
         Require(ReadAllBytes(path) == trusted &&
                 FileSha256(path) == trusted_sha &&
@@ -1211,7 +1211,7 @@ void TestUnknownMetadataConstructionFailure()
 {
     const std::filesystem::path path =
         FreshTestDirectory("unknown-construction") / "labels.asdf";
-    specforge::SampleLabelingAsdfStoreOpenResult opened =
+    spectiary::SampleLabelingAsdfStoreOpenResult opened =
         OpenForwardUnknownFixture(path);
     const TrustedGeneration trusted =
         CaptureTrustedGeneration(path, *opened.snapshot);
@@ -1221,7 +1221,7 @@ void TestUnknownMetadataConstructionFailure()
         AdvancedTimestamp(trusted.modified_at);
 
     const SampleLabelingAsdfStoreWriteResult failed =
-        specforge::sample_labeling_asdf_store_test_seam::
+        spectiary::sample_labeling_asdf_store_test_seam::
             RewriteDocumentWithBeforePreservedMetadataBuild(
                 *opened.snapshot,
                 intended,
@@ -1230,14 +1230,14 @@ void TestUnknownMetadataConstructionFailure()
         SampleLabelingAsdfStoreErrorKind::CodecFailure,
         "unknown metadata construction failure should be controlled");
     Require(failed.error.codec_kind ==
-            specforge::SampleLabelingAsdfErrorKind::IoFailure,
+            spectiary::SampleLabelingAsdfErrorKind::IoFailure,
         "unknown metadata construction exception should be classified as codec I/O failure");
     RequireTrustedGenerationUnchanged(
         path, *opened.snapshot, trusted,
         "unknown metadata construction failure should preserve the trusted generation");
 
     const SampleLabelingAsdfStoreGenerationWriteResult retry =
-        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+        spectiary::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
             *opened.snapshot, intended, CompatibleSource(intended));
     const std::vector<unsigned char> retry_bytes = ReadAllBytes(path);
     Require(retry.succeeded() && retry.document_replaced &&

@@ -24,13 +24,13 @@
 #include <utility>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kLabelingWindow = "Labeling###LabelingV1";
 constexpr const char* kFiltersWindow = "Sample Filters###FiltersV1";
 constexpr const char* kSortingWindow = "Sample Sorting###SampleSortingV1";
-constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
+constexpr const char* kSampleAnnotationDragPayload = "SAMPLE_ANNOTATION_PATH_V1";
 
 enum class ActionIcon {
     Minus,
@@ -4008,4 +4008,4 @@ void SampleWorkflowPanelUi::RenderSorting(
     ImGui::End();
 }
 
-}  // namespace specforge
+}  // namespace spectiary

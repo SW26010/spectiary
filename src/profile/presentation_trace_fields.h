@@ -5,7 +5,7 @@
 #include <Windows.h>
 #endif
 
-namespace specforge {
+namespace spectiary {
 inline void WritePresentationTrace(ProfileSink& sink,
     const presentation_trace::Event& event, std::string_view role,
     std::uint64_t viewport_id)
@@ -80,4 +80,4 @@ inline void WritePresentationTrace(ProfileSink& sink,
         F::Number("bound_buffer_slot", std::to_string(event.bound_buffer_slot)),
     });
 }
-} // namespace specforge
+} // namespace spectiary

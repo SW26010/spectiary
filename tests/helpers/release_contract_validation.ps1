@@ -80,34 +80,34 @@ function Get-ReleaseContractRuleId {
         'Debug C\+\+ compile rule must use' {
             return 'SF-CFG-DEBUG-CRT'
         }
-        'specforge_loader_tests must preserve the executable exit code' {
+        'spectiary_loader_tests must preserve the executable exit code' {
             return 'SF-CFG-LOADER-EXIT-AUTHORITY'
         }
-        'specforge_fits_file_reader_tests must preserve the executable exit code' {
+        'spectiary_fits_file_reader_tests must preserve the executable exit code' {
             return 'SF-CFG-READER-EXIT-AUTHORITY'
         }
-        'specforge_loader_tests must participate in the repository-wide ci-headless required selector' {
+        'spectiary_loader_tests must participate in the repository-wide ci-headless required selector' {
             return 'SF-CFG-LOADER-GATE'
         }
-        'specforge_fits_file_reader_tests must participate in the repository-wide ci-headless required selector' {
+        'spectiary_fits_file_reader_tests must participate in the repository-wide ci-headless required selector' {
             return 'SF-CFG-READER-GATE'
         }
-        'Configured CTest graph must register specforge_loader_tests|specforge_loader_tests must (execute|be a configured executable)' {
+        'Configured CTest graph must register spectiary_loader_tests|spectiary_loader_tests must (execute|be a configured executable)' {
             return 'SF-CFG-LOADER-GRAPH'
         }
-        'Configured CTest graph must register specforge_fits_file_reader_tests|specforge_fits_file_reader_tests must (execute|be a configured executable)' {
+        'Configured CTest graph must register spectiary_fits_file_reader_tests|spectiary_fits_file_reader_tests must (execute|be a configured executable)' {
             return 'SF-CFG-READER-GRAPH'
         }
-        'specforge_release_artifacts_tests must be configured in the timed' {
+        'spectiary_release_artifacts_tests must be configured in the timed' {
             return 'SF-CFG-ARTIFACT-GATE'
         }
-        'specforge_portable_pe_contract_tests must be configured in the timed' {
+        'spectiary_portable_pe_contract_tests must be configured in the timed' {
             return 'SF-CFG-PE-GATE'
         }
-        'specforge_release_workflow_structure_contract_tests must be configured in the timed' {
+        'spectiary_release_workflow_structure_contract_tests must be configured in the timed' {
             return 'SF-CFG-WORKFLOW-GATE'
         }
-        'specforge_release_configured_build_contract_tests must be configured in the timed' {
+        'spectiary_release_configured_build_contract_tests must be configured in the timed' {
             return 'SF-CFG-CONFIGURED-GATE'
         }
         'Spectrum loader entry point must unconditionally execute TestLoadsGzippedFitsSpectrum' {
@@ -590,11 +590,11 @@ function Assert-ConfiguredTestExecutable {
         -Condition (
             $rule.Success -and
             $rule.Groups['body'].Value.Contains($SourceObject) -and
-            $rule.Groups['body'].Value.Contains('specforge_core.lib') -and
+            $rule.Groups['body'].Value.Contains('spectiary_core.lib') -and
             $rule.Groups['body'].Value -match
                 '(?:^|[\\/])(?:debug[\\/])?lib[\\/]cfitsio\.lib(?:\s|$)'
         ) `
-        -Message "$Name must be a configured executable built from its source and linked through specforge_core to CFITSIO."
+        -Message "$Name must be a configured executable built from its source and linked through spectiary_core to CFITSIO."
 }
 
 function Assert-ConfiguredBuildMode {
@@ -662,7 +662,7 @@ function Assert-CMakeAndFitsTestContract {
         -RuntimeFlag $RuntimeFlag
     $coreRule = [regex]::Match(
         $BuildGraphText,
-        '(?m)^build specforge_core\.lib: (?<body>[^\r\n]+)')
+        '(?m)^build spectiary_core\.lib: (?<body>[^\r\n]+)')
     Assert-True `
         -Condition (
             $coreRule.Success -and
@@ -673,7 +673,7 @@ function Assert-CMakeAndFitsTestContract {
             $coreRule.Groups['body'].Value.Contains(
                 'src\domain\spectrum_loader.cpp.obj')
         ) `
-        -Message 'Configured specforge_core must compile the production FITS reader and loader sources.'
+        -Message 'Configured spectiary_core must compile the production FITS reader and loader sources.'
     if ($Configuration -ceq 'Release') {
         $nativeRule = [regex]::Match(
             $BuildGraphText,
@@ -696,20 +696,20 @@ function Assert-CMakeAndFitsTestContract {
         -CTestModel $ctestModel `
         -BuildGraphText $BuildGraphText `
         -BuildDirectory $BuildDirectory `
-        -Name 'specforge_loader_tests' `
+        -Name 'spectiary_loader_tests' `
         -SourceObject 'tests\spectrum_loader_tests.cpp.obj'
     Assert-ConfiguredTestExecutable `
         -CTestModel $ctestModel `
         -BuildGraphText $BuildGraphText `
         -BuildDirectory $BuildDirectory `
-        -Name 'specforge_fits_file_reader_tests' `
+        -Name 'spectiary_fits_file_reader_tests' `
         -SourceObject 'tests\fits_file_reader_tests.cpp.obj'
 
     foreach ($releaseTestName in @(
-        'specforge_release_artifacts_tests',
-        'specforge_portable_pe_contract_tests',
-        'specforge_release_workflow_structure_contract_tests',
-        'specforge_release_configured_build_contract_tests'
+        'spectiary_release_artifacts_tests',
+        'spectiary_portable_pe_contract_tests',
+        'spectiary_release_workflow_structure_contract_tests',
+        'spectiary_release_configured_build_contract_tests'
     )) {
         $releaseTests = @(
             @($ctestModel.tests) |
@@ -728,7 +728,7 @@ function Assert-CMakeAndFitsTestContract {
             -Test $releaseTests[0] `
             -Name 'RUN_SERIAL'
         $timingContractSatisfied = if (
-            $releaseTestName -ceq 'specforge_release_artifacts_tests') {
+            $releaseTestName -ceq 'spectiary_release_artifacts_tests') {
             [double]$timeout -eq 600 -and $runSerial -eq $true
         }
         else {
@@ -831,7 +831,7 @@ function Assert-CMakeMutationCannotSatisfyConfiguredGraph {
 cmake_minimum_required(VERSION 3.24)
 project(ReleaseContractMutation LANGUAGES NONE)
 enable_testing()
-add_custom_target(specforge_core)
+add_custom_target(spectiary_core)
 $Body
 "@
     $utf8 = [Text.UTF8Encoding]::new($false)
@@ -862,7 +862,7 @@ $Body
                     -CTestModel ($fixtureCTestJson | ConvertFrom-Json) `
                     -BuildGraphText $fixtureGraph `
                     -BuildDirectory $fixtureBuildDirectory `
-                    -Name 'specforge_loader_tests' `
+                    -Name 'spectiary_loader_tests' `
                     -SourceObject 'tests\spectrum_loader_tests.cpp.obj'
             }
     }
@@ -989,7 +989,7 @@ function Assert-AutomationRequiredGate {
             Name = 'Build native automation targets'
             Count = 1
             Preset = $null
-            RequiredTargets = @('specforge_automation_headless_targets')
+            RequiredTargets = @('spectiary_automation_headless_targets')
             Configure = $false
         }
     )) {
@@ -1024,7 +1024,7 @@ function Assert-AutomationRequiredGate {
             Assert-True `
                 -Condition (
                     ([string](Get-CommandArgumentValue $elements '-VcvarsPath')).Trim(
-                        '"', "'") -ceq '$env:SPECFORGE_VCVARS_PATH' -and
+                        '"', "'") -ceq '$env:SPECTIARY_VCVARS_PATH' -and
                     ($null -eq $buildStepContract.Preset -or
                         (Get-CommandArgumentValue $elements '-Preset') -ceq
                             $buildStepContract.Preset)
@@ -1063,7 +1063,7 @@ function Assert-AutomationRequiredGate {
             -not $headlessJob.Contains('-Target all') -and
             -not $headlessJob.Contains('ninja-msvc-release-static') -and
             -not $headlessJob.Contains('asdf-pinned-oracle') -and
-            -not $headlessJob.Contains('specforge_asdf_labeling') -and
+            -not $headlessJob.Contains('spectiary_asdf_labeling') -and
             -not $headlessJob.Contains('actions/setup-python')
         ) `
         -Message 'Automation workflow must not retain repository-wide Release or ASDF ownership.'
@@ -1283,7 +1283,7 @@ function Assert-ReleaseWorkflowContract {
             (Get-CommandArgumentValue $elements '-LiteralPath') -ceq
                 '$env:GITHUB_ENV' -and
             ([string](Get-CommandArgumentValue $elements '-Value')).Trim('"', "'") -ceq
-                'SPECFORGE_VCVARS_PATH=$vcvars'
+                'SPECTIARY_VCVARS_PATH=$vcvars'
         }
     )
     Assert-True `
@@ -1328,7 +1328,7 @@ function Assert-ReleaseWorkflowContract {
                 (Get-CommandArgumentValue $elements '-Preset') -ceq
                     'ninja-msvc-release-static' -and
                 ([string](Get-CommandArgumentValue $elements '-VcvarsPath')).Trim(
-                    '"', "'") -ceq '$env:SPECFORGE_VCVARS_PATH'
+                    '"', "'") -ceq '$env:SPECTIARY_VCVARS_PATH'
             ) `
             -Message 'Every FITS verification build command must use the static preset and the resolved hosted-runner vcvars path.'
     }
@@ -1338,8 +1338,8 @@ function Assert-ReleaseWorkflowContract {
         ).Count -eq 1) `
         -Message 'Static Release FITS verification must configure exactly once.'
     foreach ($targetName in @(
-        'specforge_fits_file_reader_tests',
-        'specforge_loader_tests'
+        'spectiary_fits_file_reader_tests',
+        'spectiary_loader_tests'
     )) {
         Assert-True `
             -Condition (@(
@@ -1357,8 +1357,8 @@ function Assert-ReleaseWorkflowContract {
         -Condition ($ctestCommands.Count -eq 2) `
         -Message 'Static Release workflow must actively invoke exactly two CTest commands.'
     foreach ($testName in @(
-        'specforge_fits_file_reader_tests',
-        'specforge_loader_tests'
+        'spectiary_fits_file_reader_tests',
+        'spectiary_loader_tests'
     )) {
         $expectedRegex = '^' + $testName + '$'
         $matchingCommands = @(
@@ -1685,14 +1685,14 @@ if ($ContractArea -ceq 'WorkflowStructure') {
                 param($text)
                 $decoy = @(
                     "          `$decoy = @'",
-                    '          ctest --test-dir build\ninja-msvc-release-static --output-on-failure --no-tests=error -R ''^specforge_fits_file_reader_tests$''',
+                    '          ctest --test-dir build\ninja-msvc-release-static --output-on-failure --no-tests=error -R ''^spectiary_fits_file_reader_tests$''',
                     "          '@"
                 ) -join $newline
                 $pattern =
                     '(?ms)^          ctest --test-dir build\\ninja-msvc-release-static `\r?\n' +
                         '            --output-on-failure `\r?\n' +
                         '            --no-tests=error `\r?\n' +
-                        '            -R ''\^specforge_fits_file_reader_tests\$'''
+                        '            -R ''\^spectiary_fits_file_reader_tests\$'''
                 $evaluator = [Text.RegularExpressions.MatchEvaluator]{
                     param($match)
                     return $decoy
@@ -1761,7 +1761,7 @@ if ($ContractArea -ceq 'WorkflowStructure') {
                 param($text)
                 [regex]::Replace(
                     $text,
-                    '(?m)^            -VcvarsPath "\$env:SPECFORGE_VCVARS_PATH" `\r?\n',
+                    '(?m)^            -VcvarsPath "\$env:SPECTIARY_VCVARS_PATH" `\r?\n',
                     '')
             };
         New-TextMutationCase `
@@ -1811,7 +1811,7 @@ $configuredMutations = @(
             $mutatedInputs = $contractInputs.Clone()
             $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
             $tests = @($model.tests | Where-Object {
-                $_.name -ceq 'specforge_loader_tests'
+                $_.name -ceq 'spectiary_loader_tests'
             })
             Assert-ContractRule `
                 -Condition ($tests.Count -eq 1) `
@@ -1834,7 +1834,7 @@ $configuredMutations = @(
             $mutatedInputs = $contractInputs.Clone()
             $model = $contractInputs.ReleaseCTestJson | ConvertFrom-Json
             $tests = @($model.tests | Where-Object {
-                $_.name -ceq 'specforge_loader_tests'
+                $_.name -ceq 'spectiary_loader_tests'
             })
             $labels = @($tests[0].properties | Where-Object {
                 $_.name -ceq 'LABELS'
@@ -1877,7 +1877,7 @@ $configuredMutations = @(
             param($text)
             [regex]::Replace(
                 $text,
-                '(?m)^build specforge_loader_tests\.exe:[^\r\n]*\r?\n',
+                '(?m)^build spectiary_loader_tests\.exe:[^\r\n]*\r?\n',
                 '')
         };
     New-TextMutationCase `
@@ -1953,7 +1953,7 @@ $configuredMutations = @(
             $mutatedInputs = $contractInputs.Clone()
             $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
             $tests = @($model.tests | Where-Object {
-                $_.name -ceq 'specforge_release_artifacts_tests'
+                $_.name -ceq 'spectiary_release_artifacts_tests'
             })
             $labels = @($tests[0].properties | Where-Object {
                 $_.name -ceq 'LABELS'
@@ -1977,7 +1977,7 @@ $configuredMutations = @(
             $mutatedInputs = $contractInputs.Clone()
             $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
             $test = @($model.tests | Where-Object {
-                $_.name -ceq 'specforge_release_artifacts_tests'
+                $_.name -ceq 'spectiary_release_artifacts_tests'
             })[0]
             $timeout = @($test.properties | Where-Object {
                 $_.name -ceq 'TIMEOUT'
@@ -2001,7 +2001,7 @@ $configuredMutations = @(
             $mutatedInputs = $contractInputs.Clone()
             $model = $contractInputs.DebugCTestJson | ConvertFrom-Json
             $test = @($model.tests | Where-Object {
-                $_.name -ceq 'specforge_release_artifacts_tests'
+                $_.name -ceq 'spectiary_release_artifacts_tests'
             })[0]
             $runSerial = @($test.properties | Where-Object {
                 $_.name -ceq 'RUN_SERIAL'
@@ -2028,33 +2028,33 @@ $cmakeFixtureMutations = @(
         Description = 'Bracket-commented executable and CTest decoy'
         Body = @'
 #[=[
-add_executable(specforge_loader_tests tests/spectrum_loader_tests.cpp)
-target_link_libraries(specforge_loader_tests PRIVATE specforge_core CFITSIO::cfitsio)
-add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
+add_executable(spectiary_loader_tests tests/spectrum_loader_tests.cpp)
+target_link_libraries(spectiary_loader_tests PRIVATE spectiary_core CFITSIO::cfitsio)
+add_test(NAME spectiary_loader_tests COMMAND spectiary_loader_tests)
 ]=]
-add_custom_target(specforge_loader_tests)
+add_custom_target(spectiary_loader_tests)
 '@
     }
     [pscustomobject]@{
         Description = 'Bracket-argument executable and CTest decoy'
         Body = @'
 set(decoy [==[
-add_executable(specforge_loader_tests tests/spectrum_loader_tests.cpp)
-target_link_libraries(specforge_loader_tests PRIVATE specforge_core CFITSIO::cfitsio)
-add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
+add_executable(spectiary_loader_tests tests/spectrum_loader_tests.cpp)
+target_link_libraries(spectiary_loader_tests PRIVATE spectiary_core CFITSIO::cfitsio)
+add_test(NAME spectiary_loader_tests COMMAND spectiary_loader_tests)
 ]==])
-add_custom_target(specforge_loader_tests)
+add_custom_target(spectiary_loader_tests)
 '@
     }
     [pscustomobject]@{
         Description = 'if(FALSE) executable and CTest decoy'
         Body = @'
 if(FALSE)
-    add_executable(specforge_loader_tests tests/spectrum_loader_tests.cpp)
-    target_link_libraries(specforge_loader_tests PRIVATE specforge_core CFITSIO::cfitsio)
-    add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
+    add_executable(spectiary_loader_tests tests/spectrum_loader_tests.cpp)
+    target_link_libraries(spectiary_loader_tests PRIVATE spectiary_core CFITSIO::cfitsio)
+    add_test(NAME spectiary_loader_tests COMMAND spectiary_loader_tests)
 endif()
-add_custom_target(specforge_loader_tests)
+add_custom_target(spectiary_loader_tests)
 '@
     }
 )

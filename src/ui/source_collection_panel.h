@@ -16,7 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct ShellUiTestAccess;
 struct SourceCollectionPanelUiTestAccess;
@@ -181,4 +181,4 @@ private:
         annotation_import_prior_diagnostic_keys_;
 };
 
-}  // namespace specforge
+}  // namespace spectiary

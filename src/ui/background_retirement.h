@@ -4,7 +4,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 
 // An opaque ownership token whose concrete object graph is released by the
 // source-load reclaimer rather than by the UI thread.
@@ -17,4 +17,4 @@ template <typename T>
     return std::make_shared<Value>(std::forward<T>(value));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

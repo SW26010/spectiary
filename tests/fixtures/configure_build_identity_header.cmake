@@ -12,14 +12,14 @@ foreach(required_variable IN ITEMS
     endif()
 endforeach()
 
-set(SPECFORGE_BUILD_SOURCE_MODE "${EXPECTED_MODE}")
-set(SPECFORGE_BUILD_SOURCE_REVISION "${EXPECTED_REVISION}")
+set(SPECTIARY_BUILD_SOURCE_MODE "${EXPECTED_MODE}")
+set(SPECTIARY_BUILD_SOURCE_REVISION "${EXPECTED_REVISION}")
 set(PROJECT_VERSION "${EXPECTED_VERSION}")
-set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "${EXPECTED_ARCHITECTURE}")
-include("${SOURCE_ROOT}/cmake/specforge_build_source.cmake")
+set(SPECTIARY_BUILD_TARGET_ARCHITECTURE "${EXPECTED_ARCHITECTURE}")
+include("${SOURCE_ROOT}/cmake/spectiary_build_source.cmake")
 
 configure_file(
-    "${SOURCE_ROOT}/cmake/specforge_build_identity.h.in"
+    "${SOURCE_ROOT}/cmake/spectiary_build_identity.h.in"
     "${OUTPUT}"
     @ONLY
 )
@@ -34,7 +34,7 @@ file(WRITE "${OUTPUT}" "${generated_header}")
 
 file(READ "${OUTPUT}" generated_header)
 foreach(expected_text IN ITEMS
-    "kSpecForgeVersion[] = \"${EXPECTED_VERSION}\""
+    "kSpectiaryVersion[] = \"${EXPECTED_VERSION}\""
     "kBuildConfiguration[] = \"${EXPECTED_CONFIGURATION}\""
     "kTargetArchitecture[] = \"${EXPECTED_ARCHITECTURE}\""
     "kBuildSourceMode[] = \"${EXPECTED_MODE}\""

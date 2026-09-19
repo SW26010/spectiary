@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kStateFormatKind = "spectiary.panel_visibility.cache";
@@ -107,4 +107,4 @@ bool SavePanelVisibilityStateCache(
         }));
 }
 
-}  // namespace specforge
+}  // namespace spectiary

@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 void Checkpoint(const std::function<void()>& cancellation_checkpoint)
@@ -178,4 +178,4 @@ PreparedSampleWorkflowState PrepareSampleWorkflowStateFromCache(
     return prepared;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

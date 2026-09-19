@@ -37,7 +37,7 @@ that the creation-time bit remains set. It changes only test HWND construction;
 ordinary tests continue to default to their existing extended style.
 
 Build wrapper log:
-`logs/build/specforge-ninja-msvc-debug-build-20260911-075003.out.log`.
+`logs/build/spectiary-ninja-msvc-debug-build-20260911-075003.out.log`.
 The six focused CTest targets pass. `Testing/Temporary/LastTest.log` records
 `backend=composition policy=prefer` and `backend=dxgi policy=disabled` for the
 local probe. Prefer mode may select DXGI on machines without Composition;
@@ -59,9 +59,9 @@ a flag only after renderer initialization is insufficient.
 
 ## Available isolated A/B executable
 
-`specforge_redirection_experiment` is now an explicitly built, non-default target
+`spectiary_redirection_experiment` is now an explicitly built, non-default target
 under the existing widget-enabled developer configuration. It produces
-`build/ninja-msvc-debug/redirection-experiment/SpecForge.exe`, with its own PDB,
+`build/ninja-msvc-debug/redirection-experiment/Spectiary.exe`, with its own PDB,
 metadata, runtime DLLs and public catalog. The normal executable stays separate.
 
 The target compiles an experiment-local copy of the pinned MIT ImGui 1.92.8
@@ -84,7 +84,7 @@ Build with the repository wrapper:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 -Configure -TimeoutSec 180
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 -Target specforge_redirection_experiment specforge_redirection_backend_tests -TimeoutSec 180
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 -Target spectiary_redirection_experiment spectiary_redirection_backend_tests -TimeoutSec 180
 ```
 
 Run A, close normally and finish saving, then run B without rebuilding or changing

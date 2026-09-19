@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kSettingsFormatKind = "spectiary.profile_settings";
@@ -80,7 +80,7 @@ std::optional<std::filesystem::path> ProfileOutputDirectoryEnvironmentOverride()
 {
     wchar_t* raw_value = nullptr;
     std::size_t value_size = 0;
-    if (_wdupenv_s(&raw_value, &value_size, L"SPECFORGE_PROFILE_DIR") != 0 ||
+    if (_wdupenv_s(&raw_value, &value_size, L"SPECTIARY_PROFILE_DIR") != 0 ||
         raw_value == nullptr) {
         return std::nullopt;
     }
@@ -106,4 +106,4 @@ ProfileOutputDirectoryResolution ResolveProfileOutputDirectory(
     return {default_directory, ProfileOutputDirectorySource::Default};
 }
 
-}  // namespace specforge
+}  // namespace spectiary

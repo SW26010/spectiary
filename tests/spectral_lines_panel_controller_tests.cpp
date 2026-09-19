@@ -38,19 +38,19 @@ void Require(bool condition, std::string_view message)
 }
 
 void RequireApplied(
-    const specforge::CatalogUserStateResult& result,
+    const spectiary::CatalogUserStateResult& result,
     std::string_view message);
 
-specforge::SpectralLineMarker Line(
+spectiary::SpectralLineMarker Line(
     std::string id,
     std::string label,
     std::string group,
     double vacuum_angstrom)
 {
-    specforge::SpectralLineMarker marker;
+    spectiary::SpectralLineMarker marker;
     marker.id = std::move(id);
     marker.label = std::move(label);
-    marker.kind = specforge::SpectralLineMarkerKind::Line;
+    marker.kind = spectiary::SpectralLineMarkerKind::Line;
     marker.group = std::move(group);
     marker.vacuum_angstrom = vacuum_angstrom;
     marker.display_label = marker.label;
@@ -58,17 +58,17 @@ specforge::SpectralLineMarker Line(
     return marker;
 }
 
-specforge::SpectralLineMarker Band(
+spectiary::SpectralLineMarker Band(
     std::string id,
     std::string label,
     std::string group,
     double start_vacuum_angstrom,
     double end_vacuum_angstrom)
 {
-    specforge::SpectralLineMarker marker;
+    spectiary::SpectralLineMarker marker;
     marker.id = std::move(id);
     marker.label = std::move(label);
-    marker.kind = specforge::SpectralLineMarkerKind::Band;
+    marker.kind = spectiary::SpectralLineMarkerKind::Band;
     marker.group = std::move(group);
     marker.start_vacuum_angstrom = start_vacuum_angstrom;
     marker.end_vacuum_angstrom = end_vacuum_angstrom;
@@ -77,18 +77,18 @@ specforge::SpectralLineMarker Band(
     return marker;
 }
 
-specforge::SpectralLineCatalog GroupedCatalog()
+spectiary::SpectralLineCatalog GroupedCatalog()
 {
-    specforge::SpectralLineCatalog catalog;
+    spectiary::SpectralLineCatalog catalog;
     catalog.markers.push_back(Line("h_beta", "H beta", "Balmer", 4862.683));
     catalog.markers.push_back(Line("h_alpha", "H alpha", "Balmer", 6564.614));
     catalog.markers.push_back(Line("ca_ii_8500", "Ca II", "Ca II", 8500.360));
     return catalog;
 }
 
-specforge::SpectralLineCatalog LineAndBandCatalog()
+spectiary::SpectralLineCatalog LineAndBandCatalog()
 {
-    specforge::SpectralLineCatalog catalog;
+    spectiary::SpectralLineCatalog catalog;
     catalog.markers.push_back(
         Line("atomic_line", "Atomic line", "Atomic", 5000.0));
     catalog.markers.push_back(
@@ -101,9 +101,9 @@ specforge::SpectralLineCatalog LineAndBandCatalog()
     return catalog;
 }
 
-specforge::SpectrumSnapshotHandle Snapshot(bool can_show_spectral_lines)
+spectiary::SpectrumSnapshotHandle Snapshot(bool can_show_spectral_lines)
 {
-    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
     snapshot->capabilities.can_show_spectral_lines = can_show_spectral_lines;
     return snapshot;
 }
@@ -111,7 +111,7 @@ specforge::SpectrumSnapshotHandle Snapshot(bool can_show_spectral_lines)
 std::filesystem::path TestCachePath(std::string_view test_name)
 {
     return std::filesystem::temp_directory_path() /
-           ("specforge_catalog_user_state_session_" + std::string(test_name) + ".json");
+           ("spectiary_catalog_user_state_session_" + std::string(test_name) + ".json");
 }
 
 void RemoveTestCache(const std::filesystem::path& path)
@@ -130,7 +130,7 @@ void RemoveTestCache(const std::filesystem::path& path)
     temporary_path += kTemporarySuffix;
     std::filesystem::remove(temporary_path, error);
     std::filesystem::remove(
-        specforge::CatalogUserStateCacheCommitLeasePath(path),
+        spectiary::CatalogUserStateCacheCommitLeasePath(path),
         error);
     const std::filesystem::path parent = path.parent_path();
     std::filesystem::path::string_type temporary_prefix =
@@ -151,17 +151,17 @@ void TestCatalogCommitLeasePathPreservesNativePath()
 #if defined(_WIN32)
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        L"specforge_catalog_commit_\u8def\u5f84" /
+        L"spectiary_catalog_commit_\u8def\u5f84" /
         L"state-\u6570\u636e.json";
 #else
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        "specforge_catalog_commit_unicode" /
+        "spectiary_catalog_commit_unicode" /
         "state-data.json";
 #endif
 
     const std::filesystem::path lease_path =
-        specforge::CatalogUserStateCacheCommitLeasePath(path);
+        spectiary::CatalogUserStateCacheCommitLeasePath(path);
     std::filesystem::path expected_filename = path.filename().native();
 #if defined(_WIN32)
     expected_filename += L".commit.lock";
@@ -179,7 +179,7 @@ void TestCacheCleanupIgnoresUnrelatedUnicodeEntries()
 #if defined(_WIN32)
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("specforge_catalog_cleanup_unicode_" +
+        ("spectiary_catalog_cleanup_unicode_" +
          std::to_string(GetCurrentProcessId()));
     const std::filesystem::path unrelated_path =
         root / L"unrelated-\U0001f52d";
@@ -209,7 +209,7 @@ void TestCacheCleanupIgnoresUnrelatedUnicodeEntries()
 std::filesystem::path MultiProcessCachePath()
 {
     return std::filesystem::temp_directory_path() /
-           ("specforge_catalog_user_state_multiprocess_" +
+           ("spectiary_catalog_user_state_multiprocess_" +
             std::to_string(GetCurrentProcessId()) + ".json");
 }
 
@@ -355,19 +355,19 @@ DWORD WaitForCatalogChild(
     return exit_code;
 }
 
-std::string NewOpaqueViewId(const specforge::CatalogUserStateView& snapshot)
+std::string NewOpaqueViewId(const spectiary::CatalogUserStateView& snapshot)
 {
     for (const auto& view : snapshot.grouping_views) {
-        if (specforge::IsCanonicalUuidV4(view.id)) return view.id;
+        if (spectiary::IsCanonicalUuidV4(view.id)) return view.id;
     }
     throw std::runtime_error("expected a newly created UUID view");
 }
 
-std::string NewOpaqueGroupId(const specforge::CatalogUserStateView& snapshot)
+std::string NewOpaqueGroupId(const spectiary::CatalogUserStateView& snapshot)
 {
     for (const auto& view : snapshot.grouping_views) {
         for (const auto& group : view.groups) {
-            if (specforge::IsCanonicalUuidV4(group.id)) return group.id;
+            if (spectiary::IsCanonicalUuidV4(group.id)) return group.id;
         }
     }
     throw std::runtime_error("expected a newly created UUID group");
@@ -376,39 +376,39 @@ std::string NewOpaqueGroupId(const specforge::CatalogUserStateView& snapshot)
 void SeedMultiProcessCache(const std::filesystem::path& path)
 {
     RemoveTestCache(path);
-    specforge::CatalogUserStateCache cache;
-    auto& state = specforge::EnsureCatalogUserState(cache, specforge::PublicSpectralLineCatalogIdentity());
+    spectiary::CatalogUserStateCache cache;
+    auto& state = spectiary::EnsureCatalogUserState(cache, spectiary::PublicSpectralLineCatalogIdentity());
     for (int index = 1; index <= 2; ++index) {
-        state.grouping_views.push_back(specforge::CreateUserGroupingViewFromCatalog(
+        state.grouping_views.push_back(spectiary::CreateUserGroupingViewFromCatalog(
             GroupedCatalog(), state.catalog_identity, "view-" + std::to_string(index),
             "Grouping " + std::to_string(index)));
     }
-    Require(specforge::AddUserGroup(state.grouping_views[1], "group-1", "Group 1"), "seed group one");
-    Require(specforge::AddUserGroup(state.grouping_views[1], "group-2", "Group 2"), "seed group two");
-    state.active_view_id = specforge::CatalogGroupingViewId();
-    (void)specforge::EnsureCatalogPanelState(cache, state.catalog_identity);
+    Require(spectiary::AddUserGroup(state.grouping_views[1], "group-1", "Group 1"), "seed group one");
+    Require(spectiary::AddUserGroup(state.grouping_views[1], "group-2", "Group 2"), "seed group two");
+    state.active_view_id = spectiary::CatalogGroupingViewId();
+    (void)spectiary::EnsureCatalogPanelState(cache, state.catalog_identity);
     std::string error;
-    Require(specforge::SaveCatalogUserStateCache(path, cache, error), error);
+    Require(spectiary::SaveCatalogUserStateCache(path, cache, error), error);
 
 }
 
 void SeedMultiProcessCacheWithReferences(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
-    specforge::SpectralLinesPanelController seed(
+    spectiary::SpectralLinesPanelController seed(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     RequireApplied(
         seed.Submit(
-            specforge::CatalogUserStateIntent::MoveMarkerReference(
+            spectiary::CatalogUserStateIntent::MoveMarkerReference(
                 "view-2",
                 "h_alpha",
-                specforge::UnassignedUserGroupId(),
+                spectiary::UnassignedUserGroupId(),
                 "group-1")),
         "reference seed should move h_alpha into group-1");
     Require(seed.Flush(), "reference seed should flush");
-    const auto loaded = specforge::LoadCatalogUserStateCache(path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(path);
     const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
     const auto view = std::find_if(
         views.begin(),
@@ -438,23 +438,23 @@ void SeedMultiProcessCacheWithReferences(const std::filesystem::path& path)
 void SeedMultiProcessCacheWithThreeGroups(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
-    auto loaded = specforge::LoadCatalogUserStateCache(path);
+    auto loaded = spectiary::LoadCatalogUserStateCache(path);
     auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
-    Require(specforge::AddUserGroup(state.grouping_views[1], "group-3", "Group 3"), "seed third legacy group");
+    Require(spectiary::AddUserGroup(state.grouping_views[1], "group-3", "Group 3"), "seed third legacy group");
     std::string error;
-    Require(specforge::SaveCatalogUserStateCache(path, loaded.cache, error), error);
+    Require(spectiary::SaveCatalogUserStateCache(path, loaded.cache, error), error);
 }
 
 void SeedMultiProcessCacheWithThreeViews(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
-    auto loaded = specforge::LoadCatalogUserStateCache(path);
+    auto loaded = spectiary::LoadCatalogUserStateCache(path);
     auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
-    state.grouping_views.push_back(specforge::CreateUserGroupingViewFromCatalog(
+    state.grouping_views.push_back(spectiary::CreateUserGroupingViewFromCatalog(
         GroupedCatalog(), state.catalog_identity, "view-3", "Grouping 3"));
     state.active_view_id = "view-1";
     std::string error;
-    Require(specforge::SaveCatalogUserStateCache(path, loaded.cache, error), error);
+    Require(spectiary::SaveCatalogUserStateCache(path, loaded.cache, error), error);
 }
 
 void RunConcurrentCatalogChildren(
@@ -522,19 +522,19 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
 
     std::string deleted_id;
     {
-        specforge::SpectralLinesPanelController owner(
+        spectiary::SpectralLinesPanelController owner(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         RequireApplied(
             owner.Submit(
-                specforge::CatalogUserStateIntent::CreateUserGroupingView()),
+                spectiary::CatalogUserStateIntent::CreateUserGroupingView()),
             "the first view-add peer should create view-3");
         deleted_id = NewOpaqueViewId(owner.View());
         Require(owner.Flush(), "the first view-add peer should commit view-3");
         RequireApplied(
             owner.Submit(
-                specforge::CatalogUserStateIntent::DeleteUserGroupingView(
+                spectiary::CatalogUserStateIntent::DeleteUserGroupingView(
                     deleted_id)),
             "the first view-add peer should delete its own view-3");
         Require(
@@ -546,7 +546,7 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
     Require(
         WaitForCatalogChild(stale_peer, "create_view") == 0,
         "the stale view-add peer should reconcile after view-3 was deleted");
-    const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(cache_path);
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto has_view = [&](std::string_view id) {
         return std::any_of(
@@ -588,20 +588,20 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
 
     std::string deleted_id;
     {
-        specforge::SpectralLinesPanelController owner(
+        spectiary::SpectralLinesPanelController owner(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         RequireApplied(
             owner.Submit(
-                specforge::CatalogUserStateIntent::AddUserGroup(
+                spectiary::CatalogUserStateIntent::AddUserGroup(
                     "view-2")),
             "the first group-add peer should create group-3");
         deleted_id = NewOpaqueGroupId(owner.View());
         Require(owner.Flush(), "the first group-add peer should commit group-3");
         RequireApplied(
             owner.Submit(
-                specforge::CatalogUserStateIntent::DeleteUserGroup(
+                spectiary::CatalogUserStateIntent::DeleteUserGroup(
                     "view-2",
                     deleted_id)),
             "the first group-add peer should delete its own group-3");
@@ -614,7 +614,7 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
     Require(
         WaitForCatalogChild(stale_peer, "add_group_view_2") == 0,
         "the stale group-add peer should reconcile after group-3 was deleted");
-    const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(cache_path);
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
@@ -633,7 +633,7 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
                 view->groups.begin(),
                 view->groups.end(),
                 [](const auto& group) {
-                    return group.id != specforge::UnassignedUserGroupId() &&
+                    return group.id != spectiary::UnassignedUserGroupId() &&
                            group.id != "group-1" && group.id != "group-2";
                 }),
         "a stale group addition must receive a fresh identity after its requested id was created and deleted");
@@ -662,13 +662,13 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
 
     std::string durable_id;
     {
-        specforge::SpectralLinesPanelController durable_peer(
+        spectiary::SpectralLinesPanelController durable_peer(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         RequireApplied(
             durable_peer.Submit(
-                specforge::CatalogUserStateIntent::AddUserGroup(
+                spectiary::CatalogUserStateIntent::AddUserGroup(
                     "view-2")),
             "ordering durable peer should add group-4");
         durable_id = NewOpaqueGroupId(durable_peer.View());
@@ -681,7 +681,7 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
     Require(
         WaitForCatalogChild(stale_task, "reorder_and_add_group") == 0,
         "ordering stale task should reconcile after the durable addition");
-    const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(cache_path);
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
@@ -694,8 +694,8 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
             view->groups[1].id == "group-1" &&
             view->groups[2].id == "group-3" &&
             view->groups[3].id == durable_id &&
-            view->groups[4].id != durable_id && specforge::IsCanonicalUuidV4(view->groups[4].id) &&
-            view->groups[5].id == specforge::UnassignedUserGroupId(),
+            view->groups[4].id != durable_id && spectiary::IsCanonicalUuidV4(view->groups[4].id) &&
+            view->groups[5].id == spectiary::UnassignedUserGroupId(),
         "multi-process ordering must preserve the task reorder and place durable addition before task addition");
     std::filesystem::remove_all(marker_root, remove_error);
 }
@@ -722,13 +722,13 @@ void RunDeleteActiveViewWithStaleSelectionRace(
         "stale deletion task should publish its active-view snapshot");
 
     {
-        specforge::SpectralLinesPanelController durable_peer(
+        spectiary::SpectralLinesPanelController durable_peer(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         RequireApplied(
             durable_peer.Submit(
-                specforge::CatalogUserStateIntent::SelectGroupingView(
+                spectiary::CatalogUserStateIntent::SelectGroupingView(
                     "view-3")),
             "durable peer should explicitly select surviving view-3");
         Require(
@@ -740,7 +740,7 @@ void RunDeleteActiveViewWithStaleSelectionRace(
     Require(
         WaitForCatalogChild(stale_delete, "delete_view_1") == 0,
         "stale deletion task should reconcile after the explicit selection");
-    const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(cache_path);
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     Require(
         state.active_view_id == "view-3" &&
@@ -784,14 +784,14 @@ void SeedLegacyMultiCatalogCache(
     int schema_version)
 {
     SeedMultiProcessCache(path);
-    specforge::CatalogUserStateCacheLoadResult loaded =
-        specforge::LoadCatalogUserStateCache(path);
+    spectiary::CatalogUserStateCacheLoadResult loaded =
+        spectiary::LoadCatalogUserStateCache(path);
     Require(
         loaded.issue_kind ==
-            specforge::CatalogUserStateCacheLoadIssueKind::None,
+            spectiary::CatalogUserStateCacheLoadIssueKind::None,
         "legacy multi-catalog fixture should load its schema-five seed");
 
-    specforge::CatalogUserState foreign_state =
+    spectiary::CatalogUserState foreign_state =
         loaded.cache.catalogs.at("public-spectral-lines.v1");
     foreign_state.catalog_identity = {
         "foreign.catalog",
@@ -801,11 +801,11 @@ void SeedLegacyMultiCatalogCache(
         std::move(foreign_state));
     loaded.cache.catalog_panel_state.emplace(
         "foreign.catalog",
-        specforge::CatalogPanelState{});
+        spectiary::CatalogPanelState{});
 
     std::string error;
     Require(
-        specforge::SaveCatalogUserStateCache(
+        spectiary::SaveCatalogUserStateCache(
             path,
             loaded.cache,
             error),
@@ -843,13 +843,13 @@ void RunExplicitSelectionRoundTripRace(
         "selection round-trip task should publish its startup snapshot");
 
     {
-        specforge::SpectralLinesPanelController durable_peer(
+        spectiary::SpectralLinesPanelController durable_peer(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         RequireApplied(
             durable_peer.Submit(
-                specforge::CatalogUserStateIntent::SelectGroupingView(
+                spectiary::CatalogUserStateIntent::SelectGroupingView(
                     "view-3")),
             "durable peer should explicitly select view-3");
         Require(
@@ -861,7 +861,7 @@ void RunExplicitSelectionRoundTripRace(
     Require(
         WaitForCatalogChild(stale_task, "select_view_2_then_1") == 0,
         "selection round-trip task should reconcile successfully");
-    const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(cache_path);
     Require(
         loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id ==
             "view-1",
@@ -979,89 +979,89 @@ void WriteLegacySchemaTwoCacheWithoutUnassignedFlag(
 })json");
 }
 
-const specforge::SpectralLineGroupingView* FindGroupingView(
-    const specforge::CatalogUserStateView& state,
+const spectiary::SpectralLineGroupingView* FindGroupingView(
+    const spectiary::CatalogUserStateView& state,
     std::string_view view_id)
 {
     const auto match = std::find_if(
         state.grouping_views.begin(),
         state.grouping_views.end(),
-        [view_id](const specforge::SpectralLineGroupingView& view) {
+        [view_id](const spectiary::SpectralLineGroupingView& view) {
             return view.id == view_id;
         });
     return match == state.grouping_views.end() ? nullptr : &(*match);
 }
 
-const specforge::SpectralLineGroupingView* FindActiveEditableView(
-    const specforge::CatalogUserStateView& state)
+const spectiary::SpectralLineGroupingView* FindActiveEditableView(
+    const spectiary::CatalogUserStateView& state)
 {
     const auto match = std::find_if(
         state.grouping_views.begin(),
         state.grouping_views.end(),
-        [](const specforge::SpectralLineGroupingView& view) {
+        [](const spectiary::SpectralLineGroupingView& view) {
             return view.active && view.editable;
         });
     return match == state.grouping_views.end() ? nullptr : &(*match);
 }
 
-const specforge::SpectralLineGroupView* FindGroup(
-    const specforge::SpectralLineGroupingView& view,
+const spectiary::SpectralLineGroupView* FindGroup(
+    const spectiary::SpectralLineGroupingView& view,
     std::string_view group_id)
 {
     const auto match = std::find_if(
         view.groups.begin(),
         view.groups.end(),
-        [group_id](const specforge::SpectralLineGroupView& group) {
+        [group_id](const spectiary::SpectralLineGroupView& group) {
             return group.id == group_id;
         });
     return match == view.groups.end() ? nullptr : &(*match);
 }
 
-const specforge::SpectralLineGroupView* FindUnassignedGroup(
-    const specforge::SpectralLineGroupingView& view)
+const spectiary::SpectralLineGroupView* FindUnassignedGroup(
+    const spectiary::SpectralLineGroupingView& view)
 {
     const auto match = std::find_if(
         view.groups.begin(),
         view.groups.end(),
-        [](const specforge::SpectralLineGroupView& group) {
+        [](const spectiary::SpectralLineGroupView& group) {
             return group.is_unassigned;
         });
     return match == view.groups.end() ? nullptr : &(*match);
 }
 
-const specforge::SpectralLineMarkerReferenceView* FindMarker(
-    const specforge::SpectralLineGroupView& group,
+const spectiary::SpectralLineMarkerReferenceView* FindMarker(
+    const spectiary::SpectralLineGroupView& group,
     std::string_view marker_id)
 {
     const auto match = std::find_if(
         group.marker_references.begin(),
         group.marker_references.end(),
-        [marker_id](const specforge::SpectralLineMarkerReferenceView& marker) {
+        [marker_id](const spectiary::SpectralLineMarkerReferenceView& marker) {
             return marker.marker_id == marker_id;
         });
     return match == group.marker_references.end() ? nullptr : &(*match);
 }
 
-void RequireApplied(const specforge::CatalogUserStateResult& result, std::string_view message)
+void RequireApplied(const spectiary::CatalogUserStateResult& result, std::string_view message)
 {
-    Require(result.status == specforge::CatalogUserStateResultStatus::Applied, message);
+    Require(result.status == spectiary::CatalogUserStateResultStatus::Applied, message);
     Require(result.changed, "applied result should report a change");
 }
 
-void RequireRejected(const specforge::CatalogUserStateResult& result, std::string_view message)
+void RequireRejected(const spectiary::CatalogUserStateResult& result, std::string_view message)
 {
-    Require(result.status == specforge::CatalogUserStateResultStatus::Rejected, message);
+    Require(result.status == spectiary::CatalogUserStateResultStatus::Rejected, message);
     Require(!result.changed, "rejected result must not report a change");
     Require(!result.message.empty(), "rejected result should explain the invalid identity or invariant");
 }
 
 void RequireNoChange(
-    const specforge::CatalogUserStateResult& result,
+    const spectiary::CatalogUserStateResult& result,
     std::string_view message)
 {
     Require(
         result.status ==
-            specforge::CatalogUserStateResultStatus::NoChange,
+            spectiary::CatalogUserStateResultStatus::NoChange,
         message);
     Require(
         !result.changed &&
@@ -1074,22 +1074,22 @@ void TestForeignIdentitiesAreRejectedWithoutPersistence()
     const std::filesystem::path path = TestCachePath("identity_rejection");
     RemoveTestCache(path);
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
 
         RequireRejected(
-            session.Submit(specforge::CatalogUserStateIntent::SelectGroupingView("missing-view")),
+            session.Submit(spectiary::CatalogUserStateIntent::SelectGroupingView("missing-view")),
             "unknown active grouping view should be rejected");
         RequireRejected(
-            session.Submit(specforge::CatalogUserStateIntent::AddUserGroup("missing-view")),
+            session.Submit(spectiary::CatalogUserStateIntent::AddUserGroup("missing-view")),
             "unknown grouping view mutation should be rejected");
         RequireRejected(
-            session.Submit(specforge::CatalogUserStateIntent::SetMarkerVisibility("missing-marker", false)),
+            session.Submit(spectiary::CatalogUserStateIntent::SetMarkerVisibility("missing-marker", false)),
             "unknown catalog marker should be rejected");
 
-        const specforge::CatalogUserStateView state = session.View();
+        const spectiary::CatalogUserStateView state = session.View();
         Require(state.user_grouping_view_count == 0, "rejected intents must leave user grouping views unchanged");
         Require(session.Flush(), "a clean session should flush successfully");
     }
@@ -1102,22 +1102,22 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
     const std::filesystem::path path = TestCachePath("plot_view");
     RemoveTestCache(path);
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
 
-        const specforge::SpectralLinePlotView no_snapshot = session.PlotView(nullptr);
+        const spectiary::SpectralLinePlotView no_snapshot = session.PlotView(nullptr);
         Require(no_snapshot.visible_markers.empty(), "a missing snapshot must not expose plot markers");
         Require(no_snapshot.marker_labels_visible, "plot label visibility should be available without a snapshot");
         Require(
-            no_snapshot.layout_scope_id == specforge::PublicSpectralLineCatalogIdentity().id,
+            no_snapshot.layout_scope_id == spectiary::PublicSpectralLineCatalogIdentity().id,
             "plot layout scope should use the stable catalog identity");
 
-        const specforge::SpectralLinePlotView unsupported = session.PlotView(Snapshot(false));
+        const spectiary::SpectralLinePlotView unsupported = session.PlotView(Snapshot(false));
         Require(unsupported.visible_markers.empty(), "an unsupported snapshot must not expose plot markers");
 
-        specforge::SpectralLinePlotView plot_view = session.PlotView(Snapshot(true));
+        spectiary::SpectralLinePlotView plot_view = session.PlotView(Snapshot(true));
         Require(plot_view.visible_markers.size() == 3, "a supported snapshot should expose visible catalog markers");
         Require(
             plot_view.visible_markers[0].marker->id == "h_beta" &&
@@ -1126,10 +1126,10 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
             "plot markers should preserve catalog order");
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetMarkerLabelsVisible(false)),
+            session.Submit(spectiary::CatalogUserStateIntent::SetMarkerLabelsVisible(false)),
             "plot label visibility intent should be applied");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetMarkerVisibility("h_alpha", false)),
+            session.Submit(spectiary::CatalogUserStateIntent::SetMarkerVisibility("h_alpha", false)),
             "plot marker visibility intent should be applied");
 
         plot_view = session.PlotView(Snapshot(true));
@@ -1139,7 +1139,7 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
             std::none_of(
                 plot_view.visible_markers.begin(),
                 plot_view.visible_markers.end(),
-                [](const specforge::SpectralLinePlotMarker& entry) {
+                [](const spectiary::SpectralLinePlotMarker& entry) {
                     return entry.marker != nullptr &&
                            entry.marker->id == "h_alpha";
                 }),
@@ -1153,15 +1153,15 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
     const std::filesystem::path path =
         TestCachePath("line_band_colors");
     RemoveTestCache(path);
-    const specforge::PlotSeriesColor line_color =
-        specforge::PlotSeriesColor::ExplicitColor({
+    const spectiary::PlotSeriesColor line_color =
+        spectiary::PlotSeriesColor::ExplicitColor({
             .red = 0.12f,
             .green = 0.24f,
             .blue = 0.36f,
             .alpha = 0.48f,
         });
-    const specforge::PlotSeriesColor band_color =
-        specforge::PlotSeriesColor::ExplicitColor({
+    const spectiary::PlotSeriesColor band_color =
+        spectiary::PlotSeriesColor::ExplicitColor({
             .red = 0.81f,
             .green = 0.62f,
             .blue = 0.43f,
@@ -1169,11 +1169,11 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
         });
 
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             LineAndBandCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
-        const specforge::SpectralLinePlotView automatic =
+        const spectiary::SpectralLinePlotView automatic =
             session.PlotView(Snapshot(true));
         Require(
             automatic.visible_markers.size() == 2 &&
@@ -1183,25 +1183,25 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerColor(
+                spectiary::CatalogUserStateIntent::SetMarkerColor(
                     "atomic_line",
                     line_color)),
             "line color override should apply");
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerColor(
+                spectiary::CatalogUserStateIntent::SetMarkerColor(
                     "molecular_band",
                     band_color)),
             "band color override should apply independently");
 
-        const specforge::SpectralLinePlotView customized =
+        const spectiary::SpectralLinePlotView customized =
             session.PlotView(Snapshot(true));
         Require(
             customized.visible_markers[0].color == line_color &&
                 customized.visible_markers[1].color == band_color,
             "plot projection should carry each marker's independent color model");
 
-        const specforge::CatalogUserStateView panel_view =
+        const spectiary::CatalogUserStateView panel_view =
             session.View();
         bool line_seen = false;
         bool band_seen = false;
@@ -1225,7 +1225,7 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "atomic_line",
                     false)),
             "line visibility should change");
@@ -1240,9 +1240,9 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
     }
 
     {
-        specforge::SpectralLinesPanelController restarted(
+        spectiary::SpectralLinesPanelController restarted(
             LineAndBandCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         const auto plot = restarted.PlotView(Snapshot(true));
         Require(
@@ -1253,13 +1253,13 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
                 plot.visible_markers.front().automatic_color_slot == 4,
             "restart should round-trip a band's override, visibility, and stable slot");
         const auto state =
-            specforge::LoadCatalogUserStateCache(path);
+            spectiary::LoadCatalogUserStateCache(path);
         const auto& persisted =
             state.cache.catalogs.at("public-spectral-lines.v1");
         Require(
-            specforge::MarkerColor(persisted, "atomic_line") ==
+            spectiary::MarkerColor(persisted, "atomic_line") ==
                     line_color &&
-                specforge::MarkerColor(
+                spectiary::MarkerColor(
                     persisted,
                     "molecular_band") == band_color,
             "persistence should retain line and band overrides independently even when one marker is hidden");
@@ -1276,31 +1276,31 @@ void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
     WriteNonCanonicalCache(path);
 
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
-        const specforge::CatalogUserStateView state = session.View();
+        const spectiary::CatalogUserStateView state = session.View();
         Require(
             state.user_grouping_view_count == 1,
             "domain canonicalization should retain the one valid user grouping view");
 
-        const specforge::SpectralLineGroupingView* catalog_view =
-            FindGroupingView(state, specforge::CatalogGroupingViewId());
+        const spectiary::SpectralLineGroupingView* catalog_view =
+            FindGroupingView(state, spectiary::CatalogGroupingViewId());
         Require(
             catalog_view != nullptr && catalog_view->active &&
                 catalog_view->selection_requested,
             "domain canonicalization should repair invalid active selection and request presentation");
 
-        const specforge::SpectralLineGroupingView* user_view =
+        const spectiary::SpectralLineGroupingView* user_view =
             FindGroupingView(state, "view-1");
         Require(
             user_view != nullptr && user_view->editable &&
                 user_view->name == "Review",
             "domain canonicalization should own persisted view flags and names");
-        const specforge::SpectralLineGroupView* group =
+        const spectiary::SpectralLineGroupView* group =
             FindGroup(*user_view, "group-1");
-        const specforge::SpectralLineGroupView* unassigned =
+        const spectiary::SpectralLineGroupView* unassigned =
             FindUnassignedGroup(*user_view);
         Require(
             group != nullptr && group->name == "Hydrogen" &&
@@ -1308,11 +1308,11 @@ void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
             "domain canonicalization should trim group names and retain valid panel state");
         Require(
             unassigned != nullptr &&
-                unassigned->id == specforge::UnassignedUserGroupId() &&
+                unassigned->id == spectiary::UnassignedUserGroupId() &&
                 unassigned->name == "Unassigned",
             "domain canonicalization should create exactly the canonical unassigned group");
 
-        const specforge::SpectralLineMarkerReferenceView* unresolved =
+        const spectiary::SpectralLineMarkerReferenceView* unresolved =
             FindMarker(*group, "missing-marker");
         Require(
             unresolved != nullptr && !unresolved->resolved &&
@@ -1330,11 +1330,11 @@ void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
                 session.View().persistence.save_diagnostic_detail);
     }
 
-    const specforge::CatalogUserStateCacheLoadResult persisted =
-        specforge::LoadCatalogUserStateCache(path);
-    const specforge::CatalogUserState& state =
+    const spectiary::CatalogUserStateCacheLoadResult persisted =
+        spectiary::LoadCatalogUserStateCache(path);
+    const spectiary::CatalogUserState& state =
         persisted.cache.catalogs.at("public-spectral-lines.v1");
-    const specforge::CatalogPanelState& panel =
+    const spectiary::CatalogPanelState& panel =
         persisted.cache.catalog_panel_state.at("public-spectral-lines.v1");
     Require(
         !state.marker_visibility.contains("") &&
@@ -1356,17 +1356,17 @@ void TestPersistentIntentUsesDomainCanonicalizationForSelection()
     RemoveTestCache(path);
 
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     CreateUserGroupingView()),
             "creating a view should apply");
-        specforge::CatalogUserStateView state = session.View();
-        const specforge::SpectralLineGroupingView* user_view =
+        spectiary::CatalogUserStateView state = session.View();
+        const spectiary::SpectralLineGroupingView* user_view =
             FindActiveEditableView(state);
         Require(
             user_view != nullptr,
@@ -1374,18 +1374,18 @@ void TestPersistentIntentUsesDomainCanonicalizationForSelection()
         const std::string user_view_id = user_view->id;
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     AcknowledgeGroupingViewSelection(user_view_id)),
             "selection acknowledgement should apply");
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     DeleteUserGroupingView(user_view_id)),
             "deleting the active view should apply");
         state = session.View();
-        const specforge::SpectralLineGroupingView* catalog_view =
-            FindGroupingView(state, specforge::CatalogGroupingViewId());
+        const spectiary::SpectralLineGroupingView* catalog_view =
+            FindGroupingView(state, spectiary::CatalogGroupingViewId());
         Require(
             catalog_view != nullptr && catalog_view->active &&
                 catalog_view->selection_requested,
@@ -1404,25 +1404,25 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
     std::string view_id;
     std::string group_id;
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     CreateUserGroupingView()),
             "generated-name fixture should create a user view");
 
-        specforge::CatalogUserStateView state =
+        spectiary::CatalogUserStateView state =
             session.View();
-        const specforge::SpectralLineGroupingView* view =
+        const spectiary::SpectralLineGroupingView* view =
             FindActiveEditableView(state);
         Require(
             view != nullptr &&
                 view->name == "Grouping 1" &&
                 view->generated_name.source ==
-                    specforge::GeneratedNameSource::
+                    spectiary::GeneratedNameSource::
                         DefaultGroupingView &&
                 view->generated_name.ordinal == 1,
             "created grouping views should carry explicit generated-name metadata");
@@ -1430,23 +1430,23 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
 
         RequireNoChange(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroupingView(
                         view_id,
                         view->name,
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Unedited)),
             "confirming an unedited grouping view name should preserve the stored value");
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     AddUserGroup(view_id)),
             "generated-name fixture should add a user group");
         state = session.View();
         view = FindGroupingView(state, view_id);
-        const specforge::SpectralLineGroupView* group =
+        const spectiary::SpectralLineGroupView* group =
             view == nullptr || view->groups.empty()
                 ? nullptr
                 : &view->groups.front();
@@ -1455,7 +1455,7 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
                 !group->is_unassigned &&
                 group->name == "Group 1" &&
                 group->generated_name.source ==
-                    specforge::GeneratedNameSource::
+                    spectiary::GeneratedNameSource::
                         DefaultGroup &&
                 group->generated_name.ordinal == 1,
             "created groups should carry explicit generated-name metadata");
@@ -1463,12 +1463,12 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
 
         RequireNoChange(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroup(
                         view_id,
                         group_id,
                         group->name,
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Unedited)),
             "confirming an unedited group name should preserve the stored value");
@@ -1478,15 +1478,15 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
     }
 
     {
-        specforge::SpectralLinesPanelController restored(
+        spectiary::SpectralLinesPanelController restored(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
-        specforge::CatalogUserStateView state =
+        spectiary::CatalogUserStateView state =
             restored.View();
-        const specforge::SpectralLineGroupingView* view =
+        const spectiary::SpectralLineGroupingView* view =
             FindGroupingView(state, view_id);
-        const specforge::SpectralLineGroupView* group =
+        const spectiary::SpectralLineGroupView* group =
             view == nullptr
                 ? nullptr
                 : FindGroup(*view, group_id);
@@ -1494,33 +1494,33 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
             view != nullptr &&
                 view->name == "Grouping 1" &&
                 view->generated_name.source ==
-                    specforge::GeneratedNameSource::
+                    spectiary::GeneratedNameSource::
                         DefaultGroupingView &&
                 group != nullptr &&
                 group->name == "Group 1" &&
                 group->generated_name.source ==
-                    specforge::GeneratedNameSource::
+                    spectiary::GeneratedNameSource::
                         DefaultGroup,
             "generated-name metadata should survive the cache round trip");
 
         RequireApplied(
             restored.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroupingView(
                         view_id,
                         "Grouping 7",
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Edited)),
             "same-shaped user grouping names should be accepted");
         RequireApplied(
             restored.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroup(
                         view_id,
                         group_id,
                         "Group 7",
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Edited)),
             "same-shaped user group names should be accepted");
@@ -1534,37 +1534,37 @@ void TestGeneratedNamesPreserveStoredValuesAndOrigins()
             view != nullptr &&
                 view->name == "Grouping 7" &&
                 view->generated_name.source ==
-                    specforge::GeneratedNameSource::None &&
+                    spectiary::GeneratedNameSource::None &&
                 group != nullptr &&
                 group->name == "Group 7" &&
                 group->generated_name.source ==
-                    specforge::GeneratedNameSource::None,
+                    spectiary::GeneratedNameSource::None,
             "user renames should clear generated-name semantics even when their shape matches a default");
 
         RequireApplied(
             restored.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroupingView(
                         view_id,
                         "Draft copy",
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Edited)),
             "user names ending in copy should be accepted verbatim");
         RequireApplied(
             restored.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     DuplicateGroupingView(view_id)),
             "duplicating a user-named view should apply");
         state = restored.View();
-        const specforge::SpectralLineGroupingView*
+        const spectiary::SpectralLineGroupingView*
             duplicated = FindActiveEditableView(state);
         Require(
             duplicated != nullptr &&
                 duplicated->id != view_id &&
                 duplicated->name == "Draft copy copy" &&
                 duplicated->generated_name.source ==
-                    specforge::GeneratedNameSource::None &&
+                    spectiary::GeneratedNameSource::None &&
                 duplicated->generated_name.copy_count == 1 &&
                 duplicated->generated_name.copy_base_name ==
                     "Draft copy",
@@ -1581,18 +1581,18 @@ void TestExplicitStoredValueRenamesClearGeneratedMetadata()
     RemoveTestCache(path);
 
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     CreateUserGroupingView()),
             "explicit-rename fixture should create a user view");
-        specforge::CatalogUserStateView state =
+        spectiary::CatalogUserStateView state =
             session.View();
-        const specforge::SpectralLineGroupingView* view =
+        const spectiary::SpectralLineGroupingView* view =
             FindActiveEditableView(state);
         Require(
             view != nullptr,
@@ -1601,12 +1601,12 @@ void TestExplicitStoredValueRenamesClearGeneratedMetadata()
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     AddUserGroup(view_id)),
             "explicit-rename fixture should create a group");
         state = session.View();
         view = FindGroupingView(state, view_id);
-        const specforge::SpectralLineGroupView* group =
+        const spectiary::SpectralLineGroupView* group =
             view == nullptr || view->groups.empty()
                 ? nullptr
                 : &view->groups.front();
@@ -1617,22 +1617,22 @@ void TestExplicitStoredValueRenamesClearGeneratedMetadata()
 
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroupingView(
                         view_id,
                         "Grouping 1",
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Edited)),
             "an explicit rename to the stored grouping-view text should clear generated-name semantics");
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::
+                spectiary::CatalogUserStateIntent::
                     RenameUserGroup(
                         view_id,
                         group_id,
                         "Group 1",
-                        specforge::
+                        spectiary::
                             CatalogUserRenameEditState::
                                 Edited)),
             "an explicit rename to the stored group text should clear generated-name semantics");
@@ -1647,11 +1647,11 @@ void TestExplicitStoredValueRenamesClearGeneratedMetadata()
             view != nullptr &&
                 view->name == "Grouping 1" &&
                 view->generated_name.source ==
-                    specforge::GeneratedNameSource::None &&
+                    spectiary::GeneratedNameSource::None &&
                 group != nullptr &&
                 group->name == "Group 1" &&
                 group->generated_name.source ==
-                    specforge::GeneratedNameSource::None,
+                    spectiary::GeneratedNameSource::None,
             "explicit same-text renames should preserve text while clearing both generated-name markers");
         Require(
             session.Flush(),
@@ -1659,25 +1659,25 @@ void TestExplicitStoredValueRenamesClearGeneratedMetadata()
     }
 
     {
-        specforge::SpectralLinesPanelController restored(
+        spectiary::SpectralLinesPanelController restored(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
-        const specforge::CatalogUserStateView state =
+        const spectiary::CatalogUserStateView state =
             restored.View();
-        const specforge::SpectralLineGroupingView* view =
+        const spectiary::SpectralLineGroupingView* view =
             FindActiveEditableView(state);
-        const specforge::SpectralLineGroupView* group =
+        const spectiary::SpectralLineGroupView* group =
             view == nullptr || view->groups.empty()
                 ? nullptr
                 : &view->groups.front();
         Require(
             view != nullptr &&
                 view->generated_name.source ==
-                    specforge::GeneratedNameSource::None &&
+                    spectiary::GeneratedNameSource::None &&
                 group != nullptr &&
                 group->generated_name.source ==
-                    specforge::GeneratedNameSource::None,
+                    spectiary::GeneratedNameSource::None,
             "cleared generated-name markers should survive the cache round trip");
     }
 
@@ -1692,11 +1692,11 @@ void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
     WriteLegacyExactShapeUserNames(path);
 
     const auto require_user_owned_names =
-        [](const specforge::CatalogUserStateView& state,
+        [](const spectiary::CatalogUserStateView& state,
            std::string_view context) {
-            const specforge::SpectralLineGroupingView* view =
+            const spectiary::SpectralLineGroupingView* view =
                 FindGroupingView(state, "view-1");
-            const specforge::SpectralLineGroupView* group =
+            const spectiary::SpectralLineGroupView* group =
                 view == nullptr
                     ? nullptr
                     : FindGroup(*view, "group-1");
@@ -1704,18 +1704,18 @@ void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
                 view != nullptr &&
                     view->name == "Grouping 1" &&
                     view->generated_name.source ==
-                        specforge::GeneratedNameSource::None &&
+                        spectiary::GeneratedNameSource::None &&
                     group != nullptr &&
                     group->name == "Group 1" &&
                     group->generated_name.source ==
-                        specforge::GeneratedNameSource::None,
+                        spectiary::GeneratedNameSource::None,
                 context);
         };
 
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         require_user_owned_names(
             session.View(),
@@ -1731,9 +1731,9 @@ void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
         "schema rewrite must not invent generated-name provenance");
 
     {
-        specforge::SpectralLinesPanelController restarted(
+        spectiary::SpectralLinesPanelController restarted(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         require_user_owned_names(
             restarted.View(),
@@ -1750,18 +1750,18 @@ void TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten()
             const std::string original =
                 ReadFile(path);
             {
-                specforge::
+                spectiary::
                     SpectralLinesPanelController
                         session(
                             GroupedCatalog(),
-                            specforge::
+                            spectiary::
                                 PublicSpectralLineCatalogIdentity(),
                             path);
                 Require(
                     session.View()
                             .persistence
                             .load_issue ==
-                        specforge::
+                        spectiary::
                             SpectralLineCacheLoadIssueKind::
                                 InvalidDocument,
                     "a malformed legacy cache body should expose an invalid-document warning");
@@ -1819,24 +1819,24 @@ void TestModificationSelectionAndPersistenceRoundTrip()
     std::string second_group_id;
     std::string first_flush_contents;
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()),
+            session.Submit(spectiary::CatalogUserStateIntent::CreateUserGroupingView()),
             "creating a user grouping view should be applied");
-        specforge::CatalogUserStateView state = session.View();
-        const specforge::SpectralLineGroupingView* user_view = FindActiveEditableView(state);
+        spectiary::CatalogUserStateView state = session.View();
+        const spectiary::SpectralLineGroupingView* user_view = FindActiveEditableView(state);
         Require(user_view != nullptr, "created user grouping view should become active");
         user_view_id = user_view->id;
-        const specforge::SpectralLineGroupView* unassigned = FindUnassignedGroup(*user_view);
+        const spectiary::SpectralLineGroupView* unassigned = FindUnassignedGroup(*user_view);
         Require(unassigned != nullptr, "created user grouping view should have an unassigned group");
         const std::string unassigned_group_id = unassigned->id;
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(user_view_id)),
+            session.Submit(spectiary::CatalogUserStateIntent::AddUserGroup(user_view_id)),
             "first user group should be added");
         state = session.View();
         user_view = FindGroupingView(state, user_view_id);
@@ -1844,14 +1844,14 @@ void TestModificationSelectionAndPersistenceRoundTrip()
         first_group_id = user_view->groups.front().id;
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::MoveMarkerReference(
+            session.Submit(spectiary::CatalogUserStateIntent::MoveMarkerReference(
                 user_view_id,
                 "h_alpha",
                 unassigned_group_id,
                 first_group_id)),
             "marker reference should move from unassigned into the first user group");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::CopyMarkerReference(
+            session.Submit(spectiary::CatalogUserStateIntent::CopyMarkerReference(
                 user_view_id,
                 "h_beta",
                 unassigned_group_id,
@@ -1860,7 +1860,7 @@ void TestModificationSelectionAndPersistenceRoundTrip()
         state = session.View();
         user_view = FindGroupingView(state, user_view_id);
         unassigned = user_view == nullptr ? nullptr : FindUnassignedGroup(*user_view);
-        const specforge::SpectralLineGroupView* first_group =
+        const spectiary::SpectralLineGroupView* first_group =
             user_view == nullptr ? nullptr : FindGroup(*user_view, first_group_id);
         Require(
             unassigned != nullptr && FindMarker(*unassigned, "h_beta") == nullptr,
@@ -1869,7 +1869,7 @@ void TestModificationSelectionAndPersistenceRoundTrip()
             first_group != nullptr && FindMarker(*first_group, "h_beta") != nullptr,
             "the ordinary group should contain the marker copied from unassigned");
         RequireRejected(
-            session.Submit(specforge::CatalogUserStateIntent::CopyMarkerReference(
+            session.Submit(spectiary::CatalogUserStateIntent::CopyMarkerReference(
                 user_view_id,
                 "h_alpha",
                 unassigned_group_id,
@@ -1877,7 +1877,7 @@ void TestModificationSelectionAndPersistenceRoundTrip()
             "copy should reject a source group that no longer owns the marker reference");
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(user_view_id)),
+            session.Submit(spectiary::CatalogUserStateIntent::AddUserGroup(user_view_id)),
             "second user group should be added");
         state = session.View();
         user_view = FindGroupingView(state, user_view_id);
@@ -1885,57 +1885,57 @@ void TestModificationSelectionAndPersistenceRoundTrip()
         second_group_id = user_view->groups[1].id;
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::CopyMarkerReference(
+            session.Submit(spectiary::CatalogUserStateIntent::CopyMarkerReference(
                 user_view_id,
                 "h_alpha",
                 first_group_id,
                 second_group_id)),
             "marker reference should copy between owned user groups");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::RenameUserGroupingView(
+            session.Submit(spectiary::CatalogUserStateIntent::RenameUserGroupingView(
                 user_view_id,
                 "Balmer review",
-                specforge::CatalogUserRenameEditState::Edited)),
+                spectiary::CatalogUserRenameEditState::Edited)),
             "user grouping view rename should be applied");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::RenameUserGroup(
+            session.Submit(spectiary::CatalogUserStateIntent::RenameUserGroup(
                 user_view_id,
                 first_group_id,
                 "Hydrogen",
-                specforge::CatalogUserRenameEditState::Edited)),
+                spectiary::CatalogUserRenameEditState::Edited)),
             "user group rename should be applied");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetGroupExpanded(
+            session.Submit(spectiary::CatalogUserStateIntent::SetGroupExpanded(
                 user_view_id,
                 first_group_id,
                 true)),
             "expanded state should be persisted by the Module");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetGroupMarkerVisibility(
+            session.Submit(spectiary::CatalogUserStateIntent::SetGroupMarkerVisibility(
                 user_view_id,
                 first_group_id,
                 false)),
             "group visibility should update shared marker visibility");
 
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetGroupingViewSearch("alpha")),
+            session.Submit(spectiary::CatalogUserStateIntent::SetGroupingViewSearch("alpha")),
             "grouping view search should update the read view");
         RequireRejected(
-            session.Submit(specforge::CatalogUserStateIntent::SetGroupMarkerVisibility(
+            session.Submit(spectiary::CatalogUserStateIntent::SetGroupMarkerVisibility(
                 user_view_id,
                 first_group_id,
                 true)),
             "bulk group visibility should be rejected while grouping view search is active");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SetGroupingViewSearch("")),
+            session.Submit(spectiary::CatalogUserStateIntent::SetGroupingViewSearch("")),
             "clearing grouping view search should be applied");
 
-        const std::string catalog_view_id = specforge::CatalogGroupingViewId();
+        const std::string catalog_view_id = spectiary::CatalogGroupingViewId();
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SelectGroupingView(catalog_view_id)),
+            session.Submit(spectiary::CatalogUserStateIntent::SelectGroupingView(catalog_view_id)),
             "catalog grouping view selection should be applied");
         RequireApplied(
-            session.Submit(specforge::CatalogUserStateIntent::SelectGroupingView(user_view_id)),
+            session.Submit(spectiary::CatalogUserStateIntent::SelectGroupingView(user_view_id)),
             "user grouping view should be selected before persistence");
         Require(session.Flush(), "modified catalog user state should flush successfully");
         Require(std::filesystem::exists(path), "modified catalog user state should create a cache file");
@@ -1944,24 +1944,24 @@ void TestModificationSelectionAndPersistenceRoundTrip()
     }
 
     {
-        specforge::SpectralLinesPanelController restored(
+        spectiary::SpectralLinesPanelController restored(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
-        const specforge::CatalogUserStateView state = restored.View();
-        const specforge::SpectralLineGroupingView* user_view = FindGroupingView(state, user_view_id);
+        const spectiary::CatalogUserStateView state = restored.View();
+        const spectiary::SpectralLineGroupingView* user_view = FindGroupingView(state, user_view_id);
         Require(user_view != nullptr, "persisted user grouping view should be restored");
         Require(user_view->active, "persisted active grouping view selection should be restored");
         Require(user_view->name == "Balmer review", "persisted grouping view name should be restored");
 
-        const specforge::SpectralLineGroupView* first_group = FindGroup(*user_view, first_group_id);
-        const specforge::SpectralLineGroupView* second_group = FindGroup(*user_view, second_group_id);
+        const spectiary::SpectralLineGroupView* first_group = FindGroup(*user_view, first_group_id);
+        const spectiary::SpectralLineGroupView* second_group = FindGroup(*user_view, second_group_id);
         Require(first_group != nullptr && second_group != nullptr, "persisted user groups should be restored");
         Require(first_group->name == "Hydrogen", "persisted user group name should be restored");
         Require(first_group->expanded, "persisted expanded state should be restored");
 
-        const specforge::SpectralLineMarkerReferenceView* first_marker = FindMarker(*first_group, "h_alpha");
-        const specforge::SpectralLineMarkerReferenceView* second_marker = FindMarker(*second_group, "h_alpha");
+        const spectiary::SpectralLineMarkerReferenceView* first_marker = FindMarker(*first_group, "h_alpha");
+        const spectiary::SpectralLineMarkerReferenceView* second_marker = FindMarker(*second_group, "h_alpha");
         Require(first_marker != nullptr && second_marker != nullptr, "shared marker references should be restored");
         Require(first_marker->shared && second_marker->shared, "restored marker references should remain shared");
         Require(!first_marker->visible && !second_marker->visible, "shared marker visibility should be restored");
@@ -1978,7 +1978,7 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        "specforge_catalog_user_state_health";
+        "spectiary_catalog_user_state_health";
     const std::filesystem::path blocker =
         root / "not-a-directory";
     const std::filesystem::path path =
@@ -1993,32 +1993,32 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
         stream << "{ invalid json";
     }
     {
-        specforge::SpectralLinesPanelController warned(
+        spectiary::SpectralLinesPanelController warned(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             warning_path);
         Require(
             warned.View().persistence.load_issue ==
-                    specforge::SpectralLineCacheLoadIssueKind::
+                    spectiary::SpectralLineCacheLoadIssueKind::
                         InvalidDocument &&
                 !warned.View()
                      .persistence
                      .load_diagnostic_detail.empty(),
             "spectral-line view should expose a typed cache load issue and parser detail");
-        const specforge::LocalUserStatePersistenceStatus warning_status =
+        const spectiary::LocalUserStatePersistenceStatus warning_status =
             warned.PersistenceStatus();
         Require(
             !warning_status.load_warning.empty() &&
                 !warning_status.load_diagnostic_detail.empty(),
             "catalog load warning and diagnostic should be owned by the shared persistence lifecycle");
     }
-    specforge::SpectralLinesPanelController session(
+    spectiary::SpectralLinesPanelController session(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     RequireApplied(
         session.Submit(
-            specforge::CatalogUserStateIntent::
+            spectiary::CatalogUserStateIntent::
                 SetMarkerVisibility(
                     "h_alpha",
                     false)),
@@ -2043,7 +2043,7 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
     }
     RequireApplied(
         session.Submit(
-            specforge::CatalogUserStateIntent::
+            spectiary::CatalogUserStateIntent::
                 SetMarkerVisibility(
                     "h_alpha",
                     true)),
@@ -2089,7 +2089,7 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
 
     RequireApplied(
         session.Submit(
-            specforge::CatalogUserStateIntent::
+            spectiary::CatalogUserStateIntent::
                 SetMarkerVisibility(
                     "h_alpha",
                     false)),
@@ -2110,13 +2110,13 @@ void TestDirtyCatalogStateFlushesDuringShutdown()
         TestCachePath("shutdown_flush");
     RemoveTestCache(path);
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "shutdown-flush fixture should create a dirty catalog state");
@@ -2125,12 +2125,12 @@ void TestDirtyCatalogStateFlushesDuringShutdown()
             "shutdown-flush fixture should remain pending before destruction");
     }
 
-    const specforge::CatalogUserStateCacheLoadResult loaded =
-        specforge::LoadCatalogUserStateCache(path);
+    const spectiary::CatalogUserStateCacheLoadResult loaded =
+        spectiary::LoadCatalogUserStateCache(path);
     Require(
         loaded.issue_kind ==
-                specforge::CatalogUserStateCacheLoadIssueKind::None &&
-            !specforge::IsMarkerVisible(
+                spectiary::CatalogUserStateCacheLoadIssueKind::None &&
+            !spectiary::IsMarkerVisible(
                 loaded.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_alpha"),
         "destruction should flush the dirty catalog state through the shared lifecycle");
@@ -2146,25 +2146,25 @@ void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
 
     // This controller keeps its canonicalized startup snapshot stale while a
     // peer commits a real rename and selection change.
-    specforge::SpectralLinesPanelController stale(
+    spectiary::SpectralLinesPanelController stale(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     {
-        specforge::SpectralLinesPanelController peer(
+        spectiary::SpectralLinesPanelController peer(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             peer.Submit(
-                specforge::CatalogUserStateIntent::RenameUserGroupingView(
+                spectiary::CatalogUserStateIntent::RenameUserGroupingView(
                     "view-1",
                     "Peer rename",
-                    specforge::CatalogUserRenameEditState::Edited)),
+                    spectiary::CatalogUserRenameEditState::Edited)),
             "peer should commit a real rename after stale startup canonicalization");
         RequireApplied(
             peer.Submit(
-                specforge::CatalogUserStateIntent::SelectGroupingView(
+                spectiary::CatalogUserStateIntent::SelectGroupingView(
                     "view-1")),
             "peer should commit a real selection after stale startup canonicalization");
         Require(peer.Flush(), "peer canonicalization and task delta should flush");
@@ -2172,7 +2172,7 @@ void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
 
     RequireApplied(
         stale.Submit(
-            specforge::CatalogUserStateIntent::SetMarkerVisibility(
+            spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                 "h_alpha",
                 false)),
         "stale controller should accept an unrelated explicit task delta");
@@ -2180,8 +2180,8 @@ void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
         stale.Flush(),
         "stale controller should reconcile without treating startup repairs as edits");
 
-    const specforge::CatalogUserStateCacheLoadResult loaded =
-        specforge::LoadCatalogUserStateCache(path);
+    const spectiary::CatalogUserStateCacheLoadResult loaded =
+        spectiary::LoadCatalogUserStateCache(path);
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
@@ -2191,7 +2191,7 @@ void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
         view != state.grouping_views.end() &&
             view->name == "Peer rename" &&
             state.active_view_id == "view-1" &&
-            !specforge::IsMarkerVisible(state, "h_alpha"),
+            !spectiary::IsMarkerVisible(state, "h_alpha"),
         "startup canonicalization must not overwrite a peer rename or selection");
     RemoveTestCache(path);
 }
@@ -2216,13 +2216,13 @@ void TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation()
             WriteTextFile(path, schema_three);
         }
 
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "a first user mutation on legacy state should be accepted");
@@ -2230,7 +2230,7 @@ void TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation()
             session.Flush(),
             "a first user mutation must migrate legacy state before reconciliation");
 
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
         const auto view = std::find_if(
             state.grouping_views.begin(),
@@ -2242,10 +2242,10 @@ void TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation()
                     view->groups.begin(),
                     view->groups.end(),
                     [](const auto& group) {
-                        return group.id == specforge::UnassignedUserGroupId() &&
+                        return group.id == spectiary::UnassignedUserGroupId() &&
                                group.is_unassigned;
                     }) &&
-                !specforge::IsMarkerVisible(state, "h_alpha"),
+                !spectiary::IsMarkerVisible(state, "h_alpha"),
             "legacy first-write migration must preserve canonical unassigned state and the user delta");
     }
     RemoveTestCache(path);
@@ -2257,37 +2257,37 @@ void TestGeneratedCatalogIdsSurviveDeletionAndRestart()
     RemoveTestCache(path);
     std::string old_view_id, old_group_id;
     {
-        specforge::SpectralLinesPanelController session(GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(), path);
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()), "create view");
+        spectiary::SpectralLinesPanelController session(GroupedCatalog(),
+            spectiary::PublicSpectralLineCatalogIdentity(), path);
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::CreateUserGroupingView()), "create view");
         old_view_id = FindActiveEditableView(session.View())->id;
-        Require(specforge::IsCanonicalUuidV4(old_view_id), "new view must have UUID v4 identity");
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(old_view_id)), "create group");
+        Require(spectiary::IsCanonicalUuidV4(old_view_id), "new view must have UUID v4 identity");
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::AddUserGroup(old_view_id)), "create group");
         const auto snapshot = session.View();
         for (const auto& group : FindActiveEditableView(snapshot)->groups) {
             if (!group.is_unassigned) old_group_id = group.id;
         }
-        Require(specforge::IsCanonicalUuidV4(old_group_id), "new group must have UUID v4 identity");
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::DuplicateGroupingView(old_view_id)), "copy view");
+        Require(spectiary::IsCanonicalUuidV4(old_group_id), "new group must have UUID v4 identity");
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::DuplicateGroupingView(old_view_id)), "copy view");
         const auto copied = session.View();
         const auto* copy = FindActiveEditableView(copied);
-        Require(copy->id != old_view_id && specforge::IsCanonicalUuidV4(copy->id), "copy must have fresh view identity");
+        Require(copy->id != old_view_id && spectiary::IsCanonicalUuidV4(copy->id), "copy must have fresh view identity");
         for (const auto& group : copy->groups) {
-            if (!group.is_unassigned) Require(group.id != old_group_id && specforge::IsCanonicalUuidV4(group.id), "copied groups need fresh UUIDs");
+            if (!group.is_unassigned) Require(group.id != old_group_id && spectiary::IsCanonicalUuidV4(group.id), "copied groups need fresh UUIDs");
         }
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::DeleteUserGroupingView(old_view_id)), "delete original");
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::DeleteUserGroupingView(old_view_id)), "delete original");
         Require(session.Flush(), "flush deletion");
     }
     {
-        specforge::SpectralLinesPanelController session(GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(), path);
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::CreateUserGroupingView()), "recreate view");
+        spectiary::SpectralLinesPanelController session(GroupedCatalog(),
+            spectiary::PublicSpectralLineCatalogIdentity(), path);
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::CreateUserGroupingView()), "recreate view");
         const auto id = FindActiveEditableView(session.View())->id;
-        Require(id != old_view_id && specforge::IsCanonicalUuidV4(id), "recreated view must not reuse deleted identity");
-        RequireApplied(session.Submit(specforge::CatalogUserStateIntent::AddUserGroup(id)), "recreate group");
+        Require(id != old_view_id && spectiary::IsCanonicalUuidV4(id), "recreated view must not reuse deleted identity");
+        RequireApplied(session.Submit(spectiary::CatalogUserStateIntent::AddUserGroup(id)), "recreate group");
         const auto snapshot = session.View();
         for (const auto& group : FindActiveEditableView(snapshot)->groups) {
-            if (!group.is_unassigned) Require(group.id != old_group_id && specforge::IsCanonicalUuidV4(group.id), "recreated group must not reuse deleted identity");
+            if (!group.is_unassigned) Require(group.id != old_group_id && spectiary::IsCanonicalUuidV4(group.id), "recreated group must not reuse deleted identity");
         }
         Require(session.Flush(), "flush recreated identities");
     }
@@ -2310,9 +2310,9 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
     const std::filesystem::path go_path = argv[5];
     const std::filesystem::path done_path = argv[6];
     try {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             cache_path);
         WriteMarkerFile(ready_path);
         if (!WaitForMarkerFile(go_path, 30s)) {
@@ -2322,7 +2322,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         if (operation == "set_alpha_hidden") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         false)),
                 "child should hide h_alpha");
@@ -2331,72 +2331,72 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
             // relying on the default-visible fallback.
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         false)),
                 "child should establish the visible conflict baseline");
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         true)),
                 "child should set h_alpha visible explicitly");
         } else if (operation == "set_beta_hidden") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_beta",
                         false)),
                 "child should hide h_beta");
         } else if (operation == "create_view") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::CreateUserGroupingView()),
+                    spectiary::CatalogUserStateIntent::CreateUserGroupingView()),
                 "child should create a grouping view");
         } else if (operation == "create_view_with_group") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::CreateUserGroupingView()),
+                    spectiary::CatalogUserStateIntent::CreateUserGroupingView()),
                 "child should create a grouping view before adding its group");
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::AddUserGroup(
+                    spectiary::CatalogUserStateIntent::AddUserGroup(
                         FindActiveEditableView(session.View())->id)),
                 "child should add a group to its new view");
         } else if (operation == "delete_view_1") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::DeleteUserGroupingView(
+                    spectiary::CatalogUserStateIntent::DeleteUserGroupingView(
                         "view-1")),
                 "child should delete view-1");
         } else if (operation == "rename_view_1_local" ||
                    operation == "rename_view_1_remote") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::RenameUserGroupingView(
+                    spectiary::CatalogUserStateIntent::RenameUserGroupingView(
                         "view-1",
                         operation == "rename_view_1_local"
                             ? "Local view 1"
                             : "Remote view 1",
-                        specforge::CatalogUserRenameEditState::Edited)),
+                        spectiary::CatalogUserRenameEditState::Edited)),
                 "child should commit its conflicting view rename");
         } else if (operation == "add_group_view_2") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::AddUserGroup(
+                    spectiary::CatalogUserStateIntent::AddUserGroup(
                         "view-2")),
                 "child should add a group to view-2");
         } else if (operation == "delete_group_1_view_2") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::DeleteUserGroup(
+                    spectiary::CatalogUserStateIntent::DeleteUserGroup(
                         "view-2",
                         "group-1")),
                 "child should delete group-1 from view-2");
         } else if (operation == "copy_reference_group_1_to_group_2") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::CopyMarkerReference(
+                    spectiary::CatalogUserStateIntent::CopyMarkerReference(
                         "view-2",
                         "h_alpha",
                         "group-1",
@@ -2405,7 +2405,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         } else if (operation == "remove_reference_group_1") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::RemoveMarkerReference(
+                    spectiary::CatalogUserStateIntent::RemoveMarkerReference(
                         "view-2",
                         "h_alpha",
                         "group-1")),
@@ -2413,15 +2413,15 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         } else if (operation == "rename_view_2") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::RenameUserGroupingView(
+                    spectiary::CatalogUserStateIntent::RenameUserGroupingView(
                         "view-2",
                         "Remote view 2",
-                        specforge::CatalogUserRenameEditState::Edited)),
+                        spectiary::CatalogUserRenameEditState::Edited)),
                 "child should rename view-2");
         } else if (operation == "reorder_groups") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::ReorderUserGroupBefore(
+                    spectiary::CatalogUserStateIntent::ReorderUserGroupBefore(
                         "view-2",
                         "group-2",
                         "group-1")),
@@ -2429,7 +2429,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         } else if (operation == "reorder_groups_reverse") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::ReorderUserGroupBefore(
+                    spectiary::CatalogUserStateIntent::ReorderUserGroupBefore(
                         "view-2",
                         "group-3",
                         "group-1")),
@@ -2437,53 +2437,53 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         } else if (operation == "reorder_and_add_group") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::ReorderUserGroupBefore(
+                    spectiary::CatalogUserStateIntent::ReorderUserGroupBefore(
                         "view-2",
                         "group-2",
                         "group-1")),
                 "ordering child should explicitly reorder view-2 groups");
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::AddUserGroup(
+                    spectiary::CatalogUserStateIntent::AddUserGroup(
                         "view-2")),
                 "ordering child should add its task group after reordering");
         } else if (operation == "select_view_1") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SelectGroupingView(
+                    spectiary::CatalogUserStateIntent::SelectGroupingView(
                         "view-1")),
                 "child should select view-1");
         } else if (operation == "select_view_2") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SelectGroupingView(
+                    spectiary::CatalogUserStateIntent::SelectGroupingView(
                         "view-2")),
                 "child should select view-2");
         } else if (operation == "select_view_2_then_1") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SelectGroupingView(
+                    spectiary::CatalogUserStateIntent::SelectGroupingView(
                         "view-2")),
                 "child should select view-2 before returning to view-1");
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SelectGroupingView(
+                    spectiary::CatalogUserStateIntent::SelectGroupingView(
                         "view-1")),
                 "child should explicitly return to view-1");
         } else if (operation == "hold_after_mutation") {
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         false)),
                 "interrupted child should mutate before being stopped");
-            specforge::ExclusiveFileLeaseAcquireResult held_commit_lease =
-                specforge::TryAcquireExclusiveFileLease(
-                    specforge::CatalogUserStateCacheCommitLeasePath(
+            spectiary::ExclusiveFileLeaseAcquireResult held_commit_lease =
+                spectiary::TryAcquireExclusiveFileLease(
+                    spectiary::CatalogUserStateCacheCommitLeasePath(
                         cache_path));
             Require(
                 held_commit_lease.status ==
-                    specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+                    spectiary::ExclusiveFileLeaseAcquireStatus::Acquired,
                 "interrupted child should hold the catalog commit lease before termination");
             WriteMarkerFile(done_path, "mutated\n");
             if (!WaitForMarkerFile(cache_path.string() + ".release", 60s)) {
@@ -2495,7 +2495,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
         } else if (operation == "interrupt_during_atomic_replace") {
             const std::filesystem::path release_path =
                 cache_path.string() + ".replace.release";
-            specforge::SetCatalogUserStateCacheBeforeReplaceHookForTests(
+            spectiary::SetCatalogUserStateCacheBeforeReplaceHookForTests(
                 [&](const std::filesystem::path& temporary_path,
                     const std::filesystem::path&) {
                     WriteMarkerFile(
@@ -2509,7 +2509,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
                 });
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         false)),
                 "atomic interruption child should mutate before replacement");
@@ -2607,9 +2607,9 @@ void TestCorruptLatestCatalogStateFailsClosed()
         path.parent_path() / (path.stem().string() + "_corrupt_markers");
     std::error_code marker_error;
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         std::filesystem::remove_all(marker_root, marker_error);
         std::filesystem::create_directories(marker_root);
@@ -2632,7 +2632,7 @@ void TestCorruptLatestCatalogStateFailsClosed()
         const std::string original = ReadFile(path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "a mutation against a corrupt cache should still be accepted in memory");
@@ -2662,9 +2662,9 @@ void TestSemanticallyInvalidLatestCatalogStateFailsClosed()
         (path.stem().string() + "_invalid_identity_markers");
     std::error_code marker_error;
     {
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         std::filesystem::remove_all(marker_root, marker_error);
         std::filesystem::create_directories(marker_root);
@@ -2689,7 +2689,7 @@ void TestSemanticallyInvalidLatestCatalogStateFailsClosed()
         const std::string original = ReadFile(path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "a mutation against a semantically invalid cache should be accepted in memory");
@@ -2735,13 +2735,13 @@ void TestEmptyLatestCatalogIdentitiesFailClosed()
         }
         WriteTextFile(path, corrupted);
 
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "an empty latest catalog identity should not reject the in-memory task");
@@ -2773,9 +2773,9 @@ void TestDuplicateLatestJsonKeysFailClosed()
         std::filesystem::remove_all(marker_root, marker_error);
         std::filesystem::create_directories(marker_root);
 
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         ChildProcess corruptor = StartCatalogChild(
             operation,
@@ -2796,7 +2796,7 @@ void TestDuplicateLatestJsonKeysFailClosed()
         const std::string corrupted = ReadFile(path);
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "a mutation against a duplicate-key cache should still be accepted in memory");
@@ -2834,9 +2834,9 @@ void TestCurrentSchemaSemanticCorruptionFailsClosedWithoutMaintenanceRewrite()
         WriteTextFile(path, corrupted);
 
         {
-            specforge::SpectralLinesPanelController session(
+            spectiary::SpectralLinesPanelController session(
                 GroupedCatalog(),
-                specforge::PublicSpectralLineCatalogIdentity(),
+                spectiary::PublicSpectralLineCatalogIdentity(),
                 path);
             Require(
                 !session.Flush(),
@@ -2878,17 +2878,17 @@ void TestLegacyIdentityCorruptionFailsClosedBeforeMigration()
                 replacement);
             WriteTextFile(path, corrupted);
 
-            specforge::SpectralLinesPanelController session(
+            spectiary::SpectralLinesPanelController session(
                 GroupedCatalog(),
-                specforge::PublicSpectralLineCatalogIdentity(),
+                spectiary::PublicSpectralLineCatalogIdentity(),
                 path);
             Require(
                 session.View().persistence.load_issue ==
-                    specforge::SpectralLineCacheLoadIssueKind::InvalidDocument,
+                    spectiary::SpectralLineCacheLoadIssueKind::InvalidDocument,
                 "legacy identity corruption must be reported before startup canonicalization");
             RequireApplied(
                 session.Submit(
-                    specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                         "h_alpha",
                         false)),
                 "legacy identity corruption test should create a replacement attempt");
@@ -2918,11 +2918,11 @@ void TestSchemaFiveMigrationDropsAllocatorHistory()
     legacy = ReplaceFirst(legacy, "\"active_view_id\":", "\"next_view_sequence\": 999, \"next_group_sequence\": 999, \"reserved_view_ids\": [\"view-998\"], \"reserved_group_ids\": [\"group-998\"], \"active_view_id\":");
     WriteTextFile(path, legacy);
     {
-        specforge::SpectralLinesPanelController session(GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(), path);
+        spectiary::SpectralLinesPanelController session(GroupedCatalog(),
+            spectiary::PublicSpectralLineCatalogIdentity(), path);
         Require(session.Flush(), "schema five migration should preserve live state");
     }
-    const auto loaded = specforge::LoadCatalogUserStateCache(path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(path);
     Require(loaded.schema_version == 6 && !loaded.requires_save, "migration should write schema six");
     const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     Require(state.grouping_views.size() == 2 && state.grouping_views[1].id == "view-2", "migration preserves live view IDs");
@@ -2948,17 +2948,17 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
             "\"catalog_identity\": \"foreign.catalog\"");
         WriteTextFile(path, corrupted);
 
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         Require(
             session.View().persistence.load_issue ==
-                specforge::SpectralLineCacheLoadIssueKind::InvalidDocument,
+                spectiary::SpectralLineCacheLoadIssueKind::InvalidDocument,
             "a legacy foreign marker reference must fail before canonicalization");
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "legacy foreign-reference corruption should create a replacement attempt");
@@ -2992,17 +2992,17 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
             corruption.second);
         WriteTextFile(path, corrupted);
 
-        specforge::SpectralLinesPanelController session(
+        spectiary::SpectralLinesPanelController session(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         Require(
             session.View().persistence.load_issue ==
-                specforge::SpectralLineCacheLoadIssueKind::InvalidDocument,
+                spectiary::SpectralLineCacheLoadIssueKind::InvalidDocument,
             "schema-three unassigned identity/flag mismatch must fail before canonicalization");
         RequireApplied(
             session.Submit(
-                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                     "h_alpha",
                     false)),
             "schema-three flag corruption should create a replacement attempt");
@@ -3025,18 +3025,18 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
     RemoveTestCache(path);
     SeedMultiProcessCacheWithThreeGroups(path);
 
-    specforge::SpectralLinesPanelController session(
+    spectiary::SpectralLinesPanelController session(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     RequireApplied(
         session.Submit(
-            specforge::CatalogUserStateIntent::AddUserGroup("view-2")),
+            spectiary::CatalogUserStateIntent::AddUserGroup("view-2")),
         "same-task ordering test should create group-4");
     const std::string new_group_id = NewOpaqueGroupId(session.View());
     RequireApplied(
         session.Submit(
-            specforge::CatalogUserStateIntent::ReorderUserGroupBefore(
+            spectiary::CatalogUserStateIntent::ReorderUserGroupBefore(
                 "view-2",
                 new_group_id,
                 "group-1")),
@@ -3045,7 +3045,7 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
         session.Flush(),
         "same-task new-group reorder should flush");
 
-    const auto loaded = specforge::LoadCatalogUserStateCache(path);
+    const auto loaded = spectiary::LoadCatalogUserStateCache(path);
     const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
     const auto view = std::find_if(
         views.begin(),
@@ -3058,7 +3058,7 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
             view->groups[1].id == "group-1" &&
             view->groups[2].id == "group-2" &&
             view->groups[3].id == "group-3" &&
-            view->groups[4].id == specforge::UnassignedUserGroupId(),
+            view->groups[4].id == spectiary::UnassignedUserGroupId(),
         "a new group explicitly moved before an existing group must retain that final order");
     RemoveTestCache(path);
 }
@@ -3073,9 +3073,9 @@ void TestLegacyMultiCatalogMigrationFailsClosed()
         const std::string legacy = ReadFile(path);
 
         {
-            specforge::SpectralLinesPanelController session(
+            spectiary::SpectralLinesPanelController session(
                 GroupedCatalog(),
-                specforge::PublicSpectralLineCatalogIdentity(),
+                spectiary::PublicSpectralLineCatalogIdentity(),
                 path);
             Require(
                 !session.Flush(),
@@ -3098,7 +3098,7 @@ void TestConcurrentCatalogStateReconciliation()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("specforge_catalog_user_state_multiprocess_" +
+        ("spectiary_catalog_user_state_multiprocess_" +
          std::to_string(GetCurrentProcessId()));
     const std::filesystem::path path = root / "state.json";
     std::error_code error;
@@ -3108,34 +3108,34 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "set_alpha_hidden", "set_beta_hidden");
     {
-        const specforge::CatalogUserStateCacheLoadResult loaded =
-            specforge::LoadCatalogUserStateCache(path);
-        const specforge::CatalogUserState& state =
+        const spectiary::CatalogUserStateCacheLoadResult loaded =
+            spectiary::LoadCatalogUserStateCache(path);
+        const spectiary::CatalogUserState& state =
             loaded.cache.catalogs.at("public-spectral-lines.v1");
         Require(
-            !specforge::IsMarkerVisible(state, "h_alpha") &&
-                !specforge::IsMarkerVisible(state, "h_beta"),
+            !spectiary::IsMarkerVisible(state, "h_alpha") &&
+                !spectiary::IsMarkerVisible(state, "h_beta"),
             "concurrent disjoint marker updates must both survive");
     }
 
     // A restart reads the reconciled durable snapshot, not either stale
     // controller's original startup snapshot.
     {
-        specforge::SpectralLinesPanelController restarted(
+        spectiary::SpectralLinesPanelController restarted(
             GroupedCatalog(),
-            specforge::PublicSpectralLineCatalogIdentity(),
+            spectiary::PublicSpectralLineCatalogIdentity(),
             path);
         Require(
             !restarted.View().grouping_views.empty(),
             "restarted controller should read the reconciled grouping state");
-        const specforge::SpectralLinePlotView restarted_plot =
+        const spectiary::SpectralLinePlotView restarted_plot =
             restarted.PlotView(Snapshot(true));
         const auto marker_is_visible =
             [&restarted_plot](std::string_view marker_id) {
                 return std::any_of(
                     restarted_plot.visible_markers.begin(),
                     restarted_plot.visible_markers.end(),
-                    [marker_id](const specforge::SpectralLinePlotMarker& entry) {
+                    [marker_id](const spectiary::SpectralLinePlotMarker& entry) {
                         return entry.marker != nullptr &&
                                entry.marker->id == marker_id;
                     });
@@ -3149,7 +3149,7 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "set_alpha_hidden", "set_alpha_visible");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
         const auto alpha = state.marker_visibility.find("h_alpha");
         Require(
@@ -3163,7 +3163,7 @@ void TestConcurrentCatalogStateReconciliation()
         "rename_view_1_local",
         "rename_view_1_remote");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
@@ -3178,11 +3178,11 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "create_view", "create_view");
     {
-        const specforge::CatalogUserStateCacheLoadResult loaded =
-            specforge::LoadCatalogUserStateCache(path);
+        const spectiary::CatalogUserStateCacheLoadResult loaded =
+            spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> ids;
-        for (const specforge::GroupingView& view : views) {
+        for (const spectiary::GroupingView& view : views) {
             ids.insert(view.id);
         }
         Require(
@@ -3200,7 +3200,7 @@ void TestConcurrentCatalogStateReconciliation()
         "create_view_with_group",
         "create_view_with_group");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> view_ids;
         std::unordered_set<std::string> ordinary_group_ids;
@@ -3208,7 +3208,7 @@ void TestConcurrentCatalogStateReconciliation()
             view_ids.insert(view.id);
             for (const auto& group : view.groups) {
                 if (!group.is_unassigned &&
-                    group.id != specforge::UnassignedUserGroupId()) {
+                    group.id != spectiary::UnassignedUserGroupId()) {
                     ordinary_group_ids.insert(group.id);
                 }
             }
@@ -3225,7 +3225,7 @@ void TestConcurrentCatalogStateReconciliation()
         "create_view_with_group",
         "add_group_view_2");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> view_ids;
         std::unordered_set<std::string> ordinary_group_ids;
@@ -3233,13 +3233,13 @@ void TestConcurrentCatalogStateReconciliation()
         bool found_new_view = false;
         for (const auto& view : views) {
             view_ids.insert(view.id);
-            found_new_view = found_new_view || specforge::IsCanonicalUuidV4(view.id);
+            found_new_view = found_new_view || spectiary::IsCanonicalUuidV4(view.id);
             if (view.id == "view-2") {
                 view_two_group_count = view.groups.size();
             }
             for (const auto& group : view.groups) {
                 if (!group.is_unassigned &&
-                    group.id != specforge::UnassignedUserGroupId()) {
+                    group.id != spectiary::UnassignedUserGroupId()) {
                     ordinary_group_ids.insert(group.id);
                 }
             }
@@ -3254,7 +3254,7 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "delete_view_1", "rename_view_1_local");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         Require(
             std::none_of(
@@ -3274,7 +3274,7 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "add_group_view_2", "add_group_view_2");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
@@ -3295,7 +3295,7 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "delete_group_1_view_2", "rename_view_2");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
@@ -3321,7 +3321,7 @@ void TestConcurrentCatalogStateReconciliation()
         "remove_reference_group_1",
         "copy_reference_group_1_to_group_2");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
@@ -3358,7 +3358,7 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "select_view_1", "select_view_2");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const std::string& active =
             loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id;
         Require(
@@ -3369,12 +3369,12 @@ void TestConcurrentCatalogStateReconciliation()
     SeedMultiProcessCache(path);
     RunConcurrentCatalogChildren(path, "select_view_1", "delete_view_1");
     {
-        const auto loaded = specforge::LoadCatalogUserStateCache(path);
+        const auto loaded = spectiary::LoadCatalogUserStateCache(path);
         const std::string& active =
             loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id;
         Require(
             active != "view-1" &&
-                (active == specforge::CatalogGroupingViewId() || active == "view-2"),
+                (active == spectiary::CatalogGroupingViewId() || active == "view-2"),
             "selection of a concurrently deleted view must fall back to a surviving view");
     }
 
@@ -3400,13 +3400,13 @@ void TestConcurrentCatalogStateReconciliation()
         TerminateProcess(interrupted.process, 9) != FALSE &&
             WaitForSingleObject(interrupted.process, 5'000) == WAIT_OBJECT_0,
         "interrupted child should terminate within the bounded test cleanup");
-    specforge::SpectralLinesPanelController after_interrupt(
+    spectiary::SpectralLinesPanelController after_interrupt(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     RequireApplied(
         after_interrupt.Submit(
-            specforge::CatalogUserStateIntent::SetMarkerVisibility(
+            spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                 "h_beta",
                 false)),
         "a fresh controller should still be able to write after an interrupted peer");
@@ -3414,10 +3414,10 @@ void TestConcurrentCatalogStateReconciliation()
         after_interrupt.Flush(),
         "an interrupted stale controller must not block the next atomic write");
     const auto after_interrupt_cache =
-        specforge::LoadCatalogUserStateCache(path);
+        spectiary::LoadCatalogUserStateCache(path);
     Require(
         after_interrupt_cache.warning.empty() &&
-            !specforge::IsMarkerVisible(
+            !spectiary::IsMarkerVisible(
                 after_interrupt_cache.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_beta"),
         "an interrupted peer must leave a valid cache for the next instance");
@@ -3449,21 +3449,21 @@ void TestConcurrentCatalogStateReconciliation()
         "atomic interruption child should terminate while waiting before replacement");
 
     const auto after_atomic_interrupt =
-        specforge::LoadCatalogUserStateCache(path);
+        spectiary::LoadCatalogUserStateCache(path);
     Require(
         after_atomic_interrupt.issue_kind ==
-                specforge::CatalogUserStateCacheLoadIssueKind::None &&
-            specforge::IsMarkerVisible(
+                spectiary::CatalogUserStateCacheLoadIssueKind::None &&
+            spectiary::IsMarkerVisible(
                 after_atomic_interrupt.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_alpha"),
         "an interrupted atomic writer must leave the previous durable cache valid");
-    specforge::SpectralLinesPanelController after_atomic_replace(
+    spectiary::SpectralLinesPanelController after_atomic_replace(
         GroupedCatalog(),
-        specforge::PublicSpectralLineCatalogIdentity(),
+        spectiary::PublicSpectralLineCatalogIdentity(),
         path);
     RequireApplied(
         after_atomic_replace.Submit(
-            specforge::CatalogUserStateIntent::SetMarkerVisibility(
+            spectiary::CatalogUserStateIntent::SetMarkerVisibility(
                 "h_beta",
                 false)),
         "a fresh controller should recover after atomic replacement interruption");
@@ -3471,11 +3471,11 @@ void TestConcurrentCatalogStateReconciliation()
         after_atomic_replace.Flush(),
         "the next controller should atomically replace the recovered cache");
     const auto recovered_after_atomic_interrupt =
-        specforge::LoadCatalogUserStateCache(path);
+        spectiary::LoadCatalogUserStateCache(path);
     Require(
         recovered_after_atomic_interrupt.issue_kind ==
-                specforge::CatalogUserStateCacheLoadIssueKind::None &&
-            !specforge::IsMarkerVisible(
+                spectiary::CatalogUserStateCacheLoadIssueKind::None &&
+            !spectiary::IsMarkerVisible(
                 recovered_after_atomic_interrupt.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_beta"),
         "atomic replacement recovery should preserve a valid target and new task delta");

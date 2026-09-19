@@ -1,7 +1,7 @@
 #include "profile/presentation_trace.h"
 #include "renderer/d3d11_sdr_swap_chain.h"
 
-namespace specforge {
+namespace spectiary {
 
 DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(UINT width, UINT height, bool allow_tearing) noexcept
 {
@@ -255,4 +255,4 @@ HRESULT D3D11SdrSwapChain::CreateRenderTarget(ID3D11Device* device)
     return result;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

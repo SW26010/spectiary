@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 
 struct SpectrumViewportState {
     bool locked = false;
@@ -44,4 +44,4 @@ LoadSpectrumViewportState(
     const SpectrumViewportState& state,
     std::string* error_message = nullptr);
 
-}  // namespace specforge
+}  // namespace spectiary

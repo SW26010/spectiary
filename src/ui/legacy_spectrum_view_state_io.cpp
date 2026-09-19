@@ -10,7 +10,7 @@
 #include <system_error>
 #include <utility>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 constexpr const char* kStateFormatKind =
@@ -223,4 +223,4 @@ LegacySpectrumViewStateLoadResult LoadLegacySpectrumViewState(
     return loaded;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

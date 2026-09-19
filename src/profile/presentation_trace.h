@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace specforge::presentation_trace {
+namespace spectiary::presentation_trace {
 
 // UI-thread diagnostics only. No scheduling, waits, or presentation decisions.
 using Clock = std::chrono::steady_clock;
@@ -183,4 +183,4 @@ inline void CancelInvalidation() noexcept
         invalidation_count = 0;
     }
 }
-} // namespace specforge::presentation_trace
+} // namespace spectiary::presentation_trace

@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-namespace specforge {
+namespace spectiary {
 namespace {
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -114,4 +114,4 @@ UiFontSelection AddUiFonts(ImGuiIO& io)
     return selection;
 }
 
-}  // namespace specforge
+}  // namespace spectiary

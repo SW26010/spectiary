@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace specforge {
+namespace spectiary {
 
 struct SourceCollectionSessionStateCache {
     std::vector<SourceCollectionSavedSource> sources;
@@ -34,4 +34,4 @@ LoadSourceCollectionSessionStateCache(
     const std::filesystem::path& path,
     const SourceCollectionSessionStateCache& cache);
 
-}  // namespace specforge
+}  // namespace spectiary

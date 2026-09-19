@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace specforge::detail {
+namespace spectiary::detail {
 namespace {
 
 constexpr double kSpeedOfLightKmPerSecond = 299792.458;
@@ -753,4 +753,4 @@ SpectrumSnapshotHandle LoadFitsSnapshotCancelable(
     }
 }
 
-}  // namespace specforge::detail
+}  // namespace spectiary::detail

@@ -91,7 +91,7 @@ The production writer identity is represented at the root as:
 
 ```yaml
 asdf_library: !core/software-1.0.0
-  name: SpecForge
+  name: Spectiary
   version: 0.8.0
 spectiary_build:
   source_mode: head
@@ -243,7 +243,7 @@ Those are the measured and semantic reasons to retain ASDF, not a claim that
 JSON is intrinsically slow.
 
 The implementation comparison is not free for either candidate. At the time of
-this spike, SpecForge used an in-tree JSON parser and DOM. Issue #88 replaces
+this spike, Spectiary used an in-tree JSON parser and DOM. Issue #88 replaces
 them with `nlohmann::json`; that general DOM still stores a value per array
 integer and would need a bounded streaming/specialized path for this workload.
 The promoted production ASDF codec is direct-to-vector and implements
@@ -285,7 +285,7 @@ annotation:
     value: -1
 ```
 
-Generic ASDF tools still discover the integer dtype and shape. SpecForge owns
+Generic ASDF tools still discover the integer dtype and shape. Spectiary owns
 the business interpretation of `-1`, validates that no label definition uses
 that code, and keeps labeled values as ordinary categorical integers.
 
@@ -442,7 +442,7 @@ Required production patches would include string ndarray read/write, a
 library-wide structured error model replacing process termination, YAML 1.1
 conformance work, MSVC/vcpkg integration, and the same golden/interoperability
 matrix. Those are not a narrow local delta, so this candidate is rejected for
-v1 rather than patched into SpecForge.
+v1 rather than patched into Spectiary.
 
 Its required matrix therefore fails at contract coverage rather than producing
 a misleading partial pass: Python writer -> asdf-cxx reader cannot consume the
@@ -537,4 +537,4 @@ Remaining hardening is tracked separately in
 These items do not change the approved semantic representation or production
 owner state machine and are not blockers for #74 product acceptance. The pinned
 Python oracle and dedicated native-spike preset remain enforced by the required
-`specforge_asdf_labeling_interoperability` CTest in CI.
+`spectiary_asdf_labeling_interoperability` CTest in CI.
