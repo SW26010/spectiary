@@ -49,50 +49,50 @@ void RequireCompleteLocalUserStatePathMapping(
         "profile log directory should use the canonical name");
     Require(
         paths.frame_capture_directory ==
-            root / kFrameCaptureDirectory,
+            root / "logs" / kFrameCaptureDirectory,
         "frame capture directory should use the canonical name");
     Require(
-        paths.imgui_ini_path == root / kImGuiIni,
+        paths.imgui_ini_path == root / "state" / kImGuiIni,
         "ImGui settings should use the canonical name");
     Require(
         paths.ui_language_settings_path ==
-            root / kUiLanguageSettings,
+            root / "config" / kUiLanguageSettings,
         "language settings should use the canonical name");
     Require(
         paths.appearance_settings_path ==
-            root / kAppearanceSettings,
+            root / "config" / kAppearanceSettings,
         "appearance settings should use the canonical name");
     Require(
         paths.ui_scale_settings_path ==
-            root / kUiScaleSettings,
+            root / "config" / kUiScaleSettings,
         "UI scale settings should use the canonical name");
     Require(
         paths.input_settings_path ==
-            root / kInputSettings,
+            root / "config" / kInputSettings,
         "input settings should use the canonical name");
     Require(
         paths.external_source_settings_path ==
-            root / kExternalSourceSettings,
+            root / "config" / kExternalSourceSettings,
         "external source settings should use the canonical name");
     Require(
         paths.profile_settings_path ==
-            root / kProfileSettings,
+            root / "config" / kProfileSettings,
         "profile settings should use the canonical name");
     Require(
         paths.panel_visibility_state_path ==
-            root / kPanelVisibilityState,
+            root / "state" / kPanelVisibilityState,
         "panel visibility should use the canonical name");
     Require(
         paths.legacy_spectrum_view_state_path ==
-            root / kLegacySpectrumViewState,
+            (paths.legacy_application_data_root.empty() ? std::filesystem::path{} : paths.legacy_application_data_root / kLegacySpectrumViewState),
         "spectrum view state should use the canonical name");
     Require(
         paths.source_session_state_path ==
-            root / kSourceSessionState,
+            root / "state" / kSourceSessionState,
         "source session state should use the canonical name");
     Require(
         paths.sample_navigation_state_path ==
-            root / kSampleNavigationState,
+            root / "state" / kSampleNavigationState,
         "navigation state should use the canonical name");
     Require(
         paths.sample_labeling_state_path ==
@@ -100,15 +100,15 @@ void RequireCompleteLocalUserStatePathMapping(
         paths.sample_labeling_drafts_path ==
             paths.unsaved_root / kSampleLabelingDrafts &&
         paths.legacy_sample_labeling_state_path ==
-            root / kLegacySampleLabelingState,
+            (paths.legacy_application_data_root.empty() ? std::filesystem::path{} : paths.legacy_application_data_root / kLegacySampleLabelingState),
         "labeling state should use the canonical name");
     Require(
         paths.sample_workflow_state_path ==
-            root / kSampleWorkflowState,
+            root / "state" / kSampleWorkflowState,
         "workflow state should use the canonical name");
     Require(
         paths.spectral_line_user_state_path ==
-            root / kSpectralLineUserState,
+            root / "state" / kSpectralLineUserState,
         "spectral-line state should use the canonical name");
 }
 
@@ -149,15 +149,15 @@ void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
     Require(path.filename() == "state.json", "default local state path should keep the requested filename");
     Require(path.parent_path().filename() == "nested", "default local state path should keep relative subdirectories");
     Require(
-        path == runtime_paths.local_user_state_root / "nested" / "state.json",
+        path == runtime_paths.state_root / "nested" / "state.json",
         "default local state path should live under the selected storage root");
     if (runtime_paths.storage_profile == specforge::StorageProfile::Portable) {
         Require(
-            path.parent_path().parent_path().filename() == "Data",
+            path.parent_path().parent_path().filename() == "state",
             "portable local state path should live under the package Data root");
     } else {
         Require(
-            path.parent_path().parent_path().filename() == "SpecForge",
+            path.parent_path().parent_path().filename() == "state",
             "LocalAppData state path should live under the SpecForge root");
     }
 }
@@ -185,10 +185,10 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         portable_paths.public_spectral_line_catalog_path ==
             package_root / "config" / "spectral_lines.public.tsv",
         "packaged spectral-line catalog should resolve from the package root");
-    Require(portable_paths.local_user_state_root == package_root / "Data", "portable state should live under Data");
+    Require(portable_paths.application_data_root == package_root, "portable state should live under Data");
     RequireCompleteLocalUserStatePathMapping(
         portable_paths,
-        package_root / "Data");
+        package_root);
 
     const specforge::RuntimePaths installed_paths =
         specforge::RuntimePathsForDeployment(
@@ -203,12 +203,12 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         installed_paths.public_spectral_line_catalog_path ==
             package_root / "config" / "spectral_lines.public.tsv",
         "installed profile should use the same package resource root");
-    Require(installed_paths.local_user_state_root == installed_root, "installed state should use local app data root");
+    Require(installed_paths.application_data_root == installed_root, "installed state should use local app data root");
     RequireCompleteLocalUserStatePathMapping(
         installed_paths,
         installed_root);
     Require(
-        portable_paths.local_user_state_root != installed_paths.local_user_state_root,
+        portable_paths.application_data_root != installed_paths.application_data_root,
         "portable and installed state roots should stay distinct");
 
     const specforge::RuntimePaths winget_paths =
@@ -223,8 +223,8 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         winget_paths.distribution == specforge::Distribution::WinGet,
         "WinGet identity should be retained for About");
     Require(
-        winget_paths.local_user_state_root ==
-            installed_paths.local_user_state_root,
+        winget_paths.application_data_root ==
+            installed_paths.application_data_root,
         "WinGet distribution should not override LocalAppData storage");
 
     for (const auto& invalid_path : {std::filesystem::path("relative.exe"), package_root / ""}) {

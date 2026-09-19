@@ -107,59 +107,28 @@ RuntimeResourceUserStateRootOverride()
 #endif
 }
 
-void SetLocalUserStatePaths(
-    RuntimePaths& paths,
-    std::filesystem::path root)
+void SetActiveStoragePaths(RuntimePaths& paths)
 {
-    paths.local_user_state_root = std::move(root);
-    paths.profile_log_directory =
-        paths.local_user_state_root /
-        local_user_state_paths::kProfileLogDirectory;
-    paths.frame_capture_directory =
-        paths.local_user_state_root /
-        local_user_state_paths::kFrameCaptureDirectory;
-    paths.imgui_ini_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kImGuiIni;
-    paths.ui_language_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kUiLanguageSettings;
-    paths.appearance_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kAppearanceSettings;
-    paths.ui_scale_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kUiScaleSettings;
-    paths.input_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kInputSettings;
-    paths.external_source_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kExternalSourceSettings;
-    paths.profile_settings_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kProfileSettings;
-    paths.panel_visibility_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kPanelVisibilityState;
-    paths.legacy_spectrum_view_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kLegacySpectrumViewState;
-    paths.source_session_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kSourceSessionState;
-    paths.sample_navigation_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kSampleNavigationState;
-    paths.legacy_sample_labeling_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kLegacySampleLabelingState;
-    paths.sample_workflow_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kSampleWorkflowState;
-    paths.spectral_line_user_state_path =
-        paths.local_user_state_root /
-        local_user_state_paths::kSpectralLineUserState;
+    paths.profile_log_directory = paths.logs_root;
+    paths.frame_capture_directory = paths.logs_root / "captures";
+    paths.imgui_ini_path = paths.state_root / local_user_state_paths::kImGuiIni;
+    paths.ui_language_settings_path = paths.config_root / local_user_state_paths::kUiLanguageSettings;
+    paths.appearance_settings_path = paths.config_root / local_user_state_paths::kAppearanceSettings;
+    paths.ui_scale_settings_path = paths.config_root / local_user_state_paths::kUiScaleSettings;
+    paths.input_settings_path = paths.config_root / local_user_state_paths::kInputSettings;
+    paths.external_source_settings_path = paths.config_root / local_user_state_paths::kExternalSourceSettings;
+    paths.profile_settings_path = paths.config_root / local_user_state_paths::kProfileSettings;
+    paths.panel_visibility_state_path = paths.state_root / local_user_state_paths::kPanelVisibilityState;
+    paths.source_session_state_path = paths.state_root / local_user_state_paths::kSourceSessionState;
+    paths.sample_navigation_state_path = paths.state_root / local_user_state_paths::kSampleNavigationState;
+    paths.sample_workflow_state_path = paths.state_root / local_user_state_paths::kSampleWorkflowState;
+    paths.spectral_line_user_state_path = paths.state_root / local_user_state_paths::kSpectralLineUserState;
+    if (!paths.legacy_application_data_root.empty()) {
+        paths.legacy_spectrum_view_state_path = paths.legacy_application_data_root /
+            local_user_state_paths::kLegacySpectrumViewState;
+        paths.legacy_sample_labeling_state_path = paths.legacy_application_data_root /
+            local_user_state_paths::kLegacySampleLabelingState;
+    }
 }
 
 }  // namespace
@@ -218,35 +187,32 @@ RuntimePaths RuntimePathsForDeployment(
     switch (deployment.storage_profile) {
     case StorageProfile::Portable:
         paths.application_data_root = paths.package_root;
-        SetLocalUserStatePaths(
-            paths,
-            paths.package_root / "Data");
+        paths.legacy_application_data_root = paths.package_root / "Data";
         break;
     case StorageProfile::LocalAppData:
-        if (inputs.local_user_state_root_override) {
-            paths.application_data_root = CheckedRoot(*inputs.local_user_state_root_override);
-            SetLocalUserStatePaths(paths, paths.application_data_root);
+        if (inputs.application_data_root_override) {
+            paths.application_data_root = CheckedRoot(*inputs.application_data_root_override);
+
         } else if (!inputs.local_app_data_user_state_root.empty()) {
             paths.application_data_root = CheckedRoot(inputs.local_app_data_user_state_root);
-            SetLocalUserStatePaths(paths, paths.application_data_root);
+
         } else {
             const auto local = CheckedRoot(inputs.local_app_data_directory
                 ? inputs.local_app_data_directory() : LocalAppDataDirectory());
             paths.application_data_root = CheckedRoot(local / project_identity::kLocalAppDataLeaf);
-            // #103-A deliberately preserves the existing business-file layout.
-            SetLocalUserStatePaths(paths, CheckedRoot(local / "SpecForge"));
+            paths.legacy_application_data_root = local / "SpecForge";
         }
         break;
     default:
         throw std::invalid_argument("Unknown storage profile.");
     }
 
-    if (inputs.local_user_state_root_override) {
-        // Isolation covers both transitional files and final role namespaces.
+    if (inputs.application_data_root_override) {
+        // Overrides isolate all managed storage and disable production migration.
         // Portable locators and public resources still use package_root, which
         // remains tied to the executable rather than this injected data root.
-        paths.application_data_root = CheckedRoot(*inputs.local_user_state_root_override);
-        SetLocalUserStatePaths(paths, paths.application_data_root);
+        paths.application_data_root = CheckedRoot(*inputs.application_data_root_override);
+        paths.legacy_application_data_root.clear();
     }
     paths.config_root = paths.application_data_root / "config";
     paths.state_root = paths.application_data_root / "state";
@@ -260,12 +226,14 @@ RuntimePaths RuntimePathsForDeployment(
         paths.state_root / local_user_state_paths::kSampleLabelingState;
     paths.sample_labeling_drafts_path =
         paths.unsaved_root / local_user_state_paths::kSampleLabelingDrafts;
+    SetActiveStoragePaths(paths);
     const auto disposable = CheckedRoot(inputs.system_temp_directory
         ? inputs.system_temp_directory() : std::filesystem::temp_directory_path());
     paths.temp_root = disposable / project_identity::kApplicationId / "temp";
     paths.cache_root = disposable / project_identity::kApplicationId / "cache";
     return paths;
 }
+
 
 SpecForgeStartup::SpecForgeStartup(
     RuntimePaths runtime_paths,
@@ -291,7 +259,7 @@ RuntimePathInputs CurrentProcessRuntimePathInputs(
 {
     return {
         .executable_path = std::move(executable_path),
-        .local_user_state_root_override =
+        .application_data_root_override =
             RuntimeResourceUserStateRootOverride(),
     };
 }

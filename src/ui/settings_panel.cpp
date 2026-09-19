@@ -433,7 +433,7 @@ SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
         },
         .build_metadata =
             startup.metadata().build_metadata,
-        .data_directory = paths.local_user_state_root,
+        .data_directory = paths.application_data_root,
     };
 }
 

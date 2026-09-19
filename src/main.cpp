@@ -87,7 +87,7 @@ specforge::SpecForgeStartup PrepareStartup(
             PathToUtf8(ordinary_root) +
             "').");
     }
-    inputs.local_user_state_root_override =
+    inputs.application_data_root_override =
         command_line.automation->state_root;
     return specforge::PrepareSpecForgeStartup(
         std::move(inputs));

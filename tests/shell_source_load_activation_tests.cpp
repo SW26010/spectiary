@@ -5062,7 +5062,7 @@ void TestSpectrumOwnersWriteAndResetIndependently()
     const auto root = UniqueTempPath("_split_owners");
     const auto startup = PrepareSpecForgeStartup({
         .executable_path = CurrentExecutablePath(),
-        .local_user_state_root_override = root,
+        .application_data_root_override = root,
     });
     const auto& paths = startup.runtime_paths();
     const auto config = paths.spectrum_plot_preferences_path;
@@ -5142,7 +5142,7 @@ void TestSpectrumOwnerFailuresAreIndependent()
             const auto root = UniqueTempPath("_split_failure");
             const auto startup = PrepareSpecForgeStartup({
                 .executable_path = CurrentExecutablePath(),
-                .local_user_state_root_override = root,
+                .application_data_root_override = root,
             });
             const auto& paths = startup.runtime_paths();
             const auto bad = preferences_failed ? paths.spectrum_plot_preferences_path : paths.spectrum_viewport_state_path;
@@ -5213,7 +5213,7 @@ void TestSpectrumSaveFailureRetriesOnlyItsOwner()
         const auto root = UniqueTempPath("_split_save_retry");
         const auto startup = PrepareSpecForgeStartup({
             .executable_path = CurrentExecutablePath(),
-            .local_user_state_root_override = root,
+            .application_data_root_override = root,
         });
         const auto& paths = startup.runtime_paths();
         const auto blocked = preferences_failed ? paths.spectrum_plot_preferences_path : paths.spectrum_viewport_state_path;
@@ -5255,7 +5255,7 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
         const auto root = UniqueTempPath("_legacy_failure");
         const auto startup = PrepareSpecForgeStartup({
             .executable_path = CurrentExecutablePath(),
-            .local_user_state_root_override = root,
+            .application_data_root_override = root,
         });
         const auto& paths = startup.runtime_paths();
         const auto legacy = paths.legacy_spectrum_view_state_path;
@@ -5306,7 +5306,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
     std::filesystem::create_directories(root);
     RuntimePathInputs inputs;
     inputs.executable_path = CurrentExecutablePath();
-    inputs.local_user_state_root_override = root;
+    inputs.application_data_root_override = root;
     const auto startup = PrepareSpecForgeStartup(std::move(inputs));
     const auto path = startup.runtime_paths().spectrum_viewport_state_path;
     std::filesystem::create_directories(path.parent_path());
@@ -5415,7 +5415,7 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
 
     specforge::RuntimePathInputs inputs;
     inputs.executable_path = specforge::CurrentExecutablePath();
-    inputs.local_user_state_root_override = root;
+    inputs.application_data_root_override = root;
     const specforge::SpecForgeStartup startup =
         specforge::PrepareSpecForgeStartup(std::move(inputs));
     const std::filesystem::path spectral_path =

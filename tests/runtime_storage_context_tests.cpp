@@ -44,7 +44,7 @@ void TestStorageContext(const fs::path& test_root)
     Require(installed.application_data_root == local / project_identity::kLocalAppDataLeaf,
             "use the explicit product storage leaf");
     Require(installed.application_data_root.filename() == "Spectiary", "final leaf is Spectiary");
-    Require(installed.local_user_state_root == local / "SpecForge", "no business-file cutover");
+    Require(installed.legacy_application_data_root == local / "SpecForge", "old root is migration-only");
     Require(!fs::exists(local), "path resolution must not create or migrate data");
     Require(installed.package_root == package, "package root is independent of executable name");
     inputs.local_app_data_directory = [&]() -> fs::path {
@@ -56,7 +56,7 @@ void TestStorageContext(const fs::path& test_root)
     const auto paths = RuntimePathsForDeployment(portable, inputs);
     Require(local_calls == 1, "Portable must not query LocalAppData");
     Require(paths.application_data_root == package, "Portable application root equals package root");
-    Require(paths.local_user_state_root == package / "Data", "Portable business layout stays unchanged");
+    Require(paths.legacy_application_data_root == package / "Data", "Portable legacy root is migration-only");
     for (const auto& p : {installed, paths}) {
         Require(p.config_root == p.application_data_root / "config", "config namespace");
         Require(p.state_root == p.application_data_root / "state", "state namespace");
@@ -70,21 +70,21 @@ void TestStorageContext(const fs::path& test_root)
         inputs.local_app_data_directory = [=] { return invalid; };
         RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
     }
-    inputs.local_user_state_root_override = test_root / "injected";
+    inputs.application_data_root_override = test_root / "injected";
     const auto overridden = RuntimePathsForDeployment({}, inputs);
-    Require(overridden.application_data_root == *inputs.local_user_state_root_override,
+    Require(overridden.application_data_root == *inputs.application_data_root_override,
             "override injects an already resolved root without platform lookup");
-    Require(overridden.local_user_state_root == overridden.application_data_root, "isolated business writes");
+    Require(overridden.application_data_root == overridden.application_data_root, "isolated business writes");
     const auto portable_override = RuntimePathsForDeployment(portable, inputs);
     Require(portable_override.package_root == package &&
-            portable_override.application_data_root == *inputs.local_user_state_root_override,
+            portable_override.application_data_root == *inputs.application_data_root_override,
             "Portable override isolates managed storage without changing package identity");
-    Require(portable_override.local_user_state_root == *inputs.local_user_state_root_override,
+    Require(portable_override.application_data_root == *inputs.application_data_root_override,
             "Portable runtime override isolates existing persistence");
     Require(portable_override.spectrum_plot_preferences_path ==
-                *inputs.local_user_state_root_override / "config" / "spectrum-plot-preferences.json" &&
+                *inputs.application_data_root_override / "config" / "spectrum-plot-preferences.json" &&
             portable_override.spectrum_viewport_state_path ==
-                *inputs.local_user_state_root_override / "state" / "spectrum-viewport-state.json",
+                *inputs.application_data_root_override / "state" / "spectrum-viewport-state.json",
             "Portable override must isolate both spectrum owners");
     Require(portable_override.config_root == overridden.config_root &&
             portable_override.state_root == overridden.state_root &&
@@ -98,13 +98,13 @@ void TestStorageContext(const fs::path& test_root)
             ReadPersistedPathReference(locator, paths) == source &&
             portable_override.public_spectral_line_catalog_path == paths.public_spectral_line_catalog_path,
             "storage isolation must not rebase Portable source locators or public resources");
-    inputs.local_user_state_root_override = fs::path{};
+    inputs.application_data_root_override = fs::path{};
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
-    inputs.local_user_state_root_override = "relative";
+    inputs.application_data_root_override = "relative";
     RequireFailure([&] { (void)RuntimePathsForDeployment(portable, inputs); });
     const auto file = test_root / "not-directory";
     std::ofstream(file) << "sentinel";
-    inputs.local_user_state_root_override = file / "nested";
+    inputs.application_data_root_override = file / "nested";
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
 }
 

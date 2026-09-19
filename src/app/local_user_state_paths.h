@@ -4,7 +4,7 @@ namespace specforge::local_user_state_paths {
 
 inline constexpr char kProfileLogDirectory[] = "logs";
 inline constexpr char kFrameCaptureDirectory[] = "captures";
-inline constexpr char kImGuiIni[] = "specforge-imgui-v2.ini";
+inline constexpr char kImGuiIni[] = "imgui-layout-v2.ini";
 inline constexpr char kUiLanguageSettings[] = "ui-language.json";
 inline constexpr char kAppearanceSettings[] =
     "appearance-settings.json";

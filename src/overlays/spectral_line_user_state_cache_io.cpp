@@ -1000,8 +1000,7 @@ std::vector<std::string> SortedSetValues(const std::unordered_set<std::string>& 
 
 std::filesystem::path DefaultCatalogUserStateCachePath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSpectralLineUserState, runtime_paths);
+    return runtime_paths.spectral_line_user_state_path;
 }
 
 std::filesystem::path CatalogUserStateCacheCommitLeasePath(

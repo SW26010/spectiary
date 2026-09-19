@@ -81,7 +81,7 @@ public:
             runtime_paths.package_root /
             ("portable-runtime-state-test-" + token);
         default_state_path =
-            runtime_paths.local_user_state_root /
+            runtime_paths.state_root /
             ("portable-default-write-" + token + ".txt");
 
         std::error_code cleanup_error;
@@ -113,7 +113,7 @@ void TestPortableDefaultStateWriteCreatesDataFile(
             roots.default_state_path.filename(), roots.runtime_paths);
     Require(
         path == roots.default_state_path,
-        "portable default state path should use the selected Data root");
+        "portable default state path should use the selected state root");
 
     specforge::AtomicFileWriteOptions options;
     options.target_description = "portable default state smoke file";
@@ -130,14 +130,14 @@ void TestPortableDefaultStateWriteCreatesDataFile(
         error.empty() ? "portable default state write failed" : error);
 
     Require(
-        path.parent_path() == roots.runtime_paths.local_user_state_root,
-        "portable default write should target Data");
+        path.parent_path() == roots.runtime_paths.state_root,
+        "portable default write should target state");
     Require(
-        path.parent_path().filename() == "Data",
-        "portable default write parent should be Data");
+        path.parent_path().filename() == "state",
+        "portable default write parent should be state");
     Require(
         std::filesystem::exists(path),
-        "portable default write should create the file under Data");
+        "portable default write should create the file under state");
     Require(
         ReadTextFile(path) == "portable",
         "portable default write should persist content");

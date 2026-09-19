@@ -414,7 +414,7 @@ int RunChildIfRequested(int argc, wchar_t** argv)
         specforge::RuntimePathInputs inputs =
             specforge::CurrentProcessRuntimePathInputs(
                 production_executable);
-        inputs.local_user_state_root_override =
+        inputs.application_data_root_override =
             marker->parent_path() / L"startup loader state";
         const specforge::SpecForgeStartup startup =
             specforge::PrepareSpecForgeStartup(std::move(inputs));

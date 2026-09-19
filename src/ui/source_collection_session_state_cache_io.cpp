@@ -19,8 +19,7 @@ constexpr std::size_t kMaxRestoredSources = 32;
 
 std::filesystem::path DefaultSourceCollectionSessionStateCachePath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSourceSessionState, runtime_paths);
+    return runtime_paths.source_session_state_path;
 }
 
 SourceCollectionSessionStateCacheLoadResult

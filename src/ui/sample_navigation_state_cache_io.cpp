@@ -21,8 +21,7 @@ constexpr int kStateSchemaVersion = 1;
 
 std::filesystem::path DefaultSampleNavigationStateCachePath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSampleNavigationState, runtime_paths);
+    return runtime_paths.sample_navigation_state_path;
 }
 
 SampleNavigationStateCacheLoadResult

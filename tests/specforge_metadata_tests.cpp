@@ -657,7 +657,7 @@ void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
     Require(
         startup.runtime_paths().executable_path ==
                 executable_path &&
-            startup.runtime_paths().local_user_state_root ==
+            startup.runtime_paths().application_data_root ==
                 state_root &&
             startup.runtime_paths().source_session_state_path ==
                 state_root / "source-session.json" &&

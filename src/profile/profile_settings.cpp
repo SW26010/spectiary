@@ -18,8 +18,7 @@ constexpr int kSettingsSchemaVersion = 1;
 
 std::filesystem::path DefaultProfileSettingsPath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kProfileSettings, runtime_paths);
+    return runtime_paths.profile_settings_path;
 }
 
 ProfileSettingsLoadResult LoadProfileSettings(

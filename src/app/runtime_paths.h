@@ -14,7 +14,7 @@ struct RuntimePathInputs {
     // Fully resolved physical root, independent of product display/artifact names.
     std::filesystem::path local_app_data_user_state_root;
     std::optional<std::filesystem::path>
-        local_user_state_root_override;
+        application_data_root_override;
     // Platform seams. Invoked only when the selected profile needs them.
     std::function<std::filesystem::path()> local_app_data_directory;
     std::function<std::filesystem::path()> system_temp_directory;
@@ -33,9 +33,8 @@ struct RuntimePaths {
     std::filesystem::path cache_root;
     std::filesystem::path temp_root;
     std::filesystem::path public_spectral_line_catalog_path;
-    // Transitional business-file placement until #109/#111 and the #103 cutover.
-    // This is not the root for new managed namespaces.
-    std::filesystem::path local_user_state_root;
+    // Read-only migration input; never an active persistence owner.
+    std::filesystem::path legacy_application_data_root;
     std::filesystem::path profile_log_directory;
     std::filesystem::path frame_capture_directory;
     std::filesystem::path imgui_ini_path;

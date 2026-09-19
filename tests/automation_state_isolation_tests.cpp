@@ -117,7 +117,7 @@ void TestPortableSpectrumOwnerIsolation(const std::filesystem::path& fixture_roo
     std::filesystem::last_write_time(config, fixed_time);
     std::filesystem::last_write_time(state, fixed_time);
 
-    inputs.local_user_state_root_override = isolated_root;
+    inputs.application_data_root_override = isolated_root;
     const auto isolated = PrepareSpecForgeStartup(inputs);
     const auto& paths = isolated.runtime_paths();
     Require(paths.package_root == package && paths.application_data_root == isolated_root &&
@@ -779,14 +779,14 @@ int wmain(int argc, wchar_t** argv)
         specforge::CurrentExecutablePath();
     inputs.local_app_data_user_state_root =
         ordinary_root;
-    inputs.local_user_state_root_override =
+    inputs.application_data_root_override =
         automation_root;
     const specforge::SpecForgeStartup startup =
         specforge::PrepareSpecForgeStartup(
             std::move(inputs));
     Require(
         startup.runtime_paths()
-                .local_user_state_root ==
+                .application_data_root ==
             automation_root &&
             startup.runtime_paths()
                     .ui_language_settings_path ==

@@ -140,9 +140,9 @@ bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesyst
 std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path,
     const RuntimePaths& runtime_paths)
 {
-    if (runtime_paths.local_user_state_root.empty()) return {};
+    if (runtime_paths.state_root.empty()) return {};
     if (!IsSafePackageRelativePath(relative_path)) throw std::invalid_argument("Invalid local-state relative path.");
-    return runtime_paths.local_user_state_root / std::move(relative_path);
+    return runtime_paths.state_root / std::move(relative_path);
 }
 
 std::string UserPathDisplayText(const std::filesystem::path& path,

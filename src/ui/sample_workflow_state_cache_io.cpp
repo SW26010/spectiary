@@ -387,8 +387,7 @@ void ParseSortState(const nlohmann::json& source_object, SampleWorkflowSourceSta
 
 std::filesystem::path DefaultSampleWorkflowStateCachePath(const RuntimePaths& runtime_paths)
 {
-    return DefaultLocalUserStatePath(
-        local_user_state_paths::kSampleWorkflowState, runtime_paths);
+    return runtime_paths.sample_workflow_state_path;
 }
 
 SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(

@@ -665,12 +665,12 @@ OrdinaryUserStateRootForExecutable(
     RuntimePathInputs inputs =
         CurrentProcessRuntimePathInputs(
             executable_path);
-    inputs.local_user_state_root_override.reset();
+    inputs.application_data_root_override.reset();
     const SpecForgeStartup startup =
         PrepareSpecForgeStartup(
             std::move(inputs));
     return startup.runtime_paths()
-        .local_user_state_root;
+        .application_data_root;
 }
 
 bool AutomationStateRootIsIndependent(

@@ -711,11 +711,11 @@ void SpecForgeApp::InitializeUiBackends()
     const RuntimePaths& runtime_paths =
         startup_.runtime_paths();
     std::error_code data_directory_error;
-    std::filesystem::create_directories(runtime_paths.local_user_state_root, data_directory_error);
+    std::filesystem::create_directories(runtime_paths.application_data_root, data_directory_error);
     if (data_directory_error) {
         throw std::runtime_error(
             "Failed to create SpecForge runtime data directory '" +
-            PathToUtf8(runtime_paths.local_user_state_root) + "': " + data_directory_error.message());
+            PathToUtf8(runtime_paths.application_data_root) + "': " + data_directory_error.message());
     }
     io.IniFilename = nullptr;
     (void)imgui_layout_persistence_.Load();
@@ -3244,8 +3244,8 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
                                                 "package_root",
                                                 PathToUtf8(runtime_paths.package_root)),
                                             ProfileSink::Field::String(
-                                                "local_user_state_root",
-                                                PathToUtf8(runtime_paths.local_user_state_root)),
+                                                "application_data_root",
+                                                PathToUtf8(runtime_paths.application_data_root)),
                                             ProfileSink::Field::String(
                                                 "profile_path",
                                                 PathToUtf8(profile_.path())),
