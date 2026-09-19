@@ -295,6 +295,7 @@ add_library(spectiary_core STATIC
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_list.cpp
     src/overlays/spectral_line_list_json.cpp
+    src/overlays/built_in_spectral_line_overlay.cpp
     src/overlays/catalog_user_state_reconciliation.cpp
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp

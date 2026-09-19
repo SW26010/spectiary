@@ -1,4 +1,5 @@
 #include "overlays/spectral_line_list_json.h"
+#include "overlays/built_in_spectral_line_overlay.h"
 #include "app/local_user_state_json.h"
 #include "helpers/temporary_directory.h"
 #include <iostream>
@@ -45,6 +46,41 @@ void Run()
     std::string error;
     Require(WriteSpectralLineListJson(list, bytes, error), error);
     auto valid = nlohmann::json::parse(bytes.str());
+    BuiltInSpectralLineOverlay overlay;
+    Require(ComposeBuiltInSpectralLineList(list, overlay).list == list, "absent override inherits complete base");
+    Require(SetBuiltInMarkerColor(list, overlay, "s1", "a", "#FF000080", error) && !overlay.color_schemes,
+            "viewing or unchanged edit must not take ownership");
+    Require(SetBuiltInMarkerColor(list, overlay, "s1", "a", std::nullopt, error), error);
+    Require(overlay.color_schemes && overlay.color_schemes->size() == 2 &&
+            overlay.color_schemes->at(0).colors.empty() && overlay.color_schemes->at(1) == list.color_schemes[1],
+            "first Auto reset takes whole collection and preserves other schemes");
+    auto changed_base = list;
+    changed_base.color_schemes[0].colors["b"] = "#12345678";
+    Require(ComposeBuiltInSpectralLineList(changed_base, overlay).list->color_schemes[0].colors.empty(),
+            "override must not inherit future base additions");
+    Require(ReplaceBuiltInColorSchemes(list, overlay, std::vector<line_list::ColorScheme>{}, error), error);
+    Require(ComposeBuiltInSpectralLineList(list, overlay).list->color_schemes.empty(), "explicit empty means Auto");
+    Require(DecodeBuiltInSpectralLineOverlay(EncodeBuiltInSpectralLineOverlay(overlay)) == overlay, "empty override round trip");
+    Require(ReplaceBuiltInColorSchemes(list, overlay, std::nullopt, error), error);
+    Require(ComposeBuiltInSpectralLineList(list, overlay).list == list, "restore resumes inheritance");
+    Require(!ReplaceBuiltInGroupingView(list, overlay, list.grouping_views[1], error), "all base views immutable");
+    Require(!RemoveBuiltInGroupingView(list, overlay, "v2", error), "base view cannot be deleted");
+    Require(ReplaceBuiltInGroupingView(list, overlay, {"custom", "Custom", {{"custom-group", "Unassigned", {"b"}}}}, error), error);
+    Require(ComposeBuiltInSpectralLineList(list, overlay).list->grouping_views.size() == 3, "overlay appends");
+    auto prior = overlay;
+    Require(!ReplaceBuiltInGroupingView(list, overlay, {"bad", "Bad", {{"g1", "Collision", {"a"}}}}, error) && overlay == prior,
+            "composed collision fails transactionally");
+    Require(!SetBuiltInMarkerColor(list, overlay, "s1", "missing", "#000000FF", error) && overlay == prior,
+            "unknown marker mutation fails transactionally");
+    auto incompatible = list;
+    incompatible.markers.pop_back();
+    incompatible.markers.erase(incompatible.markers.begin() + 1);
+    incompatible.grouping_views.clear(); incompatible.color_schemes.clear();
+    Require(!ComposeBuiltInSpectralLineList(incompatible, overlay).list, "base update cannot silently drop overlay references");
+    bool rejected_null = false;
+    try { (void)DecodeBuiltInSpectralLineOverlay(nlohmann::json{{"grouping_views", nlohmann::json::array()}, {"color_schemes", nullptr}}); }
+    catch (const std::exception&) { rejected_null = true; }
+    Require(rejected_null, "null cannot represent inheritance");
     const auto reject = [&](auto mutate) {
         auto invalid = valid; mutate(invalid);
         const auto result = ParseSpectralLineListJson(invalid.dump());
