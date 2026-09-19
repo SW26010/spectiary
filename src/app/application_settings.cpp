@@ -318,12 +318,15 @@ bool SaveStoredLiveNumericNavigation(
         error_message);
 }
 
-StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
+struct ExternalSourceSettingsLoadResult : StoredBooleanLoadResult {
+    ExternalOpenInstancePolicy policy = ExternalOpenInstancePolicy::NewInstance;
+};
+
+ExternalSourceSettingsLoadResult LoadStoredOpenExternalSourceAsFolder(
     const std::filesystem::path& path)
 {
-    StoredBooleanLoadResult loaded{
-        .value = kDefaultOpenExternalSourceAsFolder,
-    };
+    ExternalSourceSettingsLoadResult loaded;
+    loaded.value = kDefaultOpenExternalSourceAsFolder;
     VersionedJsonCacheLoadResult cache =
         LoadVersionedJsonCacheFile(
             path,
@@ -358,12 +361,20 @@ StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
     }
 
     loaded.value = open_external_source_as_folder->get<bool>();
+    if (const auto* policy = JsonObjectMember(cache.document->root, "instance_policy")) {
+        if (*policy == "recent_instance") {
+            loaded.policy = ExternalOpenInstancePolicy::RecentInstance;
+        } else if (*policy != "new_instance") {
+            loaded.warning = "Ignored invalid external-open instance_policy; using new_instance.";
+        }
+    }
     return loaded;
 }
 
 bool SaveStoredOpenExternalSourceAsFolder(
     const std::filesystem::path& path,
     bool enabled,
+    ExternalOpenInstancePolicy policy,
     std::string* error_message)
 {
     return WriteVersionedJsonCacheDocument(
@@ -374,6 +385,8 @@ bool SaveStoredOpenExternalSourceAsFolder(
         nlohmann::json::object({
             {kOpenExternalSourceAsFolderMember,
              nlohmann::json(enabled)},
+            {"instance_policy", policy == ExternalOpenInstancePolicy::RecentInstance
+                ? "recent_instance" : "new_instance"},
         }),
         error_message);
 }
@@ -604,11 +617,12 @@ ApplicationSettings::ApplicationSettings(
         ApplicationSetting::Input,
         std::move(input_settings.warning));
 
-    StoredBooleanLoadResult external_source_settings =
+    ExternalSourceSettingsLoadResult external_source_settings =
         LoadStoredOpenExternalSourceAsFolder(
             storage_.external_source_settings_path);
     open_external_source_as_folder_ =
         external_source_settings.value;
+    external_open_instance_policy_ = external_source_settings.policy;
     AdoptLoadWarning(
         ApplicationSetting::ExternalSource,
         std::move(external_source_settings.warning));
@@ -634,6 +648,7 @@ ApplicationSettings::ApplicationSettings(
 ApplicationSettingsView ApplicationSettings::View() const
 {
     return {
+        .external_open_instance_policy = external_open_instance_policy_,
         .language = language_,
         .theme_selection = theme_selection_,
         .ui_scale_percentage = ui_scale_percentage_,
@@ -657,6 +672,8 @@ ApplicationSettingsResult ApplicationSettings::Apply(
     ApplicationSettingsRuntimeState runtime)
 {
     switch (intent.kind) {
+    case ApplicationSettingsIntentKind::SetExternalOpenInstancePolicy:
+        return ApplyExternalOpenInstancePolicy(intent.external_open_instance_policy);
     case ApplicationSettingsIntentKind::SetLanguage:
         return ApplyLanguage(intent.language);
     case ApplicationSettingsIntentKind::SetThemeSelection:
@@ -1042,6 +1059,30 @@ ApplicationSettings::ApplyOpenExternalSourceAsFolder(bool enabled)
     };
 }
 
+ApplicationSettingsResult ApplicationSettings::ApplyExternalOpenInstancePolicy(
+    ExternalOpenInstancePolicy policy)
+{
+    constexpr auto setting = ApplicationSetting::ExternalSource;
+    if (policy == external_open_instance_policy_ &&
+        View().StatusFor(setting).kind == ApplicationSettingsStatusKind::Ready) {
+        return {.outcome = ApplicationSettingsOutcome::Unchanged, .setting = setting};
+    }
+    pending_external_open_instance_policy_ = policy;
+    if (!storage_.persistent) {
+        CommitPendingSetting(setting);
+        ClearStatus(setting);
+        return {.outcome = ApplicationSettingsOutcome::Applied, .setting = setting};
+    }
+    PersistenceFor(setting).MarkDirty();
+    if (FlushSetting(setting) == LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const auto error = PersistenceStatus(setting).save_message;
+        CancelPendingSetting(setting);
+        return {.outcome = ApplicationSettingsOutcome::PersistenceFailed,
+            .setting = setting, .detail = error};
+    }
+    return {.outcome = ApplicationSettingsOutcome::Applied, .setting = setting};
+}
+
 ApplicationSettingsResult
 ApplicationSettings::ApplyProfileOutputDirectory(
     std::optional<std::filesystem::path> directory,
@@ -1321,7 +1362,7 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
         };
     }
     case ApplicationSetting::ExternalSource: {
-        if (!pending_open_external_source_as_folder_) {
+        if (!HasPendingSetting(ApplicationSetting::ExternalSource)) {
             return {
                 .error =
                     "No pending external source setting save."};
@@ -1329,7 +1370,8 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
         std::string error;
         if (SaveStoredOpenExternalSourceAsFolder(
                 storage_.external_source_settings_path,
-                *pending_open_external_source_as_folder_,
+                pending_open_external_source_as_folder_.value_or(open_external_source_as_folder_),
+                pending_external_open_instance_policy_.value_or(external_open_instance_policy_),
                 &error)) {
             return {.saved = true};
         }
@@ -1431,7 +1473,8 @@ bool ApplicationSettings::HasPendingSetting(
     case ApplicationSetting::Input:
         return pending_live_numeric_navigation_.has_value();
     case ApplicationSetting::ExternalSource:
-        return pending_open_external_source_as_folder_.has_value();
+        return pending_open_external_source_as_folder_.has_value() ||
+            pending_external_open_instance_policy_.has_value();
     case ApplicationSetting::ProfileOutputDirectory:
         return pending_profile_settings_.has_value() &&
                pending_profile_output_directory_.has_value();
@@ -1473,6 +1516,10 @@ void ApplicationSettings::CommitPendingSetting(ApplicationSetting setting)
         }
         return;
     case ApplicationSetting::ExternalSource:
+        if (pending_external_open_instance_policy_) {
+            external_open_instance_policy_ = *pending_external_open_instance_policy_;
+            pending_external_open_instance_policy_.reset();
+        }
         if (pending_open_external_source_as_folder_) {
             open_external_source_as_folder_ =
                 *pending_open_external_source_as_folder_;
@@ -1511,6 +1558,7 @@ void ApplicationSettings::CancelPendingSetting(
         break;
     case ApplicationSetting::ExternalSource:
         pending_open_external_source_as_folder_.reset();
+        pending_external_open_instance_policy_.reset();
         break;
     case ApplicationSetting::ProfileOutputDirectory:
         pending_profile_settings_.reset();

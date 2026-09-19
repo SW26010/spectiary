@@ -1119,6 +1119,25 @@ void SettingsPanelUi::RenderGeneral(
 
     bool open_external_source_as_folder =
         settings.open_external_source_as_folder;
+    const bool recent = settings.external_open_instance_policy ==
+        ExternalOpenInstancePolicy::RecentInstance;
+    const auto instance_label = StableUiLabel(language,
+        UiTextId::ExternalOpenInstancePolicy, "ExternalOpenInstancePolicy");
+    if (ImGui::BeginCombo(instance_label.c_str(), UiText(language,
+            recent ? UiTextId::ExternalOpenRecentInstance : UiTextId::ExternalOpenNewInstance).data())) {
+        for (const bool use_recent : {false, true}) {
+            if (ImGui::Selectable(UiText(language, use_recent
+                    ? UiTextId::ExternalOpenRecentInstance : UiTextId::ExternalOpenNewInstance).data(),
+                    recent == use_recent)) {
+                ApplicationSettingsIntent intent;
+                intent.kind = ApplicationSettingsIntentKind::SetExternalOpenInstancePolicy;
+                intent.external_open_instance_policy = use_recent
+                    ? ExternalOpenInstancePolicy::RecentInstance : ExternalOpenInstancePolicy::NewInstance;
+                application_settings_intent_ = intent;
+            }
+        }
+        ImGui::EndCombo();
+    }
     const std::string open_external_source_label =
         StableUiLabel(
             language,

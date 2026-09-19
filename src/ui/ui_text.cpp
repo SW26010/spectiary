@@ -219,6 +219,9 @@ constexpr std::array kTextCatalog = {
         "Other input behavior settings are not available yet.",
         "其他输入行为设置暂不可用。"},
     UiTextEntry{"External source opening", "外部源打开"},
+    UiTextEntry{"External-open instance", "外部打开的实例"},
+    UiTextEntry{"Open in a new instance", "在新实例中打开"},
+    UiTextEntry{"Add to the most recently used instance and activate", "添加到最近使用的实例并激活"},
     UiTextEntry{
         "Open external spectrum files as folder sources",
         "将外部打开的光谱文件作为文件夹源打开"},
@@ -229,11 +232,11 @@ constexpr std::array kTextCatalog = {
         "Include subfolders (not implemented)",
         "包含子文件夹（尚未实现）"},
     UiTextEntry{
-        "The saved external source folder preference could not be loaded; it is disabled.",
-        "无法加载已保存的外部源文件夹偏好，当前已关闭。"},
+        "Some saved external source settings could not be loaded; defaults are used for those settings.",
+        "部分已保存的外部源设置无法加载，已对这些设置使用默认值。"},
     UiTextEntry{
-        "The external source folder preference could not be saved. The previous behavior is still in use.",
-        "无法保存外部源文件夹偏好，仍继续使用此前的行为。"},
+        "The external source settings could not be saved. The previous behavior is still in use.",
+        "无法保存外部源设置，仍继续使用此前的行为。"},
     UiTextEntry{"Data & Recovery", "数据与恢复"},
     UiTextEntry{
         "Inspect local application storage. Scientific source files and label result files remain user-owned.",

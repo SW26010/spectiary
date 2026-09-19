@@ -22,6 +22,8 @@ struct RuntimePaths;
 inline constexpr bool kDefaultLiveNumericNavigation = true;
 inline constexpr bool kDefaultOpenExternalSourceAsFolder = false;
 
+enum class ExternalOpenInstancePolicy { NewInstance, RecentInstance };
+
 enum class ApplicationSetting {
     None,
     Language,
@@ -66,6 +68,8 @@ struct ApplicationSettingsStatus {
 };
 
 struct ApplicationSettingsView {
+    ExternalOpenInstancePolicy external_open_instance_policy =
+        ExternalOpenInstancePolicy::NewInstance;
     UiLanguage language = UiLanguage::English;
     ThemeSelection theme_selection =
         ThemeSelection::FollowSystem();
@@ -117,6 +121,7 @@ void SetApplicationPanelVisible(
     bool visible) noexcept;
 
 enum class ApplicationSettingsIntentKind {
+    SetExternalOpenInstancePolicy,
     SetLanguage,
     SetThemeSelection,
     SetUiScale,
@@ -130,6 +135,8 @@ enum class ApplicationSettingsIntentKind {
 };
 
 struct ApplicationSettingsIntent {
+    ExternalOpenInstancePolicy external_open_instance_policy =
+        ExternalOpenInstancePolicy::NewInstance;
     ApplicationSettingsIntentKind kind =
         ApplicationSettingsIntentKind::SetLanguage;
     UiLanguage language = UiLanguage::English;
@@ -245,6 +252,8 @@ public:
         PersistenceStatus(ApplicationSetting setting) const;
 
 private:
+    [[nodiscard]] ApplicationSettingsResult ApplyExternalOpenInstancePolicy(
+        ExternalOpenInstancePolicy policy);
     [[nodiscard]] ApplicationSettingsResult ApplyLanguage(
         UiLanguage language);
     [[nodiscard]] ApplicationSettingsResult ApplyThemeSelection(
@@ -289,6 +298,9 @@ private:
     void SetPersistenceFailureStatus(ApplicationSetting setting);
 
     ApplicationSettingsStorage storage_;
+    ExternalOpenInstancePolicy external_open_instance_policy_ =
+        ExternalOpenInstancePolicy::NewInstance;
+    std::optional<ExternalOpenInstancePolicy> pending_external_open_instance_policy_;
     UiLanguage language_ = UiLanguage::English;
     ThemeSelection theme_selection_ =
         ThemeSelection::FollowSystem();

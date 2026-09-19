@@ -1534,8 +1534,50 @@ void TestAppearancePersistenceFailureRetainsPreviousSelection()
 
 }  // namespace
 
+void TestExternalOpenInstancePolicy()
+{
+    using namespace spectiary;
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    ApplicationSettings settings(storage);
+    Require(settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance,
+        "missing routing preference must retain new-instance startup");
+    ApplicationSettingsIntent intent;
+    intent.kind = ApplicationSettingsIntentKind::SetExternalOpenInstancePolicy;
+    intent.external_open_instance_policy = ExternalOpenInstancePolicy::RecentInstance;
+    Require(settings.Apply(intent, {}).outcome == ApplicationSettingsOutcome::Applied,
+        "recent-instance preference must persist");
+    Require(settings.Apply(ApplicationSettingsIntent::SetOpenExternalSourceAsFolder(true), {}).outcome ==
+        ApplicationSettingsOutcome::Applied, "folder preference must save alongside routing");
+    ApplicationSettings reloaded(storage);
+    Require(reloaded.View().external_open_instance_policy == ExternalOpenInstancePolicy::RecentInstance &&
+        reloaded.View().open_external_source_as_folder, "both external-open preferences must survive reload");
+    intent.external_open_instance_policy = ExternalOpenInstancePolicy::NewInstance;
+    Require(reloaded.Apply(intent, {}).outcome == ApplicationSettingsOutcome::Applied,
+        "new-instance preference must persist");
+    Require(ApplicationSettings(storage).View().open_external_source_as_folder,
+        "routing changes must retain folder preference");
+    std::ofstream(storage.external_source_settings_path, std::ios::trunc)
+        << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":true,"instance_policy":"unknown"})";
+    ApplicationSettings invalid(storage);
+    Require(invalid.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance &&
+        invalid.View().open_external_source_as_folder &&
+        invalid.View().StatusFor(ApplicationSetting::ExternalSource).kind == ApplicationSettingsStatusKind::LoadWarning,
+        "invalid routing must default safely without discarding folder preference");
+    const auto blocked = temporary.path() / "blocker";
+    std::ofstream(blocked) << "file";
+    auto blocked_storage = storage;
+    blocked_storage.external_source_settings_path = blocked / "settings.json";
+    ApplicationSettings failure(blocked_storage);
+    intent.external_open_instance_policy = ExternalOpenInstancePolicy::RecentInstance;
+    Require(failure.Apply(intent, {}).outcome == ApplicationSettingsOutcome::PersistenceFailed &&
+        failure.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance,
+        "failed routing writes must report failure and preserve previous policy");
+}
+
 int main()
 {
+    TestExternalOpenInstancePolicy();
     TestSettingsIntentsPersistAndReloadThroughOneOwner();
     TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings();
     TestCompactSingleValueFilesRemainReadableThroughApplicationSettings();
