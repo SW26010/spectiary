@@ -29,6 +29,8 @@ struct AutomationStartupConfiguration {
 
 struct SpectiaryCommandLine {
     std::optional<std::filesystem::path> initial_source;
+    // Explicit in-app launches must never route back to an existing GUI.
+    bool force_new_instance = false;
     std::optional<AutomationStartupConfiguration> automation;
     bool automation_requested = false;
     std::string error_message;

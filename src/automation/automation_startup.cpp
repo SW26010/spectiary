@@ -1356,6 +1356,10 @@ SpectiaryCommandLine ParseSpectiaryCommandLine(
          ++index) {
         const std::wstring_view argument =
             arguments[index];
+        if (argument == L"--new-instance") {
+            result.force_new_instance = true;
+            continue;
+        }
         if (argument ==
             kAutomationAllowPersistentLabelingOutputsOption) {
             result.automation_requested = true;

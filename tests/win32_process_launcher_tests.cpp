@@ -390,15 +390,16 @@ int RunChildIfRequested(int argc, wchar_t** argv)
     if (!marker) {
         return -1;
     }
-    if (argc != 2 || argv[1] == nullptr) {
+    if (argc != 3 || argv[2] == nullptr) {
         return 2;
     }
 
     const spectiary::SpectiaryCommandLine command_line =
         spectiary::ParseCurrentProcessSpectiaryCommandLine();
     if (!command_line.error_message.empty() ||
+        !command_line.force_new_instance ||
         !command_line.initial_source ||
-        command_line.initial_source->wstring() != argv[1]) {
+        command_line.initial_source->wstring() != argv[2]) {
         return 3;
     }
 

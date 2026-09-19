@@ -247,7 +247,7 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
 
     const std::wstring command_line =
         QuoteWindowsCommandLineArgument(executable_text) +
-        L" " +
+        L" --new-instance " +
         QuoteWindowsCommandLineArgument(source_text);
     std::vector<wchar_t> mutable_command_line(
         command_line.begin(),
