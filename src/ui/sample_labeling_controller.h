@@ -464,12 +464,11 @@ private:
             TaskEditLeaseSet& leases,
             std::optional<SampleLabelingAsdfOpenSnapshot>*
                 asdf_snapshot);
-    [[nodiscard]] bool CommitTaskRegistration(
+    [[nodiscard]] SampleLabelingStateCacheSaveResult CommitTaskRegistration(
         std::string_view source_identity,
         const SourceState& state,
         const SampleLabelingTask& task,
-        bool expected_absent,
-        std::string* error_message);
+        bool expected_absent);
     void BumpActiveSourceTasksGeneration();
     void Touch();
     void UpdateRecoveryTaskTrustFromSnapshot(
@@ -656,6 +655,7 @@ private:
     std::uint64_t active_source_tasks_generation_ = 0;
     bool state_cache_loaded_ = false;
     std::string state_cache_load_warning_;
+    std::string state_cache_load_diagnostic_detail_;
 };
 
 }  // namespace spectiary
