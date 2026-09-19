@@ -205,7 +205,7 @@ void TestNavigationStateCacheIgnoresUnsupportedSchema()
     WriteTextFile(
         cache_path,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"format_kind\": \"spectiary.sample_navigation_state.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"sources\": [\n"
         "    { \"identity\": \"source-a\", \"last_index\": 2 }\n"
@@ -1460,7 +1460,7 @@ void TestControllerLoadsLongFolderIdentityState()
         std::ofstream stream(cache_path);
         Require(stream.good(), "could not write navigation cache fixture");
         stream << "{\n";
-        stream << "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n";
+        stream << "  \"format_kind\": \"spectiary.sample_navigation_state.cache\",\n";
         stream << "  \"schema_version\": 1,\n";
         stream << "  \"sources\": [\n";
         stream << "    { \"identity\": \"short-source\", \"last_index\": 0 },\n";

@@ -18,15 +18,15 @@ constexpr auto kApplicationSettingsSaveRetry = 2s;
 constexpr auto kPanelVisibilitySaveDebounce = 500ms;
 
 constexpr const char* kUiLanguageSettingsFormatKind =
-    "specforge.ui_language.settings";
+    "spectiary.ui_language.settings";
 constexpr const char* kAppearanceSettingsFormatKind =
-    "specforge.appearance.settings";
+    "spectiary.appearance.settings";
 constexpr const char* kUiScaleSettingsFormatKind =
-    "specforge.ui_scale.settings";
+    "spectiary.ui_scale.settings";
 constexpr const char* kInputSettingsFormatKind =
-    "specforge.input.settings";
+    "spectiary.input.settings";
 constexpr const char* kExternalSourceSettingsFormatKind =
-    "specforge.external_source.settings";
+    "spectiary.external_source.settings";
 constexpr int kSettingsSchemaVersion = 1;
 constexpr const char* kThemeSelectionPolicyMember =
     "selection_policy";

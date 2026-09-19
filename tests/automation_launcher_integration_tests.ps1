@@ -1436,7 +1436,7 @@ try {
         "wavelength,flux`n5000,1`n5001,2`n",
         [System.Text.UTF8Encoding]::new($false))
     $ordinarySession = [ordered]@{
-        format_kind = 'specforge.source_collection_session.cache'
+        format_kind = 'spectiary.source_collection_session.cache'
         schema_version = 2
         active_source_index = 0
         sources = @(
@@ -1452,7 +1452,7 @@ try {
         [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText(
         (Join-Path $ordinaryRoot 'config\ui-language.json'),
-        '{"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"zh-Hans"}',
+        '{"format_kind":"spectiary.ui_language.settings","schema_version":1,"language":"zh-Hans"}',
         [System.Text.UTF8Encoding]::new($false))
     # Pin fixture directory timestamps after population; NTFS can otherwise
     # finish its creation-time directory updates after the first snapshot.

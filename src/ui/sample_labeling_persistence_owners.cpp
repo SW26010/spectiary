@@ -13,8 +13,8 @@
 namespace specforge {
 namespace {
 using Json = nlohmann::json;
-constexpr char kStateFormat[] = "specforge.sample_labeling.state";
-constexpr char kDraftFormat[] = "specforge.sample_labeling.drafts";
+constexpr char kStateFormat[] = "spectiary.sample_labeling.state";
+constexpr char kDraftFormat[] = "spectiary.sample_labeling.drafts";
 constexpr int kSchema = 1;
 
 struct InvalidOwner : std::runtime_error { using std::runtime_error::runtime_error; };

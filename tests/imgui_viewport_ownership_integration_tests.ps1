@@ -1608,14 +1608,14 @@ try {
     $darkTheme =
         Send-LauncherRequest `
             -Process $launcherProcess `
-            -Line 'setting set ui.theme specforge.theme.dark' `
+            -Line 'setting set ui.theme builtin.theme.dark' `
             -RequestId 'request-8'
     Assert-True `
         -Condition (
             [string]$darkTheme.status -eq 'completed' -and
             [string]$darkTheme.result.name -eq 'ui.theme' -and
             [string]$darkTheme.result.value -eq
-                'specforge.theme.dark' -and
+                'builtin.theme.dark' -and
             [bool]$darkTheme.result.changed) `
         -Message 'The GUI must accept an explicit dark runtime theme selection.'
     Assert-WindowTitleBarTheme `
@@ -1638,14 +1638,14 @@ try {
     $lightTheme =
         Send-LauncherRequest `
             -Process $launcherProcess `
-            -Line 'setting set ui.theme specforge.theme.light' `
+            -Line 'setting set ui.theme builtin.theme.light' `
             -RequestId 'request-10'
     Assert-True `
         -Condition (
             [string]$lightTheme.status -eq 'completed' -and
             [string]$lightTheme.result.name -eq 'ui.theme' -and
             [string]$lightTheme.result.value -eq
-                'specforge.theme.light' -and
+                'builtin.theme.light' -and
             [bool]$lightTheme.result.changed) `
         -Message 'The GUI must accept an explicit light runtime theme selection.'
     Assert-WindowTitleBarTheme `
@@ -1718,7 +1718,7 @@ try {
 
     [System.IO.File]::WriteAllText(
         $systemThemeFixturePath,
-        'specforge.theme.dark',
+        'builtin.theme.dark',
         [System.Text.UTF8Encoding]::new($false))
     [SpecForgeViewportOwnershipNative]::
         PostThemeChanged($mainHandle)
@@ -1736,7 +1736,7 @@ try {
         -Condition (
             [string]$themeGet.status -eq 'completed' -and
             [string]$themeGet.result.value -eq
-                'specforge.theme.light') `
+                'builtin.theme.light') `
         -Message 'An explicit theme must remain selected after a system-theme message.'
 
     $followTheme =
@@ -1770,7 +1770,7 @@ try {
 
     [System.IO.File]::WriteAllText(
         $systemThemeFixturePath,
-        'specforge.theme.light',
+        'builtin.theme.light',
         [System.Text.UTF8Encoding]::new($false))
     [SpecForgeViewportOwnershipNative]::
         PostThemeChanged($mainHandle)
@@ -1804,7 +1804,7 @@ try {
 
     [System.IO.File]::WriteAllText(
         $systemThemeFixturePath,
-        'specforge.theme.dark',
+        'builtin.theme.dark',
         [System.Text.UTF8Encoding]::new($false))
     [SpecForgeViewportOwnershipNative]::
         PostThemeChanged($mainHandle)

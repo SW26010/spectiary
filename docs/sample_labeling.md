@@ -840,7 +840,7 @@ interchangeably:
 | Task name | User-authored UTF-8 display data stored at `labeling_task.name`. | Persistently editable. Changing it advances `modified_at` but does not change the task ID or any path. |
 | Output filename | The user-selected filesystem name of the canonical `.asdf` owner. | Independent of both task ID and task name. The dialog may suggest a sanitized filename from the task name, but the final name is not canonical metadata and later task renames do not rename it. |
 | SpecForge schema version | The semantic contract selected by the YAML `schema_version`. | Current writers emit exactly `2.0.0`; this is not an ASDF implementation version. |
-| SpecForge build source | Generation provenance stored in `specforge_build`. | A current writer or rewrite stamps its own compiled build identity. `head` requires one full 40-character lowercase hexadecimal revision; `working_tree` requires `source_revision` to be absent. |
+| SpecForge build source | Generation provenance stored in `spectiary_build`. | A current writer or rewrite stamps its own compiled build identity. `head` requires one full 40-character lowercase hexadecimal revision; `working_tree` requires `source_revision` to be absent. |
 | ASDF file-format version | The container framing version in `#ASDF 1.0.0`. | Independently versioned by ASDF. It does not mean SpecForge schema 1.0. |
 | ASDF Standard version | The tag/schema vocabulary declared by `#ASDF_STANDARD 1.5.0`. | Independently versioned by ASDF. The `!core/asdf-1.1.0` root tag is likewise an ASDF core tag, not the SpecForge schema version. |
 
@@ -951,10 +951,10 @@ the ASDF container:
 asdf_library: !core/software-1.0.0
   name: SpecForge
   version: 0.8.0
-specforge_build:
+spectiary_build:
   source_mode: head
   source_revision: "0123456789abcdef0123456789abcdef01234567"
-format_kind: "specforge.sample_labeling"
+format_kind: "spectiary.sample_labeling"
 schema_version: "2.0.0"
 source_collection:
   identity: "source:example"
@@ -1032,7 +1032,7 @@ only at `labeling_task.name`, while `origin.annotation.name` is provenance for
 the promoted input artifact and is not a second task name.
 
 `asdf_library` identifies the producer as `SpecForge` version `0.8.0`.
-`specforge_build` records only the source state compiled into that producer:
+`spectiary_build` records only the source state compiled into that producer:
 clean `head` builds include the complete revision, while `working_tree` builds
 omit `source_revision` entirely. The field is generation provenance rather
 than user-authored task content. Fresh writes, values-only rewrites, and full

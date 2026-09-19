@@ -7012,7 +7012,7 @@ void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
     WriteTextFile(
         source_session_cache,
         "{\n"
-        "  \"format_kind\": \"specforge.source_collection_session.cache\",\n"
+        "  \"format_kind\": \"spectiary.source_collection_session.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"active_source_index\": 0,\n"
         "  \"sources\": []\n"
@@ -7050,7 +7050,7 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     WriteTextFile(
         navigation_cache,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"format_kind\": \"spectiary.sample_navigation_state.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"sources\": []\n"
         "}\n");
@@ -7062,7 +7062,7 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     WriteTextFile(
         workflow_cache,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_workflow_state.cache\",\n"
+        "  \"format_kind\": \"spectiary.sample_workflow_state.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"sources\": []\n"
         "}\n");
@@ -7411,7 +7411,7 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
     WriteTextFile(
         warning_navigation_cache,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"format_kind\": \"spectiary.sample_navigation_state.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"sources\": []\n"
         "}\n");
@@ -7419,7 +7419,7 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
     WriteTextFile(
         warning_workflow_cache,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_workflow_state.cache\",\n"
+        "  \"format_kind\": \"spectiary.sample_workflow_state.cache\",\n"
         "  \"schema_version\": 999,\n"
         "  \"sources\": []\n"
         "}\n");

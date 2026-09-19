@@ -35,7 +35,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kMetadataFormatKind = "specforge.sample_label_result.metadata";
+constexpr const char* kMetadataFormatKind = "spectiary.sample_label_result.metadata";
 constexpr int kMetadataSchemaVersion = 1;
 constexpr std::string_view kInt32DtypeText = "int32";
 constexpr std::string_view kCsvTextDtypeText = "utf8";

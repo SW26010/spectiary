@@ -93,10 +93,10 @@ The production writer identity is represented at the root as:
 asdf_library: !core/software-1.0.0
   name: SpecForge
   version: 0.8.0
-specforge_build:
+spectiary_build:
   source_mode: head
   source_revision: "0123456789abcdef0123456789abcdef01234567"
-format_kind: "specforge.sample_labeling"
+format_kind: "spectiary.sample_labeling"
 schema_version: "2.0.0"
 ```
 
@@ -318,7 +318,7 @@ The second-round recommended v1 writer profile is intentionally narrow:
 - little-endian int32 values and little-endian UCS-4 roster strings;
 - label-only atomic rewrites rebuild canonical metadata with supported unknown
   mappings, preserve only the unchanged encoded roster block, and re-encode the
-  values block; known `specforge_build` fields are refreshed from the current
+  values block; known `spectiary_build` fields are refreshed from the current
   binary while unknown entries in that map are preserved;
 - a roster is eligible for durable verbatim reuse only when its zlib stream
   declares `FLEVEL=2`, the level-6 production class; other valid zlib levels

@@ -16,7 +16,7 @@ struct SampleLabelingCanonicalSourceDescriptor;
 
 
 inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
-    "specforge.sample_labeling";
+    "spectiary.sample_labeling";
 inline constexpr std::string_view kSampleLabelingDocumentSchemaVersion = "2.0.0";
 inline constexpr std::string_view kSampleLabelingDocumentCategoricalIntegerKind =
     "categorical_integer";

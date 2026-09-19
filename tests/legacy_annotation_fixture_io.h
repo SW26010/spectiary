@@ -32,7 +32,7 @@ public:
 };
 
 namespace legacy_fixture_detail {
-inline constexpr const char* kMetadataFormatKind = "specforge.sample_label_result.metadata";
+inline constexpr const char* kMetadataFormatKind = "spectiary.sample_label_result.metadata";
 inline constexpr int kMetadataSchemaVersion = 1;
 inline constexpr std::string_view kInt32DtypeText = "int32";
 inline std::string PathToUtf8(const std::filesystem::path& path)

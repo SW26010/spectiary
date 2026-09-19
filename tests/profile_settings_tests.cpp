@@ -157,7 +157,7 @@ void TestLegacyCompactSettingsRemainReadable()
         temporary.path() / "profile-settings.json";
     WriteFile(
         settings_path,
-        R"({"format_kind":"specforge.profile_settings","schema_version":1,"output_directory":{"path_kind":"absolute","path":"C:/legacy/profiles"}})");
+        R"({"format_kind":"spectiary.profile_settings","schema_version":1,"output_directory":{"path_kind":"absolute","path":"C:/legacy/profiles"}})");
     Require(
         specforge::LoadProfileSettings(specforge::RuntimePaths{}, settings_path)
                 .settings.output_directory ==
@@ -226,7 +226,7 @@ void TestMalformedSettingsAreIgnored()
     const std::filesystem::path settings_path = temporary.path() / "profile-settings.json";
     {
         std::ofstream stream(settings_path);
-        stream << R"({"format_kind":"specforge.profile_settings","schema_version":1,"output_directory":42})";
+        stream << R"({"format_kind":"spectiary.profile_settings","schema_version":1,"output_directory":42})";
     }
 
     const specforge::ProfileSettingsLoadResult loaded =

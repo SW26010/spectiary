@@ -11,7 +11,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kSettingsFormatKind = "specforge.profile_settings";
+constexpr const char* kSettingsFormatKind = "spectiary.profile_settings";
 constexpr int kSettingsSchemaVersion = 1;
 
 }  // namespace

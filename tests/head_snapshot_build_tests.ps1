@@ -136,7 +136,7 @@ exit 1
     }
     $legacyMetadataPath = Join-Path `
         $testRoot `
-        'dist\head\SpecForge-portable\specforge_build_metadata.json'
+        'dist\head\SpecForge-portable\spectiary_build_metadata.json'
     if (-not (Test-Path -LiteralPath $legacyMetadataPath -PathType Leaf) -or
         $invocation.child_schema_version -ne 3) {
         throw 'HEAD wrapper did not accept the child builder generation-owned legacy output.'

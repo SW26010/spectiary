@@ -5159,7 +5159,7 @@ void TestSpectrumOwnerFailuresAreIndependent()
             }
             const auto old_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
             std::filesystem::last_write_time(good, old_time);
-            const std::string format = preferences_failed ? "specforge.spectrum_plot.preferences" : "specforge.spectrum_viewport.state";
+            const std::string format = preferences_failed ? "spectiary.spectrum_plot.preferences" : "spectiary.spectrum_viewport.state";
             const std::string original = failure == 0
                 ? "{\"format_kind\":\"" + format + "\",\"schema_version\":999}"
                 : failure == 1 ? "{invalid" : failure == 2 ? "[]" : "unreadable then accessible";
@@ -5315,7 +5315,7 @@ void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
     const auto path = startup.runtime_paths().spectrum_viewport_state_path;
     std::filesystem::create_directories(path.parent_path());
     const std::array<std::string, 4> documents{
-        "{\"format_kind\":\"specforge.spectrum_viewport.state\",\"schema_version\":999}",
+        "{\"format_kind\":\"spectiary.spectrum_viewport.state\",\"schema_version\":999}",
         "{broken json",
         "[]",
         "temporarily unreadable original",

@@ -1409,7 +1409,7 @@ void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
                 specforge::UiLanguage::English,
                 specforge::UiTextId::
                     PublicSpectralLineCatalog),
-            "specforge.public");
+            "public-spectral-lines.v1");
     const std::string chinese =
         specforge::SpectralLineCatalogOptionLabel(
             specforge::UiText(
@@ -1417,13 +1417,13 @@ void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
                     SimplifiedChinese,
                 specforge::UiTextId::
                     PublicSpectralLineCatalog),
-            "specforge.public");
+            "public-spectral-lines.v1");
 
     Require(
         english ==
-                "Public catalog###specforge.public" &&
+                "Public catalog###public-spectral-lines.v1" &&
             chinese ==
-                "公共目录###specforge.public",
+                "公共目录###public-spectral-lines.v1",
         "the spectral-line catalog option should keep its catalog identity while localizing visible text");
 }
 

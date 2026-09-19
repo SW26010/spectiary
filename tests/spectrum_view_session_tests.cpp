@@ -664,7 +664,7 @@ void TestLegacySpectrumMigrationCompletesPartialCutover()
         "both established owners must bypass legacy decoding entirely");
     std::filesystem::remove(paths.legacy_spectrum_view_state_path);
     // A present unsupported destination must not be replaced with legacy data.
-    const std::string future = R"({"format_kind":"specforge.spectrum_plot.preferences","schema_version":999})";
+    const std::string future = R"({"format_kind":"spectiary.spectrum_plot.preferences","schema_version":999})";
     std::ofstream(paths.spectrum_plot_preferences_path) << future;
     std::ofstream(paths.legacy_spectrum_view_state_path) << legacy;
     std::filesystem::remove(paths.spectrum_viewport_state_path);
@@ -707,7 +707,7 @@ void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
             path,
             std::ios::binary | std::ios::trunc);
         stream <<
-            "{\"format_kind\":\"specforge.spectrum_plot.preferences\","
+            "{\"format_kind\":\"spectiary.spectrum_plot.preferences\","
             "\"schema_version\":1,"
             "\"series_colors\":{"
             "\"spectrum.raw\":{\"mode\":\"explicit-color\","

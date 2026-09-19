@@ -445,7 +445,7 @@ void TestSchema6StrictParsing()
         Schema6Metadata(R"("2024-01-01T00:00:00.000Z")"),
         Schema6Metadata(
             R"("2024-02-29T23:59:59Z")",
-            R"({"file":"specforge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
+            R"({"file":"spectiary.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
         Schema6Metadata(
             {},
             R"({"file":"Spectiary.exe","sha256":"0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"})"),

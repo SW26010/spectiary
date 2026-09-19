@@ -14,7 +14,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kStateFormatKind = "specforge.sample_navigation_state.cache";
+constexpr const char* kStateFormatKind = "spectiary.sample_navigation_state.cache";
 constexpr int kStateSchemaVersion = 1;
 
 }  // namespace

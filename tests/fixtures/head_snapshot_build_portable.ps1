@@ -53,12 +53,12 @@ Set-Content `
 } |
     ConvertTo-Json -Depth 10 |
     Set-Content `
-        -LiteralPath (Join-Path $packageRoot 'specforge_build_metadata.json') `
+        -LiteralPath (Join-Path $packageRoot 'spectiary_build_metadata.json') `
         -Encoding UTF8
 
 $verifiedMetadata = Get-Content `
     -Raw `
-    -LiteralPath (Join-Path $packageRoot 'specforge_build_metadata.json') |
+    -LiteralPath (Join-Path $packageRoot 'spectiary_build_metadata.json') |
     ConvertFrom-Json
 $verifiedSchemaVersion =
     $verifiedMetadata.PSObject.Properties['schema_version'].Value

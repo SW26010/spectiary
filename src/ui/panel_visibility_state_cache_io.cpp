@@ -11,7 +11,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kStateFormatKind = "specforge.panel_visibility.cache";
+constexpr const char* kStateFormatKind = "spectiary.panel_visibility.cache";
 constexpr int kStateSchemaVersion = 1;
 
 }  // namespace

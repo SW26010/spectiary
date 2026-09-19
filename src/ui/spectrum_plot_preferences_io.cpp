@@ -16,7 +16,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kPreferencesFormatKind =
-    "specforge.spectrum_plot.preferences";
+    "spectiary.spectrum_plot.preferences";
 constexpr int kPreferencesSchemaVersion = 1;
 constexpr std::string_view kSeriesColorsMember =
     "series_colors";

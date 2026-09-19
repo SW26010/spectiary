@@ -475,7 +475,7 @@ std::string BuildSourceYaml(
     std::string_view source_mode,
     std::optional<std::string_view> source_revision)
 {
-    std::string yaml = "specforge_build:\n  source_mode: \"";
+    std::string yaml = "spectiary_build:\n  source_mode: \"";
     yaml.append(source_mode);
     yaml.append("\"\n");
     if (source_revision) {
@@ -676,7 +676,7 @@ void WriteYamlAliasAmplificationFixture(
              << "%YAML 1.1\n"
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
-             << "format_kind: \"specforge.sample_labeling\"\n"
+             << "format_kind: \"spectiary.sample_labeling\"\n"
              << "schema_version: \"2.0.0\"\n"
              << CurrentBuildSourceYaml()
              << "source_collection:\n"
@@ -1003,6 +1003,26 @@ void TestRejectsManifestSemanticViolationsWithControlledErrors()
 
 void TestSchemaTwoRejectsLegacyVersionAndReservedAnnotationName()
 {
+    // Legacy brand namespaces are historical documents, not writer aliases.
+    const auto legacy_brand_path = TempPath("_legacy_brand.asdf");
+    Require(WriteDocument(legacy_brand_path, ProductionDocument()).succeeded(),
+        "brand fixture should start from the current writer");
+    auto legacy_bytes = ReadAllBytes(legacy_brand_path);
+    const std::string current_text(legacy_bytes.begin(), legacy_bytes.end());
+    Require(current_text.find("name: Spectiary") != std::string::npos &&
+        current_text.find("spectiary_build:") != std::string::npos &&
+        current_text.find("specforge_build:") == std::string::npos,
+        "current writer must emit only Spectiary producer contracts");
+    ReplaceTextOnce(legacy_bytes, "spectiary.sample_labeling", "specforge.sample_labeling");
+    WriteAllBytes(legacy_brand_path, legacy_bytes);
+    const auto legacy_brand = specforge::ReadSampleLabelingAsdfDocument(legacy_brand_path);
+    Require(!legacy_brand.succeeded() && legacy_brand.error.kind ==
+        specforge::SampleLabelingAsdfErrorKind::UnsupportedProfile,
+        "legacy brand canonical documents must be rejected explicitly");
+    Require(ReadAllBytes(legacy_brand_path) == legacy_bytes,
+        "rejecting a legacy document must not modify it");
+    std::filesystem::remove(legacy_brand_path);
+
     const std::filesystem::path legacy_schema_path =
         TempPath("_legacy_schema.asdf");
     Require(
@@ -1947,7 +1967,7 @@ void TestWriterEmitsFixedProductionProfileAndRoundTrips()
         "writer should emit only the narrow current build source tuple before the schema identity");
     Require(
         text.find(
-            "asdf_library: !core/software-1.0.0 {name: SpecForge, version: "
+            "asdf_library: !core/software-1.0.0 {name: Spectiary, version: "
             SPECFORGE_EXPECTED_VERSION "}") != std::string::npos,
         "writer provenance should use the configured SpecForge project version");
 
@@ -2607,8 +2627,8 @@ void TestMetadataRewritePreservesForwardUnknownFields()
 
     std::vector<unsigned char> bytes = ReadAllBytes(input_path);
     ReplaceTextOnce(bytes,
-        "\nspecforge_build:\n  source_mode: ",
-        "\nspecforge_build:\n"
+        "\nspectiary_build:\n  source_mode: ",
+        "\nspectiary_build:\n"
         "  future_build: \"build-survives\"\n"
         "  source_mode: ");
     ReplaceTextOnce(bytes,

@@ -172,7 +172,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
             R"("selection_policy": "explicit")") !=
                 std::string::npos &&
             appearance_document.find(
-                R"("theme_id": "specforge.theme.dark")") !=
+                R"("theme_id": "builtin.theme.dark")") !=
                 std::string::npos,
         "appearance should persist selection policy and stable theme ID separately");
     Require(
@@ -243,7 +243,7 @@ void TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings()
     const auto storage = MakeStorage(temporary.path());
     {
         std::ofstream stream(storage.external_source_settings_path);
-        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_fits_as_folder":true})";
+        stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_fits_as_folder":true})";
     }
 
     const specforge::ApplicationSettings settings(storage);
@@ -279,19 +279,19 @@ void TestCompactSingleValueFilesRemainReadableThroughApplicationSettings()
     const auto storage = MakeStorage(temporary.path());
     {
         std::ofstream stream(storage.language_settings_path);
-        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"zh-Hans"})";
+        stream << R"({"format_kind":"spectiary.ui_language.settings","schema_version":1,"language":"zh-Hans"})";
     }
     {
         std::ofstream stream(storage.ui_scale_settings_path);
-        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":1,"percentage":150})";
+        stream << R"({"format_kind":"spectiary.ui_scale.settings","schema_version":1,"percentage":150})";
     }
     {
         std::ofstream stream(storage.input_settings_path);
-        stream << R"({"format_kind":"specforge.input.settings","schema_version":1,"live_numeric_navigation":false})";
+        stream << R"({"format_kind":"spectiary.input.settings","schema_version":1,"live_numeric_navigation":false})";
     }
     {
         std::ofstream stream(storage.external_source_settings_path);
-        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_source_as_folder":true})";
+        stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":true})";
     }
 
     const specforge::ApplicationSettings settings(storage);
@@ -320,19 +320,19 @@ void TestInvalidSingleValuesFallBackThroughApplicationSettings()
     const auto storage = MakeStorage(temporary.path());
     {
         std::ofstream stream(storage.language_settings_path);
-        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"fr"})";
+        stream << R"({"format_kind":"spectiary.ui_language.settings","schema_version":1,"language":"fr"})";
     }
     {
         std::ofstream stream(storage.ui_scale_settings_path);
-        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":1,"percentage":151})";
+        stream << R"({"format_kind":"spectiary.ui_scale.settings","schema_version":1,"percentage":151})";
     }
     {
         std::ofstream stream(storage.input_settings_path);
-        stream << R"({"format_kind":"specforge.input.settings","schema_version":1,"live_numeric_navigation":"false"})";
+        stream << R"({"format_kind":"spectiary.input.settings","schema_version":1,"live_numeric_navigation":"false"})";
     }
     {
         std::ofstream stream(storage.external_source_settings_path);
-        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_source_as_folder":"true"})";
+        stream << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":"true"})";
     }
 
     const specforge::ApplicationSettings settings(storage);
@@ -361,11 +361,11 @@ void TestUnsupportedSingleValueSchemasFallBackThroughApplicationSettings()
     const auto storage = MakeStorage(temporary.path());
     {
         std::ofstream stream(storage.language_settings_path);
-        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":2,"language":"zh-Hans"})";
+        stream << R"({"format_kind":"spectiary.ui_language.settings","schema_version":2,"language":"zh-Hans"})";
     }
     {
         std::ofstream stream(storage.ui_scale_settings_path);
-        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":2,"percentage":125})";
+        stream << R"({"format_kind":"spectiary.ui_scale.settings","schema_version":2,"percentage":125})";
     }
 
     const specforge::ApplicationSettings settings(storage);
@@ -1464,7 +1464,7 @@ void TestAppearanceFallbackWarningsAndRepair()
     {
         std::ofstream stream(storage.appearance_settings_path);
         stream
-            << R"({"format_kind":"specforge.appearance.settings","schema_version":1,"selection_policy":"explicit","theme_id":"specforge.theme.future"})";
+            << R"({"format_kind":"spectiary.appearance.settings","schema_version":1,"selection_policy":"explicit","theme_id":"spectiary.theme.future"})";
     }
     specforge::ApplicationSettings unknown(storage);
     Require(
@@ -1484,7 +1484,7 @@ void TestAppearanceFallbackWarningsAndRepair()
                     specforge::ThemeSelection::Explicit(
                         specforge::ThemeId(
                             std::string_view(
-                                "specforge.theme.future")))),
+                                "spectiary.theme.future")))),
             {});
     Require(
         rejected.outcome ==

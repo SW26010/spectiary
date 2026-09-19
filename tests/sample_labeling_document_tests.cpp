@@ -471,7 +471,7 @@ void TestValidatorEnforcesLabelAndUnlabeledInvariants()
 void TestValidatorRejectsUnsupportedDocumentSemantics()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
-    document.format_kind = "specforge.session";
+    document.format_kind = "spectiary.session";
     document.schema_version = "1.0.0";
     document.annotation.kind = "continuous_float";
     document.annotation.missing.semantic = "nan";

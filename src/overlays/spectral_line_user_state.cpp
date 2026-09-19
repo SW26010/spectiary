@@ -14,7 +14,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kPublicCatalogIdentity = "specforge.public";
+constexpr const char* kPublicCatalogIdentity = "public-spectral-lines.v1";
 constexpr const char* kPublicCatalogDisplayName = "Public catalog";
 constexpr const char* kCatalogGroupingViewId = "__catalog_grouping_view__";
 constexpr const char* kUnassignedUserGroupId = "__unassigned__";

@@ -19,9 +19,9 @@ struct ThemeSelection;
 inline constexpr std::size_t kPlotAutoSeriesColorCount = 8;
 
 inline constexpr std::string_view kBuiltInDarkThemeStableId =
-    "specforge.theme.dark";
+    "builtin.theme.dark";
 inline constexpr std::string_view kBuiltInLightThemeStableId =
-    "specforge.theme.light";
+    "builtin.theme.light";
 inline constexpr std::string_view kFollowSystemThemeStableValue =
     "follow-system";
 

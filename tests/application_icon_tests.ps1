@@ -100,8 +100,8 @@ public static class SpecForgeApplicationIconNative
 '@
 }
 
-$iconPath = Join-Path $RepoRoot 'resources\branding\specforge.ico'
-$svgPath = Join-Path $RepoRoot 'resources\branding\specforge.svg'
+$iconPath = Join-Path $RepoRoot 'resources\branding\spectiary.ico'
+$svgPath = Join-Path $RepoRoot 'resources\branding\spectiary.svg'
 $resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
 $resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
 $cmakePath = Join-Path $RepoRoot 'CMakeLists.txt'

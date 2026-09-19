@@ -500,7 +500,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     Require(
         specforge::WriteVersionedJsonCacheDocument(
             path,
-            "specforge.test.cache",
+            "spectiary.test.cache",
             2,
             "test cache",
             body,
@@ -508,7 +508,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
         error.empty() ? "versioned cache write failed" : error);
     const std::string expected = ReadTextFile(path);
     auto expected_document = body;
-    expected_document["format_kind"] = "specforge.test.cache";
+    expected_document["format_kind"] = "spectiary.test.cache";
     expected_document["schema_version"] = 2;
     Require(nlohmann::json::parse(expected) == expected_document,
             "structured output should round-trip semantically");
@@ -519,7 +519,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     Require(
         specforge::WriteVersionedJsonCacheDocument(
             path,
-            "specforge.test.cache",
+            "spectiary.test.cache",
             2,
             "test cache",
             body,
@@ -528,7 +528,7 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
         "repeated structured writes should be byte-stable");
 
     const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "specforge.test.cache", {2}, "test cache");
+        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {2}, "test cache");
     Require(loaded.warning.empty(), loaded.warning);
     Require(loaded.document.has_value(), "versioned cache should load");
     Require(loaded.document->schema_version == 2, "versioned cache should report the parsed schema");
@@ -558,7 +558,7 @@ void TestStructuredJsonCacheRejectsInvalidBody()
     Require(
         !specforge::WriteVersionedJsonCacheDocument(
             path,
-            "specforge.test.cache",
+            "spectiary.test.cache",
             1,
             "test cache",
             nlohmann::json("invalid"),
@@ -608,7 +608,7 @@ void TestVersionedJsonCacheShellReportsCorruptCacheWarning()
     WriteTextFile(path, "{ invalid json");
 
     const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "specforge.test.cache", {1}, "test cache");
+        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1}, "test cache");
 
     Require(!loaded.document.has_value(), "corrupt versioned cache should not load a document");
     Require(!loaded.warning.empty(), "corrupt versioned cache should report a warning");
@@ -631,13 +631,13 @@ void TestVersionedJsonCacheShellRejectsUnsupportedSchema()
     WriteTextFile(
         path,
         "{\n"
-        "  \"format_kind\": \"specforge.test.cache\",\n"
+        "  \"format_kind\": \"spectiary.test.cache\",\n"
         "  \"schema_version\": 99,\n"
         "  \"items\": []\n"
         "}\n");
 
     const specforge::VersionedJsonCacheLoadResult loaded =
-        specforge::LoadVersionedJsonCacheFile(path, "specforge.test.cache", {1, 2}, "test cache");
+        specforge::LoadVersionedJsonCacheFile(path, "spectiary.test.cache", {1, 2}, "test cache");
 
     Require(!loaded.document.has_value(), "unsupported versioned cache should not load a document");
     Require(!loaded.warning.empty(), "unsupported versioned cache should report a warning");
@@ -667,7 +667,7 @@ void TestVersionedJsonCacheDiagnosticsUseUtf8Paths()
     const specforge::VersionedJsonCacheLoadResult loaded =
         specforge::LoadVersionedJsonCacheFile(
             path,
-            "specforge.test.cache",
+            "spectiary.test.cache",
             {1},
             "test cache");
 
@@ -1127,7 +1127,7 @@ void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
     WriteTextFile(
         path,
         "{\n"
-        "  \"format_kind\": \"specforge.panel_visibility.cache\",\n"
+        "  \"format_kind\": \"spectiary.panel_visibility.cache\",\n"
         "  \"schema_version\": 1,\n"
         "  \"files\": false\n"
         "}\n");
@@ -1159,7 +1159,7 @@ void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
     WriteTextFile(
         path,
         "{\n"
-        "  \"format_kind\": \"specforge.panel_visibility.cache\",\n"
+        "  \"format_kind\": \"spectiary.panel_visibility.cache\",\n"
         "  \"schema_version\": 1,\n"
         "  \"files\": false,\n"
         "  \"navigation\": \"visible\"\n"

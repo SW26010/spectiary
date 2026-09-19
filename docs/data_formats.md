@@ -237,7 +237,7 @@ GitHub issue #82 是纳入 `schema_version: 2.0.0` 的 bounded self-description
 patch，没有引入 `2.1.0`。
 
 每个当前 generation 都直接声明 producer：`asdf_library.name` 为 `SpecForge`，
-`asdf_library.version` 为 `0.8.0`。相邻的 `specforge_build` 只包含构建源码状态：
+`asdf_library.version` 为 `0.8.0`。相邻的 `spectiary_build` 只包含构建源码状态：
 `source_mode: head` 必须同时包含完整 40 位小写十六进制 `source_revision`；
 `source_mode: working_tree` 必须完全省略 `source_revision`，不能写成 `null`。
 fresh write、values-only rewrite 和 metadata rewrite 都写入当前 binary 的这一

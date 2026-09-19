@@ -1,4 +1,5 @@
 #include "app/local_user_state.h"
+#include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 #include "ui/source_collection_session_state_cache_io.h"
 #include "ui/source_collection_session.h"
@@ -106,6 +107,42 @@ void TestStorageContext(const fs::path& test_root)
     std::ofstream(file) << "sentinel";
     inputs.application_data_root_override = file / "nested";
     RequireFailure([&] { (void)RuntimePathsForDeployment({}, inputs); });
+}
+
+void TestLegacyBrandState(const fs::path& test_root)
+{
+    const auto file = test_root / "legacy-brand.json";
+    const auto write = [&](const nlohmann::json& value) {
+        std::ofstream out(file); out << value.dump();
+    };
+    // Read-only migration keeps user data; next write has only current identity.
+    write({{"format_kind", "specforge.sample_labeling.drafts"},
+           {"schema_version", 1}, {"drafts", nlohmann::json::array({{{"name", "SpecForge"}, {"values", {1, 2, 3}}}})}});
+    auto read = LoadVersionedJsonCacheFile(file, "spectiary.sample_labeling.drafts", {1}, "draft");
+    Require(read.document.has_value(), "historical checkpoint remains readable");
+    Require(read.document->root["drafts"][0]["name"] == "SpecForge" &&
+            read.document->root["drafts"][0]["values"][2] == 3,
+            "migration must preserve user text and draft values");
+    Require(read.document->root["format_kind"] == "spectiary.sample_labeling.drafts",
+            "loaded checkpoint adopts current format identity");
+    write({{"format_kind", "specforge.appearance.settings"}, {"schema_version", 1},
+           {"theme_id", "specforge.theme.dark"}});
+    read = LoadVersionedJsonCacheFile(file, "spectiary.appearance.settings", {1}, "appearance");
+    Require(read.document && read.document->root["theme_id"] == "builtin.theme.dark",
+            "historical theme selection survives identity cutover");
+    write({{"format_kind", "specforge.catalog_user_state.cache"}, {"schema_version", 6},
+           {"catalogs", {{"specforge.public", {{"name", "specforge.public"},
+              {"references", {{{"catalog_identity", "specforge.public"}}}}}}}}});
+    read = LoadVersionedJsonCacheFile(file, "spectiary.catalog_user_state.cache", {6}, "catalog");
+    Require(read.document && read.document->root["catalogs"].contains("public-spectral-lines.v1"),
+            "historical public catalog key migrates");
+    const auto& catalog = read.document->root["catalogs"]["public-spectral-lines.v1"];
+    Require(catalog["name"] == "specforge.public" &&
+            catalog["references"][0]["catalog_identity"] == "public-spectral-lines.v1",
+            "catalog references migrate without rewriting user names");
+    write({{"format_kind", "specforge.unknown"}, {"schema_version", 1}});
+    Require(!LoadVersionedJsonCacheFile(file, "spectiary.unknown", {1}, "unknown").document,
+            "compatibility is an explicit allowlist, never arbitrary prefix replacement");
 }
 
 void TestBoundedMigration(const fs::path& root)
@@ -288,6 +325,7 @@ int main()
     try {
         fs::create_directories(root);
         TestStorageContext(root);
+        TestLegacyBrandState(root);
         TestBoundedMigration(root);
         TestLocators(root);
         TestReservedNamespaces(root);

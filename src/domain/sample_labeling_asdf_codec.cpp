@@ -1153,7 +1153,7 @@ void ParseAnnotationAlignment(const YAML::Node& annotation,
     const YAML::Node node = build_source[std::string(key)];
     if (!node.IsDefined() || !IsYamlStringScalar(node)) {
         Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-            "specforge_build field must be a string: " +
+            "spectiary_build field must be a string: " +
                 std::string(key));
     }
     materialization_budget.AccountString(node.Scalar().size());
@@ -1164,10 +1164,10 @@ void ParseBuildSource(const YAML::Node& root,
     SampleLabelingDocumentBuildSource& parsed_build_source,
     CanonicalMaterializationBudget& materialization_budget)
 {
-    const YAML::Node build_source = root["specforge_build"];
+    const YAML::Node build_source = root["spectiary_build"];
     if (!build_source.IsDefined() || !build_source.IsMap()) {
         Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
-            "specforge_build must be a map");
+            "spectiary_build must be a map");
     }
     parsed_build_source.source_mode = RequiredBuildSourceStringScalar(
         build_source, "source_mode", materialization_budget);
@@ -1784,10 +1784,10 @@ void ValidateDocumentText(const SampleLabelingDocument& document)
     RequireUtf8(document.format_kind, "format_kind");
     RequireUtf8(document.schema_version, "schema_version");
     RequireUtf8(
-        document.build_source.source_mode, "specforge_build.source_mode");
+        document.build_source.source_mode, "spectiary_build.source_mode");
     if (document.build_source.source_revision) {
         RequireUtf8(*document.build_source.source_revision,
-            "specforge_build.source_revision");
+            "spectiary_build.source_revision");
     }
     RequireUtf8(document.source.base_identity, "source_collection.identity");
     RequireUtf8(document.source.kind, "source_collection.source_kind");
@@ -2225,9 +2225,9 @@ void EmitMetadata(std::ostream& metadata,
              << "%YAML 1.1\n"
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
-             << "asdf_library: !core/software-1.0.0 {name: SpecForge, version: "
+             << "asdf_library: !core/software-1.0.0 {name: Spectiary, version: "
              << build_info::kSpecForgeVersion << "}\n"
-             << "specforge_build:\n  source_mode: ";
+             << "spectiary_build:\n  source_mode: ";
     WriteQuotedYaml(metadata, build_source.source_mode);
     if (build_source.source_revision) {
         metadata << "\n  source_revision: ";
@@ -2572,12 +2572,12 @@ void SetCanonicalArrayDescriptor(YAML::Node node,
                 std::string{kSampleLabelingAsdfRootTag});
     YAML::Node library = MapNodeOrNew(root, "asdf_library");
     library.SetTag("tag:stsci.edu:asdf/core/software-1.0.0");
-    SetYamlString(library, "name", "SpecForge");
+    SetYamlString(library, "name", "Spectiary");
     SetYamlString(
         library, "version", build_info::kSpecForgeVersion);
     const SampleLabelingDocumentBuildSource build_source =
         CurrentSampleLabelingDocumentBuildSource();
-    YAML::Node build = MapNodeOrNew(root, "specforge_build");
+    YAML::Node build = MapNodeOrNew(root, "spectiary_build");
     SetYamlString(build, "source_mode", build_source.source_mode);
     if (build_source.source_revision) {
         SetYamlString(

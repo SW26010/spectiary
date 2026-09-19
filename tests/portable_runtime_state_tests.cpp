@@ -510,7 +510,7 @@ void TestSourceSessionStateCacheDoesNotGuessLegacyMovedPortablePath(
         stream.good(),
         "could not open legacy source-session cache fixture");
     stream << "{\n"
-           << "  \"format_kind\": \"specforge.source_collection_session.cache\",\n"
+           << "  \"format_kind\": \"spectiary.source_collection_session.cache\",\n"
            << "  \"schema_version\": 1,\n"
            << "  \"active_source_index\": 0,\n"
            << "  \"sources\": [\n"

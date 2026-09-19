@@ -861,7 +861,7 @@ void WriteReproducer(const Options& options,
         throw std::runtime_error("could not create reproducer.json");
     }
     json << "{\n"
-         << "  \"format_kind\": \"specforge.asdf_mutation_reproducer\",\n"
+         << "  \"format_kind\": \"spectiary.asdf_mutation_reproducer\",\n"
          << "  \"schema_version\": 1,\n"
          << "  \"base_fixture\": " << JsonQuoted(PathText(base_fixture))
          << ",\n"

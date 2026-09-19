@@ -2917,7 +2917,7 @@ std::filesystem::path LabelingTargetLeasePath(
 {
     specforge::StableSha256 digest;
     digest.Append(
-        "specforge.sample-labeling.edit-lease.v1\n");
+        "spectiary.sample-labeling.edit-lease.v1\n");
     digest.Append(lease_key);
     return specforge::SampleLabelingStateCoordinationDirectory(
                cache_path) /
@@ -3949,7 +3949,7 @@ void TestSampleLabelResultWritesMetadataSidecar()
 
     const std::string metadata = ReadTextFile(metadata_path);
     Require(
-        metadata.find("\"format_kind\": \"specforge.sample_label_result.metadata\"") != std::string::npos,
+        metadata.find("\"format_kind\": \"spectiary.sample_label_result.metadata\"") != std::string::npos,
         "metadata should identify the sidecar format");
     Require(metadata.find("\"result_file\": \"specforge_sample_label_result_metadata.npy\"") != std::string::npos, "metadata should reference the result relatively");
     Require(metadata.find("\"task_id\": \"quality\"") != std::string::npos, "metadata should carry the stable task id");
@@ -4108,7 +4108,7 @@ void TestMismatchedLabelMetadataFallsBackToRawAnnotationValues()
     WriteTextFile(
         metadata_path,
         "{\n"
-        "  \"format_kind\": \"specforge.sample_label_result.metadata\",\n"
+        "  \"format_kind\": \"spectiary.sample_label_result.metadata\",\n"
         "  \"schema_version\": 1,\n"
         "  \"result_file\": \"another.npy\",\n"
         "  \"task_id\": \"quality\",\n"

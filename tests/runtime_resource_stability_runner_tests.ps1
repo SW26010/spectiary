@@ -816,7 +816,7 @@ $savedSamplingParameters = @{
 }
 try {
     $Source = @('sampling-margin-a', 'sampling-margin-b')
-    $Executable = 'deliberately-missing-specforge.exe'
+    $Executable = 'deliberately-missing-spectiary.exe'
     $SampleIntervalMs = 200
     $SettleMs = 200
     $samplingMarginRejected = $false

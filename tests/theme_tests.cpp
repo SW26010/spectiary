@@ -48,9 +48,9 @@ void TestBuiltInThemesHaveStableIdentities()
         "the initial registry should expose the two built-in themes");
     Require(
         specforge::BuiltInDarkThemeId().value() ==
-                "specforge.theme.dark" &&
+                "builtin.theme.dark" &&
             specforge::BuiltInLightThemeId().value() ==
-                "specforge.theme.light",
+                "builtin.theme.light",
         "built-in themes should expose stable non-boolean identities");
     Require(
         specforge::FindBuiltInThemeDescriptor(
@@ -144,14 +144,14 @@ void TestSelectionStableValuesRoundTrip()
     }
     Require(
         !specforge::ParseThemeSelectionStableValue(
-            "specforge.theme.unknown"),
+            "spectiary.theme.unknown"),
         "unknown theme automation values should be rejected at the registry boundary");
 }
 
 void TestResolverPreservesSyntheticFutureIdentity()
 {
     const specforge::ThemeId future_theme(
-        std::string_view("specforge.theme.synthetic"));
+        std::string_view("spectiary.theme.synthetic"));
     const specforge::ThemeSelection selection =
         specforge::ThemeSelection::Explicit(future_theme);
     Require(
@@ -298,7 +298,7 @@ void TestSyntheticThemeUsesSharedRuntimeApplicationPath()
 {
     specforge::ThemeDescriptor synthetic{
         .id = specforge::ThemeId(
-            "specforge.theme.synthetic.light"),
+            "spectiary.theme.synthetic.light"),
         .color_scheme =
             specforge::ThemeColorScheme::Light,
         .palette =

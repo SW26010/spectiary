@@ -23,7 +23,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kCacheFormatKind = "specforge.catalog_user_state.cache";
+constexpr const char* kCacheFormatKind = "spectiary.catalog_user_state.cache";
 constexpr int kCacheSchemaVersion = 6;
 constexpr std::string_view kExplicitColorMode =
     "explicit-color";

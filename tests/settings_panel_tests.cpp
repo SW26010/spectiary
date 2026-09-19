@@ -1333,7 +1333,7 @@ void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
             !specforge::AppearanceThemeOptionIndex(
                 specforge::ThemeSelection::Explicit(
                     specforge::ThemeId(
-                        "specforge.theme.synthetic"))),
+                        "spectiary.theme.synthetic"))),
         "appearance theme mapping should reject indexes and identities outside the option table");
 }
 

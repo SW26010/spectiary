@@ -409,7 +409,7 @@ void SeedMultiProcessCacheWithReferences(const std::filesystem::path& path)
         "reference seed should move h_alpha into group-1");
     Require(seed.Flush(), "reference seed should flush");
     const auto loaded = specforge::LoadCatalogUserStateCache(path);
-    const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+    const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
     const auto view = std::find_if(
         views.begin(),
         views.end(),
@@ -439,7 +439,7 @@ void SeedMultiProcessCacheWithThreeGroups(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
     auto loaded = specforge::LoadCatalogUserStateCache(path);
-    auto& state = loaded.cache.catalogs.at("specforge.public");
+    auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     Require(specforge::AddUserGroup(state.grouping_views[1], "group-3", "Group 3"), "seed third legacy group");
     std::string error;
     Require(specforge::SaveCatalogUserStateCache(path, loaded.cache, error), error);
@@ -449,7 +449,7 @@ void SeedMultiProcessCacheWithThreeViews(const std::filesystem::path& path)
 {
     SeedMultiProcessCache(path);
     auto loaded = specforge::LoadCatalogUserStateCache(path);
-    auto& state = loaded.cache.catalogs.at("specforge.public");
+    auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     state.grouping_views.push_back(specforge::CreateUserGroupingViewFromCatalog(
         GroupedCatalog(), state.catalog_identity, "view-3", "Grouping 3"));
     state.active_view_id = "view-1";
@@ -547,7 +547,7 @@ void RunCreateDeleteViewRace(const std::filesystem::path& cache_path)
         WaitForCatalogChild(stale_peer, "create_view") == 0,
         "the stale view-add peer should reconcile after view-3 was deleted");
     const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto has_view = [&](std::string_view id) {
         return std::any_of(
             state.grouping_views.begin(),
@@ -615,7 +615,7 @@ void RunCreateDeleteGroupRace(const std::filesystem::path& cache_path)
         WaitForCatalogChild(stale_peer, "add_group_view_2") == 0,
         "the stale group-add peer should reconcile after group-3 was deleted");
     const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
         state.grouping_views.end(),
@@ -682,7 +682,7 @@ void RunDeterministicOrderingRace(const std::filesystem::path& cache_path)
         WaitForCatalogChild(stale_task, "reorder_and_add_group") == 0,
         "ordering stale task should reconcile after the durable addition");
     const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
         state.grouping_views.end(),
@@ -741,7 +741,7 @@ void RunDeleteActiveViewWithStaleSelectionRace(
         WaitForCatalogChild(stale_delete, "delete_view_1") == 0,
         "stale deletion task should reconcile after the explicit selection");
     const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     Require(
         state.active_view_id == "view-3" &&
             std::none_of(
@@ -792,7 +792,7 @@ void SeedLegacyMultiCatalogCache(
         "legacy multi-catalog fixture should load its schema-five seed");
 
     specforge::CatalogUserState foreign_state =
-        loaded.cache.catalogs.at("specforge.public");
+        loaded.cache.catalogs.at("public-spectral-lines.v1");
     foreign_state.catalog_identity = {
         "foreign.catalog",
         "Foreign catalog"};
@@ -863,7 +863,7 @@ void RunExplicitSelectionRoundTripRace(
         "selection round-trip task should reconcile successfully");
     const auto loaded = specforge::LoadCatalogUserStateCache(cache_path);
     Require(
-        loaded.cache.catalogs.at("specforge.public").active_view_id ==
+        loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id ==
             "view-1",
         "the final explicit selection back to the base value must beat a peer selection");
     std::filesystem::remove_all(marker_root, remove_error);
@@ -873,10 +873,10 @@ void WriteNonCanonicalCache(const std::filesystem::path& path)
 {
     std::ofstream stream(path);
     stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "missing-view",
       "marker_visibility": {"": false},
       "grouping_views": [{
@@ -888,22 +888,22 @@ void WriteNonCanonicalCache(const std::filesystem::path& path)
           "name": "  Hydrogen  ",
           "is_unassigned": false,
           "marker_references": [
-            {"catalog_identity": "specforge.public", "marker_id": "h_alpha"},
-            {"catalog_identity": "specforge.public", "marker_id": "missing-marker"}
+            {"catalog_identity": "public-spectral-lines.v1", "marker_id": "h_alpha"},
+            {"catalog_identity": "public-spectral-lines.v1", "marker_id": "missing-marker"}
           ]
         }, {
           "id": "__unassigned__",
           "name": "Wrong",
           "is_unassigned": false,
           "marker_references": [
-            {"catalog_identity": "specforge.public", "marker_id": "h_beta"}
+            {"catalog_identity": "public-spectral-lines.v1", "marker_id": "h_beta"}
           ]
         }]
       }]
     }
   },
   "catalog_panel_state": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "expanded_group_ids": ["missing/group", "view-1/group-1"]
     }
   }
@@ -916,7 +916,7 @@ void WriteMalformedLegacyCacheBody(
 {
     std::ofstream stream(path, std::ios::binary);
     stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": )json"
            << catalogs_json
@@ -930,10 +930,10 @@ void WriteLegacyExactShapeUserNames(
 {
     std::ofstream stream(path, std::ios::binary);
     stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "view-1",
       "marker_visibility": {},
       "grouping_views": [{
@@ -958,10 +958,10 @@ void WriteLegacySchemaTwoCacheWithoutUnassignedFlag(
     WriteTextFile(
         path,
         R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "view-1",
       "marker_visibility": {},
       "grouping_views": [{
@@ -1255,7 +1255,7 @@ void TestLineAndBandColorsAreIndependentStableAndPersistent()
         const auto state =
             specforge::LoadCatalogUserStateCache(path);
         const auto& persisted =
-            state.cache.catalogs.at("specforge.public");
+            state.cache.catalogs.at("public-spectral-lines.v1");
         Require(
             specforge::MarkerColor(persisted, "atomic_line") ==
                     line_color &&
@@ -1333,9 +1333,9 @@ void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
     const specforge::CatalogUserStateCacheLoadResult persisted =
         specforge::LoadCatalogUserStateCache(path);
     const specforge::CatalogUserState& state =
-        persisted.cache.catalogs.at("specforge.public");
+        persisted.cache.catalogs.at("public-spectral-lines.v1");
     const specforge::CatalogPanelState& panel =
-        persisted.cache.catalog_panel_state.at("specforge.public");
+        persisted.cache.catalog_panel_state.at("public-spectral-lines.v1");
     Require(
         !state.marker_visibility.contains("") &&
             state.grouping_views.size() == 1 &&
@@ -1776,11 +1776,11 @@ void TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten()
              std::pair<std::string_view, std::string_view>>{
              {"null_catalogs", "null"},
              {"array_catalogs", "[]"},
-             {"non_object_catalog", R"json({"specforge.public": []})json"},
+             {"non_object_catalog", R"json({"public-spectral-lines.v1": []})json"},
              {"object_grouping_views",
-              R"json({"specforge.public": {"active_view_id": "", "marker_visibility": {}, "grouping_views": {}}})json"},
+              R"json({"public-spectral-lines.v1": {"active_view_id": "", "marker_visibility": {}, "grouping_views": {}}})json"},
              {"object_groups",
-              R"json({"specforge.public": {"active_view_id": "view-1", "marker_visibility": {}, "grouping_views": [{"id": "view-1", "name": "Grouping 1", "groups": {}}]}})json"},
+              R"json({"public-spectral-lines.v1": {"active_view_id": "view-1", "marker_visibility": {}, "grouping_views": [{"id": "view-1", "name": "Grouping 1", "groups": {}}]}})json"},
          }) {
         const std::filesystem::path path =
             TestCachePath(test_name);
@@ -1800,7 +1800,7 @@ void TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten()
             missing_path,
             std::ios::binary);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalog_panel_state": {}
 })json";
@@ -2131,7 +2131,7 @@ void TestDirtyCatalogStateFlushesDuringShutdown()
         loaded.issue_kind ==
                 specforge::CatalogUserStateCacheLoadIssueKind::None &&
             !specforge::IsMarkerVisible(
-                loaded.cache.catalogs.at("specforge.public"),
+                loaded.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_alpha"),
         "destruction should flush the dirty catalog state through the shared lifecycle");
     RemoveTestCache(path);
@@ -2182,7 +2182,7 @@ void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
 
     const specforge::CatalogUserStateCacheLoadResult loaded =
         specforge::LoadCatalogUserStateCache(path);
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     const auto view = std::find_if(
         state.grouping_views.begin(),
         state.grouping_views.end(),
@@ -2231,7 +2231,7 @@ void TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation()
             "a first user mutation must migrate legacy state before reconciliation");
 
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& state = loaded.cache.catalogs.at("specforge.public");
+        const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
         const auto view = std::find_if(
             state.grouping_views.begin(),
             state.grouping_views.end(),
@@ -2559,7 +2559,7 @@ int RunCatalogReconciliationChild(int argc, char* argv[])
                     "  }," + line_break +
                     "  \"catalog_panel_state\"",
                 line_break + "    }," + line_break +
-                    "    \"specforge.public\": {}," + line_break +
+                    "    \"public-spectral-lines.v1\": {}," + line_break +
                     "  }," + line_break +
                     "  \"catalog_panel_state\"");
             WriteTextFile(cache_path, corrupted);
@@ -2710,7 +2710,7 @@ void TestEmptyLatestCatalogIdentitiesFailClosed()
 {
     const std::filesystem::path path =
         TestCachePath("empty_latest_catalog_identity_reconciliation");
-    const std::string key = "\"specforge.public\":";
+    const std::string key = "\"public-spectral-lines.v1\":";
     for (const bool panel_state : {false, true}) {
         RemoveTestCache(path);
         SeedMultiProcessCache(path);
@@ -2924,7 +2924,7 @@ void TestSchemaFiveMigrationDropsAllocatorHistory()
     }
     const auto loaded = specforge::LoadCatalogUserStateCache(path);
     Require(loaded.schema_version == 6 && !loaded.requires_save, "migration should write schema six");
-    const auto& state = loaded.cache.catalogs.at("specforge.public");
+    const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
     Require(state.grouping_views.size() == 2 && state.grouping_views[1].id == "view-2", "migration preserves live view IDs");
     Require(ReadFile(path).find("reserved_") == std::string::npos, "deleted allocator history must disappear");
     RemoveTestCache(path);
@@ -2944,7 +2944,7 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
             "\"schema_version\": " + std::to_string(schema_version));
         corrupted = ReplaceFirst(
             std::move(corrupted),
-            "\"catalog_identity\": \"specforge.public\"",
+            "\"catalog_identity\": \"public-spectral-lines.v1\"",
             "\"catalog_identity\": \"foreign.catalog\"");
         WriteTextFile(path, corrupted);
 
@@ -3046,7 +3046,7 @@ void TestSameTaskNewGroupReorderPreservesFinalOrder()
         "same-task new-group reorder should flush");
 
     const auto loaded = specforge::LoadCatalogUserStateCache(path);
-    const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+    const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
     const auto view = std::find_if(
         views.begin(),
         views.end(),
@@ -3111,7 +3111,7 @@ void TestConcurrentCatalogStateReconciliation()
         const specforge::CatalogUserStateCacheLoadResult loaded =
             specforge::LoadCatalogUserStateCache(path);
         const specforge::CatalogUserState& state =
-            loaded.cache.catalogs.at("specforge.public");
+            loaded.cache.catalogs.at("public-spectral-lines.v1");
         Require(
             !specforge::IsMarkerVisible(state, "h_alpha") &&
                 !specforge::IsMarkerVisible(state, "h_beta"),
@@ -3150,7 +3150,7 @@ void TestConcurrentCatalogStateReconciliation()
     RunConcurrentCatalogChildren(path, "set_alpha_hidden", "set_alpha_visible");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& state = loaded.cache.catalogs.at("specforge.public");
+        const auto& state = loaded.cache.catalogs.at("public-spectral-lines.v1");
         const auto alpha = state.marker_visibility.find("h_alpha");
         Require(
             alpha != state.marker_visibility.end(),
@@ -3164,7 +3164,7 @@ void TestConcurrentCatalogStateReconciliation()
         "rename_view_1_remote");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
             views.end(),
@@ -3180,7 +3180,7 @@ void TestConcurrentCatalogStateReconciliation()
     {
         const specforge::CatalogUserStateCacheLoadResult loaded =
             specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> ids;
         for (const specforge::GroupingView& view : views) {
             ids.insert(view.id);
@@ -3201,7 +3201,7 @@ void TestConcurrentCatalogStateReconciliation()
         "create_view_with_group");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> view_ids;
         std::unordered_set<std::string> ordinary_group_ids;
         for (const auto& view : views) {
@@ -3226,7 +3226,7 @@ void TestConcurrentCatalogStateReconciliation()
         "add_group_view_2");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         std::unordered_set<std::string> view_ids;
         std::unordered_set<std::string> ordinary_group_ids;
         std::size_t view_two_group_count = 0;
@@ -3255,7 +3255,7 @@ void TestConcurrentCatalogStateReconciliation()
     RunConcurrentCatalogChildren(path, "delete_view_1", "rename_view_1_local");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         Require(
             std::none_of(
                 views.begin(),
@@ -3275,7 +3275,7 @@ void TestConcurrentCatalogStateReconciliation()
     RunConcurrentCatalogChildren(path, "add_group_view_2", "add_group_view_2");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
             views.end(),
@@ -3296,7 +3296,7 @@ void TestConcurrentCatalogStateReconciliation()
     RunConcurrentCatalogChildren(path, "delete_group_1_view_2", "rename_view_2");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
             views.end(),
@@ -3322,7 +3322,7 @@ void TestConcurrentCatalogStateReconciliation()
         "copy_reference_group_1_to_group_2");
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
-        const auto& views = loaded.cache.catalogs.at("specforge.public").grouping_views;
+        const auto& views = loaded.cache.catalogs.at("public-spectral-lines.v1").grouping_views;
         const auto view = std::find_if(
             views.begin(),
             views.end(),
@@ -3360,7 +3360,7 @@ void TestConcurrentCatalogStateReconciliation()
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
         const std::string& active =
-            loaded.cache.catalogs.at("specforge.public").active_view_id;
+            loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id;
         Require(
             active == "view-1" || active == "view-2",
             "a selection conflict must resolve to one valid explicit task selection");
@@ -3371,7 +3371,7 @@ void TestConcurrentCatalogStateReconciliation()
     {
         const auto loaded = specforge::LoadCatalogUserStateCache(path);
         const std::string& active =
-            loaded.cache.catalogs.at("specforge.public").active_view_id;
+            loaded.cache.catalogs.at("public-spectral-lines.v1").active_view_id;
         Require(
             active != "view-1" &&
                 (active == specforge::CatalogGroupingViewId() || active == "view-2"),
@@ -3418,7 +3418,7 @@ void TestConcurrentCatalogStateReconciliation()
     Require(
         after_interrupt_cache.warning.empty() &&
             !specforge::IsMarkerVisible(
-                after_interrupt_cache.cache.catalogs.at("specforge.public"),
+                after_interrupt_cache.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_beta"),
         "an interrupted peer must leave a valid cache for the next instance");
 
@@ -3454,7 +3454,7 @@ void TestConcurrentCatalogStateReconciliation()
         after_atomic_interrupt.issue_kind ==
                 specforge::CatalogUserStateCacheLoadIssueKind::None &&
             specforge::IsMarkerVisible(
-                after_atomic_interrupt.cache.catalogs.at("specforge.public"),
+                after_atomic_interrupt.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_alpha"),
         "an interrupted atomic writer must leave the previous durable cache valid");
     specforge::SpectralLinesPanelController after_atomic_replace(
@@ -3476,7 +3476,7 @@ void TestConcurrentCatalogStateReconciliation()
         recovered_after_atomic_interrupt.issue_kind ==
                 specforge::CatalogUserStateCacheLoadIssueKind::None &&
             !specforge::IsMarkerVisible(
-                recovered_after_atomic_interrupt.cache.catalogs.at("specforge.public"),
+                recovered_after_atomic_interrupt.cache.catalogs.at("public-spectral-lines.v1"),
                 "h_beta"),
         "atomic replacement recovery should preserve a valid target and new task delta");
 

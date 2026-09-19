@@ -13,6 +13,69 @@
 namespace specforge {
 namespace {
 
+// Read-only pre-1.0 compatibility for application-owned JSON. Canonical ASDF
+// and user-owned annotation metadata never pass through this adapter. Writers
+// only emit the current format; legacy schema validation still runs below.
+void NormalizeLegacyApplicationState(nlohmann::json& root)
+{
+    const auto format = ReadJsonStringMember(root, "format_kind");
+    if (!format) return;
+    constexpr std::pair<std::string_view, std::string_view> formats[] = {
+        {"specforge.ui_language.settings", "spectiary.ui_language.settings"},
+        {"specforge.appearance.settings", "spectiary.appearance.settings"},
+        {"specforge.ui_scale.settings", "spectiary.ui_scale.settings"},
+        {"specforge.input.settings", "spectiary.input.settings"},
+        {"specforge.external_source.settings", "spectiary.external_source.settings"},
+        {"specforge.profile_settings", "spectiary.profile_settings"},
+        {"specforge.panel_visibility.cache", "spectiary.panel_visibility.cache"},
+        {"specforge.source_collection_session.cache", "spectiary.source_collection_session.cache"},
+        {"specforge.sample_navigation_state.cache", "spectiary.sample_navigation_state.cache"},
+        {"specforge.sample_workflow_state.cache", "spectiary.sample_workflow_state.cache"},
+        {"specforge.catalog_user_state.cache", "spectiary.catalog_user_state.cache"},
+        {"specforge.spectrum_plot.preferences", "spectiary.spectrum_plot.preferences"},
+        {"specforge.spectrum_viewport.state", "spectiary.spectrum_viewport.state"},
+        {"specforge.sample_labeling.state", "spectiary.sample_labeling.state"},
+        {"specforge.sample_labeling.drafts", "spectiary.sample_labeling.drafts"},
+    };
+    for (const auto& [legacy, current] : formats) {
+        if (*format != legacy) continue;
+        root["format_kind"] = current;
+        if (legacy == "specforge.appearance.settings") {
+            auto theme = root.find("theme_id");
+            if (theme != root.end() && theme->is_string()) {
+                if (*theme == "specforge.theme.dark") *theme = "builtin.theme.dark";
+                if (*theme == "specforge.theme.light") *theme = "builtin.theme.light";
+            }
+        }
+        if (legacy == "specforge.catalog_user_state.cache") {
+            for (const char* key : {"catalogs", "catalog_panel_state"}) {
+                auto map = root.find(key);
+                if (map == root.end() || !map->is_object()) continue;
+                auto old = map->find("specforge.public");
+                if (old == map->end()) continue;
+                // Current records win in a mixed historical file.
+                if (!map->contains("public-spectral-lines.v1")) {
+                    (*map)["public-spectral-lines.v1"] = *old;
+                }
+                map->erase("specforge.public");
+            }
+            const auto normalize_references = [](auto&& self, nlohmann::json& value) -> void {
+                if (value.is_object()) {
+                    for (auto& [key, child] : value.items()) {
+                        if (key == "catalog_identity" && child == "specforge.public") {
+                            child = "public-spectral-lines.v1";
+                        } else self(self, child);
+                    }
+                } else if (value.is_array()) {
+                    for (auto& child : value) self(self, child);
+                }
+            };
+            normalize_references(normalize_references, root);
+        }
+        return;
+    }
+}
+
 struct JsonLimitError : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
@@ -266,6 +329,7 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
         return result;
     }
 
+    NormalizeLegacyApplicationState(*root);
     const std::optional<std::string> parsed_format_kind = ReadJsonStringMember(*root, "format_kind");
     const std::optional<int> schema_version = ReadJsonIntMember(*root, "schema_version");
     if (!parsed_format_kind || *parsed_format_kind != format_kind || !schema_version ||

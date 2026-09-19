@@ -11,7 +11,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kSourceSessionStateFormatKind = "specforge.source_collection_session.cache";
+constexpr const char* kSourceSessionStateFormatKind = "spectiary.source_collection_session.cache";
 constexpr int kSourceSessionStateSchemaVersion = 2;
 constexpr std::size_t kMaxRestoredSources = 32;
 

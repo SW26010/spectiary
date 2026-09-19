@@ -18,7 +18,7 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kStateFormatKind = "specforge.sample_workflow_state.cache";
+constexpr const char* kStateFormatKind = "spectiary.sample_workflow_state.cache";
 constexpr int kStateSchemaVersion = 2;
 constexpr std::string_view kAnnotationSourcePrefix = "annotation:";
 constexpr std::string_view kSourceKindAnnotationPath = "annotation_path";

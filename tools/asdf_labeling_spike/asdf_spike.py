@@ -22,7 +22,7 @@ import numpy as np
 import psutil
 
 
-FORMAT_KIND = "specforge.sample_labeling"
+FORMAT_KIND = "spectiary.sample_labeling"
 SCHEMA_VERSION = "2.0.0"
 REFERENCE_STANDARD_VERSION = "1.5.0"
 UNLABELED = -1
@@ -140,7 +140,7 @@ def _tree(
     tree: dict[str, Any] = {
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
-        "specforge_build": {"source_mode": build_source_mode},
+        "spectiary_build": {"source_mode": build_source_mode},
         "source_collection": {
             "identity": f"source:{source_fingerprint.removeprefix('sha256:')}",
             "source_kind": source_kind,
@@ -165,7 +165,7 @@ def _tree(
         },
     }
     if build_source_revision is not None:
-        tree["specforge_build"]["source_revision"] = build_source_revision
+        tree["spectiary_build"]["source_revision"] = build_source_revision
     if description is not None:
         tree["labeling_task"]["description"] = description
     if authors:
@@ -215,12 +215,12 @@ def _author_summary(author: Any) -> dict[str, Any]:
 
 
 def _semantic_summary(tree: Any) -> dict[str, Any]:
-    build_source = tree["specforge_build"]
+    build_source = tree["spectiary_build"]
     if not isinstance(build_source, dict):
-        raise TypeError("specforge_build must be a mapping")
+        raise TypeError("spectiary_build must be a mapping")
     build_source_mode = build_source["source_mode"]
     if not isinstance(build_source_mode, str):
-        raise TypeError("specforge_build.source_mode must be a string")
+        raise TypeError("spectiary_build.source_mode must be a string")
     build_source_revision = (
         build_source["source_revision"]
         if "source_revision" in build_source
@@ -294,7 +294,7 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
 
 def _semantic_errors(tree: Any) -> list[str]:
     errors: list[str] = []
-    build_source = tree.get("specforge_build") if isinstance(tree, dict) else None
+    build_source = tree.get("spectiary_build") if isinstance(tree, dict) else None
     revision_present = (
         isinstance(build_source, dict) and "source_revision" in build_source
     )
@@ -441,7 +441,7 @@ def _fixture_cases() -> list[dict[str, Any]]:
     forward_unknown["labeling_task"]["labels"][0]["future_label"] = {
         "token": "label-survives"
     }
-    forward_unknown["specforge_build"]["future_build"] = {
+    forward_unknown["spectiary_build"]["future_build"] = {
         "token": "build-survives"
     }
     return [
@@ -528,7 +528,7 @@ def _fixture_cases() -> list[dict[str, Any]]:
                 build_source_mode="working_tree",
                 build_source_revision=None,
             ),
-            "mutate": lambda tree: tree["specforge_build"].__setitem__(
+            "mutate": lambda tree: tree["spectiary_build"].__setitem__(
                 "source_revision", None
             ),
         },
@@ -1179,7 +1179,7 @@ def _json_document(names: list[str], values: list[int]) -> dict[str, Any]:
     return {
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
-        "specforge_build": {
+        "spectiary_build": {
             "source_mode": "head",
             "source_revision": FIXTURE_BUILD_SOURCE_REVISION,
         },
@@ -1245,7 +1245,7 @@ def _second_round_hydration(
         if compression == "zlib":
             payload = zlib.decompress(payload)
         document = json.loads(payload.decode("utf-8"))
-        build_source = document.get("specforge_build")
+        build_source = document.get("spectiary_build")
         if (
             not isinstance(build_source, dict)
             or build_source.get("source_mode") != "head"
@@ -1676,7 +1676,7 @@ def _yaml_special_character_matrix() -> str:
 
 def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
     return {
-        "format_kind": "specforge.sample_labeling",
+        "format_kind": "spectiary.sample_labeling",
         "schema_version": "2.0.0",
         "build_source_mode": "head",
         "build_source_revision": FIXTURE_BUILD_SOURCE_REVISION,

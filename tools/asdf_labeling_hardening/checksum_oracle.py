@@ -20,7 +20,7 @@ import numpy as np
 
 
 ASDF_VERSION = "5.3.1"
-FORMAT_KIND = "specforge.sample_labeling"
+FORMAT_KIND = "spectiary.sample_labeling"
 SCHEMA_VERSION = "2.0.0"
 FIXTURE_BUILD_SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567"
 STANDARD_VERSION = "1.5.0"
@@ -77,7 +77,7 @@ def _sha256(path: Path) -> str:
 
 def _production_tree(*, include_unknown: bool = False) -> dict[str, Any]:
     tree: dict[str, Any] = {
-        "specforge_build": {
+        "spectiary_build": {
             "source_mode": "head",
             "source_revision": FIXTURE_BUILD_SOURCE_REVISION,
         },
@@ -129,7 +129,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _semantic_summary(tree: Any) -> dict[str, Any]:
-    build_source = tree["specforge_build"]
+    build_source = tree["spectiary_build"]
     source = tree["source_collection"]
     roster = tree["sample_roster"]
     annotation = tree["annotation"]
@@ -723,7 +723,7 @@ def main() -> int:
         )
 
     report: dict[str, Any] = {
-        "format_kind": "specforge.asdf_labeling.checksum_policy_evidence",
+        "format_kind": "spectiary.asdf_labeling.checksum_policy_evidence",
         "oracle_version": 1,
         "reference_versions": {
             "python": platform.python_version(),

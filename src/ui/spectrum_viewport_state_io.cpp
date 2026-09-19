@@ -16,7 +16,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kStateFormatKind =
-    "specforge.spectrum_viewport.state";
+    "spectiary.spectrum_viewport.state";
 constexpr int kStateSchemaVersion = 1;
 
 void AppendWarning(

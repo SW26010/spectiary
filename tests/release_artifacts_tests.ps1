@@ -797,7 +797,7 @@ $metadataEnsureScriptPath = Join-Path `
 $buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
-$manifestTemplatePath = Join-Path $RepoRoot 'src\platform\specforge.exe.manifest.in'
+$manifestTemplatePath = Join-Path $RepoRoot 'src\platform\spectiary.exe.manifest.in'
 $resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
 $resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
 $embeddedLegalSourcePath = Join-Path $RepoRoot 'src\app\embedded_legal_documents.cpp'
@@ -1056,14 +1056,14 @@ Assert-NotContains $manifestTemplate 'version="0.1.0.0"' 'Manifest version templ
 if ($manifestTemplate -match 'version="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"') {
     throw 'Manifest template contains a handwritten numeric assembly version.'
 }
-if (Test-Path -LiteralPath (Join-Path $RepoRoot 'src\platform\specforge.exe.manifest')) {
+if (Test-Path -LiteralPath (Join-Path $RepoRoot 'src\platform\spectiary.exe.manifest')) {
     throw 'Tracked final manifest still exists beside the manifest template.'
 }
 Assert-Contains $cmakeSource `
     'set(SPECFORGE_MANIFEST_TEMPLATE' `
     'CMake manifest template binding'
 Assert-Contains $cmakeSource `
-    '"${CMAKE_BINARY_DIR}/generated/specforge/specforge.exe.manifest"' `
+    '"${CMAKE_BINARY_DIR}/generated/specforge/spectiary.exe.manifest"' `
     'CMake generated manifest path'
 Assert-Contains $cmakeSource `
     '"${SPECFORGE_MANIFEST_TEMPLATE}"' `
@@ -1090,7 +1090,7 @@ $nativeTargetSources = $cmakeSource.Substring(
 Assert-Contains $nativeTargetSources '${SPECFORGE_MANIFEST}' 'specforge_native sources'
 Assert-NotContains `
     $nativeTargetSources `
-    'src/platform/specforge.exe.manifest' `
+    'src/platform/spectiary.exe.manifest' `
     'specforge_native sources'
 Assert-Contains $nativeTargetSources '${SPECFORGE_WINDOWS_RESOURCES}' 'specforge_native resources'
 Assert-NotContains $packageScript '$releaseDocumentDirectoryName' 'Portable packaging script'

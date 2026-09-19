@@ -101,7 +101,7 @@ bool GroupContainsReference(const specforge::UserGroup& group, std::string_view 
 void TestPublicCatalogIdentityIsStable()
 {
     const specforge::CatalogIdentity& identity = specforge::PublicSpectralLineCatalogIdentity();
-    Require(identity.id == "specforge.public", "public catalog identity should be fixed");
+    Require(identity.id == "public-spectral-lines.v1", "public catalog identity should be fixed");
 }
 
 void TestMarkerColorsCanonicalizeAutoAndValidateExplicitRgba()
@@ -637,7 +637,7 @@ void TestCacheRoundTrip()
 
     specforge::CatalogUserStateCache cache;
     cache.catalogs.emplace(state.catalog_identity.id, state);
-    cache.catalog_panel_state["specforge.public"].expanded_group_ids.insert(
+    cache.catalog_panel_state["public-spectral-lines.v1"].expanded_group_ids.insert(
         specforge::GroupExpansionKey("view-1", "group-1"));
 
     std::string error;
@@ -646,7 +646,7 @@ void TestCacheRoundTrip()
     std::filesystem::remove(path, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
-    const auto catalog = loaded.cache.catalogs.find("specforge.public");
+    const auto catalog = loaded.cache.catalogs.find("public-spectral-lines.v1");
     Require(catalog != loaded.cache.catalogs.end(), "cache should preserve public catalog state");
     Require(catalog->second.active_view_id == "view-1", "cache should preserve active view");
     Require(!specforge::IsMarkerVisible(catalog->second, "h_alpha"), "cache should preserve marker visibility");
@@ -659,7 +659,7 @@ void TestCacheRoundTrip()
             !catalog->second.marker_colors.contains("auto_marker"),
         "cache should round-trip independent line and band overrides while keeping Auto absent");
     Require(catalog->second.grouping_views.size() == 1, "cache should preserve user grouping views");
-    const auto panel = loaded.cache.catalog_panel_state.find("specforge.public");
+    const auto panel = loaded.cache.catalog_panel_state.find("public-spectral-lines.v1");
     Require(panel != loaded.cache.catalog_panel_state.end(), "cache should preserve public panel state separately");
     Require(
         panel->second.expanded_group_ids.find(specforge::GroupExpansionKey("view-1", "group-1")) !=
@@ -675,10 +675,10 @@ void TestSchemaFourMarkerColorsMigrateToAuto()
     {
         std::ofstream stream(path);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 4,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "",
       "next_view_sequence": 1,
       "next_group_sequence": 1,
@@ -701,7 +701,7 @@ void TestSchemaFourMarkerColorsMigrateToAuto()
         loaded.schema_version == 4 && loaded.requires_save,
         "schema four should load as a supported one-time migration");
     const auto match =
-        loaded.cache.catalogs.find("specforge.public");
+        loaded.cache.catalogs.find("public-spectral-lines.v1");
     Require(
         match != loaded.cache.catalogs.end() &&
             match->second.marker_colors.empty() &&
@@ -718,10 +718,10 @@ void TestSchemaFiveRejectsCorruptMarkerColor()
     {
         std::ofstream stream(path);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 5,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "",
       "next_view_sequence": 1,
       "next_group_sequence": 1,
@@ -765,10 +765,10 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
     {
         std::ofstream stream(path);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "",
       "marker_visibility": {"": false},
       "grouping_views": [{
@@ -788,7 +788,7 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
     }
   },
   "catalog_panel_state": {
-    "specforge.public": {"expanded_group_ids": [""]}
+    "public-spectral-lines.v1": {"expanded_group_ids": [""]}
   }
 })json";
     }
@@ -800,7 +800,7 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
         loaded.requires_save,
         "legacy schema two should request a one-time rewrite to the current schema");
     const auto catalog =
-        loaded.cache.catalogs.find("specforge.public");
+        loaded.cache.catalogs.find("public-spectral-lines.v1");
     Require(
         catalog != loaded.cache.catalogs.end(),
         "raw cache should preserve the parsed catalog entry");
@@ -825,7 +825,7 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
             raw_group.marker_references.front().marker_id.empty(),
         "cache parsing should preserve invalid references for domain canonicalization");
     const auto panel =
-        loaded.cache.catalog_panel_state.find("specforge.public");
+        loaded.cache.catalog_panel_state.find("public-spectral-lines.v1");
     Require(
         panel != loaded.cache.catalog_panel_state.end() &&
             panel->second.expanded_group_ids.contains(""),
@@ -840,10 +840,10 @@ void TestLegacySchemaTwoEditableNamesRemainUserOwned()
     {
         std::ofstream stream(path);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 2,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "view-1",
       "marker_visibility": {},
       "grouping_views": [{
@@ -899,7 +899,7 @@ void TestLegacySchemaTwoEditableNamesRemainUserOwned()
         loaded.requires_save,
         "legacy caches should request a one-time schema rewrite");
     const auto catalog =
-        loaded.cache.catalogs.find("specforge.public");
+        loaded.cache.catalogs.find("public-spectral-lines.v1");
     Require(
         catalog != loaded.cache.catalogs.end() &&
             catalog->second.grouping_views.size() == 6,
@@ -955,7 +955,7 @@ void TestLegacySchemaTwoEditableNamesRemainUserOwned()
     const std::vector<specforge::GroupingView>&
         reloaded_views =
             reloaded.cache.catalogs
-                .at("specforge.public")
+                .at("public-spectral-lines.v1")
                 .grouping_views;
     Require(
         reloaded_views[0].generated_name.source ==
@@ -1017,7 +1017,7 @@ void TestCacheSaveReplacesExistingFileWithoutLeavingTempFile()
     std::filesystem::remove_all(root, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
-    Require(loaded.cache.catalogs.find("specforge.public") != loaded.cache.catalogs.end(), "saved cache should load");
+    Require(loaded.cache.catalogs.find("public-spectral-lines.v1") != loaded.cache.catalogs.end(), "saved cache should load");
     Require(!found_temporary_file, "atomic cache save should not leave temporary files behind");
 }
 
@@ -1047,7 +1047,7 @@ void TestCacheSeparatesCatalogIdentities()
     std::filesystem::remove(path, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
-    const auto public_match = loaded.cache.catalogs.find("specforge.public");
+    const auto public_match = loaded.cache.catalogs.find("public-spectral-lines.v1");
     const auto imported_match = loaded.cache.catalogs.find("imported.catalog");
     Require(public_match != loaded.cache.catalogs.end(), "public catalog state should round-trip");
     Require(imported_match != loaded.cache.catalogs.end(), "imported catalog state should round-trip separately");
@@ -1064,10 +1064,10 @@ void TestLegacyExpandedGroupsMigrateToPanelState()
     {
         std::ofstream stream(path);
         stream << "{\n";
-        stream << "  \"format_kind\": \"specforge.catalog_user_state.cache\",\n";
+        stream << "  \"format_kind\": \"spectiary.catalog_user_state.cache\",\n";
         stream << "  \"schema_version\": 1,\n";
         stream << "  \"catalogs\": {\n";
-        stream << "    \"specforge.public\": {\n";
+        stream << "    \"public-spectral-lines.v1\": {\n";
         stream << "      \"active_view_id\": \"view-1\",\n";
         stream << "      \"marker_visibility\": {},\n";
         stream << "      \"expanded_group_ids\": [\"view-1/group-1\"],\n";
@@ -1082,7 +1082,7 @@ void TestLegacyExpandedGroupsMigrateToPanelState()
     std::filesystem::remove(path, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
-    const auto panel = loaded.cache.catalog_panel_state.find("specforge.public");
+    const auto panel = loaded.cache.catalog_panel_state.find("public-spectral-lines.v1");
     Require(panel != loaded.cache.catalog_panel_state.end(), "legacy expanded state should migrate to panel state");
     Require(
         panel->second.expanded_group_ids.find("view-1/group-1") != panel->second.expanded_group_ids.end(),
@@ -1096,10 +1096,10 @@ void TestCacheReadsUnicodeEscapes()
     {
         std::ofstream stream(path);
         stream << "{\n";
-        stream << "  \"format_kind\": \"specforge.catalog_user_state.cache\",\n";
+        stream << "  \"format_kind\": \"spectiary.catalog_user_state.cache\",\n";
         stream << "  \"schema_version\": 2,\n";
         stream << "  \"catalogs\": {\n";
-        stream << "    \"specforge.public\": {\n";
+        stream << "    \"public-spectral-lines.v1\": {\n";
         stream << "      \"active_view_id\": \"view-\\u0031\",\n";
         stream << "      \"marker_visibility\": {},\n";
         stream << "      \"grouping_views\": [\n";
@@ -1127,7 +1127,7 @@ void TestCacheReadsUnicodeEscapes()
     std::filesystem::remove(path, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
-    const auto catalog = loaded.cache.catalogs.find("specforge.public");
+    const auto catalog = loaded.cache.catalogs.find("public-spectral-lines.v1");
     Require(catalog != loaded.cache.catalogs.end(), "unicode cache should load public catalog state");
     Require(catalog->second.active_view_id == "view-1", "unicode escape should decode ASCII code points");
     Require(catalog->second.grouping_views.size() == 1, "unicode cache should load grouping view");
@@ -1168,8 +1168,8 @@ void TestDuplicateJsonObjectKeysAreRejected()
     const std::optional<nlohmann::json> parsed = specforge::ParseJson(
         R"json({
   "catalogs": {
-    "specforge.public": {},
-    "specforge.public": {}
+    "public-spectral-lines.v1": {},
+    "public-spectral-lines.v1": {}
   }
 })json",
         error);
@@ -1186,7 +1186,7 @@ void TestUnsupportedCacheSchemaIsWarningOnly()
     {
         std::ofstream stream(path);
         stream << "{\n";
-        stream << "  \"format_kind\": \"specforge.catalog_user_state.cache\",\n";
+        stream << "  \"format_kind\": \"spectiary.catalog_user_state.cache\",\n";
         stream << "  \"schema_version\": 999,\n";
         stream << "  \"catalogs\": {}\n";
         stream << "}\n";
@@ -1218,10 +1218,10 @@ void TestSchemaThreeRejectsExcessiveGeneratedCopyCount()
     {
         std::ofstream stream(path);
         stream << R"json({
-  "format_kind": "specforge.catalog_user_state.cache",
+  "format_kind": "spectiary.catalog_user_state.cache",
   "schema_version": 3,
   "catalogs": {
-    "specforge.public": {
+    "public-spectral-lines.v1": {
       "active_view_id": "view-1",
       "marker_visibility": {},
       "grouping_views": [{

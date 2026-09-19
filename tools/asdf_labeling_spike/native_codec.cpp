@@ -19,7 +19,7 @@
 namespace specforge::asdf_labeling_spike {
 namespace {
 
-constexpr std::string_view kFormatKind = "specforge.sample_labeling";
+constexpr std::string_view kFormatKind = "spectiary.sample_labeling";
 constexpr std::string_view kSchemaVersion = "2.0.0";
 constexpr std::string_view kYamlStringTag = "tag:yaml.org,2002:str";
 constexpr std::string_view kFixtureBuildSourceRevision =
@@ -808,15 +808,15 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
     LabelingDocument document;
     document.format_kind = RequiredScalar<std::string>(root, "format_kind");
     document.schema_version = RequiredScalar<std::string>(root, "schema_version");
-    const YAML::Node build_source = RequiredNode(root, "specforge_build");
+    const YAML::Node build_source = RequiredNode(root, "spectiary_build");
     if (!build_source.IsMap()) {
-        throw CodecError("specforge_build must be a map");
+        throw CodecError("spectiary_build must be a map");
     }
     document.build_source_mode =
         RequiredScalar<std::string>(build_source, "source_mode");
     if (const YAML::Node revision = build_source["source_revision"]) {
         if (!revision.IsScalar()) {
-            throw CodecError("specforge_build.source_revision must be scalar");
+            throw CodecError("spectiary_build.source_revision must be scalar");
         }
         document.build_source_revision = revision.as<std::string>();
     }
@@ -1185,8 +1185,8 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
              << "%YAML 1.1\n"
              << "%TAG ! tag:stsci.edu:asdf/\n"
              << "--- !core/asdf-1.1.0\n"
-             << "asdf_library: !core/software-1.0.0 {name: SpecForge, version: 0.8.0}\n"
-             << "specforge_build:\n"
+             << "asdf_library: !core/software-1.0.0 {name: Spectiary, version: 0.8.0}\n"
+             << "spectiary_build:\n"
              << "  source_mode: " << QuoteYaml(document.build_source_mode) << "\n";
     if (document.build_source_revision) {
         metadata << "  source_revision: " << QuoteYaml(*document.build_source_revision) << "\n";
