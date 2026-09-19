@@ -298,6 +298,52 @@ void ActivateCanonicalFixtureSource(
             context));
 }
 
+void TestCanonicalSaveRejectsReservedStorage()
+{
+    using namespace specforge;
+    const auto base = UniqueTempPath("_canonical_storage_admission");
+    for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
+        const auto root = base / (profile == StorageProfile::Portable ? "portable" : "local");
+        const auto paths = RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = root / "app.exe",
+            .local_app_data_user_state_root = root,
+        });
+        std::filesystem::create_directories(root);
+        const auto source = root / "source.npy";
+        TouchFile(source);
+        SourceCollectionContext context;
+        context.identity = {Utf8(root.u8string()), "source", "source-fingerprint", "context-fingerprint", 3};
+        SampleLabelingController controller(paths.sample_labeling_state_path, paths);
+        ActivateCanonicalFixtureSource(controller, source, context);
+        Require(controller.CreateTask("Storage admission").accepted, "create draft for storage admission");
+        Require(controller.UpsertActiveLabel({1, "one", 'o'}).changed, "create draft label");
+        Require(controller.AssignLabel(0, 1).write.changed, "retain user work before Save As");
+        const auto task_id = controller.View().active_task->task_id;
+        for (const auto* role : {"config", "state", "logs", "unsaved"}) {
+            const auto target = root / role / "task.asdf";
+            const auto rejected = controller.SaveActiveTemporaryTaskToOutput(target);
+            Require(!rejected.accepted && rejected.issue == SampleLabelingOperationResult::Issue::UserFilePathRejected &&
+                    !std::filesystem::exists(target),
+                "Save As must reject reserved storage without publishing");
+            Require(!controller.AdoptCanonicalAsdfTask(task_id, target).accepted,
+                "canonical adoption must reject reserved storage");
+            Require(controller.View().active_task && !controller.View().active_task->persistence.output_path,
+                "rejection must retain the in-memory draft");
+        }
+        const auto canonical = root / "my-work/task.asdf";
+        Require(controller.SaveActiveTemporaryTaskToOutput(canonical).output_saved,
+            "canonical Save As remains allowed in a user subdirectory of application root");
+        std::ifstream before_stream(canonical, std::ios::binary);
+        const std::string before(std::istreambuf_iterator<char>(before_stream), {});
+        before_stream.close();
+        MigrateLegacyApplicationStorage(paths);
+        std::ifstream after_stream(canonical, std::ios::binary);
+        Require(std::string(std::istreambuf_iterator<char>(after_stream), {}) == before,
+            "storage migration cannot modify an actual canonical ASDF");
+    }
+    std::filesystem::remove_all(base);
+}
+
 specforge::PreparedSampleWorkflowState PrepareWorkflow(
     const specforge::SpectrumSnapshotHandle& snapshot,
     const specforge::SourceCollectionContext& context,
@@ -11743,6 +11789,7 @@ void RunAllTests()
 int main()
 {
     try {
+        TestCanonicalSaveRejectsReservedStorage();
         RunAllTests();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

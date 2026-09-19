@@ -130,6 +130,51 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
+void TestReservedStorageSourceAdmission()
+{
+    using namespace specforge;
+    const auto base = UniqueTempPath("_reserved_paths");
+    for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
+        const auto root = base / (profile == StorageProfile::Portable ? "portable" : "local");
+        const auto paths = RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = root / "app.exe",
+            .local_app_data_user_state_root = root,
+        });
+        std::atomic<int> decoder_calls = 0;
+        SourceCollectionLoadDependencies adapters;
+        adapters.workflow_cache_paths.runtime_paths = paths;
+        adapters.snapshot_loader = [&](const auto& path, std::size_t index, const auto&) {
+            ++decoder_calls;
+            return MakeSnapshot(path, index);
+        };
+        LoadingHarness preparation(std::move(adapters));
+        for (const auto* role : {"config", "state", "logs", "unsaved"}) {
+            const auto path = root / role / "source.csv";
+            std::filesystem::create_directories(path.parent_path());
+            WriteFixture(path);
+            bool rejected = false;
+            try { (void)preparation.Load({.path = path}); }
+            catch (const std::runtime_error& error) {
+                rejected = std::string(error.what()).find("outside config") != std::string::npos;
+            }
+            Require(rejected && decoder_calls == 0, "reserved source must fail before decoder access");
+        }
+        for (const auto& path : {root / "source.csv", root / "my-work/source.csv"}) {
+            std::filesystem::create_directories(path.parent_path());
+            WriteFixture(path);
+            (void)preparation.Load({.path = path});
+        }
+        Require(decoder_calls == 2, "user files at root and outside reserved children remain loadable");
+        bool annotation_rejected = false;
+        try { (void)preparation.Load({.path = root / "source.csv", .annotation_paths = {root / "state/task.asdf"}}); }
+        catch (const std::runtime_error& error) {
+            annotation_rejected = std::string(error.what()).find("outside config") != std::string::npos;
+        }
+        Require(annotation_rejected && decoder_calls == 2, "restored reserved annotation is rejected before decoding");
+    }
+    std::filesystem::remove_all(base);
+}
+
 class MutableDirectoryChangeGeneration final
     : public specforge::DirectoryChangeGeneration {
 public:
@@ -1377,6 +1422,7 @@ int main()
     try {
         TestProductionQueueLoadsRealSourcesAndReusesGenerations();
         TestPartialWorkflowCachePathsAreRejected();
+        TestReservedStorageSourceAdmission();
         TestKnownFileReusesVerifiedContext();
         TestVerifiedResidentSnapshotSkipsDecode();
         TestStaleResidentSnapshotFallsBackToDecode();

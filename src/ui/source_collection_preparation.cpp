@@ -1,4 +1,5 @@
 #include "ui/source_collection_preparation_internal.h"
+#include "app/local_user_state.h"
 
 #include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_path_identity.h"
@@ -318,6 +319,7 @@ public:
         std::stop_token cancellation_token)
     {
         checkpoint();
+        CheckUserInputPath(request.path);
         SourceCollectionLoadRequest resolved_request =
             request;
         if (request.source_open_request) {
@@ -338,6 +340,9 @@ public:
                 resolution.preferred_member_path;
             resolved_request.source_open_request.reset();
         }
+        CheckUserInputPath(resolved_request.path);
+        if (resolved_request.preferred_member_path) CheckUserInputPath(*resolved_request.preferred_member_path);
+        for (const auto& annotation : resolved_request.annotation_paths) CheckUserInputPath(annotation);
         if (request.snapshot_only &&
             (!resolved_request.reuse ||
              !resolved_request.reuse->context_reuse_proof())) {
@@ -369,6 +374,17 @@ public:
     }
 
 private:
+    void CheckUserInputPath(const std::filesystem::path& path) const
+    {
+        const auto& paths = adapters_.workflow_cache_paths.runtime_paths;
+        // Context-free decoder tests have no managed namespace. Runtime loads
+        // always receive the authoritative startup context.
+        if (!paths.application_data_root.empty() &&
+            CheckUserFilePath(path, paths) != UserFilePathStatus::Allowed) {
+            throw std::runtime_error("Choose a source or document outside config, state, logs and unsaved.");
+        }
+    }
+
     std::shared_ptr<const SampleWorkflowPreparationCacheBundle>
     WorkflowCache(const Work& work)
     {
@@ -746,6 +762,9 @@ private:
             } else {
                 work.spectrum_index =
                     work.request.spectrum_index;
+            }
+            if (work.spectrum_index < listing.spectra.size()) {
+                CheckUserInputPath(listing.spectra[work.spectrum_index].path);
             }
             const SourceCollectionSingleFileState initial_state =
                 CaptureSourceCollectionSingleFileState(

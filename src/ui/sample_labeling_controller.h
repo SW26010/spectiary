@@ -83,6 +83,7 @@ struct SampleLabelingOperationResult {
         LabelValuesExportInvalidPath,
         LabelValuesExportTargetProtected,
         LabelValuesExportFailed,
+        UserFilePathRejected,
     };
 
     bool accepted = false;

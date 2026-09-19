@@ -782,6 +782,10 @@ void TestSampleWorkflowMappingsAreExact()
             "Could not export label values to the selected file.",
             "无法将标签值导出到所选文件。"},
         ExpectedText{
+            UiTextId::ManagedStoragePathRejected,
+            "Choose a valid file outside the application's config, state, logs and unsaved folders.",
+            "请选择应用 config、state、logs 和 unsaved 文件夹以外的有效文件。"},
+        ExpectedText{
             UiTextId::LabelingDeleteTargetChanged,
             "This labeling task changed on disk and could not be deleted from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
@@ -1659,7 +1663,8 @@ void TestLabelingIssueDescriptorIsTheSingleMapping()
         Issue::OutputMigrationOwnerSwitchFailed,
         Issue::LabelValuesExportInvalidPath,
         Issue::LabelValuesExportTargetProtected,
-        Issue::LabelValuesExportFailed};
+        Issue::LabelValuesExportFailed,
+        Issue::UserFilePathRejected};
     for (const Issue issue : kIssues) {
         const specforge::SampleLabelingIssueTextDescriptor descriptor =
             specforge::SampleLabelingIssueTextFor(issue);

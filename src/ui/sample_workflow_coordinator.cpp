@@ -1,5 +1,6 @@
 #include "ui/sample_workflow_coordinator.h"
 
+#include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
@@ -1311,6 +1312,11 @@ SampleWorkflowCoordinator::AddReadOnlyAnnotationToActiveSource(
     const std::filesystem::path& path)
 {
     SampleWorkflowTransitionOutcome outcome;
+    if (!runtime_paths_.application_data_root.empty() &&
+        CheckUserFilePath(path, runtime_paths_) != UserFilePathStatus::Allowed) {
+        outcome.message = "Choose a document outside config, state, logs and unsaved.";
+        return outcome;
+    }
     const SourceCollectionManifest* context_before =
         navigation_.active_context();
     const std::size_t diagnostic_count_before =

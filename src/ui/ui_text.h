@@ -374,6 +374,7 @@ enum class UiTextId {
     LabelValuesExportInvalidPath,
     LabelValuesExportTargetProtected,
     LabelValuesExportFailed,
+    ManagedStoragePathRejected,
     LabelingDeleteTargetChanged,
     LabelSaveStateInternalDraft,
     LabelSaveStateAutosaved,

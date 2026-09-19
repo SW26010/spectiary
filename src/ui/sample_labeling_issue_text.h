@@ -67,6 +67,11 @@ SampleLabelingIssueTextFor(
             UiTextId::LabelValuesExportFailed,
             "Could not export label values to the selected file.",
             "无法将标签值导出到所选文件。"};
+    case Issue::UserFilePathRejected:
+        return {
+            UiTextId::ManagedStoragePathRejected,
+            "Choose a valid file outside the application's config, state, logs and unsaved folders.",
+            "请选择应用 config、state、logs 和 unsaved 文件夹以外的有效文件。"};
     case Issue::None:
     default:
         return {};

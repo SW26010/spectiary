@@ -636,6 +636,9 @@ constexpr std::array kTextCatalog = {
             SampleLabelingOperationResult::Issue::
                 LabelValuesExportFailed).simplified_chinese},
     UiTextEntry{
+        SampleLabelingIssueTextFor(SampleLabelingOperationResult::Issue::UserFilePathRejected).english,
+        SampleLabelingIssueTextFor(SampleLabelingOperationResult::Issue::UserFilePathRejected).simplified_chinese},
+    UiTextEntry{
         "This labeling task changed on disk and could not be deleted from the stale view.",
         "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
     UiTextEntry{

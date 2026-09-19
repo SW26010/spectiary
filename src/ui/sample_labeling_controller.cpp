@@ -1,5 +1,6 @@
 #include "ui/sample_labeling_controller.h"
 
+#include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_label_export.h"
 #include "domain/source_collection_manifest.h"
@@ -1854,6 +1855,11 @@ SampleLabelingController::ConnectCanonicalAsdfTask(
     bool allow_new_adoption,
     bool activate_task)
 {
+    if (!runtime_paths_.application_data_root.empty() &&
+        CheckUserFilePath(output_path, runtime_paths_) != UserFilePathStatus::Allowed) {
+        return {.revision = revision_, .issue = SampleLabelingOperationResult::Issue::UserFilePathRejected};
+    }
+
     SourceState* state = ActiveSource();
     if (state == nullptr ||
         !active_source_identity_ ||
@@ -2743,6 +2749,11 @@ SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAd
 SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskToOutput(
     std::filesystem::path output_path)
 {
+    if (!runtime_paths_.application_data_root.empty() &&
+        CheckUserFilePath(output_path, runtime_paths_) != UserFilePathStatus::Allowed) {
+        return {.revision = revision_, .issue = SampleLabelingOperationResult::Issue::UserFilePathRejected};
+    }
+
     SampleLabelingTask* task = ActiveTask();
     SourceState* state = ActiveSource();
     if (task == nullptr || state == nullptr || task->persistence.output_path ||
@@ -2909,6 +2920,11 @@ SampleLabelingOperationResult
 SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     std::filesystem::path output_path)
 {
+    if (!runtime_paths_.application_data_root.empty() &&
+        CheckUserFilePath(output_path, runtime_paths_) != UserFilePathStatus::Allowed) {
+        return {.revision = revision_, .issue = SampleLabelingOperationResult::Issue::UserFilePathRejected};
+    }
+
     SampleLabelingTask* task = ActiveTask();
     SourceState* state = ActiveSource();
     if (task == nullptr || state == nullptr ||
@@ -3099,6 +3115,11 @@ SampleLabelingController::ExportActiveLabels(
     const std::filesystem::path& output_path,
     SampleLabelExportFormat format) const
 {
+    if (!runtime_paths_.application_data_root.empty() &&
+        CheckUserFilePath(output_path, runtime_paths_) != UserFilePathStatus::Allowed) {
+        return {.revision = revision_, .issue = SampleLabelingOperationResult::Issue::UserFilePathRejected};
+    }
+
     const SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || !task->values.IsComplete() ||
         !active_source_descriptor_) {
@@ -3598,6 +3619,8 @@ SampleLabelingController::PersistCanonicalTaskOutput(
             result.message);
     };
     if (!task.persistence.output_path ||
+        (!runtime_paths_.application_data_root.empty() &&
+         CheckUserFilePath(*task.persistence.output_path, runtime_paths_) != UserFilePathStatus::Allowed) ||
         !task.values.IsComplete() ||
         asdf_snapshot == nullptr ||
         !*asdf_snapshot ||
@@ -4217,6 +4240,8 @@ SampleLabelingController::HydrateCanonicalAsdfTask(
     std::string* error_message) const
 {
     if (!cached_task.persistence.output_path ||
+        (!runtime_paths_.application_data_root.empty() &&
+         CheckUserFilePath(*cached_task.persistence.output_path, runtime_paths_) != UserFilePathStatus::Allowed) ||
         cached_task.persistence.output_format !=
             SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
         if (error_message != nullptr) {
