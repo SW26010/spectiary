@@ -4,6 +4,10 @@ Storage-layout amendment: [ADR 0015](0015-application-storage-cutover.md)
 supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below.
 Active persistence now uses the final config/state/logs/unsaved role layout.
 
+Identity/metadata amendment: [ADR 0011](0011-project-identity-contracts.md)
+supersedes schema 5 and the historical artifact names with schema 6,
+`Spectiary.exe` and `spectiary_metadata.json`. The distribution capability and
+dependency linkage decisions below remain in effect.
 
 Status: Accepted. Supersedes
 [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md).
@@ -164,8 +168,8 @@ it.
 Dropping cross-distribution executable equality does not weaken verification of
 an individual artifact.
 
-Schema 5 `artifact.sha256` continues to bind metadata to the exact
-`SpecForge.exe` beside it. The production ordering remains:
+Schema 6 `artifact.sha256` continues to bind metadata to the exact
+`Spectiary.exe` beside it, following ADR 0011. The production ordering remains:
 
 ```text
 link -> sign -> hash -> metadata finalization -> package
@@ -279,7 +283,7 @@ change must update validation so that:
 - [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md)
   is superseded by this ADR.
 - [Release Artifacts](../release_artifacts.md) remains the contract for the
-  current schema 5 artifact and Portable pipeline until an implementation
-  change updates that document.
+  current schema 6 artifact and Portable pipeline, with identity and metadata
+  boundaries defined by [ADR 0011](0011-project-identity-contracts.md).
 - [Technical Direction](../technical_direction.md) remains authoritative for
   the native, lightweight, performance-first product direction.

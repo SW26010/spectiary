@@ -17,10 +17,13 @@ Without an explicit isolation override, the final `application_data_root` is
 `package_root` for Portable and
 `%LOCALAPPDATA%\Spectiary` for local-app-data deployments. The latter consumes
 `project_identity::kLocalAppDataLeaf` directly. LocalAppData is queried only when
-selected and not already supplied. Missing, relative, inaccessible or non-directory
-persistent roots cause an explicit error, with no fallback to temp, cwd, package
-root or another profile. Resolution does not create the roots or prove future
-write permission; I/O owners still report write failures.
+selected and not already supplied. Empty or relative roots, resolution or
+inspection failures, and a root or existing ancestor that is not a directory
+cause an explicit error, with no fallback to temp, cwd, package root or another
+profile. A valid absolute root may name a directory that has not yet been
+created. Resolution checks existing ancestors but does not create directories
+or prove future write permission; I/O owners create the needed directories and
+report write failures.
 
 `config_root`, `state_root`, `logs_root` and `unsaved_root` are the lowercase
 children of `application_data_root`. `cache_root` and `temp_root` are separate
@@ -37,7 +40,9 @@ and `legacy_sample_labeling_state_path` are migration inputs only.
 
 An injected `local_app_data_user_state_root` supplies the physical local-app-data
 root without guessing a legacy sibling. `application_data_root_override` isolates
-all managed roles in either profile and disables production legacy discovery.
+the persistent `config`, `state`, `logs` and `unsaved` roles in either profile and
+disables production legacy discovery. It does not redirect `cache_root` or
+`temp_root`, which retain their system-temp and application-lineage basis.
 Automation may explicitly supply an isolated legacy input for seed materialization.
 `package_root`, public resources and package-relative locators stay tied to the
 executable. Overrides must be absolute valid roots, never fallback policies.

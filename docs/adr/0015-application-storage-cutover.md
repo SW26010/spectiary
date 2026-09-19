@@ -1,6 +1,6 @@
 # Application-managed storage physical cutover
 
-Status: Implemented; final local joint acceptance recorded in
+Status: Implemented; final joint acceptance recorded in
 [storage acceptance](../storage_acceptance.md). Date: 2026-09-19.
 Issues: #103 and the storage-coupled subset of #106.
 
@@ -16,7 +16,7 @@ nor machine identity are computed from display text.
 | `config/` | UI language, appearance, UI scale, input, external-source and profile settings; spectrum plot preferences |
 | `state/` | `imgui-layout-v2.ini`, panel visibility, source session, sample navigation, sample workflow, labeling registrations, spectrum viewport, complete `spectral-line-grouping-views.json` |
 | `logs/` | Profile logs; frame captures under `logs/captures/` |
-| `unsaved/` | Pre-canonical labeling checkpoints only; Windows Hidden is applied at startup and checkpoint publication and is not identity/security |
+| `unsaved/` | Pre-canonical labeling checkpoints only; Windows Hidden is applied best-effort at startup and checkpoint publication and is not identity/security |
 
 Disposable caches and indexes stay in system cache/temp facilities. Resolved
 cache/temp roots use the stable application identity. No persistent `cache/`
@@ -67,8 +67,11 @@ The public built-in catalog remains a package resource. Grouping views move as o
 state file; #104 is unchanged. #108/#109 canonical ownership/checkpoint lifecycle
 is unchanged. IPC, Win32/shell identity, ImGui internal IDs, format/digest domains,
 environment/CLI naming and broad public rename remain outside this phase.
-Stage 8 audits the combined implementation after the identity/public rename, without
-expanding the storage design. See the acceptance matrix and local closure summary
-for #103 in [storage acceptance](../storage_acceptance.md). Publication and GitHub
-issue closure are deferred while this work remains local; that is separate from
-the implementation acceptance result. Other issues retain their own scope/status.
+Stage 8 audited the combined implementation after the identity/public rename,
+without expanding the storage design. The [storage acceptance](../storage_acceptance.md)
+record preserves that original local pass and its validation limits. Its final
+commits were subsequently published, and [#103](https://github.com/SW26010/spectiary/issues/103)
+closed on 2026-09-19 following the
+[final joint acceptance review](https://github.com/SW26010/spectiary/issues/103#issuecomment-5739583887).
+Publication and closure do not add new test or CI evidence to the local record.
+Other issues retain their own scope/status.

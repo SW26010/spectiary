@@ -1,8 +1,8 @@
 # Sample Labeling Architecture
 
-SpecForge models per-sample data as sample annotation results and treats storage
+Spectiary models per-sample data as sample annotation results and treats storage
 formats such as NPY and CSV as annotation I/O adapters, not as the domain model.
-New formal labeling owners use the canonical SpecForge sample-labeling schema
+New formal labeling owners use the canonical `spectiary.sample_labeling` schema
 `2.0.0` in one ASDF document. Legacy NPY results and adjacent portable
 metadata sidecars are read-only compatibility inputs. Importing NPY or CSV
 creates an output-free draft; explicit Save As establishes an ASDF owner
@@ -10,11 +10,15 @@ without rewriting the import files. Legacy registrations reopen their unchanged
 NPY/sidecar inputs for explicit ASDF migration, with no legacy autosave or
 persisted pending overlay.
 See [recovery compatibility](../agents/legacy-labeling-recovery-audit.md).
-Sample labeling task records, workflow settings, autosave
-state, output paths, and recovery remain local user state rather than canonical
-document fields. Annotation I/O belongs behind a domain or service boundary; UI
-code consumes loaded annotation results and save state rather than parsing
-dtype, shape, ASDF blocks, or file-write capabilities.
+Sample labeling registrations, workflow/session settings, and output paths
+belong to ordinary local state; pre-canonical draft content has a separate
+best-effort checkpoint. Pending formal value and metadata edits remain in memory
+until successfully published to the canonical document, with no local durable
+recovery payload. Save/retry state remains runtime only. Canonical documents
+contain task content and provenance, not local workflow state. Annotation I/O
+belongs behind a domain or service boundary; UI code consumes loaded annotation
+results and save state rather than parsing dtype, shape, ASDF blocks, or
+file-write capabilities.
 
 The runtime task groups local navigation preferences in `SampleLabelingSessionState`,
 output ownership/write tracking in `SampleLabelingPersistenceState`, and derived
@@ -29,7 +33,7 @@ operations. View pointers are valid only until the controller's next mutation
 or destruction and must not be retained across command submission or
 maintenance. Operation results report the resulting revision and output/state
 persistence status, including rejected operations. `SampleWorkflowCoordinator`
-still owns navigation order, filters, sorting, and undo coordination. A
+still owns navigation order, sample filtering, sorting, and undo coordination. A
 labeling write may request advance, but only the coordinator resolves and
 applies that navigation request.
 
@@ -62,10 +66,10 @@ The canonical document keeps these concepts independent:
 | Task ID | Immutable `labeling_task.id`, using only lowercase hyphenated UUID v4 canonical text. |
 | Task name | Persistently editable UTF-8 canonical metadata. It must contain non-whitespace text, is neither trimmed nor normalized, and is not an identity. |
 | Output filename | User-selected shell/filesystem state. A sanitized task-name suggestion is presentation policy only; selecting or later renaming a file does not change task identity or task name. |
-| SpecForge schema version | Exactly `schema_version: 2.0.0` for current documents. |
-| SpecForge build source | Required `specforge_build` generation provenance. `head` requires a full 40-character lowercase hexadecimal `source_revision`; `working_tree` requires the revision to be absent. |
+| Spectiary schema identity and version | Exactly `format_kind: spectiary.sample_labeling` and `schema_version: 2.0.0` for current documents. |
+| Spectiary build source | Required `spectiary_build` generation provenance. `head` requires a full 40-character lowercase hexadecimal `source_revision`; `working_tree` requires the revision to be absent. |
 | Annotation alignment | Required `annotation.alignment` declaration with exactly `mode: by_index` and `target: sample_roster`; values follow roster/source index order. |
-| ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not SpecForge schema versions. |
+| ASDF versions | File format `1.0.0`, Standard `1.5.0`, and ASDF core tag versions are independent container/vocabulary versions, not Spectiary schema versions. |
 
 Issue #82 is a bounded self-description patch within `schema_version: 2.0.0`;
 it does not define or require schema `2.1.0`.
@@ -89,9 +93,10 @@ source-collection fingerprint. Readers may preserve a syntactically valid
 future origin token unchanged, but current writers cannot introduce one and
 preserving rewrites cannot alter origin or `created_at`.
 
-The ASDF producer declaration is exactly `asdf_library.name: SpecForge` with
-version `0.8.0`. The adjacent `specforge_build` map is deliberately narrow and
-comes only from the generated build-identity header: no runtime Git query,
+The ASDF producer declaration is exactly `asdf_library.name: Spectiary`, with
+`asdf_library.version` set to the current build's generated application version.
+The adjacent `spectiary_build` map is deliberately narrow and comes only from
+the generated build-identity header: no runtime Git query,
 release sidecar, compiler, SDK, dependency inventory, executable hash, or
 completion timestamp participates. It identifies the producer of the current
 durable generation, so fresh writes and both values-only and full metadata
@@ -120,16 +125,18 @@ entries follow stable label code. It does not cover arbitrary extra blocks or
 sequence schemas, removed labels, metadata byte layout/padding, or an old block
 index/trailer. In task-content terms, a values-only rewrite changes only
 annotation values and `modified_at`; as generation provenance,
-`specforge_build` is still refreshed to the current binary as specified above.
+`spectiary_build` is still refreshed to the current binary as specified above.
 The rewrite reuses only the encoded roster block and recomputes the metadata and
 container layout.
 
 SpecForge labeling schema `1.0.0` and labeling cache schemas 1 through 3 have no
-migration path. Current ordinary state and draft checkpoint codecs each use
-their own schema 1 envelope; the old monolithic schema 4 is a bounded migration
-input. Unsupported state is
-ignored/fails closed according to its owner rather than being guessed into
-canonical identity or provenance.
+migration path. The former `specforge.sample_labeling` namespace is not a read
+alias for current canonical documents, including schema `2.0.0`. Current
+ordinary state and draft checkpoint codecs each use their own schema 1
+envelope; the old monolithic schema 4 is a bounded migration input. Unsupported
+state is ignored/fails closed according to its owner rather than being guessed
+into canonical identity or provenance. See
+[ADR 0011](0011-project-identity-contracts.md) for the format-name cutover.
 
 Task copy/parent lineage, persisted edit history, canonical document revision,
 incremental patches, and workflow status are non-goals for schema 2.0. The
@@ -150,23 +157,34 @@ overlay row is unknown, including when an explicit pending value is `-1`.
 Sparse state cannot yield a content view. Deactivation drops complete values
 into the sparse representation; canonical projection restores complete content
 from the ASDF base before applying pending edits. This is an implementation
-boundary does not change canonical schema 2.0. Sparse edits are no longer
+boundary that does not change canonical schema 2.0. Sparse edits are no longer
 serialized for formal tasks. See the [persistence field audit](../labeling_persistence_ownership.md).
 
 Source-session, navigation, labeling ordinary state, labeling draft checkpoints,
-and workflow state are independently validated JSON owners. Their
-codecs continue to own schema support and field validation; the session only
-aggregates owner-reported health.
+and workflow state have separate JSON content owners. Their codecs own schema
+support and field validation. The two labeling JSON owners share one commit
+coordinator, save/retry scheduler, and persistence-health status in
+`SampleLabelingController`; they are not independent persistence lifecycles.
+A labeling commit reloads and validates both owners under the same commit lock,
+applies the task patch, then attempts ordinary-state and checkpoint replacement.
+An untrusted document in either labeling owner stops that combined local commit
+before either is replaced; canonical output saves remain independent of that
+failure. The session aggregates the health reported by each persistence controller.
 
 | Condition | User signal | Continue? | Clear condition |
 | --- | --- | --- | --- |
 | Missing cache | None; use defaults | Yes | Not applicable |
-| Corrupt cache | Non-blocking owner warning; a later write attempt reports retrying | Yes, with read-only salvage or defaults; labeling cache commits fail closed and preserve the original bytes | The cache is repaired or removed, then that owner successfully commits against the trusted latest state |
-| Unsupported schema | Non-blocking owner warning; a later write attempt reports retrying | Yes, without reading unsupported state; labeling cache commits fail closed and preserve the original bytes | Supported state replaces the cache or the user removes it, then that owner successfully commits; labeling cache schemas 1–3 are not migrated |
-| Partial save | Overall `retrying` health naming each failed owner while retries remain scheduled | Yes; attempt every other dirty cache | Each failed owner succeeds independently |
+| Corrupt cache | Non-blocking owner warning; a later write attempt reports retrying | Yes, with read-only salvage or defaults; labeling cache commits fail closed and preserve the original bytes | The cache is repaired or removed, then its persistence controller successfully commits against the trusted latest state |
+| Unsupported schema | Non-blocking owner warning; a later write attempt reports retrying | Yes, without reading unsupported state; labeling cache commits fail closed and preserve the original bytes | Supported state replaces the cache or the user removes it, then its persistence controller successfully commits; labeling cache schemas 1–3 are not migrated |
+| Partial save | Overall `retrying` health naming failed local-state components while retries remain scheduled | Yes; attempt every other dirty cache | Each failed component succeeds; labeling ordinary state and checkpoints clear their shared status only after a successful combined commit attempt |
 | Retrying | Overall `retrying` health; existing retry deadline remains active | Yes | First successful retry |
 | Recovered | Overall recovery health | Yes | Next user mutation owned by the recovered cache |
 
-There is no cross-file transaction: a failure in one cache must not suppress
-attempts for the other caches. Normal shutdown consumes a per-owner flush
-result so an incomplete flush is not reduced to an ignored aggregate boolean.
+There is no cross-file transaction. Once labeling validation succeeds, a failed
+ordinary-state replacement does not suppress the checkpoint attempt when its
+previous contents can still be trusted; checkpoint removal waits for successful
+registration. Either replacement may succeed without the other, and the labeling
+controller retains the patch for its shared retry scheduler. Other persistence
+controllers still attempt their dirty caches. Normal shutdown consumes
+per-controller flush results so an incomplete flush is not reduced to an ignored
+aggregate boolean.

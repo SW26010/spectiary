@@ -1,5 +1,11 @@
 # Storage final joint acceptance — #103, stage 8
 
+Publication follow-up (2026-09-19): the final commits below were subsequently
+published and [#103](https://github.com/SW26010/spectiary/issues/103) closed after
+the [final joint acceptance review](https://github.com/SW26010/spectiary/issues/103#issuecomment-5739583887).
+The original pre-publication record below is retained; this follow-up adds no new
+test or CI result.
+
 Date: 2026-09-19. Scope: audit the combined stages 1–7 against the final #103
 contract, with focused regression tests and documentation corrections. This is
 not another storage refactor. All changes and the closure summary below remain

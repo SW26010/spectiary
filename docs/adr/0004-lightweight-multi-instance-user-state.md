@@ -1,6 +1,6 @@
 # Lightweight Multi-Instance Runs Share User State
 
-SpecForge supports concurrently running ordinary GUI processes as independent
+Spectiary supports concurrently running ordinary GUI processes as independent
 in-memory viewing contexts over the same resolved local user state root. It does
 not introduce persisted per-instance sessions, a primary process, an IPC
 configuration owner, or live state propagation. Each instance loads shared
@@ -50,14 +50,17 @@ This is an intentional catalog-only exception, not a reusable multi-writer
 cache framework. This amendment records existing behavior and ownership; it
 does not change runtime ownership or introduce a new persistence facility.
 
-Labeling is a separate exception because its task cache and external
-result/metadata pair represent user-authored work. Different labeling targets
-may be edited by different instances concurrently, but one logical target may
-have only one SpecForge editor. A target-scoped operating-system lease protects
-the editing lifetime. Shared labeling-task-cache commits take a separate
-short-lived cross-process lock, reload the latest JSON, apply only task-level
-upserts or explicit deletion tombstones, validate the task and output
-identities, and atomically replace the document. Ordinary task saves do not
+Labeling is a separate exception because canonical ASDF documents and
+pre-canonical drafts represent user-authored work. Canonical content belongs to
+the user-owned ASDF; local registration/session state and draft checkpoints have
+separate application-managed owners. Legacy NPY results and adjacent metadata
+sidecars are read-only migration inputs. Different labeling targets may be
+edited by different instances concurrently, but one logical target may have
+only one Spectiary editor. A target-scoped operating-system lease protects the
+editing lifetime. Shared labeling-state commits take a separate short-lived
+cross-process lock, reload both JSON owners under that lock, apply only
+task-level upserts or explicit deletion tombstones, validate the task and output
+identities, and atomically replace each document. Ordinary task saves do not
 overwrite the persisted active-task selection; only explicit activation or
 deactivation may update that best-effort next-launch choice.
 
@@ -104,9 +107,14 @@ exclusion.
 
 Labeling persistence has two application-managed owners: ordinary registration
 and session preferences in `state/sample-labeling-state.json`, and complete
-pre-canonical checkpoints in `unsaved/sample-labeling-drafts.json`. Both use
-atomic replacement under the existing labeling commit lock. There is no
-cross-file transaction. See the [field audit and lifecycle contract](../labeling_persistence_ownership.md).
+pre-canonical checkpoints in `unsaved/sample-labeling-drafts.json`. Their codecs
+validate separate content, while the labeling controller shares commit
+coordination, retry scheduling, and persistence health across both owners.
+Under the existing labeling commit lock, ordinary-state replacement precedes
+checkpoint replacement; either can fail independently. There is no cross-file
+transaction, and failed checkpoint cleanup cannot roll back canonical
+publication or a successful registration. See the
+[field audit and lifecycle contract](../labeling_persistence_ownership.md).
 
 Temporary-to-formal conversion publishes a complete ASDF from the current
 in-memory draft, reopens and validates it, and only then adopts the canonical
@@ -142,16 +150,16 @@ rewrites or removes user-owned canonical files.
 
 The labeling lease coordinates writers only. It does not invalidate annotation
 snapshots already loaded by another instance when that labeling output changes.
-Displays, filters, and sorting derived from such an annotation may therefore
-continue to use the older values until the user explicitly reloads or reopens
-the data, or restarts that instance. Atomic output replacement ensures that a
-subsequent read observes a complete file; it does not provide live change
+Displays, sample filters, and sorting derived from such an annotation may
+therefore continue to use the older values until the user explicitly reloads or
+reopens the data, or restarts that instance. Atomic output replacement ensures
+that a subsequent read observes a complete file; it does not provide live change
 notification. This is expected eventual-consistency behavior rather than data
 corruption, and cross-instance file watching, runtime propagation, and automatic
-filter or sorting recomputation are not acceptance requirements of this change.
-If those capabilities become product requirements, they should be designed as
-a separate follow-up and do not by themselves require a primary process or IPC
-configuration service.
+sample filter or sorting recomputation are not acceptance requirements of this
+change. If those capabilities become product requirements, they should be
+designed as a separate follow-up and do not by themselves require a primary
+process or IPC configuration service.
 
 The catalog and labeling exceptions do not grant multi-writer merge semantics
 to unrelated shared settings or caches; those retain their existing policies.

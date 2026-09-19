@@ -9,8 +9,11 @@ collection identity and x/y limits in `state/spectrum-viewport-state.json`.
 An explicit runtime/automation root override redirects both owners in either
 storage profile, including Portable. Package-relative locators continue to use
 the executable-based `package_root`, independently of this isolated data root.
-Both use schema 1 and separate format kinds in the existing `specforge.*`
-machine-format namespace. Neither changes source identity or rendering.
+Both use schema 1, with format kinds `spectiary.spectrum_plot.preferences` and
+`spectiary.spectrum_viewport.state`. The historical `specforge.*` kinds are
+explicit bounded read inputs only; all current writes use the Spectiary kinds
+under [ADR 0011](0011-project-identity-contracts.md). The ownership split does
+not change source identity or rendering.
 
 ShellUi retains a lifecycle and startup writeback authority for each owner.
 Color changes dirty only preferences. Viewport mutation revision changes dirty
