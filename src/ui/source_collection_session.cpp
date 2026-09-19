@@ -1836,6 +1836,18 @@ void SourceCollectionSession::InvalidateView()
     ++session_view_revision_;
 }
 
+std::optional<std::size_t> SourceCollectionSession::FolderMemberIndex(
+    const std::filesystem::path& folder, const std::filesystem::path& member) const
+{
+    const auto generation = roster_->FolderListingGeneration(folder);
+    if (!generation) return std::nullopt;
+    const auto key = SourcePathIdentityKey(member);
+    for (std::size_t index = 0; index < generation->listing.spectra.size(); ++index) {
+        if (SourcePathIdentityKey(generation->listing.spectra[index].path) == key) return index;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::size_t>
 SourceCollectionSession::PresentedSampleIndex() const
 {

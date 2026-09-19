@@ -1,4 +1,5 @@
 #pragma once
+#include "platform/win32_external_open_router.h"
 
 #include "app/automation_panel_command_coordinator.h"
 #include "app/automation_execution.h"
@@ -212,6 +213,7 @@ private:
     std::optional<RenderWakeScheduler::TimePoint>
         automation_poll_deadline_;
     bool automation_shutdown_requested_ = false;
+    Win32ExternalOpenRouter external_open_router_;
 
     std::wstring applied_window_title_;
     std::optional<NativeWindowTitleSemanticKey>

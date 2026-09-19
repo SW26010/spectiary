@@ -4,6 +4,7 @@
 #include "app/runtime_paths.h"
 #include "automation/automation_startup.h"
 #include "platform/win32_text.h"
+#include "platform/win32_external_open_router.h"
 #include "ui/ui_text.h"
 
 #include <Windows.h>
@@ -223,12 +224,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
             automation_diagnostic_root =
                 command_line.automation->state_root;
         }
-        startup_error_language =
-            spectiary::ApplicationSettings(
+        const auto settings = spectiary::ApplicationSettings(
                 spectiary::ApplicationSettingsStorageForRuntimePaths(
                     startup.runtime_paths()))
-                .View()
-                .language;
+                .View();
+        startup_error_language = settings.language;
+        if (!command_line.automation && !RuntimeResourceWorkloadEnabled() && !command_line.force_new_instance &&
+            command_line.initial_source &&
+            settings.external_open_instance_policy == spectiary::ExternalOpenInstancePolicy::RecentInstance) {
+            std::error_code error;
+            const auto path = std::filesystem::absolute(*command_line.initial_source, error);
+            if (!error && spectiary::Win32ExternalOpenRouter::Forward(
+                    startup.runtime_paths().config_root,
+                    {path.lexically_normal(), settings.open_external_source_as_folder})) {
+                return 0;
+            }
+        }
         spectiary::SpectiaryApp app(
             startup,
             command_line.automation);

@@ -192,6 +192,18 @@ std::vector<std::wstring> ParseCommandLine(
 
 void TestWindowsArgumentQuotingRoundTrips()
 {
+    const std::vector<std::wstring> no_source{L"Spectiary.exe"};
+    const auto empty = spectiary::ParseSpectiaryCommandLine(no_source);
+    Require(!empty.initial_source && !empty.automation && !empty.force_new_instance,
+        "source-free invocation must remain an ordinary new GUI launch");
+    for (const std::vector<std::wstring>& arguments : {
+            std::vector<std::wstring>{L"Spectiary.exe", L"--new-instance", L"C:\\数据 folder\\光谱.csv"},
+            std::vector<std::wstring>{L"Spectiary.exe", L"C:\\数据 folder\\光谱.csv", L"--new-instance"}}) {
+        const auto explicit_new = spectiary::ParseSpectiaryCommandLine(arguments);
+        Require(explicit_new.force_new_instance && explicit_new.initial_source ==
+                std::filesystem::path(L"C:\\数据 folder\\光谱.csv") && !explicit_new.automation,
+            "new-instance flag position must not change Unicode source parsing");
+    }
     Require(
         spectiary::QuoteWindowsCommandLineArgument(L"plain") ==
             L"plain",

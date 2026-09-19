@@ -333,6 +333,8 @@ public:
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] const SourceCollectionSessionView& View();
+    [[nodiscard]] std::optional<std::size_t> FolderMemberIndex(
+        const std::filesystem::path& folder, const std::filesystem::path& member) const;
     [[nodiscard]] ExactSampleNameResolution
     ResolveExactSampleName(std::string_view name) const;
     // A deferred pending target is the origin for a subsequent navigation command.

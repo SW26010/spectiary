@@ -308,6 +308,7 @@ add_library(spectiary_core STATIC
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
     src/platform/win32_process_launcher.cpp
+    src/platform/win32_external_open_router.cpp
     src/profile/load_latency_trace_lifecycle.cpp
     src/profile/navigation_latency_trace.cpp
     src/profile/navigation_prefetch_trace.cpp
@@ -1316,6 +1317,11 @@ spectiary_add_test(
     tests/win32_process_launcher_tests.cpp
     spectiary_core
 )
+spectiary_add_test(
+    spectiary_win32_external_open_router_tests
+    tests/win32_external_open_router_tests.cpp
+    spectiary_core
+)
 target_link_libraries(
     spectiary_win32_process_launcher_tests
     PRIVATE
@@ -1738,6 +1744,7 @@ add_test(
 set_tests_properties(spectiary_live_resize_resource_observation_tests spectiary_presentation_profile_schema_tests spectiary_presentation_trace_tests
     PROPERTIES TIMEOUT 15)
 set(SPECTIARY_FAST_TESTS
+    spectiary_win32_external_open_router_tests
     spectiary_sample_labeling_persistence_owner_tests
     spectiary_live_resize_resource_observation_tests
     spectiary_presentation_trace_tests

@@ -6825,6 +6825,67 @@ void TestRestoreDefaultLayout()
 
 }  // namespace
 
+void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto folder = UniqueTempPath("_routed_external_folder");
+    std::filesystem::create_directories(folder);
+    WriteFixture(folder / "first.csv");
+    const auto preferred = folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+    const auto other = UniqueTempPath("_routed_other.npy");
+    WriteFixture(other);
+    std::atomic<unsigned> decodes{0};
+    SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    dependencies.snapshot_loader = [&decodes](const auto& path, std::size_t index, const auto&) {
+        ++decodes; return MakeSnapshot(path, index);
+    };
+    dependencies.folder_snapshot_loader = [&decodes](const auto& path, std::size_t index, const auto&, const auto&) {
+        ++decodes; return MakeSnapshot(path, index);
+    };
+    auto shell = Access::Create(SourceCollectionSession({}, {}, {}, {}),
+        MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    // Receiver settings stay at defaults: request carries the sender's policy.
+    shell->OpenRoutedExternalSource(preferred, true);
+    shell->OpenRoutedExternalSource(preferred, true);
+    Require(DrainAllSourceLoads(*shell), "routed folder should load");
+    auto& session = Access::Session(*shell);
+    Require(session.CurrentSampleSnapshot()->source.path == folder &&
+        session.CurrentSampleSnapshot()->collection.current_index == 1,
+        "new routed folder must select requested FITS instead of first member");
+    const auto original = session.CurrentSampleSnapshot();
+    const auto before = decodes.load();
+    Require(before == 1, "duplicate requests during loading must coalesce without reloading");
+    shell->OpenRoutedExternalSource(folder, false);
+    Require(DrainAllSourceLoads(*shell), "duplicate folder activation should settle");
+    Require(session.CurrentSampleSnapshot() == original && decodes.load() == before,
+        "duplicate direct folder open must retain selected sample without reload");
+    shell->OpenRoutedExternalSource(preferred, true);
+    Require(DrainAllSourceLoads(*shell), "duplicate preferred member should settle");
+    Require(session.CurrentSampleSnapshot() == original && decodes.load() == before,
+        "duplicate preferred-member open must retain exact snapshot without reload");
+    shell->OpenRoutedExternalSource(other, false);
+    shell->OpenRoutedExternalSource(folder, false);
+    Require(DrainAllSourceLoads(*shell), "second routed source should load");
+    Require(session.View().sources.size() == 2 && session.CurrentSampleSnapshot() == original,
+        "a queued existing-source activation must not cancel an earlier accepted new-source load");
+    const auto loaded_count = decodes.load();
+    shell->OpenRoutedExternalSource(folder, false);
+    Require(DrainAllSourceLoads(*shell), "existing source switch should settle");
+    Require(session.View().sources.size() == 2 && session.CurrentSampleSnapshot() == original &&
+        decodes.load() == loaded_count, "switching back must preserve original source state without reload");
+    shell->OpenRoutedExternalSource(folder / "zzz.csv", true);
+    Require(DrainAllSourceLoads(*shell), "existing folder preferred navigation should settle");
+    Require(session.CurrentSampleSnapshot()->collection.current_index == 2 && session.View().sources.size() == 2,
+        "routed member in an existing folder must navigate within that source");
+    shell.reset();
+    std::filesystem::remove_all(folder);
+    std::filesystem::remove(other);
+}
+
 #define RUN_SHELL_TEST(test) do { \
     std::fprintf(stderr, "Running %s\n", #test); \
     std::fflush(stderr); \
@@ -6834,6 +6895,7 @@ void TestRestoreDefaultLayout()
 int main()
 {
     try {
+        RUN_SHELL_TEST(TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember);
 #ifdef IMGUI_ENABLE_TEST_ENGINE
         RUN_SHELL_TEST(TestRestoreDefaultLayout);
 #endif

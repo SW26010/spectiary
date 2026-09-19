@@ -2,6 +2,7 @@
 #include "ui/spectrum_persistence_migration.h"
 
 #include "app/runtime_paths.h"
+#include "domain/source_path_identity.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
 #include "ui/immersive_context_overlay.h"
@@ -1529,6 +1530,52 @@ void ShellUi::OpenExternalSource(
         spectrum_index);
 }
 
+void ShellUi::OpenRoutedExternalSource(const std::filesystem::path& path, bool as_folder)
+{
+    routed_external_opens_.emplace_back(path, as_folder);
+    ServiceRoutedExternalOpens();
+}
+
+void ShellUi::ServiceRoutedExternalOpens()
+{
+    // Serialize external requests through the existing loading transaction.
+    // Switching to a known source must not cancel an earlier accepted open;
+    // duplicates queued during loading resolve against its completed roster.
+    while (!routed_external_opens_.empty() && !source_activation_.HasPendingLoads()) {
+        auto request = std::move(routed_external_opens_.front());
+        routed_external_opens_.pop_front();
+        ApplyRoutedExternalOpen(request.first, request.second);
+    }
+}
+
+void ShellUi::ApplyRoutedExternalOpen(const std::filesystem::path& path, bool as_folder)
+{
+    const SourceOpenRequest request{path, SourceOpenOrigin::ExternalStartup, as_folder};
+    const auto candidate = SourceOpenRequestCandidatePath(request);
+    const auto key = SourcePathIdentityKey(candidate);
+    const auto& sources = session_.View().sources;
+    for (std::size_t index = 0; index < sources.size(); ++index) {
+        if (SourcePathIdentityKey(sources[index].path) != key ||
+            sources[index].state == SourceCollectionSourceState::Unavailable) continue;
+        const bool member_requested = SourceOpenRequestExpandsAsFolder(request);
+        const auto member = member_requested ? session_.FolderMemberIndex(candidate, path) : std::nullopt;
+        // A newly added folder member still needs the normal worker resolver.
+        if (member_requested && !member) break;
+        if (session_.View().current_source_index != index) {
+            (void)SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
+                SourceCollectionIntent::SwitchActive(index)));
+        }
+        if (member && session_.View().navigation.current_index != member) {
+            // Keep the path, not just the cached row: directory changes while
+            // the worker runs must not redirect this request to another member.
+            // The resolver also preserves explicit sample-filter diagnostics.
+            (void)source_activation_.OpenExternalSource(path, as_folder);
+        }
+        return;
+    }
+    (void)source_activation_.OpenExternalSource(path, as_folder);
+}
+
 SourceCollectionActivationTransaction::
     SourceOpenOperation
 ShellUi::OpenSourceForAutomation(
@@ -1923,6 +1970,7 @@ void ShellUi::DrainSourceLoads(
     HandleSessionAction(source_activation_.Drain(
         allow_snapshot_prefetch &&
             !latency_sensitive_plot_interaction_active()));
+    ServiceRoutedExternalOpens();
 }
 
 void ShellUi::BeginDeferredSourceRestore()

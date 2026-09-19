@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 
 #include "app/application_settings.h"
 #include "domain/spectrum_snapshot.h"
@@ -289,6 +290,7 @@ public:
     void OpenExternalSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);
+    void OpenRoutedExternalSource(const std::filesystem::path& path, bool as_folder);
     [[nodiscard]] SourceCollectionActivationTransaction::
         SourceOpenOperation
     OpenSourceForAutomation(
@@ -419,6 +421,8 @@ private:
         NavigationLatencyInputKind kind);
     void DrainSourceLoads(
         bool allow_snapshot_prefetch = true);
+    void ServiceRoutedExternalOpens();
+    void ApplyRoutedExternalOpen(const std::filesystem::path& path, bool as_folder);
     void BeginDeferredSourceRestore();
     void RestoreDeferredSpectrumViewport(
         std::optional<std::string> source_collection_identity);
@@ -466,6 +470,7 @@ private:
     friend struct ShellUiTestAccess;
 
     SourceCollectionSession session_;
+    std::deque<std::pair<std::filesystem::path, bool>> routed_external_opens_;
     SpectrumViewSession spectrum_view_session_;
     SourceCollectionActivationTransaction source_activation_;
     PanelSessionInteraction panel_session_interaction_;

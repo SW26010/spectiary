@@ -423,6 +423,11 @@ int SpectiaryApp::Run(
             break;
         }
 
+        for (const auto& request : external_open_router_.TakeRequests()) {
+            ui_.OpenRoutedExternalSource(request.path, request.as_folder);
+            render_wake_scheduler_.RequestFrame();
+        }
+
         auto now = RenderWakeScheduler::Clock::now();
         auto maintenance_deadline =
             next_maintenance_deadline();
@@ -691,6 +696,14 @@ void SpectiaryApp::Initialize(
             ? Win32WindowActivation::NoActivate
             : Win32WindowActivation::Default);
     LogDisplayEnvironment("startup");
+    if (!automation_configuration_ && !runtime_resource_workload_) {
+        (void)external_open_router_.Start(startup_.runtime_paths().config_root,
+            [this]() {
+                if (!running_ || os_session_ending_) return false;
+                return ActivateExternalOpenWindow(window_.hwnd());
+            },
+            [this]() { PostMessageW(window_.hwnd(), kSourceLoadCompletionReadyMessage, 0, 0); });
+    }
     LogPresentationUpdates();
     WritePanPacingState("startup", false);
     if (runtime_resource_workload_) {
@@ -846,6 +859,7 @@ void SpectiaryApp::SaveImGuiLayoutForShutdown()
 
 void SpectiaryApp::Shutdown()
 {
+    external_open_router_.Stop();
     if (shutdown_complete_) {
         return;
     }
@@ -3846,6 +3860,7 @@ void SpectiaryApp::LogDisplayEnvironment(std::string_view reason)
 
 LRESULT SpectiaryApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    if (message == WM_ACTIVATEAPP && wparam) external_open_router_.MarkUsed();
     if (message == kSourceLoadCompletionReadyMessage) {
         render_wake_scheduler_.RequestFrame();
         return 0;
@@ -3924,6 +3939,7 @@ LRESULT SpectiaryApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
             MessageBoxW(hwnd, text.c_str(), title.c_str(), MB_OK | MB_ICONWARNING);
             return 0;
         }
+        external_open_router_.Stop();
         break;
     case WM_SIZE: {
         if (wparam == SIZE_MINIMIZED) {

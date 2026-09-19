@@ -3,6 +3,7 @@
 namespace spectiary::project_identity {
 // Permanent lineage token, not a runtime Git revision or a display name.
 inline constexpr char kApplicationId[] = "@PROJECT_founding_identity@";
+inline constexpr wchar_t kExternalOpenNamespacePrefix[] = L"@PROJECT_founding_identity@.external-open.";
 // Machine namespaces are rooted in the complete immutable lineage token.
 inline constexpr wchar_t kAutomationPipePrefix[] = L"\\\\.\\pipe\\@PROJECT_founding_identity@.automation.v1.";
 inline constexpr wchar_t kAutomationRootLock[] = L".@PROJECT_founding_identity@.automation-root.v1.lock";
