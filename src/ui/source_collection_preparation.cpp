@@ -986,6 +986,13 @@ private:
              attempt < kMaximumAttempts;
              ++attempt) {
             work.checkpoint();
+            // Auto-discovered NPY companions are user inputs too. Validate
+            // before dependency capture or context reuse can read their data.
+            for (const auto& companion : {
+                     SourceCollectionCompanionNamePath(work.request.path),
+                     SourceCollectionCompanionAnnotationPath(work.request.path)}) {
+                if (companion) CheckUserInputPath(*companion);
+            }
             const SourceCollectionSingleFileState initial_state =
                 CaptureSourceCollectionSingleFileState(
                     work.request.path,

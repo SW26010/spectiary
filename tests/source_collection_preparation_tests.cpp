@@ -175,6 +175,81 @@ void TestReservedStorageSourceAdmission()
     std::filesystem::remove_all(base);
 }
 
+void TestReservedStorageCompanionAdmission()
+{
+    using namespace specforge;
+    const auto base = UniqueTempPath("_companion_admission_" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    bool symlink_unavailable_reported = false;
+    const auto create_alias = [&](const auto& target, const auto& alias) {
+        std::error_code error;
+        std::filesystem::create_symlink(target, alias, error);
+#ifdef _WIN32
+        // Windows without Developer Mode / SeCreateSymbolicLinkPrivilege
+        // cannot create this fixture; do not require elevated test accounts.
+        if (error.value() == 1314) { // ERROR_PRIVILEGE_NOT_HELD
+            if (!symlink_unavailable_reported) {
+                std::cout << "SKIP: companion symlink cases require Windows symbolic-link privilege\n";
+                symlink_unavailable_reported = true;
+            }
+            return false;
+        }
+#endif
+        Require(!error, "could not create companion alias fixture");
+        return true;
+    };
+    for (const auto profile : {StorageProfile::Portable, StorageProfile::LocalAppData}) {
+        const auto root = base / (profile == StorageProfile::Portable ? "portable" : "local");
+        const auto paths = RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = root / "app.exe",
+            .local_app_data_user_state_root = root,
+        });
+        std::filesystem::create_directories(root / "my-work");
+        const auto source = root / "my-work/source_x.npy";
+        WriteFixture(source);
+        std::atomic<int> decoder_calls = 0;
+        SourceCollectionLoadDependencies adapters;
+        adapters.workflow_cache_paths.runtime_paths = paths;
+        adapters.snapshot_loader = [&](const auto& path, std::size_t index, const auto&) {
+            ++decoder_calls;
+            return MakeSnapshot(path, index);
+        };
+        LoadingHarness preparation(std::move(adapters));
+        // Missing companions remain optional.
+        (void)preparation.Load({.path = source});
+        for (const auto& companion : {*SourceCollectionCompanionNamePath(source),
+                 *SourceCollectionCompanionAnnotationPath(source)}) {
+            WriteFixture(companion);
+            (void)preparation.Load({.path = source});
+            std::filesystem::remove(companion);
+            for (const auto* role : {"config", "state", "logs", "unsaved"}) {
+                const auto target = root / role / "companion.npy";
+                std::filesystem::create_directories(target.parent_path());
+                WriteFixture(target);
+                if (!create_alias(target, companion)) continue;
+                const auto calls_before = decoder_calls.load();
+                bool rejected = false;
+                try { (void)preparation.Load({.path = source}); }
+                catch (const std::runtime_error& error) {
+                    rejected = std::string(error.what()).find("outside config") != std::string::npos;
+                }
+                Require(rejected && decoder_calls == calls_before,
+                    "reserved companion alias must be rejected before decoder or manifest access");
+                std::filesystem::remove(companion);
+            }
+            const auto allowed = root / "my-work/user-companion.npy";
+            WriteFixture(allowed);
+            if (!create_alias(allowed, companion)) continue;
+            const auto calls_before = decoder_calls.load();
+            (void)preparation.Load({.path = source});
+            Require(decoder_calls == calls_before + 1,
+                "companion aliases outside reserved storage remain admissible");
+            std::filesystem::remove(companion);
+        }
+    }
+    std::filesystem::remove_all(base);
+}
+
 class MutableDirectoryChangeGeneration final
     : public specforge::DirectoryChangeGeneration {
 public:
@@ -1427,6 +1502,7 @@ int main()
         TestVerifiedResidentSnapshotSkipsDecode();
         TestStaleResidentSnapshotFallsBackToDecode();
         TestCompanionAndAnnotationChangesMaterializeContext();
+        TestReservedStorageCompanionAdmission();
         TestReuseCandidateRejectsMismatchedResident();
         TestChangedContextPlanCarriesLiveRevision();
         TestChangedFileRetriesOneStableGeneration();
