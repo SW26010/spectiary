@@ -147,7 +147,7 @@ is UI layout state, not marker organization. On Windows, the default location
 should be under the user's local application data directory, for example:
 
 ```text
-%LOCALAPPDATA%\SpecForge\spectral-line-grouping-views.json
+%LOCALAPPDATA%\Spectiary\state\spectral-line-grouping-views.json
 ```
 
 The cache should be written after edits with a short debounce and flushed on

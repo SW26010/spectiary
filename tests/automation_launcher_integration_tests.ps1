@@ -194,10 +194,10 @@ function Get-OrdinaryStateRoot {
         }
         if ($null -ne $storageProfileProperty -and
             [string]$storageProfileProperty.Value -eq 'portable') {
-            return Join-Path $appDirectory 'Data'
+            return $appDirectory
         }
     }
-    return Join-Path $env:LOCALAPPDATA 'SpecForge'
+    return Join-Path $env:LOCALAPPDATA 'Spectiary'
 }
 
 function Get-LauncherProcessId {
@@ -967,7 +967,7 @@ function Invoke-UnrenderablePanelQuitScenario {
                 }))
 
         $savedPanelPath =
-            Join-Path $Root 'panel-visibility.json'
+            Join-Path $Root 'state\panel-visibility.json'
         if (Test-Path -LiteralPath $savedPanelPath) {
             $savedPanels =
                 Get-Content -Raw -LiteralPath $savedPanelPath |
@@ -1266,7 +1266,7 @@ function Invoke-PanelShutdownRollbackScenario {
                 ($messages | ConvertTo-Json -Compress -Depth 20))
 
         $savedPanelPath =
-            Join-Path $Root 'panel-visibility.json'
+            Join-Path $Root 'state\panel-visibility.json'
         Assert-True `
             -Condition (
                 (Test-Path `
@@ -1421,11 +1421,14 @@ try {
     Assert-True `
         -Condition (
             $ordinaryRoot -eq (
-                Join-Path $portableAppRoot 'Data')) `
+                $portableAppRoot)) `
         -Message 'Integration fixture requires Portable user-state resolution.'
     [System.IO.Directory]::CreateDirectory($ordinaryRoot) |
         Out-Null
 
+    foreach ($role in @('config', 'state', 'logs', 'unsaved')) {
+        [System.IO.Directory]::CreateDirectory((Join-Path $ordinaryRoot $role)) | Out-Null
+    }
     $ordinarySource =
         Join-Path $fixtureParent 'ordinary-session-marker.csv'
     [System.IO.File]::WriteAllText(
@@ -1444,13 +1447,19 @@ try {
         )
     } | ConvertTo-Json -Depth 5
     [System.IO.File]::WriteAllText(
-        (Join-Path $ordinaryRoot 'source-session.json'),
+        (Join-Path $ordinaryRoot 'state\source-session.json'),
         $ordinarySession,
         [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText(
-        (Join-Path $ordinaryRoot 'ui-language.json'),
+        (Join-Path $ordinaryRoot 'config\ui-language.json'),
         '{"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"zh-Hans"}',
         [System.Text.UTF8Encoding]::new($false))
+    # Pin fixture directory timestamps after population; NTFS can otherwise
+    # finish its creation-time directory updates after the first snapshot.
+    $fixtureDirectoryTime = [DateTime]::UtcNow.AddDays(-1)
+    foreach ($directory in @(Get-ChildItem -LiteralPath $ordinaryRoot -Directory -Recurse -Force)) {
+        [IO.Directory]::SetLastWriteTimeUtc($directory.FullName, $fixtureDirectoryTime)
+    }
     $ordinaryBefore =
         Get-TreeFingerprint -Path $ordinaryRoot
 
@@ -2399,15 +2408,15 @@ try {
 
     $savedLanguage =
         Get-Content -Raw -LiteralPath (
-            Join-Path $settingsControlRoot 'ui-language.json') |
+            Join-Path $settingsControlRoot 'config\ui-language.json') |
             ConvertFrom-Json
     $savedScale =
         Get-Content -Raw -LiteralPath (
-            Join-Path $settingsControlRoot 'ui-scale.json') |
+            Join-Path $settingsControlRoot 'config\ui-scale.json') |
             ConvertFrom-Json
     $savedPanels =
         Get-Content -Raw -LiteralPath (
-            Join-Path $settingsControlRoot 'panel-visibility.json') |
+            Join-Path $settingsControlRoot 'state\panel-visibility.json') |
             ConvertFrom-Json
     Assert-True `
         -Condition (
@@ -2719,7 +2728,7 @@ try {
         [void][SpecForgeAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 4)
         $uiScaleWriteBlocker =
-            Join-Path $windowContractRoot 'ui-scale.json'
+            Join-Path $windowContractRoot 'config\ui-scale.json'
         [System.IO.Directory]::CreateDirectory(
             $uiScaleWriteBlocker) | Out-Null
         $failedScaleMessages = @(
@@ -4163,7 +4172,7 @@ try {
                 --app $fixtureExecutable `
                 --state-root $ordinarySeedRoot `
                 --labeling-state-seed (
-                    Join-Path $ordinaryRoot 'ui-language.json') 2>&1
+                    Join-Path $ordinaryRoot 'config\ui-language.json') 2>&1
         )
         $ordinarySeedExitCode = $LASTEXITCODE
     }
@@ -4449,6 +4458,9 @@ try {
         -Message 'frame.capture must reject an absolute path outside the current automation root and clean up its owned GUI.'
 
     $ordinaryAfter = Get-TreeFingerprint -Path $ordinaryRoot
+    if ($ordinaryAfter -cne $ordinaryBefore) {
+        Compare-Object ($ordinaryBefore -split "`n") ($ordinaryAfter -split "`n") | Out-Host
+    }
     Assert-True `
         -Condition ($ordinaryAfter -ceq $ordinaryBefore) `
         -Message 'Real automation startup, state, idle and quit must not read/import or modify ordinary user state.'

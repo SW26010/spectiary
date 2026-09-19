@@ -327,7 +327,7 @@ function Assert-PortablePackage {
     )
 
     $expectedPackageEntries = @(
-        'Data',
+        'config', 'state', 'logs', 'unsaved',
         'Spectiary.exe',
         'spectiary_metadata.json'
     )
@@ -338,9 +338,6 @@ function Assert-PortablePackage {
     if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
         throw "$Description package root entries are wrong: $($actualPackageEntries -join ', ')."
     }
-    $dataEntry = @(
-        $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
-    )
     $executableEntry = @(
         $actualPackageItems | Where-Object { $_.Name -ceq 'Spectiary.exe' }
     )
@@ -348,8 +345,11 @@ function Assert-PortablePackage {
         $actualPackageItems |
             Where-Object { $_.Name -ceq 'spectiary_metadata.json' }
     )
-    if ($dataEntry.Count -ne 1 -or -not $dataEntry[0].PSIsContainer) {
-        throw "$Description package root Data must be a directory."
+    foreach ($role in @('config', 'state', 'logs', 'unsaved')) {
+        $entry = @($actualPackageItems | Where-Object { $_.Name -ceq $role })
+        if ($entry.Count -ne 1 -or -not $entry[0].PSIsContainer) {
+            throw "$Description package root $role must be a directory."
+        }
     }
     if ($executableEntry.Count -ne 1 -or $executableEntry[0].PSIsContainer) {
         throw "$Description package root Spectiary.exe must be a file."
@@ -406,7 +406,7 @@ function Assert-PortablePackage {
     $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
         $expectedZipEntries = @(
-            'Data/',
+            'config/', 'state/', 'logs/', 'unsaved/',
             'Spectiary.exe',
             'spectiary_metadata.json'
         )
@@ -1560,7 +1560,7 @@ try {
     $hiddenEntryPackageRoot = Join-Path $testRoot 'hidden-entry-package'
     New-Item `
         -ItemType Directory `
-        -Path (Join-Path $hiddenEntryPackageRoot 'Data') `
+        -Path (Join-Path $hiddenEntryPackageRoot 'state') `
         -Force |
         Out-Null
     Copy-Item `
@@ -1604,8 +1604,11 @@ try {
         -LiteralPath $verifiedPackageMetadataPath `
         -Destination (
             Join-Path $wrongDataTypePackageRoot 'spectiary_metadata.json')
+    foreach ($role in @('config', 'logs', 'unsaved')) {
+        New-Item -ItemType Directory -Path (Join-Path $wrongDataTypePackageRoot $role) | Out-Null
+    }
     [IO.File]::WriteAllText(
-        (Join-Path $wrongDataTypePackageRoot 'Data'),
+        (Join-Path $wrongDataTypePackageRoot 'state'),
         'not a directory')
     Assert-ScriptFails `
         -CaseId 'reject-data-file' `
@@ -1618,8 +1621,8 @@ try {
             '-ZipPath',
             $verifiedPackageZip
         ) `
-        -ExpectedMessage 'Portable package root Data must be a directory' `
-        -Description 'Portable verifier rejects a Data file in place of the directory'
+        -ExpectedMessage 'Portable package root state must be a directory' `
+        -Description 'Portable verifier rejects a state file in place of the directory'
 
     $originalPackageMetadataBytes = [IO.File]::ReadAllBytes($verifiedPackageMetadataPath)
     try {

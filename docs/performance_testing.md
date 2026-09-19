@@ -178,7 +178,7 @@ Present 仍可能影响整个 UI frame，不能把这种混合场景与主窗口
 自动化采集继续使用 `SPECFORGE_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
 `Settings > Diagnostics` 在运行时开始/停止采集；沉浸模式右上角的 `REC` 标记表示正在录制。复现卡顿后
 尽快停止录制，分析时结合停止前的一段帧时间线和输入事件定位。Portable build 的默认输出目录是可执行
-文件旁的 `Data/logs/`，用户可在 Diagnostics 设置中修改；性能脚本会显式设置
+文件旁的 `logs/`，用户可在 Diagnostics 设置中修改；性能脚本会显式设置
 `SPECFORGE_PROFILE_DIR`，覆盖 UI 设置并把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态
 混在一起。
 
@@ -554,7 +554,7 @@ Portable source 的 JSONL A/B。真实 IO/decode/context/renderer phase 是否�
 `sequence_cache_hit=true/false` 两组仍可解释、稳定 folder 为 `listing_scan_performed=false`
 且 `context_reused=true`。这些数字只能来自对应的完整 JSONL，不能用 synthetic test 时间估算。
 
-Portable build 的实际日志通常在 `Data\logs\`，也可以把对应完整路径传给脚本。分析器会
+Portable build 的实际日志通常在 `logs\`，也可以把对应完整路径传给脚本。分析器会
 校验唯一且位于末尾的 recorder summary、`dropped_events == 0`、至少一条导航事件和至少
 一次成功 presented。每条成功记录还必须具有完整 ID、有限非负 duration、连续 attempt、
 单调时间戳和与时间戳一致的阶段用时，否则即使存在 `outcome=presented` 也会 FAIL。

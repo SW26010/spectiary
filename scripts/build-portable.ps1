@@ -397,7 +397,9 @@ if (Test-Path -LiteralPath $packageRoot) {
 }
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-Null
+foreach ($role in @('config', 'state', 'logs', 'unsaved')) {
+    New-Item -ItemType Directory -Path (Join-Path $packageRoot $role) -Force | Out-Null
+}
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot $ArtifactFileName) -Force
 $packagedExecutableHash = (
     Get-FileHash `
@@ -459,7 +461,9 @@ try {
             $packageMetadataPath,
             $MetadataFileName,
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
-        [void]$archive.CreateEntry('Data/')
+        foreach ($role in @('config/', 'state/', 'logs/', 'unsaved/')) {
+            [void]$archive.CreateEntry($role)
+        }
     }
     finally {
         $archive.Dispose()

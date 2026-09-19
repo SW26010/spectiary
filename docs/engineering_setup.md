@@ -121,7 +121,7 @@ dispatch，同号消息在其他窗口仍按普通 invalidation 处理。专用 
 主 viewport 的 ImGui/DX11 draw 完成之后、`Present` 之前，按请求创建 D3D11 staging texture，完成 GPU→CPU
 readback 后用 Windows Imaging Component 写入 PNG。普通运行和未请求状态不执行逐帧复制，也不保留最后帧缓存。
 最小化或隐藏会明确取消尚未执行的请求，窗口恢复后不会补做。输出位于当前 storage profile 的
-`captures/`（Portable 为 `Data/captures/`，其他 profile 位于相应 local user state root）；写入先使用临时文件，
+`logs/captures/`（位于当前 application data root 下）；写入先使用临时文件，
 只有完整编码成功后才发布最终 PNG。该同步 readback/编码会扰动帧时间，不应用于性能测量。
 
 `D3D11SdrSwapChain::Resize` 必须显式从 D3D11 context 解绑 render target 后再释放 back buffer；调用方不应依赖先前
@@ -266,7 +266,7 @@ build/ninja-msvc-release-static/Spectiary.exe
 ```
 
 普通构建输出的 `spectiary_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
-panel 显示状态、profile 设置和默认日志分别写入 `%LOCALAPPDATA%\SpecForge` 下的对应文件或目录。
+panel 显示状态、profile 设置和默认日志分别写入 `%LOCALAPPDATA%\Spectiary` 下按 `config/`、`state/`、`logs/` 分工的文件或目录。
 Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，并可选择 profile 输出目录。
 设置 `SPECFORGE_PROFILE=1` 则从启动阶段自动录制；`SPECFORGE_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
 录制器使用有界异步写入，单次 5 分钟或 100 MiB 自动停止；分析前检查
@@ -276,7 +276,7 @@ Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，
 ## Portable release
 
 第一版 portable 是 no-launcher 包：zip 根目录包含 `Spectiary.exe`、
-`spectiary_metadata.json` 和 `Data\`。第三方声明与数据来源内嵌在所有分发形式
+`spectiary_metadata.json` 和 `config/`、`state/`、`logs/`、`unsaved/`。第三方声明与数据来源内嵌在所有分发形式
 共用的 EXE 中，可从 About 阅读。直接从当前工作区文件构建：
 
 ```powershell
@@ -307,7 +307,7 @@ Working-tree 默认输出位于 `dist\Spectiary-portable`，包名来自 identit
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
 目录和 ZIP 根部只保留文件 `Spectiary.exe`、文件 `spectiary_metadata.json` 和
-目录 `Data\`；根目录枚举包含隐藏项，不允许用隐藏文件绕过精确条目合同，也不要求
+目录 `config/`、`state/`、`logs/`、`unsaved/`；根目录枚举包含隐藏项，不允许用隐藏文件绕过精确条目合同，也不要求
 EXE 旁存在外部法律文档目录。仓库 `legal\` 中的两份文本
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt` 仍是可审查、可维护的唯一来源，
 构建时原样嵌入 EXE。
@@ -320,7 +320,7 @@ Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 CMake 的 post-build finalizer tool 读取实际 `Spectiary.exe`，计算 SHA-256 和 UTC 完成时间，
 并原子发布 schema 6 `spectiary_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
 `deployment` 与顶层 `application_id` 是独立维度。普通 build 输出不含 deployment，因此运行身份为 Standalone，
-数据目录仍为 `%LOCALAPPDATA%\SpecForge`。#106-A 在 `config/project_identity.json` 中明确最终 leaf 为 `Spectiary`，实际目录切换由 #103 完成。
+数据目录为 `%LOCALAPPDATA%\Spectiary`。leaf 由 `config/project_identity.json` 显式定义；旧 `SpecForge` 目录仅用于有界迁移，见 ADR 0015。
 
 `build` 中的构建环境字段为 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
 `target_architecture` 和 `windows_sdk_version`，另有严格的 `completed_at_utc`；这些值来自实际配置
@@ -337,7 +337,7 @@ metadata artifact digest、包内 `Spectiary.exe` 以及 ZIP 对应 entry 的 SH
 storage profile 差异。共同打包脚本接受两种严格组合：`working_tree` 必须使用 JSON `null` revision；
 `head` 必须显式携带完整 40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口
 负责解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，将 build provenance 原样保留到 Portable
-metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态目录 `Data\`。
+metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态目录 `config/`、`state/`、`logs/`、`unsaved/`。
 仅重新 configure 不会改变可打包 EXE 对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包
 必须失败，而不是发布过期版本声明。完整字段、finalizer 顺序和失败清理规则见
 [`docs/release_artifacts.md`](release_artifacts.md)。
@@ -379,7 +379,7 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 - `.vs/`
 - `vcpkg_installed/`
 - `CMakeUserPresets.json`
-- `Data/`
+- `config/`、`state/`、`logs/`、`unsaved/`
 - `imgui.ini`
 - `logs/`
 - 本地光谱数据。

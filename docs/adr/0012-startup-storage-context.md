@@ -1,6 +1,7 @@
 # Startup storage context (#103-A)
 
-Status: Accepted, foundation only. Date: 2026-09-19. Issue: #103.
+Status: Accepted. Foundation dated 2026-09-19; physical cutover completed by
+[ADR 0015](0015-application-storage-cutover.md). Issue: #103.
 
 ## Authority and final namespaces
 
@@ -27,31 +28,19 @@ children under the system temporary directory, namespaced by the application
 lineage ID. They describe disposable storage, not another durable content owner.
 This phase does not relocate existing caches or change machine identity schemes.
 
-## Transitional business-file placement, without cutover
+## Active role paths and migration inputs
 
-The existing business-file fields in `RuntimePaths` deliberately retain their
-current placement: Portable `Data/` and local-app-data `%LOCALAPPDATA%\SpecForge`.
-`local_user_state_root` is explicitly transitional, not a synonym for the final
-`application_data_root` and not an API for new managed namespaces. Startup obtains
-the final and transitional local roots from the same resolved platform directory.
-There is one active location per existing file, with no old/new probing, dual
-reads, dual writes, copying or migration.
+All activity now uses the final role roots; see [ADR 0015](0015-application-storage-cutover.md)
+for the file mapping and bounded migration/reset policy. `local_user_state_root`
+was removed. `legacy_application_data_root`, `legacy_spectrum_view_state_path`
+and `legacy_sample_labeling_state_path` are migration inputs only.
 
-An injected `local_app_data_user_state_root` supplies a resolved physical root for
-both local-app-data views. The runtime/automation `local_user_state_root_override`
-isolates transitional persistence and supplies `application_data_root` in both
-profiles, including its final config/state/logs/unsaved role roots. This explicit
-isolation exception also applies to Portable; `package_root`, public resources
-and the basis of package-relative locators remain tied to the executable.
-Overrides must themselves be valid absolute roots; they are not fallback policies.
-
-The eventual physical cutover remains part of #103 after the #109 labeling and
-#111 spectrum preference/state splits. Existing spectral-line grouping-view data
-will move as a whole into `state/`; #104 owns its later ViewProfile model. This
-phase does not implement #108 checkpoint lifecycle, #110 load-failure overwrite
-protection, #106-B machine identity changes, or #107 public rename work. Creating
-and hiding `unsaved/` is deferred to its storage owner/cutover, not done as a side
-effect of path resolution.
+An injected `local_app_data_user_state_root` supplies the physical local-app-data
+root without guessing a legacy sibling. `application_data_root_override` isolates
+all managed roles in either profile and disables production legacy discovery.
+Automation may explicitly supply an isolated legacy input for seed materialization.
+`package_root`, public resources and package-relative locators stay tied to the
+executable. Overrides must be absolute valid roots, never fallback policies.
 
 ## Locators and ordinary user paths
 
@@ -64,7 +53,7 @@ plain strings are accepted only as literal absolute paths. A missing file is nev
 rebound by matching a package directory basename. Only explicit relative locators
 relocate with the package.
 
-`CheckUserFilePath` is the shared admission API for subsequent normal source and
+`CheckUserFilePath` is the admission API for normal source and
 document open/save workflows. Callers may accept only `Allowed`; `Invalid` also
 fails closed. The four reserved directories themselves and their descendants are
 rejected, using Windows case-insensitive component comparison, lexical ancestry
@@ -75,5 +64,5 @@ concurrent filesystem changes.
 
 User files directly at the application root or in any other explicitly chosen
 subdirectory remain allowed. Ancestry under the application root does not transfer
-ownership. The API does not recommend that root as a user workspace, and this
-foundation phase does not wire every domain open/save flow to it.
+ownership. The API does not recommend that root as a user workspace, and is enforced at source preparation, annotation import, and canonical
+document connect/save/export boundaries.

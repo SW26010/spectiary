@@ -1,5 +1,10 @@
 # Release Profiles Are Separate Artifacts
 
+Storage-layout amendment: [ADR 0015](0015-application-storage-cutover.md)
+supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below.
+Active persistence now uses the final config/state/logs/unsaved role layout.
+
+
 Status: Superseded by
 [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md).
 

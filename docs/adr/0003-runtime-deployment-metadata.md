@@ -1,5 +1,10 @@
 # Runtime Deployment Metadata Selects Storage
 
+Storage-layout amendment: [ADR 0015](0015-application-storage-cutover.md)
+supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below.
+Active persistence now uses the final config/state/logs/unsaved role layout.
+
+
 Status: Superseded by
 [ADR 0006: Distribution Capability and Dependency Linkage Policy](0006-distribution-capability-and-linkage-policy.md).
 

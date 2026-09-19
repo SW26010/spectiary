@@ -106,7 +106,7 @@ if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
 }
 
 $expectedPackageEntries = @(
-    'Data',
+    'config', 'state', 'logs', 'unsaved',
     $ArtifactFileName,
     $MetadataFileName
 )
@@ -117,9 +117,6 @@ Assert-ExactEntries `
     -Actual $actualPackageEntries `
     -Description 'Portable package root'
 
-$packageDataEntry = @(
-    $actualPackageItems | Where-Object { $_.Name -ceq 'Data' }
-)
 $packageExecutableEntry = @(
     $actualPackageItems | Where-Object { $_.Name -ceq $ArtifactFileName }
 )
@@ -127,9 +124,11 @@ $packageMetadataEntry = @(
     $actualPackageItems |
         Where-Object { $_.Name -ceq $MetadataFileName }
 )
-if ($packageDataEntry.Count -ne 1 -or
-    -not $packageDataEntry[0].PSIsContainer) {
-    throw 'Portable package root Data must be a directory.'
+foreach ($role in @('config', 'state', 'logs', 'unsaved')) {
+    $entry = @($actualPackageItems | Where-Object { $_.Name -ceq $role })
+    if ($entry.Count -ne 1 -or -not $entry[0].PSIsContainer) {
+        throw "Portable package root $role must be a directory."
+    }
 }
 if ($packageExecutableEntry.Count -ne 1 -or
     $packageExecutableEntry[0].PSIsContainer) {
@@ -252,7 +251,10 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
     $expectedZipEntries = @(
-        'Data/',
+        'config/',
+        'state/',
+        'logs/',
+        'unsaved/',
         $ArtifactFileName,
         $MetadataFileName
     )

@@ -1,5 +1,10 @@
 # Explicit project identity and naming contracts
 
+Storage-layout amendment: [ADR 0015](0015-application-storage-cutover.md)
+supersedes the historical `Data/` and `%LOCALAPPDATA%\SpecForge` placement below.
+Active persistence now uses the final config/state/logs/unsaved role layout.
+
+
 Status: Accepted for #106-A. Date: 2026-09-18. Issues: #106, #107, #103.
 
 ## Independent values

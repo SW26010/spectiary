@@ -116,7 +116,7 @@ Run the working-tree or isolated-`HEAD` entrypoint described in
    requirement;
 3. checks that `artifact.sha256` equals the hash of the build-directory EXE;
 4. copies `Spectiary.exe` and metadata to a package root containing only the
-   executable file, metadata file, and `Data/` directory; exact enumeration
+   executable file, metadata file, and `config/`, `state/`, `logs/`, `unsaved/` directories; exact enumeration
    includes hidden entries and validates each entry type;
 5. adds `deployment.distribution: "portable"` and
    `deployment.storage_profile: "portable"` to the package metadata copy;

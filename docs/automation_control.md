@@ -22,7 +22,7 @@ Start an isolated automation instance:
 The launcher accepts `--app <SpecForge.exe>`,
 `--state-root <new-absolute-directory>`, the optional
 `--labeling-state-seed <absolute-production-cache.json>`, and the optional
-`--imgui-layout-seed <absolute-specforge-imgui-v2.ini>`. The state-root path
+`--imgui-layout-seed <absolute-imgui-layout-v2.ini>`. The state-root path
 must not already exist. When omitted, the launcher creates a unique directory
 below the system temporary directory. The launcher also generates a
 cryptographically random instance ID and nonce, constructs the per-instance
@@ -34,7 +34,8 @@ The ImGui layout seed is a launcher preparation input, not a protocol command.
 The launcher pins a non-reparse regular file that is independent from the
 ordinary and automation state roots, rejects empty, malformed, or larger than
 16 MiB snapshots with the production layout validator, and copies it through
-the pinned state-root handle as `specforge-imgui-v2.ini` before `CreateProcessW`.
+the pinned state-root handle as `imgui-layout-v2.ini` before `CreateProcessW`; startup imports that isolated
+seed into `state/imgui-layout-v2.ini`.
 The materialized copy is validated again. This keeps deterministic layout and
 viewport lifecycle fixtures out of ordinary user state without adding an ImGui
 mutation command to the automation protocol.
