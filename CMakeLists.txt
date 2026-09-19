@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Spectiary VERSION 0.9.0 LANGUAGES CXX RC)
+project(Spectiary VERSION 0.10.0 LANGUAGES CXX RC)
 include("${CMAKE_SOURCE_DIR}/cmake/project_identity.cmake")
 
 set(CMAKE_CXX_STANDARD 20)
