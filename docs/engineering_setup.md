@@ -320,7 +320,11 @@ Portable 根目录和 ZIP 都不得用相邻 DLL 补足该依赖。
 CMake 的 post-build finalizer tool 读取实际 `Spectiary.exe`，计算 SHA-256 和 UTC 完成时间，
 并原子发布 schema 6 `spectiary_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
 `deployment` 与顶层 `application_id` 是独立维度。普通 build 输出不含 deployment，因此运行身份为 Standalone，
-数据目录为 `%LOCALAPPDATA%\Spectiary`。leaf 由 `config/project_identity.json` 显式定义；旧 `Spectiary` 目录仅用于有界迁移，见 ADR 0015。
+数据目录为 `%LOCALAPPDATA%\Spectiary`。leaf 由 `config/project_identity.json` 显式定义；旧 `%LOCALAPPDATA%\SpecForge` 目录仅用于有界迁移，见 ADR 0015。
+
+最终存储联合验收见 [阶段 8 验收记录](storage_acceptance.md)。只有 `config/`、`state/`、
+`logs/`、`unsaved/` 是保留 namespace；用户主动选择的根目录文件和其他子目录仍归用户所有。
+配置重置、普通状态清理和 checkpoint 清理不得递归删除 application data root；可重建缓存继续使用系统临时存储。
 
 `build` 中的构建环境字段为 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
 `target_architecture` 和 `windows_sdk_version`，另有严格的 `completed_at_utc`；这些值来自实际配置

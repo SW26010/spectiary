@@ -1,6 +1,7 @@
 # Application-managed storage physical cutover
 
-Status: Implemented locally; joint acceptance before closing #103. Date: 2026-09-19.
+Status: Implemented; final local joint acceptance recorded in
+[storage acceptance](../storage_acceptance.md). Date: 2026-09-19.
 Issues: #103 and the storage-coupled subset of #106.
 
 ## Final owners
@@ -66,5 +67,8 @@ The public built-in catalog remains a package resource. Grouping views move as o
 state file; #104 is unchanged. #108/#109 canonical ownership/checkpoint lifecycle
 is unchanged. IPC, Win32/shell identity, ImGui internal IDs, format/digest domains,
 environment/CLI naming and broad public rename remain outside this phase.
-#103 remains open for joint acceptance; #106 and #107 remain open for their remaining
-identity/adoption work. No push or issue closure is part of the local cutover.
+Stage 8 audits the combined implementation after the identity/public rename, without
+expanding the storage design. See the acceptance matrix and local closure summary
+for #103 in [storage acceptance](../storage_acceptance.md). Publication and GitHub
+issue closure are deferred while this work remains local; that is separate from
+the implementation acceptance result. Other issues retain their own scope/status.
