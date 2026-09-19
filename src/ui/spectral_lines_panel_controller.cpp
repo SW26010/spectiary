@@ -7,6 +7,20 @@
 
 namespace spectiary {
 namespace {
+SpectralLineCacheLoadIssueKind PanelLoadIssue(VersionedJsonCacheLoadIssueKind issue)
+{
+    switch (issue) {
+    case VersionedJsonCacheLoadIssueKind::None:
+        return SpectralLineCacheLoadIssueKind::None;
+    case VersionedJsonCacheLoadIssueKind::ReadFailed:
+        return SpectralLineCacheLoadIssueKind::ReadFailed;
+    case VersionedJsonCacheLoadIssueKind::InvalidDocument:
+        return SpectralLineCacheLoadIssueKind::InvalidDocument;
+    case VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema:
+        return SpectralLineCacheLoadIssueKind::UnsupportedFormatOrSchema;
+    }
+    return SpectralLineCacheLoadIssueKind::InvalidDocument;
+}
 std::string Trim(std::string value) {
     const auto blank = [](unsigned char c) { return std::isspace(c) != 0; };
     while (!value.empty() && blank(value.front())) value.erase(value.begin());
@@ -30,105 +44,105 @@ GeneratedNameMetadata NameMetadata(const std::unordered_map<std::string, Generat
     return found == names.end() ? GeneratedNameMetadata{} : found->second;
 }
 } // namespace
-CatalogUserStateIntent::CatalogUserStateIntent(Kind kind) : kind_(kind) {}
+SpectralLineStateIntent::SpectralLineStateIntent(Kind kind) : kind_(kind) {}
 
-CatalogUserStateIntent CatalogUserStateIntent::SetGroupingViewSearch(std::string query)
+SpectralLineStateIntent SpectralLineStateIntent::SetGroupingViewSearch(std::string query)
 {
-    CatalogUserStateIntent intent(Kind::SetGroupingViewSearch);
+    SpectralLineStateIntent intent(Kind::SetGroupingViewSearch);
     intent.text_ = std::move(query);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SetMarkerLabelsVisible(bool visible)
+SpectralLineStateIntent SpectralLineStateIntent::SetMarkerLabelsVisible(bool visible)
 {
-    CatalogUserStateIntent intent(Kind::SetMarkerLabelsVisible);
+    SpectralLineStateIntent intent(Kind::SetMarkerLabelsVisible);
     intent.enabled_ = visible;
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SelectGroupingView(std::string view_id)
+SpectralLineStateIntent SpectralLineStateIntent::SelectGroupingView(std::string view_id)
 {
-    CatalogUserStateIntent intent(Kind::SelectGroupingView);
+    SpectralLineStateIntent intent(Kind::SelectGroupingView);
     intent.view_id_ = std::move(view_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::AcknowledgeGroupingViewSelection(std::string view_id)
+SpectralLineStateIntent SpectralLineStateIntent::AcknowledgeGroupingViewSelection(std::string view_id)
 {
-    CatalogUserStateIntent intent(Kind::AcknowledgeGroupingViewSelection);
+    SpectralLineStateIntent intent(Kind::AcknowledgeGroupingViewSelection);
     intent.view_id_ = std::move(view_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::CreateUserGroupingView()
+SpectralLineStateIntent SpectralLineStateIntent::CreateUserGroupingView()
 {
-    return CatalogUserStateIntent(Kind::CreateUserGroupingView);
+    return SpectralLineStateIntent(Kind::CreateUserGroupingView);
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::DuplicateGroupingView(std::string view_id)
+SpectralLineStateIntent SpectralLineStateIntent::DuplicateGroupingView(std::string view_id)
 {
-    CatalogUserStateIntent intent(Kind::DuplicateGroupingView);
+    SpectralLineStateIntent intent(Kind::DuplicateGroupingView);
     intent.view_id_ = std::move(view_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::RenameUserGroupingView(
+SpectralLineStateIntent SpectralLineStateIntent::RenameUserGroupingView(
     std::string view_id,
     std::string name,
-    CatalogUserRenameEditState edit_state)
+    SpectralLineRenameEditState edit_state)
 {
-    CatalogUserStateIntent intent(Kind::RenameUserGroupingView);
+    SpectralLineStateIntent intent(Kind::RenameUserGroupingView);
     intent.view_id_ = std::move(view_id);
     intent.text_ = std::move(name);
     intent.rename_edit_state_ = edit_state;
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::DeleteUserGroupingView(std::string view_id)
+SpectralLineStateIntent SpectralLineStateIntent::DeleteUserGroupingView(std::string view_id)
 {
-    CatalogUserStateIntent intent(Kind::DeleteUserGroupingView);
+    SpectralLineStateIntent intent(Kind::DeleteUserGroupingView);
     intent.view_id_ = std::move(view_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::AddUserGroup(std::string view_id)
+SpectralLineStateIntent SpectralLineStateIntent::AddUserGroup(std::string view_id)
 {
-    CatalogUserStateIntent intent(Kind::AddUserGroup);
+    SpectralLineStateIntent intent(Kind::AddUserGroup);
     intent.view_id_ = std::move(view_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::MoveMarkerReferenceToNewGroup(
+SpectralLineStateIntent SpectralLineStateIntent::MoveMarkerReferenceToNewGroup(
     std::string view_id,
     std::string marker_id,
     std::string source_group_id)
 {
-    CatalogUserStateIntent intent(Kind::MoveMarkerReferenceToNewGroup);
+    SpectralLineStateIntent intent(Kind::MoveMarkerReferenceToNewGroup);
     intent.view_id_ = std::move(view_id);
     intent.marker_id_ = std::move(marker_id);
     intent.source_group_id_ = std::move(source_group_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::CopyMarkerReferenceToNewGroup(
+SpectralLineStateIntent SpectralLineStateIntent::CopyMarkerReferenceToNewGroup(
     std::string view_id,
     std::string marker_id,
     std::string source_group_id)
 {
-    CatalogUserStateIntent intent(Kind::CopyMarkerReferenceToNewGroup);
+    SpectralLineStateIntent intent(Kind::CopyMarkerReferenceToNewGroup);
     intent.view_id_ = std::move(view_id);
     intent.marker_id_ = std::move(marker_id);
     intent.source_group_id_ = std::move(source_group_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::RenameUserGroup(
+SpectralLineStateIntent SpectralLineStateIntent::RenameUserGroup(
     std::string view_id,
     std::string group_id,
     std::string name,
-    CatalogUserRenameEditState edit_state)
+    SpectralLineRenameEditState edit_state)
 {
-    CatalogUserStateIntent intent(Kind::RenameUserGroup);
+    SpectralLineStateIntent intent(Kind::RenameUserGroup);
     intent.view_id_ = std::move(view_id);
     intent.group_id_ = std::move(group_id);
     intent.text_ = std::move(name);
@@ -136,57 +150,57 @@ CatalogUserStateIntent CatalogUserStateIntent::RenameUserGroup(
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::DeleteUserGroup(std::string view_id, std::string group_id)
+SpectralLineStateIntent SpectralLineStateIntent::DeleteUserGroup(std::string view_id, std::string group_id)
 {
-    CatalogUserStateIntent intent(Kind::DeleteUserGroup);
+    SpectralLineStateIntent intent(Kind::DeleteUserGroup);
     intent.view_id_ = std::move(view_id);
     intent.group_id_ = std::move(group_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SetGroupMarkerVisibility(
+SpectralLineStateIntent SpectralLineStateIntent::SetGroupMarkerVisibility(
     std::string view_id,
     std::string group_id,
     bool visible)
 {
-    CatalogUserStateIntent intent(Kind::SetGroupMarkerVisibility);
+    SpectralLineStateIntent intent(Kind::SetGroupMarkerVisibility);
     intent.view_id_ = std::move(view_id);
     intent.group_id_ = std::move(group_id);
     intent.enabled_ = visible;
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SetGroupExpanded(
+SpectralLineStateIntent SpectralLineStateIntent::SetGroupExpanded(
     std::string view_id,
     std::string group_id,
     bool expanded)
 {
-    CatalogUserStateIntent intent(Kind::SetGroupExpanded);
+    SpectralLineStateIntent intent(Kind::SetGroupExpanded);
     intent.view_id_ = std::move(view_id);
     intent.group_id_ = std::move(group_id);
     intent.enabled_ = expanded;
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::ReorderUserGroupBefore(
+SpectralLineStateIntent SpectralLineStateIntent::ReorderUserGroupBefore(
     std::string view_id,
     std::string source_group_id,
     std::string target_group_id)
 {
-    CatalogUserStateIntent intent(Kind::ReorderUserGroupBefore);
+    SpectralLineStateIntent intent(Kind::ReorderUserGroupBefore);
     intent.view_id_ = std::move(view_id);
     intent.source_group_id_ = std::move(source_group_id);
     intent.target_group_id_ = std::move(target_group_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::MoveMarkerReference(
+SpectralLineStateIntent SpectralLineStateIntent::MoveMarkerReference(
     std::string view_id,
     std::string marker_id,
     std::string source_group_id,
     std::string target_group_id)
 {
-    CatalogUserStateIntent intent(Kind::MoveMarkerReference);
+    SpectralLineStateIntent intent(Kind::MoveMarkerReference);
     intent.view_id_ = std::move(view_id);
     intent.marker_id_ = std::move(marker_id);
     intent.source_group_id_ = std::move(source_group_id);
@@ -194,13 +208,13 @@ CatalogUserStateIntent CatalogUserStateIntent::MoveMarkerReference(
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::CopyMarkerReference(
+SpectralLineStateIntent SpectralLineStateIntent::CopyMarkerReference(
     std::string view_id,
     std::string marker_id,
     std::string source_group_id,
     std::string target_group_id)
 {
-    CatalogUserStateIntent intent(Kind::CopyMarkerReference);
+    SpectralLineStateIntent intent(Kind::CopyMarkerReference);
     intent.view_id_ = std::move(view_id);
     intent.marker_id_ = std::move(marker_id);
     intent.source_group_id_ = std::move(source_group_id);
@@ -208,31 +222,31 @@ CatalogUserStateIntent CatalogUserStateIntent::CopyMarkerReference(
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::RemoveMarkerReference(
+SpectralLineStateIntent SpectralLineStateIntent::RemoveMarkerReference(
     std::string view_id,
     std::string marker_id,
     std::string group_id)
 {
-    CatalogUserStateIntent intent(Kind::RemoveMarkerReference);
+    SpectralLineStateIntent intent(Kind::RemoveMarkerReference);
     intent.view_id_ = std::move(view_id);
     intent.marker_id_ = std::move(marker_id);
     intent.group_id_ = std::move(group_id);
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SetMarkerVisibility(std::string marker_id, bool visible)
+SpectralLineStateIntent SpectralLineStateIntent::SetMarkerVisibility(std::string marker_id, bool visible)
 {
-    CatalogUserStateIntent intent(Kind::SetMarkerVisibility);
+    SpectralLineStateIntent intent(Kind::SetMarkerVisibility);
     intent.marker_id_ = std::move(marker_id);
     intent.enabled_ = visible;
     return intent;
 }
 
-CatalogUserStateIntent CatalogUserStateIntent::SetMarkerColor(
+SpectralLineStateIntent SpectralLineStateIntent::SetMarkerColor(
     std::string marker_id,
     PlotSeriesColor color)
 {
-    CatalogUserStateIntent intent(Kind::SetMarkerColor);
+    SpectralLineStateIntent intent(Kind::SetMarkerColor);
     intent.marker_id_ = std::move(marker_id);
     intent.marker_color_ = std::move(color);
     return intent;
@@ -306,9 +320,9 @@ std::string SpectralLinesPanelController::NextId(bool group) const
     return {};
 }
 
-CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateIntent intent)
+SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIntent intent)
 {
-    using Kind = CatalogUserStateIntent::Kind;
+    using Kind = SpectralLineStateIntent::Kind;
     auto& session = adapter_.session();
     std::string error;
     if (intent.kind_ == Kind::SetGroupingViewSearch) {
@@ -413,7 +427,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
     if (intent.kind_ == Kind::RenameUserGroupingView) {
         const auto name = Trim(intent.text_);
         if (name.empty()) return Rejected("A non-empty name is required.");
-        if (intent.rename_edit_state_ == CatalogUserRenameEditState::Unedited) return NoChange();
+        if (intent.rename_edit_state_ == SpectralLineRenameEditState::Unedited) return NoChange();
         if (view.name == name && NameMetadata(session.view_names, view.id) == GeneratedNameMetadata{}) return NoChange();
         view.name = name;
         if (!adapter_.PutView(view, error)) return Rejected(error);
@@ -422,7 +436,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
     if (intent.kind_ == Kind::RenameUserGroup) {
         auto* group = find_group(intent.group_id_); const auto name = Trim(intent.text_);
         if (!group || name.empty()) return Rejected("Editable group and non-empty name are required.");
-        if (intent.rename_edit_state_ == CatalogUserRenameEditState::Unedited) return NoChange();
+        if (intent.rename_edit_state_ == SpectralLineRenameEditState::Unedited) return NoChange();
         if (group->name == name && NameMetadata(session.group_names, group->id) == GeneratedNameMetadata{}) return NoChange();
         group->name = name;
         if (!adapter_.PutView(view, error)) return Rejected(error);
@@ -493,22 +507,22 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
     return Applied(true);
 }
 
-CatalogUserStateView SpectralLinesPanelController::View() const
+SpectralLinePanelView SpectralLinesPanelController::View() const
 {
-    CatalogUserStateView result;
+    SpectralLinePanelView result;
     const auto& list = adapter_.effective(); const auto& session = adapter_.session();
     const auto persistence = cache_persistence_.PersistenceStatus();
-    result.catalog_id = list.id; result.catalog_display_name = list.name; result.catalog_load_error = adapter_.base_error();
+    result.line_list_id = list.id; result.line_list_display_name = list.name; result.line_list_load_error = adapter_.base_error();
     result.persistence.retrying = persistence.retrying; result.persistence.recovered = persistence.recovered;
-    result.persistence.load_issue = static_cast<SpectralLineCacheLoadIssueKind>(adapter_.load_issue());
+    result.persistence.load_issue = PanelLoadIssue(adapter_.load_issue());
     result.persistence.load_diagnostic_detail = persistence.load_diagnostic_detail;
     result.persistence.save_diagnostic_detail = persistence.save_diagnostic_detail;
     result.grouping_view_search = grouping_view_search_; result.marker_labels_visible = marker_labels_visible_;
-    result.catalog_marker_count = list.markers.size();
+    result.line_list_marker_count = list.markers.size();
     for (const auto& view : list.grouping_views) {
         SpectralLineGroupingView output;
         output.id = view.id; output.name = view.name; output.editable = adapter_.CanEditView(view.id);
-        result.has_catalog_grouping_view |= adapter_.IsBaseView(view.id);
+        result.has_base_grouping_view |= adapter_.IsBaseView(view.id);
         if (output.editable) ++result.user_grouping_view_count;
         output.generated_name = NameMetadata(session.view_names, view.id);
         if (adapter_.IsBaseView(view.id) && view.id == "__catalog_grouping_view__") output.generated_name.source = GeneratedNameSource::CatalogGroupingView;
@@ -573,13 +587,13 @@ bool SpectralLinesPanelController::Flush()
     return cache_persistence_.Flush([this] { return SaveState(); }) != LocalUserStatePersistenceLifecycle::FlushOutcome::Failed &&
         adapter_.load_issue() == VersionedJsonCacheLoadIssueKind::None;
 }
-CatalogUserStateResult SpectralLinesPanelController::Applied(bool persistent)
+SpectralLineStateResult SpectralLinesPanelController::Applied(bool persistent)
 {
     if (persistent) { adapter_.NormalizeSession(); cache_persistence_.MarkDirty(); }
-    return {CatalogUserStateResultStatus::Applied, true, persistent, {}};
+    return {SpectralLineStateResultStatus::Applied, true, persistent, {}};
 }
-CatalogUserStateResult SpectralLinesPanelController::NoChange() { return {}; }
-CatalogUserStateResult SpectralLinesPanelController::Rejected(std::string message)
-{ return {CatalogUserStateResultStatus::Rejected, false, false, std::move(message)}; }
+SpectralLineStateResult SpectralLinesPanelController::NoChange() { return {}; }
+SpectralLineStateResult SpectralLinesPanelController::Rejected(std::string message)
+{ return {SpectralLineStateResultStatus::Rejected, false, false, std::move(message)}; }
 
 } // namespace spectiary

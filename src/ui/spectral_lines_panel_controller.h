@@ -22,70 +22,70 @@ namespace spectiary {
 enum class GroupVisibilityState { Empty, AllVisible, AllHidden, Mixed, SearchFiltered };
 class SpectralLinesPanelController;
 
-enum class CatalogUserRenameEditState {
+enum class SpectralLineRenameEditState {
     Unedited,
     Edited,
 };
 
-struct CatalogUserStateIntent {
-    [[nodiscard]] static CatalogUserStateIntent SetGroupingViewSearch(std::string query);
-    [[nodiscard]] static CatalogUserStateIntent SetMarkerLabelsVisible(bool visible);
-    [[nodiscard]] static CatalogUserStateIntent SelectGroupingView(std::string view_id);
-    [[nodiscard]] static CatalogUserStateIntent AcknowledgeGroupingViewSelection(std::string view_id);
-    [[nodiscard]] static CatalogUserStateIntent CreateUserGroupingView();
-    [[nodiscard]] static CatalogUserStateIntent DuplicateGroupingView(std::string view_id);
-    [[nodiscard]] static CatalogUserStateIntent RenameUserGroupingView(
+struct SpectralLineStateIntent {
+    [[nodiscard]] static SpectralLineStateIntent SetGroupingViewSearch(std::string query);
+    [[nodiscard]] static SpectralLineStateIntent SetMarkerLabelsVisible(bool visible);
+    [[nodiscard]] static SpectralLineStateIntent SelectGroupingView(std::string view_id);
+    [[nodiscard]] static SpectralLineStateIntent AcknowledgeGroupingViewSelection(std::string view_id);
+    [[nodiscard]] static SpectralLineStateIntent CreateUserGroupingView();
+    [[nodiscard]] static SpectralLineStateIntent DuplicateGroupingView(std::string view_id);
+    [[nodiscard]] static SpectralLineStateIntent RenameUserGroupingView(
         std::string view_id,
         std::string name,
-        CatalogUserRenameEditState edit_state);
-    [[nodiscard]] static CatalogUserStateIntent DeleteUserGroupingView(std::string view_id);
-    [[nodiscard]] static CatalogUserStateIntent AddUserGroup(std::string view_id);
-    [[nodiscard]] static CatalogUserStateIntent MoveMarkerReferenceToNewGroup(
+        SpectralLineRenameEditState edit_state);
+    [[nodiscard]] static SpectralLineStateIntent DeleteUserGroupingView(std::string view_id);
+    [[nodiscard]] static SpectralLineStateIntent AddUserGroup(std::string view_id);
+    [[nodiscard]] static SpectralLineStateIntent MoveMarkerReferenceToNewGroup(
         std::string view_id,
         std::string marker_id,
         std::string source_group_id);
-    [[nodiscard]] static CatalogUserStateIntent CopyMarkerReferenceToNewGroup(
+    [[nodiscard]] static SpectralLineStateIntent CopyMarkerReferenceToNewGroup(
         std::string view_id,
         std::string marker_id,
         std::string source_group_id);
-    [[nodiscard]] static CatalogUserStateIntent RenameUserGroup(
+    [[nodiscard]] static SpectralLineStateIntent RenameUserGroup(
         std::string view_id,
         std::string group_id,
         std::string name,
-        CatalogUserRenameEditState edit_state);
-    [[nodiscard]] static CatalogUserStateIntent DeleteUserGroup(
+        SpectralLineRenameEditState edit_state);
+    [[nodiscard]] static SpectralLineStateIntent DeleteUserGroup(
         std::string view_id,
         std::string group_id);
-    [[nodiscard]] static CatalogUserStateIntent SetGroupMarkerVisibility(
+    [[nodiscard]] static SpectralLineStateIntent SetGroupMarkerVisibility(
         std::string view_id,
         std::string group_id,
         bool visible);
-    [[nodiscard]] static CatalogUserStateIntent SetGroupExpanded(
+    [[nodiscard]] static SpectralLineStateIntent SetGroupExpanded(
         std::string view_id,
         std::string group_id,
         bool expanded);
-    [[nodiscard]] static CatalogUserStateIntent ReorderUserGroupBefore(
+    [[nodiscard]] static SpectralLineStateIntent ReorderUserGroupBefore(
         std::string view_id,
         std::string source_group_id,
         std::string target_group_id);
-    [[nodiscard]] static CatalogUserStateIntent MoveMarkerReference(
-        std::string view_id,
-        std::string marker_id,
-        std::string source_group_id,
-        std::string target_group_id);
-    [[nodiscard]] static CatalogUserStateIntent CopyMarkerReference(
+    [[nodiscard]] static SpectralLineStateIntent MoveMarkerReference(
         std::string view_id,
         std::string marker_id,
         std::string source_group_id,
         std::string target_group_id);
-    [[nodiscard]] static CatalogUserStateIntent RemoveMarkerReference(
+    [[nodiscard]] static SpectralLineStateIntent CopyMarkerReference(
+        std::string view_id,
+        std::string marker_id,
+        std::string source_group_id,
+        std::string target_group_id);
+    [[nodiscard]] static SpectralLineStateIntent RemoveMarkerReference(
         std::string view_id,
         std::string marker_id,
         std::string group_id);
-    [[nodiscard]] static CatalogUserStateIntent SetMarkerVisibility(
+    [[nodiscard]] static SpectralLineStateIntent SetMarkerVisibility(
         std::string marker_id,
         bool visible);
-    [[nodiscard]] static CatalogUserStateIntent SetMarkerColor(
+    [[nodiscard]] static SpectralLineStateIntent SetMarkerColor(
         std::string marker_id,
         PlotSeriesColor color);
 
@@ -116,7 +116,7 @@ private:
         SetMarkerColor,
     };
 
-    explicit CatalogUserStateIntent(Kind kind);
+    explicit SpectralLineStateIntent(Kind kind);
 
     Kind kind_;
     std::string view_id_;
@@ -127,18 +127,18 @@ private:
     std::string text_;
     bool enabled_ = false;
     PlotSeriesColor marker_color_ = PlotSeriesColor::Auto();
-    CatalogUserRenameEditState rename_edit_state_ =
-        CatalogUserRenameEditState::Unedited;
+    SpectralLineRenameEditState rename_edit_state_ =
+        SpectralLineRenameEditState::Unedited;
 };
 
-enum class CatalogUserStateResultStatus {
+enum class SpectralLineStateResultStatus {
     Applied,
     NoChange,
     Rejected,
 };
 
-struct CatalogUserStateResult {
-    CatalogUserStateResultStatus status = CatalogUserStateResultStatus::NoChange;
+struct SpectralLineStateResult {
+    SpectralLineStateResultStatus status = SpectralLineStateResultStatus::NoChange;
     bool changed = false;
     bool persistent_state_changed = false;
     std::string message;
@@ -194,16 +194,16 @@ struct SpectralLinePersistenceView {
     std::string save_diagnostic_detail;
 };
 
-struct CatalogUserStateView {
-    std::string catalog_id;
-    std::string catalog_display_name;
-    std::string catalog_load_error;
+struct SpectralLinePanelView {
+    std::string line_list_id;
+    std::string line_list_display_name;
+    std::string line_list_load_error;
     SpectralLinePersistenceView persistence;
     std::string grouping_view_search;
     bool marker_labels_visible = true;
-    bool has_catalog_grouping_view = false;
+    bool has_base_grouping_view = false;
     std::size_t user_grouping_view_count = 0;
-    std::size_t catalog_marker_count = 0;
+    std::size_t line_list_marker_count = 0;
     std::vector<SpectralLineGroupingView> grouping_views;
 };
 
@@ -216,9 +216,9 @@ struct SpectralLinePlotView {
 class SpectralLinesPanelController {
 public:
     explicit SpectralLinesPanelController(
-        std::filesystem::path packaged_catalog_path);
+        std::filesystem::path packaged_line_list_path);
     SpectralLinesPanelController(
-        std::filesystem::path packaged_catalog_path,
+        std::filesystem::path packaged_line_list_path,
         std::filesystem::path user_state_cache_path);
     SpectralLinesPanelController(
         SpectralLineList list,
@@ -228,8 +228,8 @@ public:
     SpectralLinesPanelController(const SpectralLinesPanelController&) = delete;
     SpectralLinesPanelController& operator=(const SpectralLinesPanelController&) = delete;
 
-    [[nodiscard]] CatalogUserStateResult Submit(CatalogUserStateIntent intent);
-    [[nodiscard]] CatalogUserStateView View() const;
+    [[nodiscard]] SpectralLineStateResult Submit(SpectralLineStateIntent intent);
+    [[nodiscard]] SpectralLinePanelView View() const;
     [[nodiscard]] SpectralLinePlotView PlotView(
         const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] LocalUserStatePersistenceStatus
@@ -241,9 +241,9 @@ public:
 
 private:
     SpectralLinesPanelController(SpectralLineListParseResult parsed, std::filesystem::path state_path);
-    [[nodiscard]] CatalogUserStateResult Applied(bool persistent_state_changed);
-    [[nodiscard]] static CatalogUserStateResult NoChange();
-    [[nodiscard]] static CatalogUserStateResult Rejected(std::string message);
+    [[nodiscard]] SpectralLineStateResult Applied(bool persistent_state_changed);
+    [[nodiscard]] static SpectralLineStateResult NoChange();
+    [[nodiscard]] static SpectralLineStateResult Rejected(std::string message);
     [[nodiscard]] const line_list::GroupingView* FindView(std::string_view id) const;
     [[nodiscard]] const line_list::Marker* FindMarker(std::string_view id) const;
     [[nodiscard]] std::string NextId(bool group) const;

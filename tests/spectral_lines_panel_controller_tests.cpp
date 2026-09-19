@@ -12,10 +12,10 @@
 
 namespace {
 using namespace spectiary;
-using Intent = CatalogUserStateIntent;
-using Status = CatalogUserStateResultStatus;
+using Intent = SpectralLineStateIntent;
+using Status = SpectralLineStateResultStatus;
 void Require(bool value, const std::string& message) { if (!value) throw std::runtime_error(message); }
-void Applied(const CatalogUserStateResult& result) { Require(result.status == Status::Applied, result.message); }
+void Applied(const SpectralLineStateResult& result) { Require(result.status == Status::Applied, result.message); }
 SpectralLineList Base()
 {
     SpectralLineList list;
@@ -27,12 +27,12 @@ SpectralLineList Base()
                            {"base-two", "Base two", {{"base-g2", "Carbon", {"c", "b"}}}}};
     return list;
 }
-const SpectralLineGroupingView& View(const CatalogUserStateView& state, const std::string& id)
+const SpectralLineGroupingView& View(const SpectralLinePanelView& state, const std::string& id)
 {
     for (const auto& view : state.grouping_views) if (view.id == id) return view;
     throw std::runtime_error("missing view: " + id);
 }
-std::string Active(const CatalogUserStateView& state)
+std::string Active(const SpectralLinePanelView& state)
 {
     for (const auto& view : state.grouping_views) if (view.active) return view.id;
     return {};
@@ -85,7 +85,7 @@ void TestOperations(const std::filesystem::path& path)
     Applied(controller.Submit(Intent::SetGroupMarkerVisibility(user, first, true)));
     Require(controller.PlotView(snapshot).visible_markers.size() == 3, "group visibility changes shared marker state");
     Applied(controller.Submit(Intent::ReorderUserGroupBefore(user, second, first)));
-    Applied(controller.Submit(Intent::RenameUserGroup(user, first, "Unassigned", CatalogUserRenameEditState::Edited)));
+    Applied(controller.Submit(Intent::RenameUserGroup(user, first, "Unassigned", SpectralLineRenameEditState::Edited)));
     Applied(controller.Submit(Intent::SetGroupExpanded(user, first, true)));
     state = controller.View();
     Require(View(state, user).groups[0].id == second && View(state, user).groups[1].name == "Unassigned" &&
@@ -95,7 +95,7 @@ void TestOperations(const std::filesystem::path& path)
     Require(copy != user, "duplicate has fresh identity");
     state = controller.View();
     Require(View(state, copy).groups[0].id != second, "duplicate group identities fresh");
-    Applied(controller.Submit(Intent::RenameUserGroupingView(copy, "Grouping 1", CatalogUserRenameEditState::Edited)));
+    Applied(controller.Submit(Intent::RenameUserGroupingView(copy, "Grouping 1", SpectralLineRenameEditState::Edited)));
     Require(View(controller.View(), copy).generated_name == GeneratedNameMetadata{}, "explicit rename clears generated provenance");
     Applied(controller.Submit(Intent::DeleteUserGroupingView(copy)));
     Applied(controller.Submit(Intent::SelectGroupingView(user)));
@@ -132,7 +132,7 @@ void TestPersistence(const std::filesystem::path& root)
     auto loaded = LoadBuiltInSpectralLineState(path, Base());
     Require(loaded.state.overlay.grouping_views.size() == 2, "both additions preserved");
     SpectralLinesPanelController left(Base(), path), right(Base(), path);
-    Applied(left.Submit(Intent::RenameUserGroupingView(a, "Pending", CatalogUserRenameEditState::Edited)));
+    Applied(left.Submit(Intent::RenameUserGroupingView(a, "Pending", SpectralLineRenameEditState::Edited)));
     Applied(right.Submit(Intent::DeleteUserGroupingView(a)));
     Require(right.Flush() && !left.Flush(), "deleted edited view is controlled conflict");
     Require(View(left.View(), a).name == "Pending", "conflict retains in-memory edit");

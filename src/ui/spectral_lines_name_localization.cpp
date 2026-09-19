@@ -67,13 +67,13 @@ std::string ResolveSpectralLineRenameSubmission(
         : std::string(stored_name);
 }
 
-std::string SpectralLineCatalogOptionLabel(
+std::string SpectralLineListOptionLabel(
     std::string_view visible_name,
-    std::string_view catalog_id)
+    std::string_view line_list_id)
 {
     std::string label(visible_name);
     label += "###";
-    label += catalog_id;
+    label += line_list_id;
     return label;
 }
 

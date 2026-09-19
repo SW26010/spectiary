@@ -25,18 +25,18 @@ bool HasNonWhitespace(std::string_view text)
     });
 }
 
-std::string LocalizedCatalogName(
+std::string LocalizedLineListName(
     UiLanguage language,
-    const CatalogUserStateView& state)
+    const SpectralLinePanelView& state)
 {
-    if (state.catalog_id ==
+    if (state.line_list_id ==
         "public-spectral-lines.v1") {
         return std::string(
             UiText(
                 language,
                 UiTextId::PublicSpectralLineCatalog));
     }
-    return state.catalog_display_name;
+    return state.line_list_display_name;
 }
 
 void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
@@ -107,7 +107,7 @@ void SpectralLinesPanelUi::Render(
     UiLanguage language,
     bool* open)
 {
-    const CatalogUserStateView state = panel.View();
+    const SpectralLinePanelView state = panel.View();
     if (!grouping_view_search_initialized_) {
         std::snprintf(
             grouping_view_search_.data(),
@@ -157,26 +157,26 @@ void SpectralLinesPanelUi::Render(
     }
 
     const std::string selected_catalog =
-        LocalizedCatalogName(language, state);
-    const std::string catalog_label =
+        LocalizedLineListName(language, state);
+    const std::string line_list_label =
         StableUiLabel(
             language,
             UiTextId::Catalog,
             "SpectralLineCatalog");
     if (ImGui::BeginCombo(
-            catalog_label.c_str(),
+            line_list_label.c_str(),
             selected_catalog.c_str())) {
-        const std::string catalog_option_label =
-            SpectralLineCatalogOptionLabel(
+        const std::string line_list_option_label =
+            SpectralLineListOptionLabel(
                 selected_catalog,
-                state.catalog_id);
+                state.line_list_id);
         ImGui::Selectable(
-            catalog_option_label.c_str(),
+            line_list_option_label.c_str(),
             true);
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", state.catalog_id.c_str());
+        ImGui::SetTooltip("%s", state.line_list_id.c_str());
     }
     ImGui::SameLine();
     bool marker_labels_visible = state.marker_labels_visible;
@@ -188,19 +188,19 @@ void SpectralLinesPanelUi::Render(
     if (ImGui::Checkbox(
             labels_label.c_str(),
             &marker_labels_visible)) {
-        (void)panel.Submit(CatalogUserStateIntent::SetMarkerLabelsVisible(marker_labels_visible));
+        (void)panel.Submit(SpectralLineStateIntent::SetMarkerLabelsVisible(marker_labels_visible));
     }
 
     ImGui::Spacing();
-    if (!state.catalog_load_error.empty()) {
+    if (!state.line_list_load_error.empty()) {
         const std::string error =
             std::string(
                 UiText(
                     language,
                     UiTextId::CatalogLoadFailed)) +
-            state.catalog_load_error;
+            state.line_list_load_error;
         RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
-    } else if (state.catalog_marker_count == 0) {
+    } else if (state.line_list_marker_count == 0) {
         const std::string_view no_markers =
             UiText(
                 language,
@@ -260,7 +260,7 @@ void SpectralLinesPanelUi::Render(
             grouping_view_search_.data(),
             grouping_view_search_.size())) {
         (void)panel.Submit(
-            CatalogUserStateIntent::SetGroupingViewSearch(grouping_view_search_.data()));
+            SpectralLineStateIntent::SetGroupingViewSearch(grouping_view_search_.data()));
     }
 
     ImGui::Spacing();
@@ -269,7 +269,7 @@ void SpectralLinesPanelUi::Render(
     std::optional<SpectralLineGroupingView> pending_rename;
     std::optional<SpectralLineGroupingView> pending_delete;
     const auto create_new_view = [&panel]() {
-        (void)panel.Submit(CatalogUserStateIntent::CreateUserGroupingView());
+        (void)panel.Submit(SpectralLineStateIntent::CreateUserGroupingView());
     };
 
     if (ImGui::BeginTabBar("spectral_line_grouping_views", ImGuiTabBarFlags_Reorderable)) {
@@ -288,10 +288,10 @@ void SpectralLinesPanelUi::Render(
                 grouping_view.id;
             if (ImGui::BeginTabItem(tab_label.c_str(), nullptr, flags)) {
                 if (!grouping_view.active) {
-                    (void)panel.Submit(CatalogUserStateIntent::SelectGroupingView(grouping_view.id));
+                    (void)panel.Submit(SpectralLineStateIntent::SelectGroupingView(grouping_view.id));
                 }
                 (void)panel.Submit(
-                    CatalogUserStateIntent::AcknowledgeGroupingViewSelection(grouping_view.id));
+                    SpectralLineStateIntent::AcknowledgeGroupingViewSelection(grouping_view.id));
                 if (ImGui::BeginPopupContextItem(
                         grouping_view.editable ? "user_grouping_view_context"
                                                : "catalog_grouping_view_context")) {
@@ -330,7 +330,7 @@ void SpectralLinesPanelUi::Render(
                     panel,
                     snapshot,
                     grouping_view,
-                    state.catalog_marker_count,
+                    state.line_list_marker_count,
                     language);
                 ImGui::EndTabItem();
             }
@@ -353,7 +353,7 @@ void SpectralLinesPanelUi::Render(
     }
 
     if (pending_duplicate) {
-        (void)panel.Submit(CatalogUserStateIntent::DuplicateGroupingView(pending_duplicate->id));
+        (void)panel.Submit(SpectralLineStateIntent::DuplicateGroupingView(pending_duplicate->id));
     }
     if (pending_rename) {
         renaming_grouping_view_id_ = pending_rename->id;
@@ -424,12 +424,12 @@ void SpectralLinesPanelUi::Render(
                         renaming_grouping_view_name_,
                         renaming_grouping_view_original_name_,
                         renaming_grouping_view_edited_);
-                (void)panel.Submit(CatalogUserStateIntent::RenameUserGroupingView(
+                (void)panel.Submit(SpectralLineStateIntent::RenameUserGroupingView(
                     *renaming_grouping_view_id_,
                     submitted_name,
                     renaming_grouping_view_edited_
-                        ? CatalogUserRenameEditState::Edited
-                        : CatalogUserRenameEditState::Unedited));
+                        ? SpectralLineRenameEditState::Edited
+                        : SpectralLineRenameEditState::Unedited));
             }
             renaming_grouping_view_id_.reset();
             renaming_grouping_view_name_.clear();
@@ -499,7 +499,7 @@ void SpectralLinesPanelUi::Render(
         if (ImGui::Button(delete_label.c_str())) {
             if (deleting_grouping_view_id_) {
                 (void)panel.Submit(
-                    CatalogUserStateIntent::DeleteUserGroupingView(*deleting_grouping_view_id_));
+                    SpectralLineStateIntent::DeleteUserGroupingView(*deleting_grouping_view_id_));
             }
             deleting_grouping_view_id_.reset();
             deleting_grouping_view_name_.clear();
@@ -519,7 +519,7 @@ void SpectralLinesPanelUi::Render(
         ImGui::EndPopup();
     }
 
-    if (!state.has_catalog_grouping_view && state.user_grouping_view_count == 0) {
+    if (!state.has_base_grouping_view && state.user_grouping_view_count == 0) {
         const std::string_view no_grouping =
             UiText(
                 language,

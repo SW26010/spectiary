@@ -1404,14 +1404,14 @@ void TestGeneratedSpectralLineNamesUseExplicitMetadata()
 void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
 {
     const std::string english =
-        spectiary::SpectralLineCatalogOptionLabel(
+        spectiary::SpectralLineListOptionLabel(
             spectiary::UiText(
                 spectiary::UiLanguage::English,
                 spectiary::UiTextId::
                     PublicSpectralLineCatalog),
             "public-spectral-lines.v1");
     const std::string chinese =
-        spectiary::SpectralLineCatalogOptionLabel(
+        spectiary::SpectralLineListOptionLabel(
             spectiary::UiText(
                 spectiary::UiLanguage::
                     SimplifiedChinese,

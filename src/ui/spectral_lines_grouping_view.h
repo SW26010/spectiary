@@ -16,7 +16,7 @@ public:
         SpectralLinesPanelController& panel,
         const SpectrumSnapshotHandle& snapshot,
         const SpectralLineGroupingView& view,
-        std::size_t catalog_marker_count,
+        std::size_t line_list_marker_count,
         UiLanguage language);
     void RenderPendingPopups(
         SpectralLinesPanelController& panel,

@@ -73,9 +73,9 @@ struct ShellUiTestAccess {
         return shell.PersistenceHealth();
     }
 
-    static CatalogUserStateResult SubmitSpectralLines(
+    static SpectralLineStateResult SubmitSpectralLines(
         ShellUi& shell,
-        CatalogUserStateIntent intent)
+        SpectralLineStateIntent intent)
     {
         return shell.spectral_lines_panel_.Submit(std::move(intent));
     }
@@ -5450,13 +5450,13 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
                        false)
                 .applied(),
             "real ShellUi panel owner should retain its live mutation while blocked");
-        const spectiary::CatalogUserStateResult spectral_result =
+        const spectiary::SpectralLineStateResult spectral_result =
             spectiary::ShellUiTestAccess::SubmitSpectralLines(
                 shell,
-                spectiary::CatalogUserStateIntent::CreateUserGroupingView());
+                spectiary::SpectralLineStateIntent::CreateUserGroupingView());
         Require(
             spectral_result.status ==
-                    spectiary::CatalogUserStateResultStatus::Applied &&
+                    spectiary::SpectralLineStateResultStatus::Applied &&
                 spectral_result.persistent_state_changed,
             "real spectral-line owner should create a dirty persistent state");
 

@@ -467,7 +467,7 @@ void SpectralLinesGroupingViewUi::Render(
     SpectralLinesPanelController& panel,
     const SpectrumSnapshotHandle& snapshot,
     const SpectralLineGroupingView& view,
-    std::size_t catalog_marker_count,
+    std::size_t line_list_marker_count,
     UiLanguage language)
 {
     const bool editable = view.editable;
@@ -480,7 +480,7 @@ void SpectralLinesGroupingViewUi::Render(
                 UiTextId::AddGroup,
                 "AddSpectralLineGroup");
         if (ImGui::Button(add_group_label.c_str())) {
-            (void)panel.Submit(CatalogUserStateIntent::AddUserGroup(view.id));
+            (void)panel.Submit(SpectralLineStateIntent::AddUserGroup(view.id));
         }
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
@@ -488,11 +488,11 @@ void SpectralLinesGroupingViewUi::Render(
                     if (drag->view_id == view.id) {
                         const bool copy = ImGui::GetIO().KeyCtrl;
                         (void)panel.Submit(
-                            copy ? CatalogUserStateIntent::CopyMarkerReferenceToNewGroup(
+                            copy ? SpectralLineStateIntent::CopyMarkerReferenceToNewGroup(
                                        view.id,
                                        drag->marker_id,
                                        drag->source_group_id)
-                                 : CatalogUserStateIntent::MoveMarkerReferenceToNewGroup(
+                                 : SpectralLineStateIntent::MoveMarkerReferenceToNewGroup(
                                        view.id,
                                        drag->marker_id,
                                        drag->source_group_id));
@@ -510,7 +510,7 @@ void SpectralLinesGroupingViewUi::Render(
             language,
             UiTextId::PlotVisibleCatalogMarkerCount,
             plot_view.visible_markers.size(),
-            catalog_marker_count);
+            line_list_marker_count);
     RenderDisabledText(marker_count);
 
     const std::optional<UserGroupDragPayload> active_user_group_drag =
@@ -556,7 +556,7 @@ void SpectralLinesGroupingViewUi::Render(
                 next_group_visible,
                 language)) {
             (void)panel.Submit(
-                CatalogUserStateIntent::SetGroupMarkerVisibility(view.id, group.id, next_group_visible));
+                SpectralLineStateIntent::SetGroupMarkerVisibility(view.id, group.id, next_group_visible));
         }
 
         ImGui::SameLine();
@@ -608,7 +608,7 @@ void SpectralLinesGroupingViewUi::Render(
             ImGui::PopStyleColor();
         }
         if (!group_reorder_drag_active && ImGui::IsItemToggledOpen()) {
-            (void)panel.Submit(CatalogUserStateIntent::SetGroupExpanded(view.id, group.id, group_open));
+            (void)panel.Submit(SpectralLineStateIntent::SetGroupExpanded(view.id, group.id, group_open));
         }
         const bool group_contents_open = !group_reorder_drag_active && group_open;
         const float group_midpoint_y = (group_item_min.y + group_item_max.y) * 0.5f;
@@ -624,7 +624,7 @@ void SpectralLinesGroupingViewUi::Render(
                     current_reorder_gap->line,
                     ImGui::GetID("user_group_reorder_target"))) {
                 (void)panel.Submit(
-                    CatalogUserStateIntent::ReorderUserGroupBefore(view.id, drop->group_id, group.id));
+                    SpectralLineStateIntent::ReorderUserGroupBefore(view.id, drop->group_id, group.id));
             }
         }
 
@@ -661,7 +661,7 @@ void SpectralLinesGroupingViewUi::Render(
                     UiTextId::Delete,
                     "DeleteSpectralLineGroup");
             if (ImGui::Selectable(delete_label.c_str())) {
-                group_deleted = panel.Submit(CatalogUserStateIntent::DeleteUserGroup(view.id, group.id)).changed;
+                group_deleted = panel.Submit(SpectralLineStateIntent::DeleteUserGroup(view.id, group.id)).changed;
                 group_context_view_id_.reset();
                 group_context_group_id_.reset();
             }
@@ -699,12 +699,12 @@ void SpectralLinesGroupingViewUi::Render(
                     if (drag->view_id == view.id) {
                         const bool copy = ImGui::GetIO().KeyCtrl;
                         (void)panel.Submit(
-                            copy ? CatalogUserStateIntent::CopyMarkerReference(
+                            copy ? SpectralLineStateIntent::CopyMarkerReference(
                                        view.id,
                                        drag->marker_id,
                                        drag->source_group_id,
                                        group.id)
-                                 : CatalogUserStateIntent::MoveMarkerReference(
+                                 : SpectralLineStateIntent::MoveMarkerReference(
                                        view.id,
                                        drag->marker_id,
                                        drag->source_group_id,
@@ -729,7 +729,7 @@ void SpectralLinesGroupingViewUi::Render(
                     language,
                     UiTextId::DisbandGroup),
                 group_row_hovered) &&
-                            panel.Submit(CatalogUserStateIntent::DeleteUserGroup(view.id, group.id)).changed;
+                            panel.Submit(SpectralLineStateIntent::DeleteUserGroup(view.id, group.id)).changed;
             ImGui::SetCursorScreenPos(saved_cursor);
         }
         if (group_deleted) {
@@ -759,7 +759,7 @@ void SpectralLinesGroupingViewUi::Render(
                 }
                 if (ImGui::Checkbox("##marker_visibility", &checkbox_value) && resolved) {
                     (void)panel.Submit(
-                        CatalogUserStateIntent::SetMarkerVisibility(reference.marker_id, checkbox_value));
+                        SpectralLineStateIntent::SetMarkerVisibility(reference.marker_id, checkbox_value));
                 }
                 if (!resolved) {
                     ImGui::EndDisabled();
@@ -808,7 +808,7 @@ void SpectralLinesGroupingViewUi::Render(
                             .alpha = marker_rgba[3],
                         });
                     (void)panel.Submit(
-                        CatalogUserStateIntent::SetMarkerColor(
+                        SpectralLineStateIntent::SetMarkerColor(
                             reference.marker_id,
                             color_selection));
                 }
@@ -897,7 +897,7 @@ void SpectralLinesGroupingViewUi::Render(
                     if (ImGui::Selectable(
                             reset_color_label.c_str())) {
                         (void)panel.Submit(
-                            CatalogUserStateIntent::SetMarkerColor(
+                            SpectralLineStateIntent::SetMarkerColor(
                                 reference.marker_id,
                                 PlotSeriesColor::Auto()));
                     }
@@ -924,7 +924,7 @@ void SpectralLinesGroupingViewUi::Render(
                                     "###" +
                                     target_group.id;
                                 if (ImGui::Selectable(target_label.c_str())) {
-                                    (void)panel.Submit(CatalogUserStateIntent::CopyMarkerReference(
+                                    (void)panel.Submit(SpectralLineStateIntent::CopyMarkerReference(
                                         view.id,
                                         reference.marker_id,
                                         group.id,
@@ -963,7 +963,7 @@ void SpectralLinesGroupingViewUi::Render(
                             language,
                             UiTextId::RemoveFromThisGroup),
                         marker_row_hovered) &&
-                                        panel.Submit(CatalogUserStateIntent::RemoveMarkerReference(
+                                        panel.Submit(SpectralLineStateIntent::RemoveMarkerReference(
                                             view.id,
                                             reference.marker_id,
                                             group.id)).changed;
@@ -1029,13 +1029,13 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(
                         renaming_group_name_,
                         renaming_group_original_name_,
                         renaming_group_edited_);
-                (void)panel.Submit(CatalogUserStateIntent::RenameUserGroup(
+                (void)panel.Submit(SpectralLineStateIntent::RenameUserGroup(
                     *renaming_group_view_id_,
                     *renaming_group_id_,
                     submitted_name,
                     renaming_group_edited_
-                        ? CatalogUserRenameEditState::Edited
-                        : CatalogUserRenameEditState::Unedited));
+                        ? SpectralLineRenameEditState::Edited
+                        : SpectralLineRenameEditState::Unedited));
             }
             renaming_group_view_id_.reset();
             renaming_group_id_.reset();
