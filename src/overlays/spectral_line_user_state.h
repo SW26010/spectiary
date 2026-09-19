@@ -2,6 +2,7 @@
 
 #include "overlays/spectral_line_catalog.h"
 #include "plot/series_color_model.h"
+#include "overlays/spectral_line_session_state.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +16,7 @@
 
 namespace spectiary {
 
-inline constexpr std::size_t kMaximumGeneratedNameCopyCount = 1024;
+
 
 struct CatalogIdentity {
     std::string id;
@@ -25,22 +26,6 @@ struct CatalogIdentity {
 struct MarkerReference {
     CatalogIdentity catalog_identity;
     std::string marker_id;
-};
-
-enum class GeneratedNameSource {
-    None,
-    CatalogGroupingView,
-    DefaultGroupingView,
-    DefaultGroup,
-};
-
-struct GeneratedNameMetadata {
-    GeneratedNameSource source = GeneratedNameSource::None;
-    std::size_t ordinal = 0;
-    std::size_t copy_count = 0;
-    std::string copy_base_name;
-
-    [[nodiscard]] bool operator==(const GeneratedNameMetadata&) const = default;
 };
 
 struct UserGroup {

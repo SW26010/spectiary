@@ -296,6 +296,9 @@ add_library(spectiary_core STATIC
     src/overlays/spectral_line_list.cpp
     src/overlays/spectral_line_list_json.cpp
     src/overlays/built_in_spectral_line_overlay.cpp
+    src/overlays/built_in_spectral_line_state_io.cpp
+    src/overlays/built_in_spectral_line_reconciliation.cpp
+    src/overlays/spectral_line_session_state.cpp
     src/overlays/catalog_user_state_reconciliation.cpp
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
@@ -1675,6 +1678,11 @@ spectiary_add_test(
 )
 target_compile_definitions(spectiary_spectral_line_list_tests
     PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+spectiary_add_test(
+    spectiary_built_in_spectral_line_state_tests
+    tests/built_in_spectral_line_state_tests.cpp
+    spectiary_core
+)
 target_compile_definitions(
     spectiary_spectral_line_catalog_tests
     PRIVATE SPECTIARY_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -1817,6 +1825,7 @@ set(SPECTIARY_FAST_TESTS
     spectiary_spectrum_view_session_tests
     spectiary_spectral_line_catalog_tests
     spectiary_spectral_line_list_tests
+    spectiary_built_in_spectral_line_state_tests
     spectiary_spectral_line_user_state_tests
     spectiary_ctest_tier_contract_tests
 )
