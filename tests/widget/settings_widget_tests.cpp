@@ -95,7 +95,7 @@ void TestExternalOpenInstanceCombo()
     Require(f.settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::NewInstance,
         "instance routing must default to a new process");
     f.ui.Click("ExternalOpenInstancePolicy");
-    f.ui.Click("Add to the most recently used instance and activate");
+    f.ui.Click("Add to recent instance and activate");
     Require(f.settings.View().external_open_instance_policy == ExternalOpenInstancePolicy::RecentInstance && f.intents == 1,
         "recent-instance selection must emit one owner intent");
     f.ui.Click("ExternalOpenInstancePolicy");

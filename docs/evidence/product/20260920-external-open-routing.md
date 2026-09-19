@@ -60,3 +60,45 @@ this is not durable recovery from a later process crash or explicit user close.
 Windows foreground refusal causes new-instance fallback rather than bypassing
 operating-system focus restrictions. No installer/file-association changes or
 global GUI state synchronization were introduced.
+
+## Computer-use acceptance (2026-09-20)
+
+Actual Windows GUI acceptance used the computer-use skill with `@oai/sky`.
+The current Debug executable, including the existing uncommitted settings
+layout/English-label adjustments, was copied into isolated PortableA/PortableB
+fixtures under `.scratch/issue4-cua-20260920`. The required build wrapper
+confirmed the executable was up to date. No normal user configuration was used.
+External opens were initiated by double-clicking Explorer shortcuts targeting
+the test executable with a source path; system file associations were unchanged.
+
+Observed passes:
+
+- A fresh General page defaults to opening a new instance. Both strategy choices
+  are readable; the selected recent-instance text fits in English and Chinese.
+- Selecting recent-instance routing and folder opening persists immediately;
+  a separately launched process displays both saved settings.
+- External CSV opening reuses and foregrounds the existing window. Opening
+  `m_selected.csv` selects sample 2/3 of its containing folder; `z_last.csv`
+  selects sample 3/3. The source list contains one folder, not duplicate entries.
+- Reopening that folder while sample 3/3 is active preserves sample 3/3.
+- Files > Open in New Spectiary Instance creates another window despite the
+  recent-instance preference. The original window retains its sample position.
+- With two A windows, changing the most recently activated window changes the
+  recipient of the next external request. The other window remains unchanged.
+- B was seeded with the same recent-instance/folder settings but a different
+  Portable config root. Its first external request creates an independent B
+  window without changing either A window. A subsequent request restores and
+  foregrounds the minimized B window without creating another B window.
+- Launching A without a source creates a third A window and restores its session.
+- Opening a file from `OtherData` adds a second source and activates it; `Data`
+  remains present in the same window.
+
+No functional blocker was observed in these flows. A minor layout observation:
+the existing English folder-opening checkbox label is clipped at its right end
+at the default Settings panel width. The new instance-policy control is fully
+readable. This acceptance did not change production code or existing user edits.
+
+Scope: GUI samples were CSV files. FITS, timeout/race handling, automation
+exclusion and Windows foreground refusal remain covered by the automated tests
+above; they were not manually fault-injected in this GUI session. Native file
+association installation and direct associated-file double-click were not tested.

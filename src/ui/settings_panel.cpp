@@ -1121,9 +1121,9 @@ void SettingsPanelUi::RenderGeneral(
         settings.open_external_source_as_folder;
     const bool recent = settings.external_open_instance_policy ==
         ExternalOpenInstancePolicy::RecentInstance;
-    const auto instance_label = StableUiLabel(language,
-        UiTextId::ExternalOpenInstancePolicy, "ExternalOpenInstancePolicy");
-    if (ImGui::BeginCombo(instance_label.c_str(), UiText(language,
+    ImGui::TextUnformatted(UiText(language, UiTextId::ExternalOpenInstancePolicy).data());
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (ImGui::BeginCombo("###ExternalOpenInstancePolicy", UiText(language,
             recent ? UiTextId::ExternalOpenRecentInstance : UiTextId::ExternalOpenNewInstance).data())) {
         for (const bool use_recent : {false, true}) {
             if (ImGui::Selectable(UiText(language, use_recent

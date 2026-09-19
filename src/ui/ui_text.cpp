@@ -221,7 +221,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"External source opening", "外部源打开"},
     UiTextEntry{"External-open instance", "外部打开的实例"},
     UiTextEntry{"Open in a new instance", "在新实例中打开"},
-    UiTextEntry{"Add to the most recently used instance and activate", "添加到最近使用的实例并激活"},
+    UiTextEntry{"Add to recent instance and activate", "添加到最近使用的实例并激活"},
     UiTextEntry{
         "Open external spectrum files as folder sources",
         "将外部打开的光谱文件作为文件夹源打开"},
