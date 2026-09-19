@@ -82,7 +82,8 @@ bool RefreshAttachedCanonicalAnnotation(
 bool RestoreCanonicalOwnerAttachments(
     SourceCollectionManifest& manifest,
     const std::optional<SampleLabelingSourceState>& labeling_state,
-    const SampleLabelingCanonicalSourceDescriptor& source)
+    const SampleLabelingCanonicalSourceDescriptor& source,
+    const RuntimePaths& runtime_paths)
 {
     if (!labeling_state) {
         return false;
@@ -96,6 +97,16 @@ bool RestoreCanonicalOwnerAttachments(
             SourceCollectionManifestContainsAnnotation(
                 manifest,
                 *task.persistence.output_path)) {
+            continue;
+        }
+        if (!runtime_paths.application_data_root.empty() &&
+            CheckUserFilePath(*task.persistence.output_path, runtime_paths) !=
+                UserFilePathStatus::Allowed) {
+            manifest.diagnostics.push_back({
+                .kind = SourceCollectionManifestDiagnosticKind::AnnotationIgnored,
+                .path = *task.persistence.output_path,
+                .detail = "Choose a document outside config, state, logs and unsaved.",
+            });
             continue;
         }
         attachment_added =
@@ -844,7 +855,8 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
             RestoreCanonicalOwnerAttachments(
                 context.manifest,
                 prepared_workflow.labeling_source_state,
-                *labeling_source_descriptor);
+                *labeling_source_descriptor,
+                runtime_paths_);
         if (canonical_attachments_restored) {
             action.annotation_roster_changed = true;
             action.navigation_inputs_changed = true;
@@ -2751,6 +2763,11 @@ bool SampleWorkflowCoordinator::
             SourceCollectionManifestContainsAnnotation(
                 *context,
                 *task.persistence.output_path)) {
+            continue;
+        }
+        if (!runtime_paths_.application_data_root.empty() &&
+            CheckUserFilePath(*task.persistence.output_path, runtime_paths_) !=
+                UserFilePathStatus::Allowed) {
             continue;
         }
         std::optional<SampleAnnotationResult> annotation =

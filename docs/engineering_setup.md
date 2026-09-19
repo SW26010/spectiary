@@ -379,7 +379,7 @@ SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` �
 - `.vs/`
 - `vcpkg_installed/`
 - `CMakeUserPresets.json`
-- `config/`、`state/`、`logs/`、`unsaved/`
+- 运行包中的 managed role 目录 `config/`、`state/`、`logs/`、`unsaved/` 及其运行时数据；不包括源码仓库中包含 `project_identity.json` 等正式输入的 `config/`。
 - `imgui.ini`
 - `logs/`
 - 本地光谱数据。

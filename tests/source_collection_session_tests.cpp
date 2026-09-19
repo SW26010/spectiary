@@ -411,7 +411,8 @@ public:
                 canonical_document_publisher = {},
         specforge::SampleLabelingController::
             CanonicalValuesPublisher
-                canonical_values_publisher = {})
+                canonical_values_publisher = {},
+        const specforge::RuntimePaths& runtime_paths = {})
         : specforge::SourceCollectionSession(
               source_session_cache,
               navigation_cache,
@@ -420,7 +421,8 @@ public:
               specforge::SampleLabelingStateCacheLoadPolicy::
                   AllowPersistentOutputs,
               std::move(canonical_document_publisher),
-              std::move(canonical_values_publisher)),
+              std::move(canonical_values_publisher),
+              runtime_paths),
           queue_(specforge::MakeSourceCollectionLoadQueueForTesting(
               LoadingDependencies(
                   std::move(loader),
@@ -654,7 +656,8 @@ PreparedSession MakePersistentSession(
     const std::filesystem::path& source_session_cache,
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
-    std::vector<SourceFixture> fixtures)
+    std::vector<SourceFixture> fixtures,
+    const specforge::RuntimePaths& runtime_paths = {})
 {
     return PreparedSession(
         [&loaded_snapshots, fixtures = std::move(fixtures)](
@@ -673,7 +676,8 @@ PreparedSession MakePersistentSession(
         source_session_cache,
         navigation_cache,
         labeling_cache,
-        UniqueTempPath("_workflow.json"));
+        UniqueTempPath("_workflow.json"),
+        {}, {}, runtime_paths);
 }
 
 PreparedSession MakeWorkflowPersistentSession(
@@ -4229,7 +4233,9 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
         "metadata restart hydration should preserve Unicode definitions and the same canonical value generation");
 }
 
-void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
+void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(
+    const specforge::RuntimePaths& runtime_paths = {},
+    std::string_view output_child = {})
 {
     const std::filesystem::path source_session_cache =
         UniqueTempPath("_crash_repair_sources.json");
@@ -4240,7 +4246,9 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
     const std::filesystem::path source_path =
         UniqueTempPath("_crash_repair_source.npy");
     const std::filesystem::path output_path =
-        UniqueTempPath("_crash_repair_owner.asdf");
+        output_child.empty()
+        ? UniqueTempPath("_crash_repair_owner.asdf")
+        : (runtime_paths.application_data_root / output_child / "task.asdf").lexically_normal();
     TouchFile(source_path);
 
     {
@@ -4299,13 +4307,40 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
             before_repair.sources[0].annotation_paths.empty(),
         "the crash fixture must retain the old source-session roster while the labeling cache owns the ASDF path");
 
+    const std::string canonical_before = ReadTextFile(output_path);
+
     std::vector<LoadedSourceSnapshot> restored_loads;
     PreparedSession restored = MakePersistentSession(
         restored_loads,
         source_session_cache,
         navigation_cache,
         labeling_cache,
-        {{source_path, 3}});
+        {{source_path, 3}},
+        runtime_paths);
+    if (!output_child.empty() && output_child != "my-work" && output_child != ".") {
+        const auto view = restored.View();
+        Require(restored_loads.size() == 1 && view.snapshot,
+            "reserved owner rejection must still restore its source");
+        Require(view.filter.sources.empty() && view.filter.available_sources.empty() &&
+                std::all_of(view.navigation.current_annotations.begin(),
+                    view.navigation.current_annotations.end(), [](const auto& annotation) {
+                        return annotation.display_text.empty() && !annotation.can_filter_samples;
+                    }),
+            "reserved canonical registration must not restore an attachment or filter data");
+        Require(std::any_of(view.navigation.annotation_diagnostics.begin(),
+                    view.navigation.annotation_diagnostics.end(), [&](const auto& diagnostic) {
+                        return diagnostic.path == output_path &&
+                            diagnostic.kind == specforge::SourceCollectionManifestDiagnosticKind::AnnotationIgnored;
+                    }),
+            "reserved canonical registration must retain a rejection diagnostic");
+        Require(restored.FlushStateCaches(), "rejected attachment roster should flush");
+        const auto after = specforge::LoadSourceCollectionSessionStateCache(runtime_paths, source_session_cache).cache;
+        Require(after.sources.size() == 1 && after.sources[0].annotation_paths.empty(),
+            "rejected canonical registration must not enter the persisted attachment roster");
+        Require(ReadTextFile(output_path) == canonical_before,
+            "rejecting reserved canonical attachment must not modify the user's ASDF");
+        return;
+    }
     Require(
         !restored.View().labeling.has_active_task &&
             restored.View().navigation.current_annotations.size() == 1 &&
@@ -4316,7 +4351,7 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
         restored.FlushStateCaches(),
         "prepared attachment repair should be durable after the restore batch completes");
     const specforge::SourceCollectionSessionStateCache after_repair =
-        specforge::LoadSourceCollectionSessionStateCache(specforge::RuntimePaths{},
+        specforge::LoadSourceCollectionSessionStateCache(runtime_paths,
             source_session_cache)
             .cache;
     Require(
@@ -4324,6 +4359,22 @@ void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
             after_repair.sources[0].annotation_paths ==
                 std::vector<std::filesystem::path>{output_path},
         "prepared restore must persist the repaired canonical attachment roster");
+}
+
+void TestCanonicalRegistrationRestoreChecksReservedStorage()
+{
+    for (const auto profile : {specforge::StorageProfile::Portable, specforge::StorageProfile::LocalAppData}) {
+        const auto root = UniqueTempPath("_registration_storage_admission");
+        const auto paths = specforge::RuntimePathsForDeployment({.storage_profile = profile}, {
+            .executable_path = root / "app.exe",
+            .local_app_data_user_state_root = root,
+        });
+        // Seed through the context-free fixture to model an older version that
+        // permitted these canonical locations, then restore with real role roots.
+        for (const auto* child : {"config", "state", "logs", "unsaved", "my-work", "."}) {
+            TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash(paths, child);
+        }
+    }
 }
 
 void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
@@ -11712,6 +11763,7 @@ void RunAllTests()
     TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask();
     TestFormalizedCanonicalAttachmentPersistsAcrossRestart();
     TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash();
+    TestCanonicalRegistrationRestoreChecksReservedStorage();
     TestUnavailableCanonicalOwnersRemainVisibleAfterRestart();
     TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask();
     TestMalformedExistingAsdfKeepsRecoverableTemporaryTask();
