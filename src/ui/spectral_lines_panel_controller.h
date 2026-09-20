@@ -30,6 +30,7 @@ enum class SpectralLineRenameEditState {
 struct SpectralLineStateIntent {
     [[nodiscard]] static SpectralLineStateIntent SetGroupingViewSearch(std::string query);
     [[nodiscard]] static SpectralLineStateIntent SetMarkerLabelsVisible(bool visible);
+    [[nodiscard]] static SpectralLineStateIntent SelectColorScheme(std::string scheme_id);
     [[nodiscard]] static SpectralLineStateIntent SelectGroupingView(std::string view_id);
     [[nodiscard]] static SpectralLineStateIntent AcknowledgeGroupingViewSelection(std::string view_id);
     [[nodiscard]] static SpectralLineStateIntent CreateUserGroupingView();
@@ -95,6 +96,7 @@ private:
     enum class Kind {
         SetGroupingViewSearch,
         SetMarkerLabelsVisible,
+        SelectColorScheme,
         SelectGroupingView,
         AcknowledgeGroupingViewSelection,
         CreateUserGroupingView,
@@ -195,6 +197,15 @@ struct SpectralLinePersistenceView {
 };
 
 struct SpectralLinePanelView {
+    std::uint64_t generation = 0;
+    bool user_owned = false;
+    bool plot_compatible = true;
+    std::string coordinate_description;
+    std::string user_line_list_name;
+    std::string user_line_list_path;
+    std::string open_error;
+    std::vector<std::pair<std::string, std::string>> color_schemes;
+    std::string active_color_scheme_id;
     std::string line_list_id;
     std::string line_list_display_name;
     std::string line_list_load_error;
@@ -228,6 +239,13 @@ public:
     SpectralLinesPanelController(const SpectralLinesPanelController&) = delete;
     SpectralLinesPanelController& operator=(const SpectralLinesPanelController&) = delete;
 
+    // User files are read-only generations. Locators and sessions are not persisted.
+    [[nodiscard]] SpectralLineStateResult OpenUserLineList(const std::filesystem::path& path, const RuntimePaths& paths);
+    [[nodiscard]] SpectralLineStateResult SelectBuiltInLineList();
+    [[nodiscard]] SpectralLineStateResult SelectOpenedUserLineList();
+    [[nodiscard]] std::uint64_t Generation() const { return generation_; }
+    [[nodiscard]] bool CanCustomize() const { return !user_active_; }
+    void ReportOpenError(std::string error) { open_error_ = std::move(error); }
     [[nodiscard]] SpectralLineStateResult Submit(SpectralLineStateIntent intent);
     [[nodiscard]] SpectralLinePanelView View() const;
     [[nodiscard]] SpectralLinePlotView PlotView(
@@ -251,7 +269,32 @@ private:
     [[nodiscard]] bool Visible(std::string_view id) const;
     [[nodiscard]] std::string UnassignedId(const line_list::GroupingView& view) const;
     [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult SaveState();
+    [[nodiscard]] const SpectralLineList& Effective() const;
+    [[nodiscard]] SpectralLineSessionState& Session();
+    [[nodiscard]] const SpectralLineSessionState& Session() const;
+    [[nodiscard]] PlotSeriesColor Color(std::string_view id) const;
+    [[nodiscard]] bool CanEditView(std::string_view id) const;
+    [[nodiscard]] bool IsBaseView(std::string_view id) const;
+    [[nodiscard]] bool PlotCompatible() const;
+    void RememberInteraction();
+    void Activate(bool user);
+    struct UserGeneration {
+        SpectralLineList list;
+        std::filesystem::path path;
+    };
+    struct Interaction {
+        SpectralLineSessionState session;
+        std::string search;
+        bool labels = true;
+    };
     BuiltInSpectralLineAdapter adapter_;
+    std::optional<UserGeneration> user_generation_;
+    std::unordered_map<std::string, Interaction> user_sessions_;
+    Interaction built_in_interaction_;
+    bool user_active_ = false;
+    std::uint64_t generation_ = 0;
+    std::string open_error_;
+    const line_list::GroupingView ungrouped_view_{"", "Markers", {}};
     StablePlotSeriesColorAssignments marker_color_assignments_;
     std::unordered_map<std::string, std::size_t> marker_auto_slots_;
     LocalUserStatePersistenceLifecycle cache_persistence_;

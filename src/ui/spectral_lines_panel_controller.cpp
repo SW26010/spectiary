@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cstdio>
+#include <span>
 
 namespace spectiary {
 namespace {
@@ -57,6 +58,13 @@ SpectralLineStateIntent SpectralLineStateIntent::SetMarkerLabelsVisible(bool vis
 {
     SpectralLineStateIntent intent(Kind::SetMarkerLabelsVisible);
     intent.enabled_ = visible;
+    return intent;
+}
+
+SpectralLineStateIntent SpectralLineStateIntent::SelectColorScheme(std::string scheme_id)
+{
+    SpectralLineStateIntent intent(Kind::SelectColorScheme);
+    intent.text_ = std::move(scheme_id);
     return intent;
 }
 
@@ -264,26 +272,102 @@ SpectralLinesPanelController::SpectralLinesPanelController(SpectralLineListParse
 {
     for (auto id : {kRawSpectrumPlotSeriesId, kGaussianSmoothingPlotSeriesId, kMedianSmoothingPlotSeriesId})
         (void)marker_color_assignments_.SlotFor(id);
-    for (const auto& marker : adapter_.effective().markers)
-        marker_auto_slots_[marker.id] = marker_color_assignments_.SlotFor(adapter_.effective().id + ".marker." + marker.id);
+    for (const auto& marker : Effective().markers)
+        marker_auto_slots_[marker.id] = marker_color_assignments_.SlotFor("builtin/" + Effective().id + ".marker." + marker.id);
     cache_persistence_.SetLoadWarning(adapter_.load_error(), adapter_.load_error());
     if (adapter_.requires_save()) cache_persistence_.MarkDirty();
 }
 SpectralLinesPanelController::~SpectralLinesPanelController() { (void)Flush(); }
 
+const SpectralLineList& SpectralLinesPanelController::Effective() const
+{ return user_active_ ? user_generation_->list : adapter_.effective(); }
+SpectralLineSessionState& SpectralLinesPanelController::Session()
+{ return user_active_ ? user_sessions_.at(Effective().id).session : adapter_.session(); }
+const SpectralLineSessionState& SpectralLinesPanelController::Session() const
+{ return user_active_ ? user_sessions_.at(Effective().id).session : adapter_.session(); }
+bool SpectralLinesPanelController::CanEditView(std::string_view id) const
+{ return CanCustomize() && adapter_.CanEditView(id); }
+bool SpectralLinesPanelController::IsBaseView(std::string_view id) const
+{ return CanCustomize() && adapter_.IsBaseView(id); }
+bool SpectralLinesPanelController::PlotCompatible() const
+{ return Effective().coordinate == line_list::WavelengthCoordinate{}; }
+PlotSeriesColor SpectralLinesPanelController::Color(std::string_view id) const
+{
+    for (const auto& scheme : Effective().color_schemes) {
+        if (scheme.id != Session().active_color_scheme_id) continue;
+        const auto found = scheme.colors.find(std::string(id));
+        if (found != scheme.colors.end()) return DecodeLineListColor(found->second);
+    }
+    return PlotSeriesColor::Auto();
+}
+void SpectralLinesPanelController::RememberInteraction()
+{
+    auto& interaction = user_active_ ? user_sessions_.at(Effective().id) : built_in_interaction_;
+    interaction.search = grouping_view_search_;
+    interaction.labels = marker_labels_visible_;
+}
+void SpectralLinesPanelController::Activate(bool user)
+{
+    ++generation_;
+    user_active_ = user;
+    auto& interaction = user ? user_sessions_[Effective().id] : built_in_interaction_;
+    NormalizeSpectralLineSession(Session(), Effective());
+    grouping_view_search_ = interaction.search;
+    marker_labels_visible_ = interaction.labels;
+    grouping_view_selection_requested_ = true;
+    marker_auto_slots_.clear();
+    for (const auto& marker : Effective().markers)
+        marker_auto_slots_[marker.id] = marker_color_assignments_.SlotFor(
+            std::string(user ? "user/" : "builtin/") + Effective().id + ".marker." + marker.id);
+    open_error_.clear();
+}
+SpectralLineStateResult SpectralLinesPanelController::OpenUserLineList(
+    const std::filesystem::path& path, const RuntimePaths& paths)
+{
+    const auto admission = CheckUserFilePath(path, paths);
+    if (admission != UserFilePathStatus::Allowed) {
+        open_error_ = admission == UserFilePathStatus::ReservedNamespace
+            ? "Choose a file outside the reserved config, state, logs and unsaved directories."
+            : "The selected path could not be resolved. Choose an accessible absolute file path.";
+        open_error_ = LocalUserStatePathToUtf8(path) + ": " + open_error_;
+        return Rejected(open_error_);
+    }
+    auto parsed = LoadSpectralLineListFromPath(path);
+    if (!parsed.list) {
+        open_error_ = LocalUserStatePathToUtf8(path) + ": " + parsed.error;
+        return Rejected(open_error_);
+    }
+    RememberInteraction();
+    user_generation_ = UserGeneration{std::move(*parsed.list), path};
+    Activate(true);
+    return Applied(false);
+}
+SpectralLineStateResult SpectralLinesPanelController::SelectBuiltInLineList()
+{
+    if (!user_active_) return NoChange();
+    RememberInteraction(); Activate(false); return Applied(false);
+}
+SpectralLineStateResult SpectralLinesPanelController::SelectOpenedUserLineList()
+{
+    if (!user_generation_) return Rejected("Open a Spectral Line List first.");
+    if (user_active_) return NoChange();
+    RememberInteraction(); Activate(true); return Applied(false);
+}
+
 const line_list::GroupingView* SpectralLinesPanelController::FindView(std::string_view id) const
 {
-    for (const auto& view : adapter_.effective().grouping_views) if (view.id == id) return &view;
+    if (Effective().grouping_views.empty() && id.empty()) return &ungrouped_view_;
+    for (const auto& view : Effective().grouping_views) if (view.id == id) return &view;
     return nullptr;
 }
 const line_list::Marker* SpectralLinesPanelController::FindMarker(std::string_view id) const
 {
-    for (const auto& marker : adapter_.effective().markers) if (marker.id == id) return &marker;
+    for (const auto& marker : Effective().markers) if (marker.id == id) return &marker;
     return nullptr;
 }
 bool SpectralLinesPanelController::Visible(std::string_view id) const
 {
-    const auto& visibility = adapter_.session().marker_visibility;
+    const auto& visibility = Session().marker_visibility;
     auto found = visibility.find(std::string(id));
     return found == visibility.end() || found->second;
 }
@@ -301,7 +385,7 @@ std::vector<std::string> SpectralLinesPanelController::GroupMembers(const line_l
     std::unordered_set<std::string> assigned;
     for (const auto& group : view.groups) assigned.insert(group.marker_ids.begin(), group.marker_ids.end());
     std::vector<std::string> result;
-    for (const auto& marker : adapter_.effective().markers) if (!assigned.contains(marker.id)) result.push_back(marker.id);
+    for (const auto& marker : Effective().markers) if (!assigned.contains(marker.id)) result.push_back(marker.id);
     return result;
 }
 std::string SpectralLinesPanelController::NextId(bool group) const
@@ -312,7 +396,7 @@ std::string SpectralLinesPanelController::NextId(bool group) const
         bool exists = FindView(*id) != nullptr;
         if (group) {
             exists = false;
-            for (const auto& view : adapter_.effective().grouping_views)
+            for (const auto& view : Effective().grouping_views)
                 for (const auto& value : view.groups) exists |= value.id == *id;
         }
         if (!exists) return *id;
@@ -323,8 +407,26 @@ std::string SpectralLinesPanelController::NextId(bool group) const
 SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIntent intent)
 {
     using Kind = SpectralLineStateIntent::Kind;
-    auto& session = adapter_.session();
+    if (user_active_) {
+        switch (intent.kind_) {
+        case Kind::SetGroupingViewSearch: case Kind::SetMarkerLabelsVisible:
+        case Kind::SelectGroupingView: case Kind::SelectColorScheme:
+        case Kind::AcknowledgeGroupingViewSelection: case Kind::SetMarkerVisibility:
+        case Kind::SetGroupExpanded: case Kind::SetGroupMarkerVisibility: break;
+        default: return Rejected("User-owned Spectral Line Lists are read-only. Only session display settings can change.");
+        }
+    }
+    auto& session = Session();
     std::string error;
+    if (intent.kind_ == Kind::SelectColorScheme) {
+        const auto& schemes = Effective().color_schemes;
+        if (std::none_of(schemes.begin(), schemes.end(), [&](const auto& scheme) { return scheme.id == intent.text_; }))
+            return Rejected("Color scheme does not exist.");
+        if (session.active_color_scheme_id == intent.text_) return NoChange();
+        session.active_color_scheme_id = intent.text_;
+        if (!user_active_) adapter_.intent().color_selection = true;
+        return Applied(true);
+    }
     if (intent.kind_ == Kind::SetGroupingViewSearch) {
         if (grouping_view_search_ == intent.text_) return NoChange();
         grouping_view_search_ = std::move(intent.text_); return Applied(false);
@@ -336,7 +438,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
     if (intent.kind_ == Kind::SelectGroupingView) {
         if (!FindView(intent.view_id_)) return Rejected("Grouping view does not exist.");
         if (session.active_view_id == intent.view_id_) return NoChange();
-        session.active_view_id = intent.view_id_; adapter_.intent().view_selection = true;
+        session.active_view_id = intent.view_id_; if (!user_active_) adapter_.intent().view_selection = true;
         return Applied(true);
     }
     if (intent.kind_ == Kind::AcknowledgeGroupingViewSelection) {
@@ -355,7 +457,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
             if (!IsValidRgbaColor(*color.explicit_color())) return Rejected("Marker color channels must be finite values from zero to one.");
             color = DecodeLineListColor(EncodeLineListColor(*color.explicit_color()));
         }
-        if (adapter_.Color(intent.marker_id_) == color) return NoChange();
+        if (Color(intent.marker_id_) == color) return NoChange();
         if (!adapter_.SetColor(intent.marker_id_, color, error)) return Rejected(error);
         return Applied(true);
     }
@@ -368,7 +470,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
             if (!source) return Rejected("Grouping view does not exist.");
             view = *source;
             metadata = NameMetadata(session.view_names, view.id);
-            if (adapter_.IsBaseView(view.id) && view.id == "__catalog_grouping_view__") metadata.source = GeneratedNameSource::CatalogGroupingView;
+            if (IsBaseView(view.id) && view.id == "__catalog_grouping_view__") metadata.source = GeneratedNameSource::CatalogGroupingView;
             if (metadata.source == GeneratedNameSource::None && metadata.copy_count == 0) metadata.copy_base_name = view.name;
             if (metadata.copy_count < kMaximumGeneratedNameCopyCount) ++metadata.copy_count; else metadata = {};
             view.name += " copy";
@@ -380,7 +482,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
             }
         } else {
             std::size_t count = 1;
-            for (const auto& candidate : adapter_.effective().grouping_views) if (adapter_.CanEditView(candidate.id)) ++count;
+            for (const auto& candidate : Effective().grouping_views) if (CanEditView(candidate.id)) ++count;
             view.name = "Grouping " + std::to_string(count);
             metadata.source = GeneratedNameSource::DefaultGroupingView; metadata.ordinal = count;
         }
@@ -417,7 +519,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
         }
         return changed ? Applied(true) : NoChange();
     }
-    if (!adapter_.CanEditView(view.id)) return Rejected("Base grouping views are read-only.");
+    if (!CanEditView(view.id)) return Rejected("Base grouping views are read-only.");
     if (intent.kind_ == Kind::DeleteUserGroupingView) {
         const bool active = session.active_view_id == view.id;
         if (!adapter_.DeleteView(view.id, error)) return Rejected(error);
@@ -471,7 +573,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
         const auto id = NextId(true);
         if (id.empty()) return Rejected("Could not generate group identity.");
         std::unordered_set<std::string> names;
-        for (const auto& v : adapter_.effective().grouping_views) for (const auto& g : v.groups) names.insert(g.name);
+        for (const auto& v : Effective().grouping_views) for (const auto& g : v.groups) names.insert(g.name);
         std::size_t ordinal = 1;
         while (names.contains("Group " + std::to_string(ordinal))) ++ordinal;
         line_list::Group group{id, "Group " + std::to_string(ordinal), {}};
@@ -510,22 +612,33 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
 SpectralLinePanelView SpectralLinesPanelController::View() const
 {
     SpectralLinePanelView result;
-    const auto& list = adapter_.effective(); const auto& session = adapter_.session();
+    const auto& list = Effective(); const auto& session = Session();
     const auto persistence = cache_persistence_.PersistenceStatus();
-    result.line_list_id = list.id; result.line_list_display_name = list.name; result.line_list_load_error = adapter_.base_error();
+    result.line_list_id = list.id; result.line_list_display_name = list.name; result.line_list_load_error = user_active_ ? "" : adapter_.base_error();
     result.persistence.retrying = persistence.retrying; result.persistence.recovered = persistence.recovered;
     result.persistence.load_issue = PanelLoadIssue(adapter_.load_issue());
     result.persistence.load_diagnostic_detail = persistence.load_diagnostic_detail;
     result.persistence.save_diagnostic_detail = persistence.save_diagnostic_detail;
     result.grouping_view_search = grouping_view_search_; result.marker_labels_visible = marker_labels_visible_;
     result.line_list_marker_count = list.markers.size();
-    for (const auto& view : list.grouping_views) {
+    result.generation = generation_; result.user_owned = user_active_; result.plot_compatible = PlotCompatible(); result.open_error = open_error_;
+    result.coordinate_description = list.coordinate.unit == line_list::Unit::Angstrom ? "Angstrom" :
+        list.coordinate.unit == line_list::Unit::Nanometer ? "nm" : "um";
+    result.coordinate_description += list.coordinate.medium == line_list::Medium::Vacuum ? " / vacuum" : " / air";
+    if (user_generation_) {
+        result.user_line_list_name = user_generation_->list.name;
+        result.user_line_list_path = LocalUserStatePathToUtf8(user_generation_->path);
+    }
+    result.active_color_scheme_id = session.active_color_scheme_id;
+    for (const auto& scheme : list.color_schemes) result.color_schemes.emplace_back(scheme.id, scheme.name);
+    const auto views = list.grouping_views.empty() ? std::span(&ungrouped_view_, 1) : std::span(list.grouping_views);
+    for (const auto& view : views) {
         SpectralLineGroupingView output;
-        output.id = view.id; output.name = view.name; output.editable = adapter_.CanEditView(view.id);
-        result.has_base_grouping_view |= adapter_.IsBaseView(view.id);
+        output.id = view.id; output.name = view.name; output.editable = CanEditView(view.id);
+        result.has_base_grouping_view |= IsBaseView(view.id);
         if (output.editable) ++result.user_grouping_view_count;
         output.generated_name = NameMetadata(session.view_names, view.id);
-        if (adapter_.IsBaseView(view.id) && view.id == "__catalog_grouping_view__") output.generated_name.source = GeneratedNameSource::CatalogGroupingView;
+        if (IsBaseView(view.id) && view.id == "__catalog_grouping_view__") output.generated_name.source = GeneratedNameSource::CatalogGroupingView;
         output.active = session.active_view_id == view.id;
         output.selection_requested = output.active && grouping_view_selection_requested_;
         output.search_active = !grouping_view_search_.empty();
@@ -547,7 +660,7 @@ SpectralLinePanelView SpectralLinesPanelController::View() const
                 const auto wavelength = WavelengthText(*marker);
                 if (!Matches(marker->name + " " + marker->id + " " + marker->note.value_or("") + " " + wavelength, grouping_view_search_)) continue;
                 group.marker_references.push_back({marker->id, marker->name, wavelength, marker->note.value_or(""), true,
-                    Visible(marker_id), counts[marker_id] > 1, adapter_.Color(marker_id), marker_auto_slots_.at(marker_id)});
+                    Visible(marker_id), counts[marker_id] > 1, Color(marker_id), marker_auto_slots_.at(marker_id)});
             }
             group.visibility = output.search_active ? GroupVisibilityState::SearchFiltered : members.empty() ? GroupVisibilityState::Empty :
                 visible == 0 ? GroupVisibilityState::AllHidden : visible == members.size() ? GroupVisibilityState::AllVisible : GroupVisibilityState::Mixed;
@@ -564,10 +677,10 @@ SpectralLinePanelView SpectralLinesPanelController::View() const
 SpectralLinePlotView SpectralLinesPanelController::PlotView(const SpectrumSnapshotHandle& snapshot) const
 {
     SpectralLinePlotView result;
-    result.marker_labels_visible = marker_labels_visible_; result.layout_scope_id = adapter_.effective().id;
-    if (!snapshot || !snapshot->capabilities.can_show_spectral_lines) return result;
-    for (const auto& marker : adapter_.effective().markers) if (Visible(marker.id))
-        result.visible_markers.push_back({&marker, adapter_.Color(marker.id), marker_auto_slots_.at(marker.id)});
+    result.marker_labels_visible = marker_labels_visible_; result.layout_scope_id = Effective().id;
+    if (!PlotCompatible() || !snapshot || !snapshot->capabilities.can_show_spectral_lines) return result;
+    for (const auto& marker : Effective().markers) if (Visible(marker.id))
+        result.visible_markers.push_back({&marker, Color(marker.id), marker_auto_slots_.at(marker.id)});
     return result;
 }
 LocalUserStatePersistenceLifecycle::SaveResult SpectralLinesPanelController::SaveState()
@@ -589,6 +702,7 @@ bool SpectralLinesPanelController::Flush()
 }
 SpectralLineStateResult SpectralLinesPanelController::Applied(bool persistent)
 {
+    if (persistent && user_active_) { NormalizeSpectralLineSession(Session(), Effective()); persistent = false; }
     if (persistent) { adapter_.NormalizeSession(); cache_persistence_.MarkDirty(); }
     return {SpectralLineStateResultStatus::Applied, true, persistent, {}};
 }
