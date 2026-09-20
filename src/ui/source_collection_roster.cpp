@@ -400,6 +400,7 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
         std::move(folder_listing_generation),
         std::move(context_reuse_proof));
     current_source_index_ = update.source_index;
+    result.action.source_roster_changed = update.source_roster_changed;
     result.retired_snapshots = std::move(update.retired_snapshots);
     result.replaced_folder_listing_generation =
         std::move(update.replaced_folder_listing_generation);
@@ -561,11 +562,17 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     const auto match = std::find_if(sources_.begin(), sources_.end(), [&key](const SourceListEntry& entry) {
         return entry.key == key;
     });
+    const auto display_name = SnapshotDisplayNameText(snapshot, path);
+    const auto type = SnapshotType(snapshot);
+    const auto state = SourceState(snapshot);
     if (match != sources_.end()) {
+        result.source_roster_changed = match->path != path ||
+            match->display_name != display_name || match->type != type ||
+            match->state != state || match->load_error.has_value();
         match->path = path;
-        match->display_name = SnapshotDisplayNameText(snapshot, path);
-        match->type = SnapshotType(snapshot);
-        match->state = SourceState(snapshot);
+        match->display_name = display_name;
+        match->type = type;
+        match->state = state;
         match->load_error.reset();
         const bool same_residency_boundary = ResidencyBoundariesMatch(
             match->context_reuse_proof,
@@ -627,15 +634,16 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     SourceListEntry entry;
     entry.path = path;
     entry.key = key;
-    entry.display_name = SnapshotDisplayNameText(snapshot, path);
-    entry.type = SnapshotType(snapshot);
-    entry.state = SourceState(snapshot);
+    entry.display_name = display_name;
+    entry.type = type;
+    entry.state = state;
     entry.cached_snapshot = std::move(snapshot);
     entry.folder_listing_generation = std::move(folder_listing_generation);
     entry.context_reuse_proof = std::move(context_reuse_proof);
     entry.last_spectrum_index = spectrum_index;
     sources_.push_back(std::move(entry));
     result.source_index = sources_.size() - 1;
+    result.source_roster_changed = true;
     return result;
 }
 

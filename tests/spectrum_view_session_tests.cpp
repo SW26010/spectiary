@@ -904,6 +904,7 @@ void TestSourceRosterClassifiesSnapshotChanges()
         first.action.snapshot_change_reason ==
             spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
         "opening the first source should be classified as a collection change");
+    Require(first.action.source_roster_changed, "adding a Files source must notify shell projections");
 
     const spectiary::SourceCollectionRosterOpenResult next_sample =
         roster.OpenPreparedSource(
@@ -916,6 +917,7 @@ void TestSourceRosterClassifiesSnapshotChanges()
         next_sample.action.snapshot_change_reason ==
             spectiary::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
         "loading another sample with the same collection identity should preserve its scope");
+    Require(!next_sample.action.source_roster_changed, "sample navigation must not republish the Files roster");
 
     const spectiary::SpectrumSnapshotHandle current_snapshot =
         roster.snapshot();
@@ -931,6 +933,7 @@ void TestSourceRosterClassifiesSnapshotChanges()
             unchanged.action.snapshot_change_reason ==
                 spectiary::SourceCollectionSnapshotChangeReason::None,
         "re-presenting the same snapshot handle and index should be a no-op");
+    Require(!unchanged.action.source_roster_changed, "unchanged source content must not republish the roster");
 
     const spectiary::SourceCollectionRosterOpenResult reloaded =
         roster.OpenPreparedSource(

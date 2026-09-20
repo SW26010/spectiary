@@ -84,6 +84,7 @@ public:
 private:
     struct AddOrUpdateSourceResult {
         std::size_t source_index = 0;
+        bool source_roster_changed = false;
         std::vector<SpectrumSnapshotHandle> retired_snapshots;
         SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
     };
