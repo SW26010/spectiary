@@ -5454,6 +5454,36 @@ void TestStartupActivationPreservesPersistedRoster()
         Require(Access::Session(stale).View().sources.size() == 2, "stale explicit source must retain the persisted roster");
         Require(!Access::LoadError(stale).empty(), "stale destination exposes normal diagnostics");
     }
+    seed();
+    std::filesystem::remove(selected_path);
+    {
+        ShellUi stale_saved(startup);
+        OpenInitialSource(stale_saved, selected_path);
+        Require(DrainAllSourceLoads(stale_saved), "deleted saved destination should settle");
+        auto& session = Access::Session(stale_saved);
+        Require(!session.CurrentSampleSnapshot(),
+            "deleted saved explicit source must not fall back to another restored source");
+        const auto& sources = session.View().sources;
+        const auto failed = std::find_if(sources.begin(), sources.end(), [&](const auto& source) {
+            return source.path == selected_path;
+        });
+        Require(sources.size() == 2 && failed != sources.end() && failed->load_error,
+            "explicit failure replacing restore must retain a removable saved-source failure row");
+        Require(!Access::LoadError(stale_saved).empty(), "deleted saved source exposes diagnostics");
+        const auto failed_index = static_cast<std::size_t>(failed - sources.begin());
+        (void)Access::Submit(stale_saved, SourceCollectionSessionIntent::EditSourceCollection(
+            SourceCollectionIntent::SwitchActive(failed_index)));
+        Require(!session.CurrentSampleSnapshot(), "failed saved-source row cannot be selected");
+        (void)Access::Submit(stale_saved, SourceCollectionSessionIntent::EditSourceCollection(
+            SourceCollectionIntent::Remove(failed_index)));
+        const auto projection = stale_saved.TakeShellSourceRoster();
+        Require(projection && projection->size() == 1 && projection->front().path == old_path,
+            "removing deleted saved source must publish the remaining source");
+        Require(session.FlushStateCaches(), "failed-source removal should persist");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 1 && saved.sources.front().path == old_path,
+            "removing failure row must forget the saved source intent");
+    }
     std::filesystem::remove_all(root);
 }
 

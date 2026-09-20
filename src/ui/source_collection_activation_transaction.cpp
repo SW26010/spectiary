@@ -952,7 +952,11 @@ void SourceCollectionActivationTransaction::DrainCompletions(
 {
     const auto record_failure = [&](const Ticket& ticket, SourceCollectionLoadError error) {
         RecordTerminalOutcome(ticket, error);
-        if (ticket.purpose == Purpose::DeferredRestore) {
+        // An explicit open can replace the saved source's restore job. Keep
+        // its removable failure row even though the replacement is explicit.
+        if (ticket.purpose == Purpose::DeferredRestore ||
+            (ticket.purpose == Purpose::ExplicitOpen &&
+                session_.HasUnresolvedSourceIntent(ticket.path))) {
             auto result = session_.RecordRestoreFailure(ticket.path, ticket.spectrum_index,
                 std::move(error));
             MergeSourceCollectionSessionAction(action, result.action);

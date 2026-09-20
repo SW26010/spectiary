@@ -15,6 +15,9 @@ A successful explicit activation marks the source session for persistence after
 restore, so the full roster and overridden active source survive a restart.
 A stale explicit path reports ordinary opening diagnostics without presenting
 another restored source as a fallback or changing an existing running instance.
+If that path belongs to an unresolved saved source, it retains a removable
+failure row in Files even when the explicit open replaced its restore job.
+An invalid path that was not saved does not add a Files row.
 
 `SourceSessionRestorePolicy::Skip` remains a small construction-time seam for
 #68's future source-free clean startup: no persisted roster preparation/enqueue,
