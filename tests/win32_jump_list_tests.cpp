@@ -37,6 +37,7 @@ struct DestinationList : ICustomDestinationList {
     bool committed = false;
     bool aborted = false;
     bool explicit_id_requested = false;
+    std::function<void()> on_begin;
     std::wstring category;
     ComPtr<IObjectCollection> removed;
     std::vector<ComPtr<IShellLinkW>> links;
@@ -53,6 +54,7 @@ struct DestinationList : ICustomDestinationList {
     HRESULT STDMETHODCALLTYPE SetAppID(LPCWSTR) override { explicit_id_requested = true; return E_UNEXPECTED; }
     HRESULT STDMETHODCALLTYPE BeginList(UINT* count, REFIID iid, void** output) override {
         *count = slots; committed = false; aborted = false; links.clear(); category.clear();
+        if (on_begin) on_begin();
         return removed->QueryInterface(iid, output);
     }
     HRESULT STDMETHODCALLTYPE AppendCategory(LPCWSTR name, IObjectArray* items) override {
@@ -148,6 +150,63 @@ void TestPublication(const std::filesystem::path& root)
     std::ofstream(preferences) << "corrupt preferences";
     list.committed = false;
     Require(FAILED(publish()) && !list.committed, "unreadable removal preferences cannot resurrect hidden destinations");
+}
+
+void TestShutdownDoesNotWaitForPublication(const std::filesystem::path& root)
+{
+    struct BlockedPublication {
+        std::promise<void> entered;
+        std::promise<void> release;
+        std::atomic<unsigned> calls = 0;
+        std::atomic<bool> stopped = false;
+        std::atomic<bool> snapshot_alive = false;
+    };
+    auto blocked = std::make_shared<BlockedPublication>();
+    auto entered = blocked->entered.get_future();
+    const auto release = blocked->release.get_future().share();
+    // Destruction of this capture proves the worker has released its state,
+    // rather than merely returning from the injected I/O operation.
+    struct WorkerLifetime {
+        std::promise<void> finished;
+        ~WorkerLifetime() { finished.set_value(); }
+    };
+    auto lifetime = std::make_shared<WorkerLifetime>();
+    auto finished = lifetime->finished.get_future();
+    auto list = std::make_unique<Win32JumpList>(root,
+        [blocked, release, lifetime = std::move(lifetime)](std::span<const JumpListSource> sources,
+            const std::wstring& category, std::stop_token stop) {
+            if (++blocked->calls == 1) blocked->entered.set_value();
+            release.wait(); // Deterministic stand-in for a blocked network/COM call.
+            blocked->stopped = stop.stop_requested();
+            blocked->snapshot_alive = sources.size() == 1 && sources[0].title == L"active" && category == L"Sources";
+        });
+    list->Refresh({{root / "active.csv", L"active"}}, L"Sources");
+    const bool started = entered.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    if (!started) {
+        blocked->release.set_value();
+        Require(false, "publication worker must start");
+    }
+    list->Refresh({{root / "queued.csv", L"queued"}}, L"Pending");
+    auto destroyed = std::async(std::launch::async, [list = std::move(list)]() mutable { list.reset(); });
+    const bool prompt = destroyed.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    // Always unblock even on regression so the test reports instead of hanging.
+    blocked->release.set_value();
+    destroyed.get();
+    Require(finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "stopped worker must release owned state");
+    Require(prompt, "destruction must not join blocked publication I/O");
+    Require(blocked->calls == 1, "shutdown must discard the pending publication");
+    Require(blocked->stopped && blocked->snapshot_alive, "in-flight publication owns its snapshot and observes shutdown");
+}
+
+void TestPublicationCancellation(const std::filesystem::path& root)
+{
+    DestinationList list;
+    std::stop_source stop;
+    list.on_begin = [&] { stop.request_stop(); };
+    const auto result = PublishSourceJumpList(ResolveCurrentExecutablePath().path, {}, L"Sources",
+        root / "cancelled-exclusions.txt", list, stop.get_token());
+    Require(result == HRESULT_FROM_WIN32(ERROR_CANCELLED) && list.aborted && !list.committed,
+        "shutdown after BeginList must abort, never commit an empty replacement");
 }
 
 void TestNativeShell(const std::filesystem::path& root)
@@ -292,7 +351,11 @@ int main(int argc, char** argv)
         std::filesystem::create_directories(root);
         if (argc == 2 && std::string_view(argv[1]) == "--native-shell") TestNativeShell(root);
         else if (argc == 2 && std::string_view(argv[1]) == "--gui-routing") TestGuiRouting(root);
-        else TestPublication(root);
+        else {
+            TestPublication(root);
+            TestShutdownDoesNotWaitForPublication(root);
+            TestPublicationCancellation(root);
+        }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; exit_code = 1; }
     std::error_code cleanup;
     std::filesystem::remove_all(root, cleanup);

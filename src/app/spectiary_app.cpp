@@ -897,6 +897,7 @@ void SpectiaryApp::SaveImGuiLayoutForShutdown()
 
 void SpectiaryApp::Shutdown()
 {
+    jump_list_.reset();
     shell_drop_target_.reset();
     external_open_router_.Stop();
     if (shutdown_complete_) {

@@ -47,6 +47,14 @@ This lock does not assign an application identity or control taskbar grouping.
 Failed COM transactions abort and report through debugger diagnostics without changing
 application source state. Windows privacy restrictions may suppress the category.
 
+Shutdown discards pending snapshots and requests cancellation. The worker owns
+its paths, snapshots and COM apartment independently of the GUI; teardown does
+not join an in-flight filesystem or shell call. Such calls are not forcibly
+interrupted: when they return, cancellation checkpoints stop further publication
+and abort any uncommitted list. An already-entered commit may finish. Process
+exit can end outstanding work; Jump List refresh is best-effort, not a shutdown
+durability requirement.
+
 Windows clears its removed-destinations list after a successful `CommitList`.
 Consequently `config/shell-jump-list-exclusions.txt` retains only SHA-256 source
 identity digests as negative shell preferences. Its first line is
@@ -63,7 +71,10 @@ one implicit shell identity across those configurations.
 
 `spectiary_win32_jump_list_tests` covers native Shell Link content, eligibility,
 ordering, limits, removal persistence, configuration-local preferences and transaction
-failures against the Windows COM interface. The shell activation suite verifies
+failures against the Windows COM interface.
+Blocked-publication tests also verify nonblocking teardown, discarded queued
+snapshots, owned worker lifetime and cancellation without committing a replacement.
+The shell activation suite verifies
 construction-time restore gating, ordinary restore, first explicit activation,
 stale-source errors, untouched saved state, and Files publication notifications.
 
