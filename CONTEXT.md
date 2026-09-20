@@ -146,8 +146,10 @@ source collection's full sample ordering. With active sample filtering or
 sorting, previous, next, navigation-list movement, and labeling auto-advance
 operate within this sequence while the current sample remains identified by its
 source row index. An empty sample navigation sequence is a valid active sequence
-state that provides no current sample to downstream sample workflow or plot
-surfaces.
+state. Ordinary sequence navigation provides no current sample to downstream
+sample workflow or plot surfaces in this state. Explicitly opening an existing
+filesystem member may still provide a displayed sample, even when the sequence
+is empty, without assigning a sequence position or Previous/Next cursor.
 _Avoid_: Source collection, narrowed-sequence index, labeling queue
 
 **Sample filtering**:
