@@ -71,11 +71,11 @@ ctest --test-dir build/ninja-msvc-debug -R '^spectiary_win32_jump_list_(native|g
 运行；确定性的发布协议测试属于 `fast`。启动和 shell identity 合同见
 [ADR 0017](../adr/0017-source-jump-list-and-startup-policy.md)。
 
-GUI 回归也验证首次无来源启动恢复、后续无来源启动为空实例、空实例关闭不覆盖会话，
+GUI 回归也验证首次无来源启动恢复、后续无来源启动不激活来源、无操作关闭不覆盖会话，
 以及显式 Jump List 来源仍保留完整 Files 清单。真实 Windows 手势另做人工验收：
 保存来源后退出全部实例，从开始菜单普通启动确认恢复；在其运行时用任务栏 Shift-click
-或 Win+Shift+数字确认新窗口为空。再退出全部实例，测试冷启动 Start Menu + Shift；
-如果 Windows 产生两次 invocation，确认首次恢复、后续为空。该手势时序不由进程启动测试替代；
+或 Win+Shift+数字确认新窗口的 Files 清单保留、无激活来源且主图为空。再退出全部实例，测试冷启动 Start Menu + Shift；
+如果 Windows 产生两次 invocation，确认首次恢复 saved active、后续只恢复 Files。该手势时序不由进程启动测试替代；
 现有 endpoint 只在 GUI 初始化后注册，不为未复现的并发启动增加存在性锁。
 
 共享配置写在 `CMakePresets.json`。本地个人配置写在 `CMakeUserPresets.json`，不要提交。

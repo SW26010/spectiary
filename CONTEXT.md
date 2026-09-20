@@ -81,9 +81,10 @@ restored sources remain removable, non-selectable Files rows. See the
 for display, diagnostics, and persistence behavior.
 
 A subsequent ordinary source-free GUI launch with a compatible registered peer
-in the same runtime/config namespace starts with no source or sample, skipping
-persisted source restore before preparation. This transient empty state never
-replaces the durable source session; explicit source mutations persist normally.
+in the same runtime/config namespace restores the Files roster but starts with
+no active source or sample. Background restore never presents a source before
+user selection. This transient activation override never replaces the durable
+source session; explicit source mutations persist normally.
 Application settings/layout keep their normal lifecycle. Explicit-source and
 automation startup retain their existing contracts.
 

@@ -825,7 +825,8 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     const SpectrumSnapshotHandle& snapshot,
     SourceCollectionContext context,
     PreparedSampleWorkflowState prepared_workflow,
-    bool present_explicit_member)
+    bool present_explicit_member,
+    bool activate)
 {
     PreparedSampleWorkflowActivationResult result;
     SourceCollectionSessionAction& action = result.action;
@@ -836,6 +837,16 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     }
 
     const SourceCollectionIdentity identity = context.identity;
+    if (!activate) {
+        // Register the prepared context for later selection without touching
+        // active navigation, labeling, or presentation state.
+        AdoptPreparedCache(prepared_workflow.preparation_cache, result.background_retirement);
+        if (auto retired = navigation_.ActivatePreparedSource(std::move(*source_key), snapshot,
+                identity, std::move(context.manifest), std::move(prepared_workflow), false)) {
+            result.background_retirement.push_back(std::move(retired));
+        }
+        return result;
+    }
     const bool workflow_identity_changed =
         !active_sample_workflow_identity_ ||
         *active_sample_workflow_identity_ != identity.id;

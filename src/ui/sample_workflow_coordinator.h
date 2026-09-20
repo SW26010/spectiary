@@ -149,7 +149,8 @@ public:
         const SpectrumSnapshotHandle& snapshot,
         SourceCollectionContext context,
         PreparedSampleWorkflowState prepared_workflow,
-        bool present_explicit_member = false);
+        bool present_explicit_member = false,
+        bool activate = true);
     [[nodiscard]] bool CanReusePreparedKnownSource(
         std::optional<std::string> source_key,
         const SourceCollectionIdentity& identity) const;

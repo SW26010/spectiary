@@ -374,7 +374,8 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
     SourceCollectionFolderListingGenerationHandle folder_listing_generation,
-    std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof,
+    bool activate)
 {
     SourceCollectionRosterOpenResult result;
     const SourceListEntry* previous_source = current_source();
@@ -399,11 +400,12 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
         spectrum_index,
         std::move(folder_listing_generation),
         std::move(context_reuse_proof));
-    current_source_index_ = update.source_index;
     result.action.source_roster_changed = update.source_roster_changed;
     result.retired_snapshots = std::move(update.retired_snapshots);
     result.replaced_folder_listing_generation =
         std::move(update.replaced_folder_listing_generation);
+    if (!activate) return result;
+    current_source_index_ = update.source_index;
     const bool same_source_collection =
         previous_identity && next_identity &&
         !previous_identity->empty() &&

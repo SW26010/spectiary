@@ -4,8 +4,8 @@ Status: Accepted. Date: 2026-09-20. Issue: #121.
 
 ## Startup boundary
 
-The first ordinary source-free GUI startup and explicit-source GUI startup
-restore the persisted Files roster.
+All ordinary GUI startups restore the persisted Files roster. First source-free
+startup restores saved activation; explicit-source startup overrides that target.
 `OpenInitialSource` runs before the message loop drains source completions and
 uses the existing external-source resolver and asynchronous opening pipeline.
 Its explicit path overrides the deferred transaction's desired active source.
@@ -22,11 +22,16 @@ An invalid path that was not saved does not add a Files row.
 
 For #68, before constructing the application, a subsequent ordinary source-free
 launch queries ADR 0016's existing namespace-local, protocol-compatible endpoint
-discovery. A registered peer selects `SourceSessionRestorePolicy::Skip`: no
-persisted roster preparation/enqueue, no current source/sample, and no empty-state
-write on idle flush or close. Explicit source mutations then use normal persistence.
+discovery. A registered peer selects
+`SourceSessionStartupPolicy::RestoreRosterWithoutActive`: restore all Files rows
+without a startup activation target or current sample. Prepared background sources
+register their roster entries and navigation contexts without activating the plot
+or labeling workflow. An idle flush or close does not replace the saved active
+source with null. Explicit source mutations then use normal persistence, including
+selections and removals while background restore is still pending.
 Application preferences and layout retain their ordinary storage lifecycle.
-Explicit-source startup never uses Skip. Automation and resource workloads are
+Explicit-source startup uses `RestoreSavedActive` with its explicit override.
+Automation and resource workloads are
 excluded. Discovery neither activates a peer nor sends a source request.
 Endpoint registration remains at ordinary GUI initialization; simultaneous
 launches before either endpoint is registered can both restore. No input polling,
@@ -94,10 +99,10 @@ The shell activation suite verifies
 ordinary roster/saved-active restore, explicit activation overriding a saved
 active source while retaining the other sources, out-of-order load completion
 without presenting an unrelated source, full-roster Jump List projection, stale
-source diagnostics, and the independent clean-start restore gate.
+source diagnostics, and roster restoration without startup activation.
 Router tests also cover read-only peer discovery, protocol compatibility,
 namespace isolation and process exit. The GUI routing smoke checks a first
-source-free restore followed by a distinct clean GUI and non-destructive close.
+source-free restore followed by a distinct no-active GUI and non-destructive close.
 
 The optional `spectiary_win32_jump_list_native_tests` checks real destination-list
 publication using the test executable's implicit identity, then deletes that list.

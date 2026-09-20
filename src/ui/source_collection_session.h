@@ -300,7 +300,7 @@ public:
                 SampleLabelingStateCacheLoadPolicy::
                     AllowPersistentOutputs,
         const RuntimePaths& runtime_paths = {},
-        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
+        SourceSessionStartupPolicy startup_source_policy = SourceSessionStartupPolicy::RestoreSavedActive);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -311,7 +311,7 @@ public:
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher,
         const RuntimePaths& runtime_paths = {},
-        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
+        SourceSessionStartupPolicy startup_source_policy = SourceSessionStartupPolicy::RestoreSavedActive);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -324,7 +324,7 @@ public:
         SampleLabelingController::CanonicalValuesPublisher
             canonical_values_publisher,
         const RuntimePaths& runtime_paths = {},
-        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
+        SourceSessionStartupPolicy startup_source_policy = SourceSessionStartupPolicy::RestoreSavedActive);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
@@ -368,7 +368,8 @@ public:
         PreparedSourceCollectionPayload payload,
         SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
-            std::nullopt);
+            std::nullopt,
+        bool activate = true);
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,
@@ -414,7 +415,7 @@ private:
         std::optional<std::filesystem::path>* canceled_source_follow_up_path);
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
     [[nodiscard]] LocalUserStateHealthView PersistenceHealth() const;
-    void PrepareDeferredSourceSessionRestore();
+    void PrepareDeferredSourceSessionRestore(SourceSessionStartupPolicy startup_source_policy);
     void MarkSourceSessionCacheDirty();
     void InvalidateView();
     void AppendPendingBackgroundRetirement(

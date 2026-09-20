@@ -374,7 +374,8 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     const SpectrumSnapshotHandle& snapshot,
     const SourceCollectionIdentity& identity,
     SourceCollectionManifest manifest,
-    PreparedSampleWorkflowState prepared)
+    PreparedSampleWorkflowState prepared,
+    bool activate)
 {
     if (source_key.empty() || !snapshot) {
         ClearActiveSource();
@@ -417,9 +418,11 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     session.sequence_state_cache_valid = true;
 
     source_key_to_session_key_[source_key] = identity.id;
-    active_source_key_ = identity.id;
-    ++active_context_generation_;
-    RefreshSequenceTopologyRevision();
+    if (activate) {
+        active_source_key_ = identity.id;
+        ++active_context_generation_;
+        RefreshSequenceTopologyRevision();
+    }
     return retired_session;
 }
 

@@ -71,7 +71,8 @@ public:
         SpectrumSnapshotHandle snapshot,
         SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
-            std::nullopt);
+            std::nullopt,
+        bool activate = true);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveSourceForRestore();
     [[nodiscard]] SourceCollectionRosterOpenResult RecordRestoreFailure(

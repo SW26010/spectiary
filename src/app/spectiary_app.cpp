@@ -334,7 +334,7 @@ SpectiaryApp::SpectiaryApp(
     const SpectiaryStartup& startup,
     std::optional<AutomationStartupConfiguration>
         automation,
-    SourceSessionRestorePolicy startup_source_policy)
+    SourceSessionStartupPolicy startup_source_policy)
     : startup_(startup),
       imgui_layout_persistence_(
           startup.runtime_paths().imgui_ini_path),

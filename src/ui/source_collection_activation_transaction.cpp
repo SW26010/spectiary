@@ -266,9 +266,13 @@ SourceCollectionActivationTransaction::Submit(
                 pending_activation_started_at);
     }
 
+    const bool explicit_source_change = intent.intent_kind() == SourceCollectionSessionIntentKind::SourceCollection;
     SourceCollectionSessionResult result = session_.Submit(
         std::move(intent),
         trace_requested ? &target_resolution : nullptr);
+    if (explicit_source_change && (result.action.source_roster_changed || result.action.snapshot_changed)) {
+        session_.RecordExplicitSourceActivation();
+    }
     ApplyPresentationAction(result.action);
     const NavigationLatencyTimePoint target_resolved_at =
         trace_requested ? NavigationLatencyTrace::Now()
@@ -1088,6 +1092,9 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 retain_presentation_resources_();
         }
 
+        const bool activate = ticket.purpose != Purpose::DeferredRestore ||
+            (deferred_restore_active_path_ &&
+                SourcePathIdentityKey(*deferred_restore_active_path_) == ticket.path_key);
         SourceCollectionSessionResult result =
             session_.OpenPreparedSource(
                 prepared.path,
@@ -1097,7 +1104,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 std::move(
                     prepared.folder_listing_generation),
                 std::move(
-                    prepared.context_reuse_proof));
+                    prepared.context_reuse_proof), activate);
         MergeSourceCollectionSessionAction(
             action,
             result.action);

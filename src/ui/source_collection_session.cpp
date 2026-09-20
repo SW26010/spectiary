@@ -552,7 +552,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
     const RuntimePaths& runtime_paths,
-    SourceSessionRestorePolicy startup_source_policy)
+    SourceSessionStartupPolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -573,7 +573,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher,
     const RuntimePaths& runtime_paths,
-    SourceSessionRestorePolicy startup_source_policy)
+    SourceSessionStartupPolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -597,7 +597,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingController::CanonicalValuesPublisher
         canonical_values_publisher,
     const RuntimePaths& runtime_paths,
-    SourceSessionRestorePolicy startup_source_policy)
+    SourceSessionStartupPolicy startup_source_policy)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
@@ -622,9 +622,7 @@ SourceCollectionSession::SourceCollectionSession(
           std::move(source_session_state_cache_path), runtime_paths))
 {
     workflow_->SetDeferredSampleNavigation(true);
-    if (startup_source_policy == SourceSessionRestorePolicy::Restore) {
-        PrepareDeferredSourceSessionRestore();
-    }
+    PrepareDeferredSourceSessionRestore(startup_source_policy);
 }
 
 SourceCollectionSession::~SourceCollectionSession() = default;
@@ -1239,7 +1237,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     SpectrumSnapshotHandle snapshot,
     PreparedSourceCollectionPayload payload,
     SourceCollectionFolderListingGenerationHandle folder_listing_generation,
-    std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof,
+    bool activate)
 {
     SourceCollectionSessionResult result;
     const auto retire_folder_listing_generation = [&]() {
@@ -1387,9 +1386,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         roster_->OpenPreparedSource(
             path,
             spectrum_index,
-            std::move(snapshot),
+            snapshot,
             std::move(folder_listing_generation),
-            std::move(context_reuse_proof));
+            std::move(context_reuse_proof), activate);
     MergeSourceCollectionSessionAction(result.action, roster_result.action);
     const bool is_prepared_plan =
         std::holds_alternative<PreparedSourceCollectionPlan>(payload);
@@ -1411,11 +1410,11 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     if (auto* plan = std::get_if<PreparedSourceCollectionPlan>(&payload)) {
         PreparedSampleWorkflowActivationResult activation =
             workflow_->SyncPreparedActiveSource(
-                roster_->current_source_key(),
-                roster_->snapshot(),
+                prepared_path_key,
+                snapshot,
                 std::move(plan->context),
                 std::move(plan->workflow),
-                plan->present_explicit_member);
+                plan->present_explicit_member, activate);
         MergeSourceCollectionSessionAction(
             result.action,
             activation.action);
@@ -1426,7 +1425,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         if (completes_pending_navigation) {
             workflow_->CompletePreparedDeferredSampleNavigation(*pending_navigation);
         }
-    } else {
+    } else if (activate) {
         const auto& reuse = std::get<PreparedSourceCollectionReuse>(payload);
         SampleWorkflowTransitionOutcome transition =
             workflow_->SyncReusedPreparedKnownSource(
@@ -1447,6 +1446,17 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     }
     if (result.action.annotation_roster_changed) {
         source_session_state_->MarkDirtyAfterRestore();
+    }
+    if (!activate) {
+        result.loaded = true;
+        std::erase_if(unresolved_deferred_restore_sources_,
+            [&prepared_path_key](const SourceCollectionSavedSource& source) {
+                return SourcePathIdentityKey(source.path) == prepared_path_key;
+            });
+        result.view_invalidated = true;
+        InvalidateView();
+        AppendPendingBackgroundRetirement(result.background_retirement);
+        return result;
     }
     const SpectrumSnapshotHandle& active_snapshot = roster_->snapshot();
     const std::optional<std::size_t> active_index = workflow_->current_index();
@@ -1799,7 +1809,7 @@ SourceCollectionSession::TakeViewRetirement()
         {});
 }
 
-void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
+void SourceCollectionSession::PrepareDeferredSourceSessionRestore(SourceSessionStartupPolicy startup_source_policy)
 {
     const SourceCollectionSessionStateCache state = source_session_state_->Load();
     SourceCollectionDeferredRestorePlan plan;
@@ -1814,7 +1824,8 @@ void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
         return;
     }
 
-    if (state.active_source_index && *state.active_source_index < state.sources.size()) {
+    if (startup_source_policy == SourceSessionStartupPolicy::RestoreSavedActive &&
+        state.active_source_index && *state.active_source_index < state.sources.size()) {
         const std::filesystem::path& active_path = state.sources[*state.active_source_index].path;
         const std::string active_path_key = SourcePathIdentityKey(active_path);
         const auto active = std::find_if(

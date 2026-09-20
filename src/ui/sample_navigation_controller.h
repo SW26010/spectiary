@@ -103,7 +103,8 @@ public:
         const SpectrumSnapshotHandle& snapshot,
         const SourceCollectionIdentity& identity,
         SourceCollectionManifest manifest,
-        PreparedSampleWorkflowState prepared);
+        PreparedSampleWorkflowState prepared,
+        bool activate = true);
     [[nodiscard]] BackgroundRetirementHandle AdoptPreparedStateCache(
         std::shared_ptr<const SampleNavigationStateCacheLoadResult>
             cache_snapshot);

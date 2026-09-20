@@ -314,7 +314,7 @@ void TestGuiRouting(const std::filesystem::path& root)
         "subsequent source-free launch creates distinct GUI");
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     Require(title_for(GetProcessId(clean)).second.find(L".csv") == std::wstring::npos,
-        "subsequent GUI must not restore a source");
+        "subsequent GUI must not activate a restored source");
     PostMessageW(title_for(GetProcessId(clean)).first, WM_CLOSE, 0, 0);
     Require(WaitForSingleObject(clean, 5000) == WAIT_OBJECT_0, "untouched clean GUI closes normally");
     const auto unchanged = LoadSourceCollectionSessionStateCache(runtime_paths, runtime_paths.source_session_state_path).cache;

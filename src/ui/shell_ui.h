@@ -278,7 +278,7 @@ public:
             labeling_state_cache_load_policy =
                 SampleLabelingStateCacheLoadPolicy::
                     AllowPersistentOutputs,
-        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
+        SourceSessionStartupPolicy startup_source_policy = SourceSessionStartupPolicy::RestoreSavedActive);
     ~ShellUi();
 
     [[nodiscard]] std::optional<std::vector<SourceCollectionSourceView>> TakeShellSourceRoster();

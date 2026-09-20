@@ -240,14 +240,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
                 return 0;
             }
         }
-        // Decide before construction can prepare/enqueue persisted source restore.
+        // Decide the activation target before construction enqueues roster restore.
         // Explicit sources and non-ordinary GUI invocations keep their contracts.
         const auto source_restore_policy =
             !command_line.automation && !RuntimeResourceWorkloadEnabled() &&
             !command_line.initial_source &&
             spectiary::Win32ExternalOpenRouter::HasCompatibleInstance(startup.runtime_paths().config_root)
-                ? spectiary::SourceSessionRestorePolicy::Skip
-                : spectiary::SourceSessionRestorePolicy::Restore;
+                ? spectiary::SourceSessionStartupPolicy::RestoreRosterWithoutActive
+                : spectiary::SourceSessionStartupPolicy::RestoreSavedActive;
         spectiary::SpectiaryApp app(
             startup,
             command_line.automation,

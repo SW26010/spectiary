@@ -158,6 +158,11 @@ struct ShellUiTestAccess {
         shell.BeginDeferredSourceRestore();
     }
 
+    static SourceCollectionSessionAction DrainActivation(ShellUi& shell)
+    {
+        return shell.source_activation_.Drain(false);
+    }
+
     static void SeedStartupSpectrumViewState(
         ShellUi& shell,
         SpectrumViewportState state)
@@ -5406,12 +5411,26 @@ void TestStartupActivationPreservesPersistedRoster()
     seed();
     {
         ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
-            SourceSessionRestorePolicy::Skip);
-        Require(!Access::Session(clean).TakeDeferredRestorePlan() && Access::PendingLoadCount(clean) == 0,
-            "clean-start seam must not prepare or enqueue persisted roster restore");
-        Require(Access::Session(clean).View().sources.empty() &&
-            !Access::Session(clean).CurrentSampleSnapshot(),
-            "clean startup exposes neither source roster nor sample/spectrum");
+            SourceSessionStartupPolicy::RestoreRosterWithoutActive);
+        Require(Access::PendingLoadCount(clean) == 2, "no-active startup must enqueue the full saved roster");
+        Require(Access::Session(clean).FlushStateCaches(), "flush before any completion is non-destructive");
+        const auto before = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(before.sources.size() == 2 && before.active_source_index == 0,
+            "early flush preserves saved activation while roster loads are pending");
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        do {
+            const auto action = Access::DrainActivation(clean);
+            Require(!action.snapshot_changed, "roster restore must not emit snapshot changes");
+            Require(!Access::Session(clean).View().current_source_index, "roster restore must not select a source");
+            Require(!Access::Session(clean).CurrentSourceCollectionIdentity(), "roster restore must not set source identity");
+            Require(!Access::Session(clean).CurrentSampleSnapshot(), "roster restore must not present a sample");
+            if (Access::PendingLoadCount(clean) == 0) break;
+            std::this_thread::sleep_for(2ms);
+        } while (std::chrono::steady_clock::now() < deadline);
+        Require(Access::PendingLoadCount(clean) == 0 && Access::Session(clean).View().sources.size() == 2,
+            "no-active startup restores all Files rows");
+        const auto projection = clean.TakeShellSourceRoster();
+        Require(projection && projection->size() == 2, "no-active window retains full shell Files projection");
         Require(Access::Session(clean).FlushStateCaches(), "clean shell flush should succeed");
         const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
         Require(saved.sources.size() == 2 && saved.active_source_index == 0,
@@ -5422,14 +5441,45 @@ void TestStartupActivationPreservesPersistedRoster()
         Require(saved.sources.size() == 2 && saved.active_source_index == 0,
             "destroying untouched clean shell preserves durable session");
         ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
-            SourceSessionRestorePolicy::Skip);
+            SourceSessionStartupPolicy::RestoreRosterWithoutActive);
         OpenInitialSource(clean, selected_path);
         Require(DrainAllSourceLoads(clean) && CurrentSourceMatches(Access::Session(clean), selected_path),
             "explicit open after clean startup uses normal activation");
         Require(Access::Session(clean).FlushStateCaches(), "explicitly changed clean shell must persist");
         const auto changed = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
-        Require(changed.sources.size() == 1 && changed.sources.front().path == selected_path &&
-            changed.active_source_index == 0, "explicit mutation ends synthetic clean persistence boundary");
+        Require(changed.sources.size() == 2 && changed.active_source_index &&
+            changed.sources[*changed.active_source_index].path == selected_path,
+            "explicit open during restore persists full roster and chosen active source");
+    }
+    seed();
+    {
+        ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            SourceSessionStartupPolicy::RestoreRosterWithoutActive);
+        Require(DrainAllSourceLoads(clean), "restore Files before user selection");
+        const auto& sources = Access::Session(clean).View().sources;
+        const auto selected = std::find_if(sources.begin(), sources.end(), [&](const auto& source) {
+            return source.path == selected_path;
+        });
+        Require(selected != sources.end(), "restored source is selectable");
+        (void)Access::Submit(clean, SourceCollectionSessionIntent::EditSourceCollection(
+            SourceCollectionIntent::SwitchActive(static_cast<std::size_t>(selected - sources.begin()))));
+        Require(DrainAllSourceLoads(clean) && CurrentSourceMatches(Access::Session(clean), selected_path),
+            "clicking a restored Files row activates its prepared context and spectrum");
+        Require(Access::Session(clean).FlushStateCaches(), "user selection persists");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 2 && saved.active_source_index &&
+            saved.sources[*saved.active_source_index].path == selected_path, "persist chosen source after no-active startup");
+    }
+    seed();
+    {
+        ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            SourceSessionStartupPolicy::RestoreRosterWithoutActive);
+        Require(DrainAllSourceLoads(clean), "restore Files before removal");
+        (void)Access::Submit(clean, SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Remove(0)));
+        Require(Access::Session(clean).FlushStateCaches(), "user removal persists");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 1 && !saved.active_source_index,
+            "explicit removal persists remaining roster with no active source");
     }
     seed();
     {
@@ -5474,6 +5524,20 @@ void TestStartupActivationPreservesPersistedRoster()
     }
     seed();
     std::filesystem::remove(selected_path);
+    {
+        ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            SourceSessionStartupPolicy::RestoreRosterWithoutActive);
+        Require(DrainAllSourceLoads(clean), "no-active restore settles missing saved sources");
+        const auto& view = Access::Session(clean).View();
+        Require(view.sources.size() == 2 && !view.current_source_index &&
+            !Access::Session(clean).CurrentSampleSnapshot() &&
+            std::any_of(view.sources.begin(), view.sources.end(), [](const auto& source) { return source.load_error.has_value(); }),
+            "missing source remains a Files failure row without activating another source");
+        Require(Access::Session(clean).FlushStateCaches(), "failed background restore flush");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 2 && saved.active_source_index == 0,
+            "background failure does not replace durable activation");
+    }
     {
         ShellUi stale_saved(startup);
         OpenInitialSource(stale_saved, selected_path);

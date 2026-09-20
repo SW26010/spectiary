@@ -46,7 +46,7 @@ public:
         const SpectiaryStartup& startup,
         std::optional<AutomationStartupConfiguration>
             automation = std::nullopt,
-        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
+        SourceSessionStartupPolicy startup_source_policy = SourceSessionStartupPolicy::RestoreSavedActive);
     ~SpectiaryApp();
 
     SpectiaryApp(const SpectiaryApp&) = delete;
