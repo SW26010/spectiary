@@ -14,6 +14,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <implot.h>
+#include <implot_internal.h>
 
 #include <atomic>
 #include <chrono>
@@ -25,6 +26,7 @@
 #include <future>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -212,7 +214,8 @@ public:
         bool left_button_down = false,
         spectiary::PlotTouchpadGestureSource* touchpad_gestures = nullptr,
         spectiary::SpectrumPlotDisplayOptions display = {},
-        float mouse_wheel = 0.0f)
+        float mouse_wheel = 0.0f,
+        bool check_y_tick_labels = false)
     {
         ImGuiIO& io = ImGui::GetIO();
         io.DeltaTime = 1.0f / 60.0f;
@@ -239,6 +242,29 @@ public:
             {},
             display,
             touchpad_gestures);
+        if (check_y_tick_labels) {
+            // Inspect generated labels only in tests; production uses public ImPlot APIs.
+            ImPlotPlot* plot = ImPlot::GetPlot("###main_spectrum");
+            Require(plot != nullptr, "the production spectrum plot should exist");
+            const ImPlotAxis& axis = plot->Axes[ImAxis_Y1];
+            int readable_ticks = 0;
+            for (const ImPlotTick& tick : axis.Ticker.Ticks) {
+                if (!tick.ShowLabel || tick.PlotPos < axis.Range.Min ||
+                    tick.PlotPos > axis.Range.Max) {
+                    continue;
+                }
+                const char* label = axis.Ticker.GetText(tick.Idx);
+                char* end = nullptr;
+                const double value = std::strtod(label, &end);
+                Require(end != label && *end == '\0' && std::isfinite(value),
+                    "visible Y ticks must contain a finite numeric label");
+                Require(std::abs(value - tick.PlotPos) <=
+                        axis.Range.Size() * 1.0e-4,
+                    "Y tick labels must represent their source coordinates");
+                ++readable_ticks;
+            }
+            Require(readable_ticks >= 2, "Y axis must retain useful numeric ticks");
+        }
         ImGui::End();
         ImGui::EndFrame();
         return feedback;
@@ -1032,6 +1058,40 @@ void TestHiddenCurvesStillReportPresentedPlotFrame()
         "a curve-free plot frame should still complete its initial fit");
 }
 
+void TestNativeYTicksSurviveImmersiveModeTransitions()
+{
+    ScopedPlotUi ui;
+    for (const double scale : {0.001, 1.0, 1.0e12}) {
+        spectiary::SpectrumViewSession session;
+        const auto snapshot = MakeSnapshot(
+            {1.0, 2.0, 3.0}, {-2.0 * scale, scale, 3.0 * scale});
+        std::optional<spectiary::PlotViewLimits> previous_limits;
+        for (const bool immersive : {false, true, false, true}) {
+            spectiary::SpectrumPlotDisplayOptions display;
+            display.native_transparent_axes = immersive;
+            display.include_edge_pixels = immersive;
+            if (previous_limits) {
+                session.Submit(spectiary::SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
+            }
+            const auto feedback = ui.RenderFrame(session, snapshot,
+                ImVec2(-100.0f, -100.0f), false, nullptr, display, 0.0f, true);
+            Require(feedback.plot_submitted && feedback.visible_limits,
+                "each axis mode must present the spectrum");
+            if (previous_limits) {
+                RequireNear(feedback.visible_limits->x_min, previous_limits->x_min,
+                    "axis mode switch preserves x minimum");
+                RequireNear(feedback.visible_limits->x_max, previous_limits->x_max,
+                    "axis mode switch preserves x maximum");
+                RequireNear(feedback.visible_limits->y_min, previous_limits->y_min,
+                    "axis mode switch preserves y minimum");
+                RequireNear(feedback.visible_limits->y_max, previous_limits->y_max,
+                    "axis mode switch preserves y maximum");
+            }
+            previous_limits = feedback.visible_limits;
+        }
+    }
+}
+
 void TestFitAndStoredLimitReuseAreObservable()
 {
     ScopedPlotUi ui;
@@ -1555,6 +1615,7 @@ int main()
     TestSourceRosterClassifiesSnapshotChanges();
     TestSnapshotResetPreservesControlsAndFitsNewData();
     TestHiddenCurvesStillReportPresentedPlotFrame();
+    TestNativeYTicksSurviveImmersiveModeTransitions();
     TestFitAndStoredLimitReuseAreObservable();
     TestViewportLockOverlayTogglesInAxisCorner();
     TestViewportLockConsumesImmersiveAxisAndTouchpadInput();

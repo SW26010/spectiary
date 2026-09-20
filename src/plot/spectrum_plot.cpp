@@ -681,30 +681,6 @@ std::string FormatTickValue(double value, double step)
     return TrimFixedDecimalZeros(std::string(buffer));
 }
 
-int FormatNativeCompactYTick(double value, char* buffer, int size, void*)
-{
-    if (buffer == nullptr || size <= 0) {
-        return 0;
-    }
-
-    if (!std::isfinite(value)) {
-        buffer[0] = '\0';
-        return 0;
-    }
-
-    const double tenths = value * 10.0;
-    const double rounded_tenths = std::round(tenths);
-    if (std::abs(tenths - rounded_tenths) > 1.0e-6) {
-        return std::snprintf(buffer, static_cast<std::size_t>(size), "%4s", "");
-    }
-
-    double rounded_value = rounded_tenths / 10.0;
-    if (std::abs(rounded_value) < 0.05) {
-        rounded_value = 0.0;
-    }
-    return std::snprintf(buffer, static_cast<std::size_t>(size), "%4.1f", rounded_value);
-}
-
 float ClampTextStart(float desired, float minimum, float maximum)
 {
     if (maximum < minimum) {
@@ -1233,9 +1209,6 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             ImPlotLocation_NorthWest,
             ImPlotLegendFlags_NoButtons |
                 ImPlotLegendFlags_NoMenus);
-        if (transparent_native_axes) {
-            ImPlot::SetupAxisFormat(ImAxis_Y1, FormatNativeCompactYTick);
-        }
 
         const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
         const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
