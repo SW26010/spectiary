@@ -14,6 +14,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
+# .NET Framework creates redirected stdin writers from Console.InputEncoding.
+# Keep raw UTF-8 payloads free of an implicit preamble; BOM coverage is explicit.
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 $labelingTaskId = '77777777-7777-4777-8777-777777777777'
 
 function Assert-True {
@@ -2584,7 +2587,7 @@ try {
             Send-InteractiveLauncherRequest `
                 -Process $interactiveLauncher `
                 -Lines @(
-                    "source open $unicodeSourceRoot") `
+                    ([string][char]0xFEFF + "source open $unicodeSourceRoot")) `
                 -RequestId 'request-1'
         )
         $unicodeWaitMessages = @(
@@ -2624,7 +2627,7 @@ try {
                     $unicodeSourceRoot -and
                 [string]$unicodeStateTerminal.state.spectrum.name -eq
                     $unicodeSecondSpectrum) `
-            -Message 'Explicit UTF-8 redirected stdin must preserve a Unicode source path and exact Unicode spectrum name through the real GUI protocol.'
+            -Message 'UTF-8 redirected stdin with an initial BOM must preserve a Unicode source path and exact Unicode spectrum name through the real GUI protocol.'
 
         $visibleCaptureMessages = @(
             Send-InteractiveLauncherRequest `

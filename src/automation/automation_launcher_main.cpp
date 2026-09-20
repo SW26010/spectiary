@@ -30,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -583,6 +584,12 @@ LauncherLineReadStatus ReadLauncherLine(
         error_message =
             "Could not read an automation command from standard input.";
         return LauncherLineReadStatus::Error;
+    }
+    // PowerShell and .NET redirected writers may emit a UTF-8 preamble.
+    // It is stream metadata only at the beginning, not part of the command.
+    static bool first_redirected_line = true;
+    if (std::exchange(first_redirected_line, false) && line.starts_with("\xEF\xBB\xBF")) {
+        line.erase(0, 3);
     }
     if (!spectiary::IsValidUtf8(line)) {
         error_message =

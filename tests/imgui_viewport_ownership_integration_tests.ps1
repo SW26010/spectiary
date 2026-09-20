@@ -14,6 +14,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
+# The .NET Framework stdin writer otherwise emits a BOM before BaseStream writes.
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Drawing
 
 function Assert-True {

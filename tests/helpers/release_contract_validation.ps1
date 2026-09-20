@@ -808,7 +808,8 @@ function Assert-CMakeAndFitsTestContract {
                 $caseBody.Contains('LoadSpectrumSnapshotFromPath') -and
                 (Test-CppHasTopLevelInvocation `
                     -Body $loaderMain `
-                    -Name $loaderCase.Name)
+                    -Name $loaderCase.Name `
+                    -ExpectedBraceDepth 1)
             ) `
             -Message "Spectrum loader entry point must unconditionally execute $($loaderCase.Name) through the production loader."
     }
