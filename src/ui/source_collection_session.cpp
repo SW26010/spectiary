@@ -551,14 +551,15 @@ SourceCollectionSession::SourceCollectionSession(
     std::filesystem::path workflow_state_cache_path,
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
-    const RuntimePaths& runtime_paths)
+    const RuntimePaths& runtime_paths,
+    StartupSourcePolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
           labeling_state_cache_load_policy,
-          {}, runtime_paths)
+          {}, runtime_paths, startup_source_policy)
 {
 }
 
@@ -571,7 +572,8 @@ SourceCollectionSession::SourceCollectionSession(
         labeling_state_cache_load_policy,
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher,
-    const RuntimePaths& runtime_paths)
+    const RuntimePaths& runtime_paths,
+    StartupSourcePolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -579,7 +581,7 @@ SourceCollectionSession::SourceCollectionSession(
           std::move(workflow_state_cache_path),
           labeling_state_cache_load_policy,
           std::move(canonical_document_publisher),
-          SampleLabelingController::CanonicalValuesPublisher{}, runtime_paths)
+          SampleLabelingController::CanonicalValuesPublisher{}, runtime_paths, startup_source_policy)
 {
 }
 
@@ -594,7 +596,8 @@ SourceCollectionSession::SourceCollectionSession(
         canonical_document_publisher,
     SampleLabelingController::CanonicalValuesPublisher
         canonical_values_publisher,
-    const RuntimePaths& runtime_paths)
+    const RuntimePaths& runtime_paths,
+    StartupSourcePolicy startup_source_policy)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
@@ -619,7 +622,9 @@ SourceCollectionSession::SourceCollectionSession(
           std::move(source_session_state_cache_path), runtime_paths))
 {
     workflow_->SetDeferredSampleNavigation(true);
-    PrepareDeferredSourceSessionRestore();
+    if (startup_source_policy == StartupSourcePolicy::RestoreSession) {
+        PrepareDeferredSourceSessionRestore();
+    }
 }
 
 SourceCollectionSession::~SourceCollectionSession() = default;

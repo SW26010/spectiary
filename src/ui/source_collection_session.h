@@ -1,4 +1,5 @@
 #pragma once
+#include "app/initial_source.h"
 
 #include "app/runtime_paths.h"
 
@@ -298,7 +299,8 @@ public:
             labeling_state_cache_load_policy =
                 SampleLabelingStateCacheLoadPolicy::
                     AllowPersistentOutputs,
-        const RuntimePaths& runtime_paths = {});
+        const RuntimePaths& runtime_paths = {},
+        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -308,7 +310,8 @@ public:
             labeling_state_cache_load_policy,
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher,
-        const RuntimePaths& runtime_paths = {});
+        const RuntimePaths& runtime_paths = {},
+        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -320,7 +323,8 @@ public:
             canonical_document_publisher,
         SampleLabelingController::CanonicalValuesPublisher
             canonical_values_publisher,
-        const RuntimePaths& runtime_paths = {});
+        const RuntimePaths& runtime_paths = {},
+        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
