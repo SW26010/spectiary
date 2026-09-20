@@ -2,6 +2,7 @@
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_external_open_router.h"
 #include "automation/automation_startup.h"
+#include "ui/source_collection_session_state_cache_io.h"
 #include <propkey.h>
 #include <propvarutil.h>
 #include <shellapi.h>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <future>
 #include <atomic>
+#include <algorithm>
 
 namespace {
 using namespace spectiary;
@@ -249,6 +251,13 @@ void TestGuiRouting(const std::filesystem::path& root)
     const auto routed_source = root / L"routed.csv";
     const auto selected_source = root / L"selected 光谱.csv";
     for (const auto& source : {old_source, routed_source, selected_source}) std::ofstream(source) << "wav,flux\n5000,1\n5001,2\n";
+    RuntimePathInputs runtime_inputs;
+    runtime_inputs.executable_path = executable;
+    const auto startup_context = PrepareSpectiaryStartup(std::move(runtime_inputs));
+    const auto& runtime_paths = startup_context.runtime_paths();
+    Require(SaveSourceCollectionSessionStateCache(runtime_paths, runtime_paths.source_session_state_path,
+        {.sources = {{.path = old_source}, {.path = selected_source}}, .active_source_index = 0}),
+        "seed a two-source Portable roster before actual GUI startup");
     const auto title_for = [](DWORD pid) {
         struct Observation { DWORD pid; HWND window = nullptr; std::wstring title; } observation{pid};
         EnumWindows([](HWND window, LPARAM data) -> BOOL {
@@ -338,6 +347,14 @@ void TestGuiRouting(const std::filesystem::path& root)
     Require(forwarded == 1 && WaitForSingleObject(stale, 0) == WAIT_TIMEOUT && title_for(GetProcessId(first)).second.find(L"old.csv | 1/1") != std::wstring::npos &&
         title_for(GetProcessId(selected)).second.find(L"selected 光谱.csv | 1/1") != std::wstring::npos,
         "stale destination must not route to or alter unrelated GUIs");
+    PostMessageW(title_for(GetProcessId(selected)).first, WM_CLOSE, 0, 0);
+    Require(WaitForSingleObject(selected, 5000) == WAIT_OBJECT_0, "selected-source GUI should close and flush its session");
+    const auto retained = LoadSourceCollectionSessionStateCache(runtime_paths, runtime_paths.source_session_state_path).cache;
+    Require(retained.sources.size() == 2 &&
+        std::any_of(retained.sources.begin(), retained.sources.end(), [&](const auto& source) { return source.path == old_source; }) &&
+        std::any_of(retained.sources.begin(), retained.sources.end(), [&](const auto& source) { return source.path == selected_source; }),
+        "real Jump List child must persist both sources instead of collapsing the roster");
+
 }
 }
 

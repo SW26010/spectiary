@@ -624,8 +624,6 @@ SourceCollectionSession::SourceCollectionSession(
     workflow_->SetDeferredSampleNavigation(true);
     if (startup_source_policy == SourceSessionRestorePolicy::Restore) {
         PrepareDeferredSourceSessionRestore();
-    } else {
-        source_annotation_context_on_demand_ = true;
     }
 }
 
@@ -1042,12 +1040,8 @@ std::vector<std::filesystem::path> SourceCollectionSession::AnnotationPathsForSo
     const std::string source_key = SourcePathIdentityKey(path);
     std::vector<std::filesystem::path> paths =
         workflow_->AnnotationPathsForSourceKey(source_key);
-    // An explicit startup does not prepare any restore plan. Read only saved
-    // annotation associations on demand when its normal opener requests them.
-    // This does not enter the restore lifecycle or enqueue other sources.
-    const auto saved_context = source_annotation_context_on_demand_
-        ? source_session_state_->Load().sources : unresolved_deferred_restore_sources_;
-    for (const SourceCollectionSavedSource& unresolved : saved_context) {
+    for (const SourceCollectionSavedSource& unresolved :
+         unresolved_deferred_restore_sources_) {
         if (SourcePathIdentityKey(unresolved.path) != source_key) {
             continue;
         }
@@ -1476,7 +1470,6 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     }
     result.action.navigation_inputs_changed = true;
     result.loaded = true;
-    source_annotation_context_on_demand_ = false;
     std::erase_if(
         unresolved_deferred_restore_sources_,
         [&prepared_path_key](const SourceCollectionSavedSource& source) {
@@ -1845,6 +1838,11 @@ void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
 void SourceCollectionSession::MarkSourceSessionCacheDirty()
 {
     source_session_state_->MarkDirty();
+}
+
+void SourceCollectionSession::RecordExplicitSourceActivation()
+{
+    source_session_state_->MarkDirtyAfterRestore();
 }
 
 void SourceCollectionSession::InvalidateView()

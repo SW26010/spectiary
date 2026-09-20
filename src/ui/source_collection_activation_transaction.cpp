@@ -1153,6 +1153,11 @@ void SourceCollectionActivationTransaction::DrainCompletions(
         const bool starts_activation_intent =
             result.loaded &&
             ticket.purpose == Purpose::ExplicitOpen;
+        if (starts_activation_intent) {
+            // Restore itself is not a mutation, but a successful explicit open
+            // must persist its activation (and any added source) once it settles.
+            session_.RecordExplicitSourceActivation();
+        }
         if (!result.loaded) {
             SourceCollectionLoadError load_error =
                 std::move(result.load_error);
@@ -1549,8 +1554,8 @@ void SourceCollectionActivationTransaction::
         QueueSessionFollowUp(result, true);
         return;
     }
-    // Do not briefly display another restored source while the saved active
-    // source is still pending (and may ultimately fail).
+    // Do not briefly display another restored source while the saved or explicit
+    // startup activation target is still pending (and may ultimately fail).
     if (view.snapshot) {
         auto result = session_.RestoreEmptyActiveSource(std::nullopt);
         MergeSourceCollectionSessionAction(action, result.action);

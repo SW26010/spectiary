@@ -1321,7 +1321,7 @@ spectiary_add_test(
     spectiary_core
 )
 spectiary_add_test(spectiary_win32_jump_list_tests tests/win32_jump_list_tests.cpp spectiary_core)
-target_link_libraries(spectiary_win32_jump_list_tests PRIVATE spectiary_automation)
+target_link_libraries(spectiary_win32_jump_list_tests PRIVATE spectiary_automation spectiary_sessions)
 spectiary_set_test_tier(spectiary_win32_jump_list_tests fast)
 add_dependencies(spectiary_win32_jump_list_tests spectiary_native)
 add_test(NAME spectiary_win32_jump_list_native_tests COMMAND spectiary_win32_jump_list_tests --native-shell)

@@ -377,6 +377,7 @@ public:
         PreparedSampleWorkflowState prepared_workflow);
     [[nodiscard]] std::optional<SourceCollectionDeferredRestorePlan> TakeDeferredRestorePlan();
     void FinishDeferredRestore();
+    void RecordExplicitSourceActivation();
     [[nodiscard]] SourceCollectionSessionResult RecordRestoreFailure(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
@@ -444,7 +445,6 @@ private:
     std::optional<SourceCollectionDeferredRestorePlan> deferred_restore_plan_;
     std::vector<SourceCollectionSavedSource> unresolved_deferred_restore_sources_;
     bool deferred_restore_active_ = false;
-    bool source_annotation_context_on_demand_ = false;
     std::optional<std::size_t> pending_background_spectrum_index_;
     std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;

@@ -4,18 +4,23 @@ Status: Accepted. Date: 2026-09-20. Issue: #121.
 
 ## Startup boundary
 
-Before constructing `SourceCollectionSession`, ordinary GUI startup chooses
-`SourceSessionRestorePolicy::Restore` or `Skip`. The latter neither prepares a persisted
-source restore plan nor enters its restoring lifecycle, and `ShellUi` submits
-no deferred restore jobs. The explicit path then uses `OpenInitialSource` and
-the existing external-source resolver and asynchronous source-opening pipeline.
-Its annotation associations may be read on demand for that first source; this
-does not restore other sources. After activation, live workflow state is authoritative.
-A failed explicit open leaves the saved source session untouched.
+Ordinary and explicit-source GUI startup both restore the persisted Files roster.
+`OpenInitialSource` runs before the message loop drains source completions and
+uses the existing external-source resolver and asynchronous opening pipeline.
+Its explicit path overrides the deferred transaction's desired active source.
+Other saved sources continue restoring into Files, but are not presented before
+the selected source. Thus a saved roster [A, B] with B active becomes [A, B]
+with A active when A is selected from the Jump List; publication retains B.
+A successful explicit activation marks the source session for persistence after
+restore, so the full roster and overridden active source survive a restart.
+A stale explicit path reports ordinary opening diagnostics without presenting
+another restored source as a fallback or changing an existing running instance.
 
-Automation retains its existing restore/startup contract. Source-free startup,
-including taskbar relaunch, is unchanged. This is a restore-policy seam, not a
-general launch-intent framework; #68 can independently add a blank-start policy.
+`SourceSessionRestorePolicy::Skip` remains a small construction-time seam for
+#68's future source-free clean startup: no persisted roster preparation/enqueue,
+and no empty-state write on an idle flush. Explicit-source startup does not use
+it. Automation and ordinary source-free startup keep their existing contracts.
+There is no generic launch-intent framework or separate shell source loader.
 
 ## Windows shell identity
 
@@ -75,8 +80,10 @@ failures against the Windows COM interface.
 Blocked-publication tests also verify nonblocking teardown, discarded queued
 snapshots, owned worker lifetime and cancellation without committing a replacement.
 The shell activation suite verifies
-construction-time restore gating, ordinary restore, first explicit activation,
-stale-source errors, untouched saved state, and Files publication notifications.
+ordinary roster/saved-active restore, explicit activation overriding a saved
+active source while retaining the other sources, out-of-order load completion
+without presenting an unrelated source, full-roster Jump List projection, stale
+source diagnostics, and the independent clean-start restore gate.
 
 The optional `spectiary_win32_jump_list_native_tests` checks real destination-list
 publication using the test executable's implicit identity, then deletes that list.
@@ -84,7 +91,8 @@ publication using the test executable's implicit identity, then deletes that lis
 proves ordinary startup forwards to a production-protocol test receiver, and
 uses Windows to activate production-created `.lnk` destinations. It verifies new
 ordinary GUI processes, selected-source titles and unchanged prior instances,
-including a stale destination. Both are serial `real-gui;gui-integration` tests;
+including a stale destination, and verifies that the child persists both sources.
+Both are serial `real-gui;gui-integration` tests;
 they clean up their processes and temporary files. Windows owns the GUI copy's
 implicit identity and shell-list lifetime; the test does not attempt to discover
 or delete another process's implicitly identified list.

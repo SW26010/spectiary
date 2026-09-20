@@ -7,8 +7,9 @@ namespace spectiary {
 
 class ShellUi;
 
-// Decided before constructing ShellUi, so explicit launches never enqueue
-// another source's restore work before opening their requested source.
+// Roster restore policy, decided before constructing ShellUi. Explicit-source
+// startup restores the roster and overrides activation through the transaction.
+// Skip is reserved for a source-free clean startup policy (#68).
 enum class SourceSessionRestorePolicy { Restore, Skip };
 
 void OpenInitialSource(

@@ -3190,6 +3190,42 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         "a second deferred Shell should restore source B from the flushed cache");
     shell.reset();
 
+    // Restore B/C first while the explicit, already-saved A remains blocked.
+    // This exercises the startup ordering before any completion is drained.
+    std::promise<void> release_selected_promise;
+    const auto release_selected = release_selected_promise.get_future().share();
+    auto explicit_dependencies = MakeFixtureLoadDependencies(cache_paths);
+    explicit_dependencies.snapshot_loader = [&](const std::filesystem::path& source,
+        std::size_t index, const auto& canceled) {
+        if (source == source_paths[0]) {
+            WaitForRelease(release_selected, canceled, "selected source A must be released");
+        }
+        return MakeSnapshot(source, index);
+    };
+    shell = MakeDeferredShell(cache_paths, std::move(explicit_dependencies));
+    spectiary::OpenInitialSource(*shell, source_paths[0]);
+    bool inactive_sources_restored = false;
+    bool wrong_source_presented = false;
+    const auto inactive_deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < inactive_deadline) {
+        Access::Drain(*shell);
+        wrong_source_presented |= Access::Session(*shell).CurrentSampleSnapshot() != nullptr;
+        if (Access::Session(*shell).View().sources.size() == 2) {
+            inactive_sources_restored = true;
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    release_selected_promise.set_value();
+    Require(inactive_sources_restored && !wrong_source_presented,
+        "B/C must restore into Files without being presented before explicit A");
+    Require(DrainAllSourceLoads(*shell) && CurrentSourceMatches(Access::Session(*shell), source_paths[0]),
+        "explicit saved A must activate when its load completes");
+    const auto explicit_projection = shell->TakeShellSourceRoster();
+    Require(explicit_projection && explicit_projection->size() == 3,
+        "explicit A startup must retain A/B/C in the derived Jump List");
+    shell.reset();
+
     shell = MakeDeferredShell(
         cache_paths,
         MakeFixtureLoadDependencies(cache_paths));
@@ -5337,11 +5373,11 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
     }
 }
 
-void TestSourceSessionRestorePolicyPreventsPersistedRestore()
+void TestStartupActivationPreservesPersistedRoster()
 {
     using namespace spectiary;
     using Access = ShellUiTestAccess;
-    const auto root = UniqueTempPath("_startup_source_policy");
+    const auto root = UniqueTempPath("_startup_roster");
     std::filesystem::create_directories(root);
     const auto old_path = root / "old.csv";
     const auto selected_path = root / "selected.csv";
@@ -5356,64 +5392,68 @@ void TestSourceSessionRestorePolicyPreventsPersistedRestore()
     std::filesystem::create_directories(paths.source_session_state_path.parent_path());
     const auto seed = [&] {
         Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path,
-            {.sources = {{.path = old_path}}, .active_source_index = 0}), "startup roster should save");
+            {.sources = {{.path = old_path}, {.path = selected_path}}, .active_source_index = 0}),
+            "startup roster should save two sources with old source active");
     };
     seed();
     {
         ShellUi ordinary(startup);
         Require(DrainAllSourceLoads(ordinary), "ordinary restore should finish");
-        Require(CurrentSourceMatches(Access::Session(ordinary), old_path), "ordinary startup still restores its source");
+        Require(CurrentSourceMatches(Access::Session(ordinary), old_path) &&
+            Access::Session(ordinary).View().sources.size() == 2,
+            "ordinary startup restores roster and saved active source");
     }
     seed();
     {
-        const auto annotation = root / "saved-annotation.csv";
-        Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path,
-            {.sources = {{.path = selected_path, .annotation_paths = {annotation}}}, .active_source_index = 0}),
-            "selected annotation association should save");
-        SourceCollectionSession session(paths.source_session_state_path, paths.sample_navigation_state_path,
-            paths.sample_labeling_state_path, paths.sample_workflow_state_path,
-            SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, paths, SourceSessionRestorePolicy::Skip);
-        Require(!session.TakeDeferredRestorePlan(), "explicit session must not prepare persisted restore");
-        Require(session.AnnotationPathsForSource(selected_path) == std::vector<std::filesystem::path>{annotation},
-            "normal explicit opening must retain selected source annotation context on demand");
-        Require(!session.TakeDeferredRestorePlan() && session.View().sources.empty(), "context lookup must not restore any source");
-    }
-    seed();
-    {
-        ShellUi explicit_shell(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+        ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
             SourceSessionRestorePolicy::Skip);
-        Require(!Access::Session(explicit_shell).TakeDeferredRestorePlan(), "explicit startup must not prepare a restore plan");
-        Require(Access::PendingLoadCount(explicit_shell) == 0 && explicit_shell.runtime_resource_observation().idle(),
-            "explicit startup must not enqueue old source work during construction");
-        Require(!Access::Session(explicit_shell).View().current_source_index, "explicit startup begins without another active source");
-        Require(Access::Session(explicit_shell).FlushStateCaches(), "idle non-restoring shell should flush safely");
-        const auto unchanged = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path);
-        Require(unchanged.cache.sources.size() == 1 && unchanged.cache.sources[0].path == old_path &&
-            unchanged.cache.active_source_index == 0, "no-source shell must not overwrite saved session with empty state");
+        Require(!Access::Session(clean).TakeDeferredRestorePlan() && Access::PendingLoadCount(clean) == 0,
+            "clean-start seam must not prepare or enqueue persisted roster restore");
+        Require(Access::Session(clean).FlushStateCaches(), "clean shell flush should succeed");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 2 && saved.active_source_index == 0,
+            "idle clean shell must not overwrite persisted roster");
+    }
+    {
+        ShellUi explicit_shell(startup);
         OpenInitialSource(explicit_shell, selected_path);
-        Require(DrainAllSourceLoads(explicit_shell), "explicit source should finish normal startup loading");
-        Require(CurrentSourceMatches(Access::Session(explicit_shell), selected_path), "first usable source must be the explicit source");
-        Require(Access::Session(explicit_shell).View().sources.size() == 1, "unrelated saved sources must never be restored");
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        do {
+            Access::Drain(explicit_shell);
+            const auto snapshot = Access::Session(explicit_shell).CurrentSampleSnapshot();
+            Require(!snapshot || snapshot->source.path == selected_path,
+                "explicit startup must never present the previously active source");
+            if (Access::PendingLoadCount(explicit_shell) == 0) break;
+            std::this_thread::sleep_for(2ms);
+        } while (std::chrono::steady_clock::now() < deadline);
+        Require(Access::PendingLoadCount(explicit_shell) == 0 &&
+            CurrentSourceMatches(Access::Session(explicit_shell), selected_path),
+            "normal initial-source opening must activate the selected source");
         const auto projection = explicit_shell.TakeShellSourceRoster();
-        Require(projection && projection->size() == 1 && (*projection)[0].path == selected_path,
-            "accepted source changes must produce a Files shell projection");
-        Require(!explicit_shell.TakeShellSourceRoster(), "unchanged source roster must not republish each frame");
+        Require(projection && projection->size() == 2 &&
+            std::any_of(projection->begin(), projection->end(), [&](const auto& source) { return source.path == old_path; }) &&
+            std::any_of(projection->begin(), projection->end(), [&](const auto& source) { return source.path == selected_path; }),
+            "Jump List projection must retain both persisted sources after explicit startup");
+        Require(!explicit_shell.TakeShellSourceRoster(), "unchanged roster must not republish each frame");
+        Require(Access::Session(explicit_shell).FlushStateCaches(), "explicit startup should persist full roster");
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 2 && saved.active_source_index &&
+            saved.sources[*saved.active_source_index].path == selected_path,
+            "persist both sources with explicit source active");
+        (void)Access::Submit(explicit_shell, SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Remove(0)));
         (void)Access::Submit(explicit_shell, SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Remove(0)));
         const auto removed = explicit_shell.TakeShellSourceRoster();
-        Require(removed && removed->empty(), "removing the final Files source must publish an empty replacement");
+        Require(removed && removed->empty(), "removing all Files sources publishes an empty replacement");
     }
     seed();
     {
-        ShellUi stale(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
-            SourceSessionRestorePolicy::Skip);
+        ShellUi stale(startup);
         OpenInitialSource(stale, root / "deleted.csv");
-        Require(DrainAllSourceLoads(stale), "stale destination must settle through normal load failure");
-        Require(!Access::Session(stale).View().current_source_index, "stale destination must not fall back to unrelated saved source");
-        Require(!Access::LoadError(stale).empty(), "stale destination must expose normal source-opening diagnostics");
+        Require(DrainAllSourceLoads(stale), "stale destination settles through normal load failure");
+        Require(!Access::Session(stale).CurrentSampleSnapshot(), "stale explicit source must not present another restored source");
+        Require(Access::Session(stale).View().sources.size() == 2, "stale explicit source must retain the persisted roster");
+        Require(!Access::LoadError(stale).empty(), "stale destination exposes normal diagnostics");
     }
-    const auto after_stale = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path);
-    Require(after_stale.cache.sources.size() == 1 && after_stale.cache.sources[0].path == old_path,
-        "failed explicit source must not overwrite the saved session");
     std::filesystem::remove_all(root);
 }
 
@@ -7157,7 +7197,7 @@ void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 int main()
 {
     try {
-        RUN_SHELL_TEST(TestSourceSessionRestorePolicyPreventsPersistedRestore);
+        RUN_SHELL_TEST(TestStartupActivationPreservesPersistedRoster);
         RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
         RUN_SHELL_TEST(TestAnnotationShellDropUsesExistingImport);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);

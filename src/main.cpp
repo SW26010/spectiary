@@ -242,10 +242,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
         }
         spectiary::SpectiaryApp app(
             startup,
-            command_line.automation,
-            !command_line.automation && command_line.initial_source
-                ? spectiary::SourceSessionRestorePolicy::Skip
-                : spectiary::SourceSessionRestorePolicy::Restore);
+            command_line.automation);
         return app.Run(
             instance,
             show_command,
