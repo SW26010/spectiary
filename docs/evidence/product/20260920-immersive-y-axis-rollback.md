@@ -30,9 +30,40 @@ work under #125. Source/normalized presentation remains separate work under
   passed. Combined coverage is 91/91, including existing pan, touchpad,
   fit/stored-limit, smoothing, spectral-line and widget tests.
 - Final diff review and `git diff --check` passed. No P0/P1 findings in this
-  change. No manual GUI/DPI acceptance or #668 evaluation is claimed.
+  change. GUI follow-up is recorded below; no #668 evaluation is claimed.
 
 An optional run against temporarily restored old source was rejected by
 automatic approval review because it could overwrite uncommitted changes;
 that operation was not performed. The successful checks above use the fixed
 source.
+
+## Computer Use GUI acceptance (2026-09-20)
+
+Used the computer-use plugin (`@oai/sky`) to launch the local Debug
+`build/ninja-msvc-debug/Spectiary.exe` and operate its actual file dialog,
+F11 shortcut and plot mouse input. No automation endpoint supplied UI actions.
+
+Local CSV fixtures in `logs/axis-125-gui/` contain 201 points with
+`x = 5000 + i` and `y = scale * (2*sin(i/13) + 0.5*cos(i/3))`,
+for integer `i` from 0 through 200. Scales are 0.001 and 1e12; the files have
+the header `wavelength,flux` and are loaded through Files > Add files.
+
+Observed results:
+
+- Small-range ordinary mode shows numeric ticks at 0.0005 intervals. F11
+  immersive mode shows useful positive/negative ticks at 0.0002 intervals,
+  including zero. The old sub-0.1 blank-label failure does not recur.
+- In immersive mode, wheel zoom changes the visible range, dragging translates
+  the curve and axes, and double-click fit restores the complete X extent.
+  The fitted view retains readable small-value ticks at 0.0001 intervals.
+- Large-range ordinary and immersive modes use scientific notation, including
+  `2.5e+12`, `2e+12`, and negative values. Wheel zoom retains useful labels
+  and a scientific-notation coordinate readout.
+- Returning with F11 preserves the displayed spectrum and adjusted view;
+  changing from small to large source data refits to the new magnitude.
+- No crash, lost input, or P0/P1 regression was observed in these interactions.
+
+Acceptance covers the current desktop/font configuration, not a multi-DPI or
+font-scaling matrix, and does not validate #122 normalization. The original
+active FITS source and ordinary mode were restored. The two test sources remain
+available in Files for reproduction; their local CSV files were retained.
