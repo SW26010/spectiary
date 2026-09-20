@@ -50,7 +50,7 @@ _Avoid_: User line groups, private presets
 
 **Line-list identity**:
 The declared stable identity independent of path, filename, display name and
-schema version. It scopes application-managed built-in state.
+schema version. It scopes built-in state and identity-specific user-file sessions.
 _Avoid_: File path alone, active tab
 
 **Built-in spectral-line overlay**:
@@ -64,6 +64,24 @@ Active grouping/color selections, marker visibility, group expansion and UI name
 localization provenance. It stays outside canonical content. The old catalog
 user-state monolith is retired.
 _Avoid_: Canonical grouping or color definitions
+**Active Spectral Line List**:
+The sole complete effective list consumed by the panel and plot. The built-in
+owner composes its packaged base and durable overlay; an opened user-owned file
+is a read-only canonical generation at its original path. Opening checks runtime
+user-file admission and validates the production v1 codec before adoption.
+Failed candidates preserve the previous owner/model/session. User-file sessions
+are memory-only and isolated from built-in persistence, even if a user file
+claims the built-in identity. No recent locator is restored at startup.
+
+Selecting the already opened user list reuses its adopted generation; Open reads
+current bytes again. Explicitly opening the same identity at a moved path can
+reuse compatible session state, without searching for missing files. All valid
+v1 lists remain inspectable, including lists with no grouping views or markers.
+Only laboratory/rest vacuum Angstrom coordinates currently reach the plot;
+incompatible lists stay active with an overlay diagnostic. Snapshot capability
+and rest-frame warning behavior still applies. Editing/saving user definitions
+and broader coordinate projection remain separate follow-up slices.
+
 **Source collection**:
 A loaded set of one or more spectrum samples that share one source identity and
 one sample ordering.

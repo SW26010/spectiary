@@ -600,6 +600,32 @@ std::optional<std::filesystem::path> DialogResultPath(IFileDialog* dialog)
     return path;
 }
 
+std::optional<std::filesystem::path> ShowLineListPicker(UiLanguage language, std::string& error)
+{
+    ScopedComInitialization com;
+    ComPtr<IFileOpenDialog> dialog;
+    if (!com.ready() || !CreateOpenDialog(dialog)) {
+        error = "The file picker could not be initialized. Try opening the file again.";
+        return std::nullopt;
+    }
+    DWORD options = 0;
+    if (FAILED(dialog->GetOptions(&options)) || FAILED(dialog->SetOptions(
+            options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_FILEMUSTEXIST))) {
+        error = "The file picker could not be configured."; return std::nullopt;
+    }
+    const auto title = Utf8ToWide(UiText(language, UiTextId::SpectralLineList));
+    const auto all = Utf8ToWide(UiText(language, UiTextId::AllFilesFilter));
+    const COMDLG_FILTERSPEC types[] = {{L"JSON", L"*.json"}, {all.c_str(), L"*.*"}};
+    dialog->SetTitle(title.c_str());
+    dialog->SetFileTypes(2, types);
+    const HRESULT result = dialog->Show(GetActiveWindow());
+    if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
+    if (FAILED(result)) { error = "The file picker failed. Try opening the file again."; return std::nullopt; }
+    auto path = DialogResultPath(dialog.Get());
+    if (!path) error = "The selected file has no accessible filesystem path.";
+    return path;
+}
+
 std::optional<std::filesystem::path> ShowSourceFilePicker(
     UiLanguage language)
 {
@@ -1017,6 +1043,7 @@ ShellUi::ShellUi(
       panel_session_interaction_(
           session_,
           source_activation_),
+      line_list_runtime_paths_(startup.runtime_paths()),
       spectral_lines_panel_(
           startup.runtime_paths()
               .public_spectral_line_catalog_path,
@@ -3649,6 +3676,12 @@ void ShellUi::RenderSpectralLinesPanel(bool panel_open)
         session_.CurrentSampleSnapshot(),
         application_settings_.View().language,
         &panel_open);
+    if (spectral_lines_panel_ui_.TakeOpenRequest()) {
+        std::string error;
+        const auto path = ShowLineListPicker(application_settings_.View().language, error);
+        if (path) (void)spectral_lines_panel_.OpenUserLineList(*path, line_list_runtime_paths_);
+        else if (!error.empty()) spectral_lines_panel_.ReportOpenError(std::move(error));
+    }
     SetPanelVisibility(
         ApplicationPanel::SpectralLines,
         panel_open);

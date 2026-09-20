@@ -29,12 +29,12 @@ std::string LocalizedLineListName(
     UiLanguage language,
     const SpectralLinePanelView& state)
 {
-    if (state.line_list_id ==
+    if (!state.user_owned && state.line_list_id ==
         "public-spectral-lines.v1") {
         return std::string(
             UiText(
                 language,
-                UiTextId::PublicSpectralLineCatalog));
+                UiTextId::BuiltInLineList));
     }
     return state.line_list_display_name;
 }
@@ -108,6 +108,13 @@ void SpectralLinesPanelUi::Render(
     bool* open)
 {
     const SpectralLinePanelView state = panel.View();
+    if (generation_ != state.generation) {
+        generation_ = state.generation;
+        grouping_view_search_initialized_ = false;
+        renaming_grouping_view_id_.reset();
+        deleting_grouping_view_id_.reset();
+        grouping_view_ui_ = {};
+    }
     if (!grouping_view_search_initialized_) {
         std::snprintf(
             grouping_view_search_.data(),
@@ -125,6 +132,7 @@ void SpectralLinesPanelUi::Render(
         ImGui::End();
         return;
     }
+    ImGui::PushID(static_cast<int>(generation_));
     const std::string_view heading =
         UiText(
             language,
@@ -156,27 +164,25 @@ void SpectralLinesPanelUi::Render(
             warning.data());
     }
 
-    const std::string selected_catalog =
-        LocalizedLineListName(language, state);
-    const std::string line_list_label =
-        StableUiLabel(
-            language,
-            UiTextId::Catalog,
-            "SpectralLineCatalog");
-    if (ImGui::BeginCombo(
-            line_list_label.c_str(),
-            selected_catalog.c_str())) {
-        const std::string line_list_option_label =
-            SpectralLineListOptionLabel(
-                selected_catalog,
-                state.line_list_id);
-        ImGui::Selectable(
-            line_list_option_label.c_str(),
-            true);
+    const std::string selected_line_list = LocalizedLineListName(language, state);
+    const std::string line_list_label = StableUiLabel(language, UiTextId::SpectralLineList, "SpectralLineList");
+    if (ImGui::BeginCombo(line_list_label.c_str(), selected_line_list.c_str())) {
+        if (ImGui::Selectable(UiText(language, UiTextId::BuiltInLineList).data(), !state.user_owned))
+            (void)panel.SelectBuiltInLineList();
+        if (!state.user_line_list_path.empty()) {
+            const auto label = state.user_line_list_name + "###opened_user_line_list";
+            if (ImGui::Selectable(label.c_str(), state.user_owned)) (void)panel.SelectOpenedUserLineList();
+        }
+        ImGui::Separator();
+        if (ImGui::Selectable(UiText(language, UiTextId::OpenLineList).data())) open_requested_ = true;
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", state.line_list_id.c_str());
+        ImGui::SetTooltip("%s", state.user_owned ? state.user_line_list_path.c_str() : state.line_list_id.c_str());
+    }
+    // Finish this frame after switching; no stale view can submit to the new owner.
+    if (panel.Generation() != state.generation) {
+        ImGui::PopID(); ImGui::End(); return;
     }
     ImGui::SameLine();
     bool marker_labels_visible = state.marker_labels_visible;
@@ -192,19 +198,40 @@ void SpectralLinesPanelUi::Render(
     }
 
     ImGui::Spacing();
+    if (!state.open_error.empty())
+        RenderLocalizedDiagnosticStatus(language, UiTextId::LineListOpenFailed, state.open_error);
+    ImGui::TextDisabled("%s", state.coordinate_description.c_str());
+    if (state.user_owned)
+        ImGui::TextWrapped("%s", UiText(language, UiTextId::LineListReadOnly).data());
+    if (!state.plot_compatible)
+        RenderLocalizedDiagnosticStatus(language, UiTextId::LineListCoordinatesUnsupported, {});
+    if (!state.color_schemes.empty()) {
+        std::string selected;
+        for (const auto& [id, name] : state.color_schemes) if (id == state.active_color_scheme_id) selected = name;
+        const auto label = StableUiLabel(language, UiTextId::LineListColorScheme, "LineListColorScheme");
+        if (ImGui::BeginCombo(label.c_str(), selected.c_str())) {
+            for (const auto& [id, name] : state.color_schemes) {
+                ImGui::PushID(id.c_str());
+                if (ImGui::Selectable((name + "###scheme").c_str(), id == state.active_color_scheme_id))
+                    (void)panel.Submit(SpectralLineStateIntent::SelectColorScheme(id));
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+    }
     if (!state.line_list_load_error.empty()) {
         const std::string error =
             std::string(
                 UiText(
                     language,
-                    UiTextId::CatalogLoadFailed)) +
+                    UiTextId::LineListOpenFailed)) +
             state.line_list_load_error;
         RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
     } else if (state.line_list_marker_count == 0) {
         const std::string_view no_markers =
             UiText(
                 language,
-                UiTextId::NoPublicCatalogMarkers);
+                UiTextId::LineListNoMarkers);
         ImGui::TextDisabled(
             "%.*s",
             static_cast<int>(no_markers.size()),
@@ -277,8 +304,9 @@ void SpectralLinesPanelUi::Render(
             const ImGuiTabItemFlags flags = grouping_view.selection_requested
                                                  ? ImGuiTabItemFlags_SetSelected
                                                  : ImGuiTabItemFlags_None;
-            const std::string grouping_view_display_name =
-                LocalizedSpectralLineName(
+            const std::string grouping_view_display_name = grouping_view.id.empty()
+                ? std::string(UiText(language, UiTextId::LineListMarkers))
+                : LocalizedSpectralLineName(
                     language,
                     grouping_view.name,
                     grouping_view.generated_name);
@@ -302,7 +330,7 @@ void SpectralLinesPanelUi::Render(
                                 ? UiTextId::Duplicate
                                 : UiTextId::DuplicateAsUserView,
                             "DuplicateSpectralLineGroupingView");
-                    if (ImGui::Selectable(
+                    if (!state.user_owned && ImGui::Selectable(
                             duplicate_label.c_str())) {
                         pending_duplicate = grouping_view;
                     }
@@ -336,10 +364,10 @@ void SpectralLinesPanelUi::Render(
             }
         }
 
-        if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+        if (!state.user_owned && ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
             create_new_view();
         }
-        if (ImGui::IsItemHovered()) {
+        if (!state.user_owned && ImGui::IsItemHovered()) {
             const std::string_view tooltip =
                 UiText(
                     language,
@@ -519,7 +547,7 @@ void SpectralLinesPanelUi::Render(
         ImGui::EndPopup();
     }
 
-    if (!state.has_base_grouping_view && state.user_grouping_view_count == 0) {
+    if (!state.user_owned && !state.has_base_grouping_view && state.user_grouping_view_count == 0) {
         const std::string_view no_grouping =
             UiText(
                 language,
@@ -539,6 +567,7 @@ void SpectralLinesPanelUi::Render(
         }
     }
 
+    ImGui::PopID();
     ImGui::End();
 }
 

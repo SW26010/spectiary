@@ -1109,8 +1109,8 @@ void TestSpectralLineMappingsAreExact()
         ExpectedText{UiTextId::Search, "Search", "搜索"},
         ExpectedText{
             UiTextId::SpectralLineSearchHint,
-            "id, label, catalog group, or plot label",
-            "ID、名称、目录分组或绘图标签"},
+            "marker ID, name, note, or wavelength",
+            "标记 ID、名称、备注或波长"},
         ExpectedText{UiTextId::Duplicate, "Duplicate", "创建副本"},
         ExpectedText{
             UiTextId::DuplicateAsUserView,
@@ -1157,8 +1157,8 @@ void TestSpectralLineMappingsAreExact()
         ExpectedText{UiTextId::AddGroup, "+ Group", "+ 分组"},
         ExpectedText{
             UiTextId::PlotVisibleCatalogMarkerCount,
-            "%zu plot-visible / %zu catalog markers",
-            "绘图中可见 %zu 个 / 目录共 %zu 个标记"},
+            "%zu plot-visible / %zu line-list markers",
+            "绘图中可见 %zu 个 / 谱线列表共 %zu 个标记"},
         ExpectedText{
             UiTextId::NoGroupsInView,
             "No groups in this view.",
@@ -1246,7 +1246,7 @@ void TestSpectralLineMappingsAreExact()
         static_cast<std::size_t>(
             UiTextId::Count) ==
         static_cast<std::size_t>(
-            UiTextId::LabelingCloseBlocked) +
+            UiTextId::LineListNoMarkers) +
             1);
     Require(
         UiText(

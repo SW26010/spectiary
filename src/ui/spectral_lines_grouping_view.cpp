@@ -789,7 +789,7 @@ void SpectralLinesGroupingViewUi::Render(
                     resolved_color.z,
                     resolved_color.w,
                 };
-                if (!resolved) {
+                if (!resolved || !panel.CanCustomize()) {
                     ImGui::BeginDisabled();
                 }
                 ImGui::SetNextItemWidth(ImGui::GetFrameHeight());
@@ -812,7 +812,7 @@ void SpectralLinesGroupingViewUi::Render(
                             reference.marker_id,
                             color_selection));
                 }
-                if (!resolved) {
+                if (!resolved || !panel.CanCustomize()) {
                     ImGui::EndDisabled();
                 }
                 if (ImGui::IsItemHovered(
@@ -886,7 +886,7 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::TextUnformatted(label.c_str());
                     ImGui::Separator();
                     ImGui::BeginDisabled(
-                        !resolved ||
+                        !resolved || !panel.CanCustomize() ||
                         color_selection.mode() ==
                             PlotSeriesColorMode::Auto);
                     const std::string reset_color_label =

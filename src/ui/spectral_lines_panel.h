@@ -14,6 +14,7 @@ namespace spectiary {
 class SpectralLinesPanelUi {
 public:
     [[nodiscard]] static const char* WindowName();
+    [[nodiscard]] bool TakeOpenRequest() { const bool requested = open_requested_; open_requested_ = false; return requested; }
 
     void Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot, bool* open);
     void Render(
@@ -23,6 +24,8 @@ public:
         bool* open);
 
 private:
+    bool open_requested_ = false;
+    std::uint64_t generation_ = 0;
     std::array<char, 96> grouping_view_search_ = {};
     bool grouping_view_search_initialized_ = false;
     std::optional<std::string> renaming_grouping_view_id_;

@@ -120,6 +120,10 @@ Panels can be docked, undocked, and restored through the Dear ImGui docking layo
 
 Spectral references come from the tracked public Spectral Line List in [`config/spectral_lines.public.json`](config/spectral_lines.public.json). The Spectral Lines panel can search and organize those references and render line or band overlays on the main plot.
 
+Use **Spectral Line List → Open...** to open your own [canonical JSON line list](docs/reference/spectral-lines/spectral_line_list_v1.md). The selected list is the only active list; the built-in public list remains available in the selector. User files stay at their original location and are read-only. Grouping/color selection, visibility, expansion, search and label settings remain available for the current session. Restarting returns to the built-in list; use Open again to read changed or moved files.
+
+All valid v1 line lists can be inspected, including empty lists. Plot overlays currently require laboratory/rest **vacuum Angstrom** coordinates. Other coordinate semantics show a diagnostic and suppress the overlay. User documents must be outside Spectiary's reserved `config/`, `state/`, `logs/` and `unsaved/` directories.
+
 ## Platform
 
 - **Windows 10 or Windows 11**

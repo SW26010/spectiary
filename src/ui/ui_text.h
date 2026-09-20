@@ -539,6 +539,15 @@ enum class UiTextId {
     ViewportUnlockedTooltip,
     ViewportLockedTooltip,
     LabelingCloseBlocked,
+    SpectralLineList,
+    BuiltInLineList,
+    OpenLineList,
+    LineListOpenFailed,
+    LineListReadOnly,
+    LineListCoordinatesUnsupported,
+    LineListColorScheme,
+    LineListMarkers,
+    LineListNoMarkers,
     Count,  // Non-display sentinel.
 };
 

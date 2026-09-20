@@ -902,8 +902,8 @@ constexpr std::array kTextCatalog = {
         "谱线状态持久化已恢复。"},
     UiTextEntry{"Search", "搜索"},
     UiTextEntry{
-        "id, label, catalog group, or plot label",
-        "ID、名称、目录分组或绘图标签"},
+        "marker ID, name, note, or wavelength",
+        "标记 ID、名称、备注或波长"},
     UiTextEntry{"Duplicate", "创建副本"},
     UiTextEntry{
         "Duplicate as user view",
@@ -929,8 +929,8 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{" copy", " 副本"},
     UiTextEntry{"+ Group", "+ 分组"},
     UiTextEntry{
-        "%zu plot-visible / %zu catalog markers",
-        "绘图中可见 %zu 个 / 目录共 %zu 个标记"},
+        "%zu plot-visible / %zu line-list markers",
+        "绘图中可见 %zu 个 / 谱线列表共 %zu 个标记"},
     UiTextEntry{
         "No groups in this view.",
         "此视图中没有分组。"},
@@ -974,6 +974,15 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Labeling work could not be saved. Return to the task to retry saving, or explicitly delete an unwanted draft before closing.",
         "标注工作尚未成功保存。请返回任务重试保存，或明确删除不需要的草稿后再关闭。"},
+    UiTextEntry{"Spectral Line List", "谱线列表"},
+    UiTextEntry{"Built-in public line list", "内置公共谱线列表"},
+    UiTextEntry{"Open...", "打开…"},
+    UiTextEntry{"Could not open Spectral Line List. ", "无法打开谱线列表。"},
+    UiTextEntry{"Read-only file. Display settings apply to this session only.", "只读文件。显示设置仅保留在本次会话中。"},
+    UiTextEntry{"Overlay hidden: the plot requires laboratory/rest vacuum Angstrom coordinates. Open a compatible line list to show markers; this list remains available for inspection.", "已隐藏叠加标记：绘图需要实验室静止系真空埃坐标。打开兼容的谱线列表可显示标记；当前列表仍可查看。"},
+    UiTextEntry{"Color scheme", "配色方案"},
+    UiTextEntry{"Markers", "标记"},
+    UiTextEntry{"This line list contains no markers.", "此谱线列表不包含标记。"},
 };
 
 static_assert(kTextCatalog.size() == kUiTextCount);

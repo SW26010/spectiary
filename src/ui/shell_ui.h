@@ -487,6 +487,7 @@ private:
     SpectrumViewSession spectrum_view_session_;
     SourceCollectionActivationTransaction source_activation_;
     PanelSessionInteraction panel_session_interaction_;
+    RuntimePaths line_list_runtime_paths_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
