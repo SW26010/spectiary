@@ -6854,6 +6854,51 @@ void TestRestoreDefaultLayout()
 
 }  // namespace
 
+void TestInAppShellDropBatchUsesNormalSourcePipeline()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_shell_drop");
+    const auto folder = root / std::filesystem::path(L"光谱 文件夹");
+    std::filesystem::create_directories(folder);
+    const auto file = root / std::filesystem::path(L"星光 sample.csv");
+    for (const auto& path : {file, folder / "member.csv"}) {
+        std::ofstream stream(path);
+        stream << "wavelength,flux\n5000,1\n5001,2\n";
+    }
+    const auto unsupported = root / "unsupported.xyz";
+    WriteFixture(unsupported);
+    const auto missing = root / "missing.csv";
+    SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    auto shell = Access::Create(SourceCollectionSession({}, {}, {}, {}),
+        MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    Require(Access::ApplySettingsUiIntent(*shell,
+        ApplicationSettingsIntent::SetOpenExternalSourceAsFolder(true)).applied(),
+        "external-only folder preference should be enabled for this regression");
+    // Same ordered submission as the native shell-drop adapter, without a
+    // presentation/drain between paths. Includes two controlled failures.
+    for (const auto& path : {file, unsupported, missing, folder}) shell->OpenSource(path);
+    Require(DrainAllSourceLoads(*shell), "mixed shell-drop batch must settle");
+    auto& session = Access::Session(*shell);
+    Require(session.View().sources.size() == 2,
+        "file and folder are independent sources, failed paths add no partial source");
+    Require(session.View().sources[0].path == file && session.View().sources[1].path == folder,
+        "ordinary in-app submission preserves source order and ignores external folder preference");
+    Require(session.CurrentSampleSnapshot() && session.CurrentSampleSnapshot()->source.path == folder,
+        "last accepted source is active after mixed batch");
+    const std::string diagnostic(Access::LoadError(*shell));
+    Require(diagnostic.find("unsupported.xyz") != std::string::npos &&
+        diagnostic.find("missing.csv") != std::string::npos,
+        "existing controlled diagnostics identify every failed path");
+    shell->OpenSource(file);
+    Require(DrainAllSourceLoads(*shell) && session.View().sources.size() == 2 &&
+        session.CurrentSampleSnapshot()->source.path == file,
+        "session remains usable and duplicate drop reuses the source");
+    shell.reset();
+    std::filesystem::remove_all(root);
+}
+
 void TestRealMemberOpenReusesActiveSource()
 {
     using namespace spectiary;
@@ -6969,6 +7014,7 @@ void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 int main()
 {
     try {
+        RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);
         RUN_SHELL_TEST(TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember);
 #ifdef IMGUI_ENABLE_TEST_ENGINE

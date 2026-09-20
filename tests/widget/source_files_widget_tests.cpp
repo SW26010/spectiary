@@ -420,8 +420,80 @@ void TestFailedSourceRowWithoutSnapshotIsDisabledAndRemovable()
     Require(submissions == 1 && view.sources.empty(), "failed row removal must submit normally");
 }
 
+void TestFilesShellDropHitTesting()
+{
+    ScopedImGuiContext context;
+    spectiary::SourceCollectionSessionView view;
+    spectiary::PanelSessionInteraction interaction(
+        [](auto, auto) { return spectiary::SourceCollectionSessionResult{}; },
+        [&]() -> const spectiary::SourceCollectionSessionView& { return view; });
+    spectiary::SourceCollectionPanelUi panel;
+    bool open = true;
+    const auto frame = [&](bool render_files, bool overlap, bool collapsed, bool modal = false) {
+        ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+        ImGui::GetIO().DisplaySize = ImVec2(900, 700);
+        ImGui::NewFrame();
+        if (render_files) {
+            ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(700, 500), ImGuiCond_Always);
+            ImGui::SetNextWindowCollapsed(collapsed, ImGuiCond_Always);
+            panel.RenderFiles(interaction, spectiary::UiLanguage::English, &open,
+                []() -> std::optional<std::filesystem::path> { return {}; },
+                []() -> std::optional<std::filesystem::path> { return {}; },
+                [](const auto&) {}, {});
+        }
+        if (overlap) {
+            ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiCond_Always);
+            ImGui::SetNextWindowFocus();
+            ImGui::Begin("Cover");
+            ImGui::End();
+        }
+        if (modal) {
+            ImGui::OpenPopup("BlockFiles");
+            ImGui::SetNextWindowPos(ImVec2(750, 100), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(100, 100), ImGuiCond_Always);
+            if (ImGui::BeginPopupModal("BlockFiles")) ImGui::EndPopup();
+        }
+        ImGui::EndFrame();
+    };
+    frame(true, false, false);
+    frame(true, false, false);
+    Require(panel.FilesDropViewport() != 0 && panel.HitTestFilesDrop(150, 150),
+        "Files content accepts shell positions without an ImGui mouse event");
+    Require(!panel.HitTestFilesDrop(10, 150) && !panel.HitTestFilesDrop(150, 25),
+        "panel exterior and title bar reject shell drops");
+    auto* window = ImGui::FindWindowByName(panel.FilesWindowName());
+    auto* original = window->Viewport;
+    auto* mouse_viewport = GImGui->MouseViewport;
+    ImGuiViewportP detached;
+    detached.ID = 123;
+    window->Viewport = &detached;
+    Require(panel.FilesDropViewport() == 123 && panel.HitTestFilesDrop(150, 150) &&
+        GImGui->MouseViewport == mouse_viewport,
+        "detached target uses its own viewport and restores ImGui mouse state");
+    window->Viewport = original;
+    panel.SetFilesDropHovered(true);
+    frame(true, false, false);
+    Require(ImGui::GetForegroundDrawList(window->Viewport)->VtxBuffer.Size > 0,
+        "compatible shell drag draws an active target outline");
+    panel.SetFilesDropHovered(false);
+    frame(true, true, false);
+    frame(true, true, false);
+    Require(!panel.HitTestFilesDrop(150, 150), "overlapping ImGui window blocks drop");
+    frame(true, false, false, true);
+    frame(true, false, false, true);
+    Require(!panel.HitTestFilesDrop(400, 150), "modal dialog blocks even uncovered Files content");
+    frame(true, false, true);
+    Require(!panel.FilesDropViewport() && !panel.HitTestFilesDrop(150, 150),
+        "collapsed Files panel has no target");
+    frame(false, false, false);
+    Require(!panel.FilesDropViewport(), "hidden Files panel discards prior target");
+}
+
 int main()
 {
+    TestFilesShellDropHitTesting();
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
     TestFilesPanelContextActionLaunchesWithoutMutatingSession();
     TestFilesPanelContextActionIsDisabledForIneligiblePath();
