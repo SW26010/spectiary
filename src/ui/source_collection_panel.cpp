@@ -916,6 +916,33 @@ void SourceCollectionPanelUi::ReloadNavigationNumberInputFromBuffer(
     input.reload_deactivate_pending = true;
 }
 
+unsigned int SourceCollectionPanelUi::FilesDropViewport() const
+{
+    if (files_drop_frame_ != ImGui::GetFrameCount()) return 0;
+    const auto* window = ImGui::FindWindowByName(FilesWindowName());
+    return window && window->Active && !window->Hidden && !window->Collapsed
+        ? window->Viewport->ID : 0;
+}
+
+bool SourceCollectionPanelUi::HitTestFilesDrop(float x, float y) const
+{
+    if (!FilesDropViewport()) return false;
+    auto* window = ImGui::FindWindowByName(FilesWindowName());
+    const ImVec2 point(x, y);
+    if (!window->InnerRect.Contains(point) ||
+        !window->ClipRect.Contains(point)) return false;
+    ImGuiWindow* hovered = nullptr;
+    ImGuiWindow* under_moving = nullptr;
+    // OLE's screen position is authoritative; ImGui's last mouse event can
+    // precede the shell drag. Also reject overlapping ImGui windows/children.
+    auto* previous_viewport = GImGui->MouseViewport;
+    GImGui->MouseViewport = window->Viewport;
+    const bool content_hoverable = ImGui::IsWindowContentHoverable(window);
+    ImGui::FindHoveredWindowEx(point, true, &hovered, &under_moving);
+    GImGui->MouseViewport = previous_viewport;
+    return content_hoverable && hovered == window;
+}
+
 void SourceCollectionPanelUi::RenderFiles(
     PanelSessionInteraction& interaction,
     UiLanguage language,
@@ -936,6 +963,14 @@ void SourceCollectionPanelUi::RenderFiles(
 
     const SourceCollectionSessionView& view = interaction.View();
     RenderText(UiText(language, UiTextId::Files));
+    ImGui::TextWrapped("%s", UiText(language, UiTextId::FilesDropHint).data());
+    if (!open || *open) files_drop_frame_ = ImGui::GetFrameCount();
+    if (files_drop_hovered_) {
+        const auto* window = ImGui::GetCurrentWindow();
+        ImGui::GetForegroundDrawList(window->Viewport)->AddRect(
+            window->InnerRect.Min, window->InnerRect.Max,
+            ImGui::GetColorU32(ImGuiCol_DragDropTarget), 0.0f, 0, 3.0f);
+    }
     ImGui::Separator();
 
     if (source_launch_error_) {

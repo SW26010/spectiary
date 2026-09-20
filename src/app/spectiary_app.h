@@ -16,6 +16,7 @@
 #include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
+#include "platform/win32_file_drop_target.h"
 #include "platform/win32_touchpad_gesture_source.h"
 #include "profile/profile_recording_status.h"
 #include "profile/profile_sink.h"
@@ -179,6 +180,7 @@ private:
 
     SpectiaryStartup startup_;
     Win32Window window_;
+    std::unique_ptr<Win32FileDropTarget> files_drop_target_;
     D3D11Renderer renderer_;
     D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;

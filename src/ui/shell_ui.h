@@ -287,6 +287,12 @@ public:
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
+    [[nodiscard]] unsigned int FilesDropViewport() const
+    { return source_collection_panel_ui_.FilesDropViewport(); }
+    [[nodiscard]] bool HitTestFilesDrop(float x, float y) const
+    { return source_collection_panel_ui_.HitTestFilesDrop(x, y); }
+    void SetFilesDropHovered(bool hovered)
+    { source_collection_panel_ui_.SetFilesDropHovered(hovered); }
     void OpenExternalSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);

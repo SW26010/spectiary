@@ -284,6 +284,7 @@ enum class UiTextId {
     PanelVisibility,
     AddFile,
     AddFolder,
+    FilesDropHint,
     OpenSourceInNewInstance,
     OpenSourceInNewInstanceFailed,
     SourceSingular,

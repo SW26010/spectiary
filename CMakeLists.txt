@@ -465,6 +465,7 @@ add_executable(spectiary_native WIN32
     src/app/spectiary_app.cpp
     src/main.cpp
     src/platform/win32_application_icon.cpp
+    src/platform/win32_file_drop_target.cpp
     src/platform/win32_system_theme.cpp
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
@@ -1318,6 +1319,13 @@ spectiary_add_test(
     spectiary_core
 )
 spectiary_add_test(
+    spectiary_win32_file_drop_target_tests
+    tests/win32_file_drop_target_tests.cpp
+    spectiary_core
+)
+target_sources(spectiary_win32_file_drop_target_tests PRIVATE src/platform/win32_file_drop_target.cpp)
+target_link_libraries(spectiary_win32_file_drop_target_tests PRIVATE ole32 shell32 comctl32 uuid)
+spectiary_add_test(
     spectiary_win32_external_open_router_tests
     tests/win32_external_open_router_tests.cpp
     spectiary_core
@@ -1744,6 +1752,7 @@ add_test(
 set_tests_properties(spectiary_live_resize_resource_observation_tests spectiary_presentation_profile_schema_tests spectiary_presentation_trace_tests
     PROPERTIES TIMEOUT 15)
 set(SPECTIARY_FAST_TESTS
+    spectiary_win32_file_drop_target_tests
     spectiary_win32_external_open_router_tests
     spectiary_sample_labeling_persistence_owner_tests
     spectiary_live_resize_resource_observation_tests

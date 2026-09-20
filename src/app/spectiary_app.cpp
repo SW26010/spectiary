@@ -428,6 +428,16 @@ int SpectiaryApp::Run(
             render_wake_scheduler_.RequestFrame();
         }
 
+        // Shell drops are ordinary in-app opens, in the shell's path order.
+        // OpenSource retains pending explicit opens; the existing load queue
+        // bounds worker concurrency and owns failures/duplicates/activation.
+        if (files_drop_target_) {
+            for (const auto& path : files_drop_target_->TakePaths()) {
+                ui_.OpenSource(path);
+                render_wake_scheduler_.RequestFrame();
+            }
+        }
+
         auto now = RenderWakeScheduler::Clock::now();
         auto maintenance_deadline =
             next_maintenance_deadline();
@@ -623,6 +633,12 @@ void SpectiaryApp::Initialize(
         throw std::runtime_error("Failed to create the Win32 window.");
     }
     applied_window_title_ = window_title;
+    files_drop_target_ = std::make_unique<Win32FileDropTarget>(
+        [this](float x, float y) { return ui_.HitTestFilesDrop(x, y); },
+        [this](bool hovered) {
+            ui_.SetFilesDropHovered(hovered);
+            RequestMessageRender();
+        });
     const HWND profile_state_window = window_.hwnd();
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {
         (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
@@ -859,6 +875,7 @@ void SpectiaryApp::SaveImGuiLayoutForShutdown()
 
 void SpectiaryApp::Shutdown()
 {
+    files_drop_target_.reset();
     external_open_router_.Stop();
     if (shutdown_complete_) {
         return;
@@ -1088,6 +1105,9 @@ RenderFrameOutcome SpectiaryApp::RenderFrame()
             {
                 presentation_trace::Span update({.name = "platform_windows_update"});
                 ImGui::UpdatePlatformWindows();
+                const auto* files_viewport = ImGui::FindViewportByID(ui_.FilesDropViewport());
+                files_drop_target_->SetWindow(files_viewport
+                    ? static_cast<HWND>(files_viewport->PlatformHandleRaw) : nullptr);
             }
             {
                 presentation_trace::Span render({.name = "platform_windows_render"});

@@ -449,6 +449,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Panel visibility", "面板可见性"},
     UiTextEntry{"Add file...", "添加文件…"},
     UiTextEntry{"Add folder...", "添加文件夹…"},
+    UiTextEntry{"Drop files or folders here (up to 256 at a time).", "将文件或文件夹拖放到此处（每次最多 256 个）。"},
     UiTextEntry{
         "Open in New Spectiary Instance",
         "在新 Spectiary 实例打开"},

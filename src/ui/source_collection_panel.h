@@ -36,6 +36,10 @@ public:
     [[nodiscard]] static const char* NavigationWindowName();
     [[nodiscard]] static const char* AnnotationsWindowName();
 
+    [[nodiscard]] unsigned int FilesDropViewport() const;
+    [[nodiscard]] bool HitTestFilesDrop(float x, float y) const;
+    void SetFilesDropHovered(bool hovered) { files_drop_hovered_ = hovered; }
+
     void SyncNavigationInputs(const SourceCollectionNavigationView& navigation);
     void FinalizeNavigationInputEdits(
         PanelSessionInteraction& interaction);
@@ -74,6 +78,8 @@ public:
         const SourceCollectionSessionView& view);
 
 private:
+    int files_drop_frame_ = -1;
+    bool files_drop_hovered_ = false;
     RuntimePaths runtime_paths_;
     friend struct ShellUiTestAccess;
     friend struct SourceCollectionPanelUiTestAccess;

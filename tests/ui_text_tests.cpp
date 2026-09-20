@@ -520,6 +520,7 @@ void TestSourceInspectionMappingsAreExact()
     constexpr std::array kExpectedTexts = {
         ExpectedText{UiTextId::AddFile, "Add file...", "添加文件…"},
         ExpectedText{UiTextId::AddFolder, "Add folder...", "添加文件夹…"},
+        ExpectedText{UiTextId::FilesDropHint, "Drop files or folders here (up to 256 at a time).", "将文件或文件夹拖放到此处（每次最多 256 个）。"},
         ExpectedText{
             UiTextId::OpenSourceInNewInstance,
             "Open in New Spectiary Instance",
