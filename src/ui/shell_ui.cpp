@@ -1,3 +1,4 @@
+#include "overlays/spectral_line_projection.h"
 #include "ui/shell_ui.h"
 #include "ui/spectrum_persistence_migration.h"
 
@@ -2609,7 +2610,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     const unsigned int viewport_id = ImGui::GetWindowViewport()->ID;
 
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
-    const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
+    const auto spectral_lines = ProjectSpectralLineList(spectral_lines_panel_.PlotSource(), snapshot);
     const SpectrumViewRenderFeedback plot_feedback =
         spectrum_view_session_.Render(
             snapshot,
@@ -3490,7 +3491,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     }
     const unsigned int viewport_id = ImGui::GetWindowViewport()->ID;
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
-    const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
+    const auto spectral_lines = ProjectSpectralLineList(spectral_lines_panel_.PlotSource(), snapshot);
     const SpectrumViewRenderFeedback plot_feedback =
         spectrum_view_session_.Render(
             snapshot,

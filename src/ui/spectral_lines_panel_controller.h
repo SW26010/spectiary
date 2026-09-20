@@ -1,10 +1,9 @@
 #pragma once
 
 #include "app/local_user_state.h"
-#include "domain/spectrum_snapshot.h"
 #include "overlays/built_in_spectral_line_adapter.h"
 
-#include "overlays/spectral_line_plot_marker.h"
+#include "overlays/spectral_line_plot_source.h"
 
 
 #include <cstddef>
@@ -199,7 +198,6 @@ struct SpectralLinePersistenceView {
 struct SpectralLinePanelView {
     std::uint64_t generation = 0;
     bool user_owned = false;
-    bool plot_compatible = true;
     std::string coordinate_description;
     std::string user_line_list_name;
     std::string user_line_list_path;
@@ -216,12 +214,6 @@ struct SpectralLinePanelView {
     std::size_t user_grouping_view_count = 0;
     std::size_t line_list_marker_count = 0;
     std::vector<SpectralLineGroupingView> grouping_views;
-};
-
-struct SpectralLinePlotView {
-    std::vector<SpectralLinePlotMarker> visible_markers;
-    bool marker_labels_visible = true;
-    std::string_view layout_scope_id;
 };
 
 class SpectralLinesPanelController {
@@ -248,8 +240,8 @@ public:
     void ReportOpenError(std::string error) { open_error_ = std::move(error); }
     [[nodiscard]] SpectralLineStateResult Submit(SpectralLineStateIntent intent);
     [[nodiscard]] SpectralLinePanelView View() const;
-    [[nodiscard]] SpectralLinePlotView PlotView(
-        const SpectrumSnapshotHandle& snapshot) const;
+    // Complete canonical/effective model, independent of snapshot compatibility.
+    [[nodiscard]] SpectralLinePlotSource PlotSource() const;
     [[nodiscard]] LocalUserStatePersistenceStatus
         PersistenceStatus() const;
 
@@ -275,7 +267,6 @@ private:
     [[nodiscard]] PlotSeriesColor Color(std::string_view id) const;
     [[nodiscard]] bool CanEditView(std::string_view id) const;
     [[nodiscard]] bool IsBaseView(std::string_view id) const;
-    [[nodiscard]] bool PlotCompatible() const;
     void RememberInteraction();
     void Activate(bool user);
     struct UserGeneration {

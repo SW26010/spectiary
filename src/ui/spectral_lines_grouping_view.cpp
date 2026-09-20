@@ -1,3 +1,4 @@
+#include "overlays/spectral_line_projection.h"
 #include "plot/series_color.h"
 #include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_name_localization.h"
@@ -504,7 +505,7 @@ void SpectralLinesGroupingViewUi::Render(
         ImGui::SameLine();
     }
 
-    const SpectralLinePlotView plot_view = panel.PlotView(snapshot);
+    const auto plot_view = ProjectSpectralLineList(panel.PlotSource(), snapshot);
     const std::string marker_count =
         FormatUiText(
             language,

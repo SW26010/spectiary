@@ -77,10 +77,16 @@ Selecting the already opened user list reuses its adopted generation; Open reads
 current bytes again. Explicitly opening the same identity at a moved path can
 reuse compatible session state, without searching for missing files. All valid
 v1 lists remain inspectable, including lists with no grouping views or markers.
-Only laboratory/rest vacuum Angstrom coordinates currently reach the plot;
-incompatible lists stay active with an overlay diagnostic. Snapshot capability
-and rest-frame warning behavior still applies. Editing/saving user definitions
-and broader coordinate projection remain separate follow-up slices.
+The controller hands the complete immutable `SpectralLineList` and session
+presentation to the downstream `ProjectSpectralLineList` boundary, without
+checking plot compatibility or changing coordinate semantics. Main and immersive
+plots consume only that boundary's renderer-ready output; panel diagnostics use
+its controlled status. Its temporary conservative guard passes through only the
+existing laboratory/rest vacuum Angstrom path. Unsupported coordinates suppress
+the overlay while the complete list remains active and inspectable. Snapshot
+capability and rest-frame warning behavior still applies. Broader projection,
+unit conversion and compatibility policy belong to #105/#129; editing/saving
+user definitions remains #66/#67 scope.
 
 **Source collection**:
 A loaded set of one or more spectrum samples that share one source identity and

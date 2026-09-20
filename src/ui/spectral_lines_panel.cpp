@@ -1,3 +1,4 @@
+#include "overlays/spectral_line_projection.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_name_localization.h"
 #include "ui/theme.h"
@@ -203,7 +204,8 @@ void SpectralLinesPanelUi::Render(
     ImGui::TextDisabled("%s", state.coordinate_description.c_str());
     if (state.user_owned)
         ImGui::TextWrapped("%s", UiText(language, UiTextId::LineListReadOnly).data());
-    if (!state.plot_compatible)
+    const auto projection = ProjectSpectralLineList(panel.PlotSource(), snapshot);
+    if (projection.status == SpectralLineProjectionStatus::UnsupportedCoordinates)
         RenderLocalizedDiagnosticStatus(language, UiTextId::LineListCoordinatesUnsupported, {});
     if (!state.color_schemes.empty()) {
         std::string selected;

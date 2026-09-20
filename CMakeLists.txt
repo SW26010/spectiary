@@ -299,6 +299,7 @@ add_library(spectiary_core STATIC
     src/overlays/built_in_spectral_line_reconciliation.cpp
     src/overlays/built_in_spectral_line_adapter.cpp
     src/overlays/spectral_line_session_state.cpp
+    src/overlays/spectral_line_projection.cpp
     src/platform/atomic_file.cpp
     src/platform/exclusive_file_lease.cpp
     src/platform/file_sha256.cpp

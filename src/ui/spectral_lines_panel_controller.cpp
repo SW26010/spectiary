@@ -289,8 +289,6 @@ bool SpectralLinesPanelController::CanEditView(std::string_view id) const
 { return CanCustomize() && adapter_.CanEditView(id); }
 bool SpectralLinesPanelController::IsBaseView(std::string_view id) const
 { return CanCustomize() && adapter_.IsBaseView(id); }
-bool SpectralLinesPanelController::PlotCompatible() const
-{ return Effective().coordinate == line_list::WavelengthCoordinate{}; }
 PlotSeriesColor SpectralLinesPanelController::Color(std::string_view id) const
 {
     for (const auto& scheme : Effective().color_schemes) {
@@ -621,7 +619,7 @@ SpectralLinePanelView SpectralLinesPanelController::View() const
     result.persistence.save_diagnostic_detail = persistence.save_diagnostic_detail;
     result.grouping_view_search = grouping_view_search_; result.marker_labels_visible = marker_labels_visible_;
     result.line_list_marker_count = list.markers.size();
-    result.generation = generation_; result.user_owned = user_active_; result.plot_compatible = PlotCompatible(); result.open_error = open_error_;
+    result.generation = generation_; result.user_owned = user_active_; result.open_error = open_error_;
     result.coordinate_description = list.coordinate.unit == line_list::Unit::Angstrom ? "Angstrom" :
         list.coordinate.unit == line_list::Unit::Nanometer ? "nm" : "um";
     result.coordinate_description += list.coordinate.medium == line_list::Medium::Vacuum ? " / vacuum" : " / air";
@@ -674,11 +672,9 @@ SpectralLinePanelView SpectralLinesPanelController::View() const
     }
     return result;
 }
-SpectralLinePlotView SpectralLinesPanelController::PlotView(const SpectrumSnapshotHandle& snapshot) const
+SpectralLinePlotSource SpectralLinesPanelController::PlotSource() const
 {
-    SpectralLinePlotView result;
-    result.marker_labels_visible = marker_labels_visible_; result.layout_scope_id = Effective().id;
-    if (!PlotCompatible() || !snapshot || !snapshot->capabilities.can_show_spectral_lines) return result;
+    SpectralLinePlotSource result{Effective(), {}, marker_labels_visible_};
     for (const auto& marker : Effective().markers) if (Visible(marker.id))
         result.visible_markers.push_back({&marker, Color(marker.id), marker_auto_slots_.at(marker.id)});
     return result;

@@ -1,3 +1,4 @@
+#include "overlays/spectral_line_projection.h"
 
 #include "ui/spectral_lines_panel_controller.h"
 #include "overlays/built_in_spectral_line_state_io.h"
@@ -76,7 +77,7 @@ void TestUserLineLists(const std::filesystem::path& root)
     Require(controller.OpenUserLineList(outside / "missing", paths).status == Status::Rejected,
             "failed first open preserves built-in owner");
     Require(!controller.View().user_owned && Active(controller.View()) == builtin_view &&
-            controller.PlotView(snapshot).visible_markers.size() == 2, "built-in model/session preserved");
+            ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 2, "built-in model/session preserved");
 
     auto user = Base(); user.id = "user-list"; user.name = "Same name";
     user.markers.front().coordinate = 1000;
@@ -96,14 +97,14 @@ void TestUserLineLists(const std::filesystem::path& root)
             view.grouping_view_search.empty() && view.marker_labels_visible, "new owner starts independent session");
     Require(view.grouping_views.front().generated_name == GeneratedNameMetadata{} &&
             view.grouping_views.front().name == "My authored name", "user names never receive built-in localization");
-    Require(controller.PlotView(snapshot).visible_markers.size() == 3 &&
-            controller.PlotView(snapshot).visible_markers.front().marker->coordinate == 1000,
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 3 &&
+            ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.front().marker->coordinate == 1000,
             "sole active user markers reach rest-warning capable plot");
     Require(controller.Flush(), "pending built-in save works while user owner is active");
     const auto durable_builtin = Bytes(state_path);
-    const auto slot = controller.PlotView(snapshot).visible_markers.front().automatic_color_slot;
+    const auto slot = ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.front().automatic_color_slot;
     Applied(controller.Submit(Intent::SelectColorScheme("green")));
-    Require(controller.PlotView(snapshot).visible_markers.front().color == DecodeLineListColor("#00FF00FF"),
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.front().color == DecodeLineListColor("#00FF00FF"),
             "canonical color selection is session-only");
     Require(controller.Submit(Intent::SetMarkerColor("a", PlotSeriesColor::Auto())).status == Status::Rejected &&
             controller.Submit(Intent::CreateUserGroupingView()).status == Status::Rejected &&
@@ -120,10 +121,10 @@ void TestUserLineLists(const std::filesystem::path& root)
     const auto generation = controller.View().generation;
     const auto unchanged = [&] {
         const auto current = controller.View();
-        Require(current.generation == generation && current.line_list_id == user.id &&
+        Require(current.generation == generation && current.line_list_id == user.id && controller.PlotSource().list == user &&
                 current.grouping_view_search == "C" && !current.marker_labels_visible &&
                 Active(current) == "base-two" && current.active_color_scheme_id == "green" &&
-                controller.PlotView(snapshot).visible_markers.size() == 2,
+                ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 2,
                 "failed candidate leaves generation and all interaction state untouched");
     };
     for (const auto* role : {"config", "state", "logs", "unsaved", "STATE"}) {
@@ -156,18 +157,18 @@ void TestUserLineLists(const std::filesystem::path& root)
             "switch restores user identity-scoped session");
     const auto moved = managed / "legal-at-root.anything";
     std::filesystem::rename(file, moved);
-    Require(controller.PlotView(snapshot).visible_markers.size() == 2, "external move does not invalidate generation");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 2, "external move does not invalidate generation");
     Require(controller.OpenUserLineList(file, paths).status == Status::Rejected, "stale explicit locator does not rebind");
     Applied(controller.OpenUserLineList(moved, paths));
     Require(controller.View().grouping_view_search == "C" && controller.View().active_color_scheme_id == "green" &&
-            controller.PlotView(snapshot).visible_markers.size() == 2, "explicit moved-path reopen resumes stable identity");
+            ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 2, "explicit moved-path reopen resumes stable identity");
     Applied(controller.Submit(Intent::SetMarkerVisibility("a", true)));
-    Require(controller.PlotView(snapshot).visible_markers.front().automatic_color_slot == slot, "stable colors after switches and move");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.front().automatic_color_slot == slot, "stable colors after switches and move");
     auto other = user; other.id = "other-identity";
     save(moved, other);
     Applied(controller.OpenUserLineList(moved, paths));
     Require(controller.View().line_list_id == other.id && controller.View().grouping_view_search.empty() &&
-            controller.View().marker_labels_visible && controller.PlotView(snapshot).visible_markers.size() == 3,
+            controller.View().marker_labels_visible && ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 3,
             "explicit replacement at same path/name adopts new identity without old session");
     const auto child = managed / "my-documents" / "list.json";
     save(child, user); Applied(controller.OpenUserLineList(child, paths));
@@ -178,22 +179,71 @@ void TestUserLineLists(const std::filesystem::path& root)
     Require(!controller.CanCustomize() && controller.View().grouping_views.front().groups.back().marker_references.size() == 3,
             "ungrouped user list inspectable; built-in identity cannot grant editing");
     Applied(controller.Submit(Intent::SetGroupMarkerVisibility("", "__unassigned__", false)));
-    Require(controller.PlotView(snapshot).visible_markers.empty(), "ungrouped visibility is session-only");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.empty(), "ungrouped visibility is session-only");
     for (const auto unit : {line_list::Unit::Angstrom, line_list::Unit::Nanometer, line_list::Unit::Micrometer}) {
         for (const auto medium : {line_list::Medium::Vacuum, line_list::Medium::Air}) {
             auto coordinates = user; coordinates.id = "coordinates"; coordinates.coordinate.unit = unit; coordinates.coordinate.medium = medium;
+            coordinates.description = "Preserve complete semantic content";
+            coordinates.creator = "Authored by the user";
+            coordinates.created_at = "2026-09-21T00:00:00Z";
+            coordinates.modified_at = "2026-09-21T01:00:00Z";
             save(moved, coordinates); Applied(controller.OpenUserLineList(moved, paths));
+            // The handoff is not filtered by wavelength semantics or snapshot
+            // capabilities: complete canonical contents survive every combination.
+            const auto source = controller.PlotSource();
+            Require(source.list == coordinates && source.visible_markers.size() == coordinates.markers.size(),
+                    "complete active model handed downstream unchanged for every valid unit/medium");
+            for (std::size_t i = 0; i < coordinates.markers.size(); ++i)
+                Require(source.visible_markers[i].marker == &source.list.markers[i] &&
+                        *source.visible_markers[i].marker == coordinates.markers[i],
+                        "line positions, band endpoints, IDs, names and notes retain canonical semantics");
+            const auto projected = ProjectSpectralLineList(source, snapshot);
+            Require(source.list == coordinates, "downstream projection never mutates canonical contents");
             const bool compatible = unit == line_list::Unit::Angstrom && medium == line_list::Medium::Vacuum;
-            Require(controller.View().plot_compatible == compatible && controller.View().line_list_marker_count == 3 &&
-                    controller.PlotView(snapshot).visible_markers.size() == (compatible ? 3U : 0U), "incompatible coordinates inspectable but never plotted raw");
+            Require(projected.status == (compatible ? SpectralLineProjectionStatus::Available : SpectralLineProjectionStatus::UnsupportedCoordinates) &&
+                    controller.View().line_list_marker_count == 3 && projected.visible_markers.size() == (compatible ? 3U : 0U),
+                    "temporary downstream guard diagnoses unsupported semantics without affecting activation");
+            if (compatible) {
+                Require(projected.visible_markers[0].marker->coordinate == coordinates.markers[0].coordinate &&
+                        projected.visible_markers[1].marker->start == coordinates.markers[1].start &&
+                        projected.visible_markers[1].marker->end == coordinates.markers[1].end,
+                        "compatible projection preserves line and band coordinates");
+            }
+            Applied(controller.Submit(Intent::SetMarkerVisibility("a", false)));
+            Applied(controller.Submit(Intent::SetMarkerLabelsVisible(false)));
+            const auto hidden_source = controller.PlotSource();
+            Require(hidden_source.list == coordinates && hidden_source.visible_markers.size() == 2 &&
+                    !hidden_source.marker_labels_visible,
+                    "session visibility does not remove hidden canonical markers from complete handoff");
+            const auto hidden_projection = ProjectSpectralLineList(hidden_source, snapshot);
+            Require(!hidden_projection.marker_labels_visible && hidden_projection.layout_scope_id == coordinates.id,
+                    "downstream result retains session labels and active identity even when unavailable");
+            Applied(controller.Submit(Intent::SetMarkerVisibility("a", true)));
+            Applied(controller.Submit(Intent::SetMarkerLabelsVisible(true)));
+            Applied(controller.SelectBuiltInLineList());
+            const auto builtin_source = controller.PlotSource();
+            Require(builtin_source.list.id == Base().id && builtin_source.list.markers == Base().markers &&
+                    std::any_of(builtin_source.list.grouping_views.begin(), builtin_source.list.grouping_views.end(),
+                        [&](const auto& view) { return view.id == builtin_view; }),
+                    "switch hands off sole built-in effective model including overlay views");
+            Applied(controller.SelectOpenedUserLineList());
+            Require(controller.PlotSource().list == coordinates,
+                    "switch back hands off sole user model without built-in overlay contamination");
+
         }
     }
     save(moved, user); Applied(controller.OpenUserLineList(moved, paths));
+    const auto before_unavailable = controller.PlotSource().list;
     snapshot->capabilities.can_show_spectral_lines = false;
-    Require(controller.PlotView(snapshot).visible_markers.empty() && controller.PlotView({}).visible_markers.empty(), "snapshot capability remains authoritative");
+    Require(controller.PlotSource().list == before_unavailable &&
+            ProjectSpectralLineList(controller.PlotSource(), snapshot).status == SpectralLineProjectionStatus::SpectrumUnavailable &&
+            ProjectSpectralLineList(controller.PlotSource(), {}).status == SpectralLineProjectionStatus::SpectrumUnavailable,
+            "snapshot unavailability is downstream state and does not change the complete handoff");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.empty() && ProjectSpectralLineList(controller.PlotSource(), {}).visible_markers.empty(), "snapshot capability remains authoritative");
     auto empty = user; empty.markers.clear(); empty.grouping_views.clear(); empty.color_schemes.clear();
     save(moved, empty); Applied(controller.OpenUserLineList(moved, paths));
-    Require(controller.View().user_owned && controller.View().line_list_marker_count == 0, "valid zero-marker file activates");
+    Require(controller.View().user_owned && controller.View().line_list_marker_count == 0 &&
+            controller.PlotSource().list == empty, "valid zero-marker file activates and hands off complete empty model");
     std::filesystem::remove(moved);
     Require(controller.View().user_owned, "external deletion leaves adopted in-memory generation intact");
     Applied(controller.SelectBuiltInLineList());
@@ -215,9 +265,9 @@ void TestOperations(const std::filesystem::path& path)
     Require(controller.Submit(Intent::SetMarkerVisibility("missing", false)).status == Status::Rejected, "foreign marker rejected");
     Require(controller.Submit(Intent::SelectGroupingView("missing")).status == Status::Rejected, "foreign view rejected");
     auto snapshot = std::make_shared<SpectrumSnapshot>(); snapshot->capabilities.can_show_spectral_lines = true;
-    Require(controller.PlotView(snapshot).visible_markers.size() == 3, "default marker visibility remains visible");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 3, "default marker visibility remains visible");
     Applied(controller.Submit(Intent::SetMarkerVisibility("a", false)));
-    Require(controller.PlotView(snapshot).visible_markers.size() == 2, "visibility controls plot independently of grouping");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 2, "visibility controls plot independently of grouping");
     const auto user = CreateView(controller);
     auto first = AddGroup(controller, user), second = AddGroup(controller, user);
     Applied(controller.Submit(Intent::MoveMarkerReference(user, "a", "__unassigned__", first)));
@@ -231,7 +281,7 @@ void TestOperations(const std::filesystem::path& path)
     Applied(controller.Submit(Intent::CopyMarkerReference(user, "b", first, second)));
     Applied(controller.Submit(Intent::SetGroupingViewSearch("")));
     Applied(controller.Submit(Intent::SetGroupMarkerVisibility(user, first, true)));
-    Require(controller.PlotView(snapshot).visible_markers.size() == 3, "group visibility changes shared marker state");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers.size() == 3, "group visibility changes shared marker state");
     Applied(controller.Submit(Intent::ReorderUserGroupBefore(user, second, first)));
     Applied(controller.Submit(Intent::RenameUserGroup(user, first, "Unassigned", SpectralLineRenameEditState::Edited)));
     Applied(controller.Submit(Intent::SetGroupExpanded(user, first, true)));
@@ -251,9 +301,9 @@ void TestOperations(const std::filesystem::path& path)
     Require(View(controller.View(), user).groups[0].marker_references[1].marker_id == "a", "removing one shared reference preserves others");
     Applied(controller.Submit(Intent::SetMarkerColor("a", PlotSeriesColor::ExplicitColor({1, 0, 0, 1}))));
     Applied(controller.Submit(Intent::SetMarkerColor("b", PlotSeriesColor::ExplicitColor({0, 1, 0, 1}))));
-    const auto slot = controller.PlotView(snapshot).visible_markers[0].automatic_color_slot;
+    const auto slot = ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers[0].automatic_color_slot;
     Applied(controller.Submit(Intent::SelectGroupingView("base-two")));
-    Require(controller.PlotView(snapshot).visible_markers[0].automatic_color_slot == slot, "palette slots remain stable across view selection");
+    Require(ProjectSpectralLineList(controller.PlotSource(), snapshot).visible_markers[0].automatic_color_slot == slot, "palette slots remain stable across view selection");
     Require(controller.Flush(), "controller saves state");
     auto loaded = LoadBuiltInSpectralLineState(path, Base());
     Require(loaded.error.empty() && loaded.state.overlay.grouping_views.size() == 1, loaded.error);
@@ -264,7 +314,7 @@ void TestOperations(const std::filesystem::path& path)
     Require(Bytes(path).find("is_unassigned") == std::string::npos && Bytes(path).find("marker_references") == std::string::npos, "new writer emits only canonical subrecords");
     SpectralLinesPanelController reopened(Base(), path);
     Require(Active(reopened.View()) == "base-two", "selection restored independently");
-    Require(reopened.PlotView(snapshot).visible_markers[0].color == PlotSeriesColor::ExplicitColor({1, 0, 0, 1}), "explicit color persists");
+    Require(ProjectSpectralLineList(reopened.PlotSource(), snapshot).visible_markers[0].color == PlotSeriesColor::ExplicitColor({1, 0, 0, 1}), "explicit color persists");
     Applied(reopened.Submit(Intent::SetMarkerColor("a", PlotSeriesColor::Auto())));
     Require(reopened.Flush(), "Auto reset saves");
     loaded = LoadBuiltInSpectralLineState(path, Base());
