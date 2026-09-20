@@ -1,4 +1,5 @@
 #include "platform/win32_jump_list.h"
+#include "app/project_identity.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/atomic_file.h"
 #include "domain/source_path_identity.h"
@@ -102,7 +103,7 @@ HRESULT PublishSourceJumpList(const std::filesystem::path& executable,
         bool acquired = false;
         ~PublicationLock() { if (acquired) ReleaseMutex(handle); if (handle) CloseHandle(handle); }
     } lock;
-    lock.handle = CreateMutexW(nullptr, FALSE, L"Local\\Spectiary.JumpListPublication");
+    lock.handle = CreateMutexW(nullptr, FALSE, project_identity::kJumpListPublicationMutex);
     if (!lock.handle) return HRESULT_FROM_WIN32(GetLastError());
     const DWORD wait = WaitForSingleObject(lock.handle, 3000);
     lock.acquired = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
