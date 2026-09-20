@@ -67,7 +67,7 @@ std::vector<JumpListSource> EligibleJumpListSources(std::span<const JumpListSour
 }
 
 HRESULT CreateSourceJumpListLink(const std::filesystem::path& executable,
-    const JumpListSource& source, const std::wstring& app_id, IShellLinkW** output)
+    const JumpListSource& source, IShellLinkW** output)
 {
     if (!output) return E_POINTER;
     *output = nullptr;
@@ -85,34 +85,28 @@ HRESULT CreateSourceJumpListLink(const std::filesystem::path& executable,
     result = properties->SetValue(PKEY_Title, title);
     PropVariantClear(&title);
     if (FAILED(result)) return result;
-    result = InitPropVariantFromString(app_id.c_str(), &title);
-    if (FAILED(result)) return result;
-    result = properties->SetValue(PKEY_AppUserModel_ID, title);
-    PropVariantClear(&title);
-    if (FAILED(result)) return result;
     if (FAILED(result = properties->Commit())) return result;
     return link.CopyTo(output);
 }
 
 HRESULT PublishSourceJumpList(const std::filesystem::path& executable,
-    std::span<const JumpListSource> sources, const std::wstring& category, const std::wstring& app_id,
+    std::span<const JumpListSource> sources, const std::wstring& category,
     const std::filesystem::path& exclusions_path, ICustomDestinationList& destinations)
 {
-    // Serialize the read/merge/commit across instances in the same namespace.
+    // Serialize publication across our processes without assigning a shell identity.
     struct PublicationLock {
         HANDLE handle = nullptr;
         bool acquired = false;
         ~PublicationLock() { if (acquired) ReleaseMutex(handle); if (handle) CloseHandle(handle); }
     } lock;
-    lock.handle = CreateMutexW(nullptr, FALSE, (L"Local\\" + app_id + L".JumpList").c_str());
+    lock.handle = CreateMutexW(nullptr, FALSE, L"Local\\Spectiary.JumpListPublication");
     if (!lock.handle) return HRESULT_FROM_WIN32(GetLastError());
     const DWORD wait = WaitForSingleObject(lock.handle, 3000);
     lock.acquired = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
     if (!lock.acquired) return HRESULT_FROM_WIN32(ERROR_BUSY);
     std::set<std::string> exclusions;
     if (!ReadExclusions(exclusions_path, exclusions)) return E_FAIL;
-    HRESULT result = destinations.SetAppID(app_id.c_str());
-    if (FAILED(result)) return result;
+    HRESULT result = S_OK;
     UINT slots = 0;
     ComPtr<IObjectArray> removed;
     if (FAILED(result = destinations.BeginList(&slots, IID_PPV_ARGS(&removed)))) return result;
@@ -149,7 +143,7 @@ HRESULT PublishSourceJumpList(const std::filesystem::path& executable,
         if (count >= slots) break;
         if (exclusions.contains(SourceDigest(source.path))) continue;
         ComPtr<IShellLinkW> link;
-        if (FAILED(result = CreateSourceJumpListLink(executable, source, app_id, &link))) return result;
+        if (FAILED(result = CreateSourceJumpListLink(executable, source, &link))) return result;
         if (FAILED(result = collection->AddObject(link.Get()))) return result;
         ++count;
     }
@@ -172,9 +166,8 @@ HRESULT PublishSourceJumpList(const std::filesystem::path& executable,
 }
 
 struct Win32JumpList::Impl {
-    Impl(std::wstring id, std::filesystem::path root)
-        : app_id(std::move(id)), exclusions_path(std::move(root) / "shell-jump-list-exclusions.txt") {}
-    std::wstring app_id;
+    Impl(std::filesystem::path root)
+        : exclusions_path(std::move(root) / "shell-jump-list-exclusions.txt") {}
     std::filesystem::path exclusions_path;
     struct Request { std::vector<JumpListSource> sources; std::wstring category; };
     std::mutex mutex;
@@ -207,7 +200,7 @@ struct Win32JumpList::Impl {
                     ComPtr<ICustomDestinationList> destinations;
                     result = CoCreateInstance(CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&destinations));
                     if (SUCCEEDED(result)) result = PublishSourceJumpList(executable.path, request.sources,
-                        request.category, app_id, exclusions_path, *destinations.Get());
+                        request.category, exclusions_path, *destinations.Get());
                 } catch (...) {
                     // Shell projection failure must never terminate the GUI.
                 }
@@ -218,8 +211,8 @@ struct Win32JumpList::Impl {
     }
 };
 
-Win32JumpList::Win32JumpList(std::wstring app_id, std::filesystem::path config_root)
-    : impl_(std::make_unique<Impl>(std::move(app_id), std::move(config_root))) {}
+Win32JumpList::Win32JumpList(std::filesystem::path config_root)
+    : impl_(std::make_unique<Impl>(std::move(config_root))) {}
 Win32JumpList::~Win32JumpList() = default;
 void Win32JumpList::Refresh(std::vector<JumpListSource> sources, std::wstring category)
 {

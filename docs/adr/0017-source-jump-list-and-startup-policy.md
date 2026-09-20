@@ -5,7 +5,7 @@ Status: Accepted. Date: 2026-09-20. Issue: #121.
 ## Startup boundary
 
 Before constructing `SourceCollectionSession`, ordinary GUI startup chooses
-`RestoreSession` or `ExplicitSource`. The latter neither prepares a persisted
+`SourceSessionRestorePolicy::Restore` or `Skip`. The latter neither prepares a persisted
 source restore plan nor enters its restoring lifecycle, and `ShellUi` submits
 no deferred restore jobs. The explicit path then uses `OpenInitialSource` and
 the existing external-source resolver and asynchronous source-opening pipeline.
@@ -17,20 +17,16 @@ Automation retains its existing restore/startup contract. Source-free startup,
 including taskbar relaunch, is unchanged. This is a restore-policy seam, not a
 general launch-intent framework; #68 can independently add a blank-start policy.
 
-## Shell namespace
+## Windows shell identity
 
-The AppUserModelID is `Spectiary.` followed by SHA-256 of the immutable founding
-identity and normalized runtime `config_root`. Case and directory separator
-normalization follows Windows source-path identity; trailing directory separators
-do not create a new identity. The prefix is an explicit shell contract, not a
-value derived from the mutable product display name.
-
-The ordinary process sets its explicit ID before creating windows. Its main
-window, relaunch properties, source destination links and `ICustomDestinationList`
-use that same ID. Equal runtime/config namespaces share taskbar grouping and
-Jump Lists; different Portable or LocalAppData namespaces cannot overwrite one
-another. Within one namespace the last publisher supplies the complete current
-projection, consistent with the lightweight multi-instance ownership in ADR 0004.
+The publisher runs inside the GUI process and uses Windows' implicitly assigned
+application identity. It does not call `SetAppID`, set a process/window AppID,
+or attach an AppID or relaunch properties to source links or windows.
+Config namespaces do not impose separate taskbar groups. If Windows groups
+multiple deployments together, the last publisher replaces their shared Jump
+List with its current Files projection; there is no cross-deployment roster merger.
+Explicit identity and shortcut/installer alignment are deferred to #118, where
+that user-visible application grouping policy can be decided together.
 Automation and resource-workload fixtures do not publish user Jump Lists.
 
 ## Projection and user removals
@@ -45,9 +41,10 @@ become stale after publication fail through ordinary source-opening diagnostics.
 Windows controls displayed item counts; the publisher respects its slot limit.
 
 A single background STA worker performs filesystem and shell I/O, coalescing
-pending updates to the latest snapshot. A namespace-local mutex serializes the
-shell transaction and removal-preference updates across instances. Failed COM
-transactions abort and report through debugger diagnostics without changing
+pending updates to the latest snapshot. A fixed publication mutex serializes the
+shell transaction and removal-preference updates across Spectiary processes.
+This lock does not assign an application identity or control taskbar grouping.
+Failed COM transactions abort and report through debugger diagnostics without changing
 application source state. Windows privacy restrictions may suppress the category.
 
 Windows clears its removed-destinations list after a successful `CommitList`.
@@ -59,23 +56,27 @@ supply a candidate source. Preferences are merged and atomically saved before
 Windows can clear its removal records. Read/write failure preserves those records
 by aborting publication. These exclusions survive restarts and are namespace-local;
 closing that namespace's instances and deleting this preference file resets them.
+They do not provide cross-configuration removal synchronization if Windows shares
+one implicit shell identity across those configurations.
 
 ## Verification
 
 `spectiary_win32_jump_list_tests` covers native Shell Link content, eligibility,
-ordering, limits, removal persistence, namespace separation and transaction
+ordering, limits, removal persistence, configuration-local preferences and transaction
 failures against the Windows COM interface. The shell activation suite verifies
 construction-time restore gating, ordinary restore, first explicit activation,
 stale-source errors, untouched saved state, and Files publication notifications.
 
-The optional `spectiary_win32_jump_list_native_tests` checks real window/process
-IDs and Windows destination-list publication under a disposable test ID.
+The optional `spectiary_win32_jump_list_native_tests` checks real destination-list
+publication using the test executable's implicit identity, then deletes that list.
 `spectiary_win32_jump_list_gui_routing_tests` creates an isolated Portable copy,
 proves ordinary startup forwards to a production-protocol test receiver, and
 uses Windows to activate production-created `.lnk` destinations. It verifies new
 ordinary GUI processes, selected-source titles and unchanged prior instances,
 including a stale destination. Both are serial `real-gui;gui-integration` tests;
-they clean up their processes and shell lists.
+they clean up their processes and temporary files. Windows owns the GUI copy's
+implicit identity and shell-list lifetime; the test does not attempt to discover
+or delete another process's implicitly identified list.
 
 Windows contracts: [AppUserModelIDs](https://learn.microsoft.com/en-us/windows/win32/shell/appids),
 [BeginList removal semantics](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-icustomdestinationlist-beginlist),

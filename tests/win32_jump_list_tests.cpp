@@ -1,6 +1,5 @@
 #include "platform/win32_jump_list.h"
 #include "platform/win32_process_launcher.h"
-#include "platform/win32_shell_identity.h"
 #include "platform/win32_external_open_router.h"
 #include "automation/automation_startup.h"
 #include <propkey.h>
@@ -37,7 +36,7 @@ struct DestinationList : ICustomDestinationList {
     HRESULT commit_result = S_OK;
     bool committed = false;
     bool aborted = false;
-    std::wstring id;
+    bool explicit_id_requested = false;
     std::wstring category;
     ComPtr<IObjectCollection> removed;
     std::vector<ComPtr<IShellLinkW>> links;
@@ -51,9 +50,8 @@ struct DestinationList : ICustomDestinationList {
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
     ULONG STDMETHODCALLTYPE Release() override { return 1; }
-    HRESULT STDMETHODCALLTYPE SetAppID(LPCWSTR value) override { id = value; return S_OK; }
+    HRESULT STDMETHODCALLTYPE SetAppID(LPCWSTR) override { explicit_id_requested = true; return E_UNEXPECTED; }
     HRESULT STDMETHODCALLTYPE BeginList(UINT* count, REFIID iid, void** output) override {
-        Require(!id.empty(), "AppID must precede BeginList");
         *count = slots; committed = false; aborted = false; links.clear(); category.clear();
         return removed->QueryInterface(iid, output);
     }
@@ -92,15 +90,11 @@ void TestPublication(const std::filesystem::path& root)
     const auto eligible = EligibleJumpListSources(sources);
     Require(eligible.size() == 2 && eligible[0].path == file && eligible[1].path == folder,
         "only durable existing filesystem entries, in Files order, without duplicates");
-    const auto id = ShellAppUserModelId(root);
-    Require(id == ShellAppUserModelId(root / "child" / "..") && id != ShellAppUserModelId(root / "other"),
-        "shell identity must track normalized config namespace");
-    Require(id.size() <= 128 && id.starts_with(L"Spectiary."), "Windows AppID must be bounded and readable");
     DestinationList list;
     const auto preferences = root / "exclusions.txt";
-    const auto publish = [&] { return PublishSourceJumpList(executable, sources, L"数据源", id, preferences, list); };
-    Require(SUCCEEDED(publish()) && list.committed && list.links.size() == 2 && list.id == id && list.category == L"数据源",
-        "publish custom category with namespace identity");
+    const auto publish = [&] { return PublishSourceJumpList(executable, sources, L"数据源", preferences, list); };
+    Require(SUCCEEDED(publish()) && list.committed && list.links.size() == 2 && !list.explicit_id_requested && list.category == L"数据源",
+        "publish custom category without overriding Windows shell identity");
     for (std::size_t i = 0; i < list.links.size(); ++i) {
         auto& link = *list.links[i].Get();
         std::wstring target(32768, L'\0');
@@ -119,8 +113,8 @@ void TestPublication(const std::filesystem::path& root)
         ComPtr<IPropertyStore> properties;
         Require(SUCCEEDED(list.links[i].As(&properties)), "link properties");
         PROPVARIANT value{};
-        Require(SUCCEEDED(properties->GetValue(PKEY_AppUserModel_ID, &value)) && value.vt == VT_LPWSTR && id == value.pwszVal,
-            "shortcut AppID must match window/process/list namespace");
+        Require(SUCCEEDED(properties->GetValue(PKEY_AppUserModel_ID, &value)) && value.vt == VT_EMPTY,
+            "source link must not override Windows shell identity");
         PropVariantClear(&value);
         Require(SUCCEEDED(properties->GetValue(PKEY_Title, &value)) && value.vt == VT_LPWSTR && eligible[i].title == value.pwszVal,
             "native shell title must retain Files display name");
@@ -132,15 +126,15 @@ void TestPublication(const std::filesystem::path& root)
     Require(SUCCEEDED(publish()) && list.links.size() == 1,
         "removal survives Windows clearing removed destinations after CommitList");
     DestinationList restarted;
-    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources", id, preferences, restarted)) && restarted.links.size() == 1,
+    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources", preferences, restarted)) && restarted.links.size() == 1,
         "user removal persists across publisher instances");
     DestinationList other_namespace;
-    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources", ShellAppUserModelId(root / "other"),
-        root / "other-exclusions.txt", other_namespace)) && other_namespace.links.size() == 2, "removal preference is namespace-local");
+    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources",
+        root / "other-exclusions.txt", other_namespace)) && other_namespace.links.size() == 2, "removal preference belongs to its configuration file");
     list.slots = 0;
     Require(SUCCEEDED(publish()) && list.links.empty() && list.committed, "zero Windows slots commits an empty projection");
     other_namespace.slots = 1;
-    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources", ShellAppUserModelId(root / "other"),
+    Require(SUCCEEDED(PublishSourceJumpList(executable, sources, L"Sources",
         root / "other-exclusions.txt", other_namespace)) && other_namespace.links.size() == 1 &&
         Arguments(*other_namespace.links[0].Get()) == NewInstanceSourceArguments(file), "Windows cap preserves Files ordering");
     list.slots = 10;
@@ -156,42 +150,28 @@ void TestPublication(const std::filesystem::path& root)
     Require(FAILED(publish()) && !list.committed, "unreadable removal preferences cannot resurrect hidden destinations");
 }
 
-void TestNativeWindowAndShell(const std::filesystem::path& root)
+void TestNativeShell(const std::filesystem::path& root)
 {
-    const auto id = ShellAppUserModelId(root);
     const auto executable = ResolveCurrentExecutablePath().path;
-    Require(SUCCEEDED(SetCurrentProcessExplicitAppUserModelID(id.c_str())), "set process namespace AppID");
     PWSTR process_id = nullptr;
-    Require(SUCCEEDED(GetCurrentProcessExplicitAppUserModelID(&process_id)) && id == process_id, "read process AppID");
+    const auto explicit_id = GetCurrentProcessExplicitAppUserModelID(&process_id);
     CoTaskMemFree(process_id);
-    const HWND window = CreateWindowExW(0, L"STATIC", L"Spectiary shell identity test", WS_OVERLAPPEDWINDOW,
-        0, 0, 100, 100, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    Require(window != nullptr, "create hidden shell identity window");
-    struct WindowCleanup { HWND window; ~WindowCleanup() { DestroyWindow(window); } } window_cleanup{window};
-    Require(SUCCEEDED(ConfigureShellWindowIdentity(window, id, executable)), "configure window AppID and source-free relaunch");
-    ComPtr<IPropertyStore> properties;
-    Require(SUCCEEDED(SHGetPropertyStoreForWindow(window, IID_PPV_ARGS(&properties))), "read window property store");
-    PROPVARIANT value{};
-    Require(SUCCEEDED(properties->GetValue(PKEY_AppUserModel_ID, &value)) && value.vt == VT_LPWSTR && id == value.pwszVal,
-        "window and process AppIDs must agree");
-    PropVariantClear(&value);
-    Require(SUCCEEDED(properties->GetValue(PKEY_AppUserModel_RelaunchCommand, &value)) && value.vt == VT_LPWSTR &&
-        QuoteWindowsCommandLineArgument(executable.wstring()) == value.pwszVal, "taskbar source-free relaunch behavior is unchanged");
-    PropVariantClear(&value);
+    Require(FAILED(explicit_id), "native test must exercise implicit process identity");
     ComPtr<ICustomDestinationList> destinations;
     Require(SUCCEEDED(CoCreateInstance(CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&destinations))),
         "create native Windows destination list");
-    struct ListCleanup { ICustomDestinationList* list; const std::wstring& id; ~ListCleanup() { list->DeleteList(id.c_str()); } } cleanup{destinations.Get(), id};
+    struct ListCleanup { ICustomDestinationList* list; ~ListCleanup() { list->DeleteList(nullptr); } } cleanup{destinations.Get()};
     const auto file = root / "native.csv";
     std::ofstream(file) << "wav,flux\n5000,1\n";
     const std::vector<JumpListSource> sources{{file, L"Native source"}};
-    const auto hr = PublishSourceJumpList(executable, sources, L"Sources", id, root / "native-exclusions.txt", *destinations.Get());
+    const auto hr = PublishSourceJumpList(executable, sources, L"Sources", root / "native-exclusions.txt", *destinations.Get());
     if (FAILED(hr)) std::cerr << "Native publication HRESULT: " << std::hex << static_cast<unsigned long>(hr) << '\n';
-    Require(SUCCEEDED(hr), "publish native shell list for isolated test namespace");
+    Require(SUCCEEDED(hr), "publish native shell list using test executable implicit identity");
 }
 
 // Optional real-GUI smoke: use a disposable Portable deployment so ordinary
-// (non-automation) startup and routing execute without touching user state.
+// (non-automation) startup and routing execute with disposable source/configuration state.
+// Windows owns the copied executable's implicit shell identity and list lifetime.
 void TestGuiRouting(const std::filesystem::path& root)
 {
     const auto build = ResolveCurrentExecutablePath().path.parent_path();
@@ -223,11 +203,6 @@ void TestGuiRouting(const std::filesystem::path& root)
         }, reinterpret_cast<LPARAM>(&observation));
         return std::pair{observation.window, observation.title};
     };
-    const auto app_id = ShellAppUserModelId(root / "config");
-    ComPtr<ICustomDestinationList> destinations;
-    Require(SUCCEEDED(CoCreateInstance(CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&destinations))), "GUI test list cleanup");
-    // Declared before process cleanup, so the GUIs stop publishing first.
-    struct ListCleanup { ICustomDestinationList* list; const std::wstring& id; ~ListCleanup() { list->DeleteList(id.c_str()); } } list_cleanup{destinations.Get(), app_id};
     std::vector<HANDLE> processes;
     struct Cleanup {
         std::vector<HANDLE>& processes;
@@ -283,7 +258,7 @@ void TestGuiRouting(const std::filesystem::path& root)
         "control invocation must actually forward under recent-instance policy");
     const auto activate_link = [&](const std::filesystem::path& source, const wchar_t* filename) {
         ComPtr<IShellLinkW> link;
-        Require(SUCCEEDED(CreateSourceJumpListLink(executable, {source, source.filename().wstring()}, app_id, &link)), "create production source link");
+        Require(SUCCEEDED(CreateSourceJumpListLink(executable, {source, source.filename().wstring()}, &link)), "create production source link");
         ComPtr<IPersistFile> persistence;
         Require(SUCCEEDED(link.As(&persistence)), "persist source link");
         const auto shortcut = root / filename;
@@ -315,7 +290,7 @@ int main(int argc, char** argv)
     int exit_code = 0;
     try {
         std::filesystem::create_directories(root);
-        if (argc == 2 && std::string_view(argv[1]) == "--native-shell") TestNativeWindowAndShell(root);
+        if (argc == 2 && std::string_view(argv[1]) == "--native-shell") TestNativeShell(root);
         else if (argc == 2 && std::string_view(argv[1]) == "--gui-routing") TestGuiRouting(root);
         else TestPublication(root);
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; exit_code = 1; }

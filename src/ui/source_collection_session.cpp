@@ -552,7 +552,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
     const RuntimePaths& runtime_paths,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -573,7 +573,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingController::CanonicalDocumentPublisher
         canonical_document_publisher,
     const RuntimePaths& runtime_paths,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
     : SourceCollectionSession(
           std::move(source_session_state_cache_path),
           std::move(navigation_state_cache_path),
@@ -597,7 +597,7 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingController::CanonicalValuesPublisher
         canonical_values_publisher,
     const RuntimePaths& runtime_paths,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
@@ -622,7 +622,7 @@ SourceCollectionSession::SourceCollectionSession(
           std::move(source_session_state_cache_path), runtime_paths))
 {
     workflow_->SetDeferredSampleNavigation(true);
-    if (startup_source_policy == StartupSourcePolicy::RestoreSession) {
+    if (startup_source_policy == SourceSessionRestorePolicy::Restore) {
         PrepareDeferredSourceSessionRestore();
     } else {
         source_annotation_context_on_demand_ = true;

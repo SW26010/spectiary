@@ -82,9 +82,10 @@ for display, diagnostics, and persistence behavior.
 
 An explicit source startup bypasses persisted-source restore from session
 construction and opens its requested source through the normal source-opening
-path. The Windows taskbar Jump List projects Files into namespace-scoped shell
-destinations, each explicitly opening a new GUI instance. It is not a source
-registry. See [ADR 0017](docs/adr/0017-source-jump-list-and-startup-policy.md).
+path. The Windows taskbar Jump List projects Files into shell
+destinations using the current process identity, each explicitly opening a new
+GUI instance. It is not a source registry. See
+[ADR 0017](docs/adr/0017-source-jump-list-and-startup-policy.md).
 
 **Sample label**:
 A classification assigned to one spectrum sample within a source collection. It

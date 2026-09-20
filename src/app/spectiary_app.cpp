@@ -8,7 +8,6 @@
 #include "platform/win32_application_icon.h"
 #include "platform/win32_text.h"
 #include "platform/win32_system_theme.h"
-#include "platform/win32_shell_identity.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
 #include "ui/ui_scale_settings.h"
@@ -335,7 +334,7 @@ SpectiaryApp::SpectiaryApp(
     const SpectiaryStartup& startup,
     std::optional<AutomationStartupConfiguration>
         automation,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
     : startup_(startup),
       imgui_layout_persistence_(
           startup.runtime_paths().imgui_ini_path),
@@ -660,10 +659,7 @@ void SpectiaryApp::Initialize(
             RequestMessageRender();
         });
     if (!automation_configuration_ && !runtime_resource_workload_) {
-        const auto app_id = ShellAppUserModelId(startup_.runtime_paths().config_root);
-        // The drop target has initialized this thread's OLE apartment.
-        (void)ConfigureShellWindowIdentity(window_.hwnd(), app_id, CurrentExecutablePath());
-        jump_list_ = std::make_unique<Win32JumpList>(app_id, startup_.runtime_paths().config_root);
+        jump_list_ = std::make_unique<Win32JumpList>(startup_.runtime_paths().config_root);
     }
     const HWND profile_state_window = window_.hwnd();
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {

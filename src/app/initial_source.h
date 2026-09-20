@@ -9,7 +9,7 @@ class ShellUi;
 
 // Decided before constructing ShellUi, so explicit launches never enqueue
 // another source's restore work before opening their requested source.
-enum class StartupSourcePolicy { RestoreSession, ExplicitSource };
+enum class SourceSessionRestorePolicy { Restore, Skip };
 
 void OpenInitialSource(
     ShellUi& shell,

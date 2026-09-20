@@ -59,15 +59,16 @@ FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
 
 ## CMake Presets
 
-Jump List 的原生 shell 与真实 GUI 回归使用隔离测试 AppID／Portable 目录，
-不会改动用户的 Files roster；后者会短暂打开并关闭测试窗口。构建后可显式运行：
+Jump List 的原生 shell 与真实 GUI 回归使用测试程序的隐式 shell identity／临时 Portable 目录，
+不会改动用户的 Files roster；后者会短暂打开并关闭测试窗口，其任务栏分组与
+Jump List 生命周期由 Windows 决定，不承诺按配置目录隔离。构建后可显式运行：
 
 ```powershell
 ctest --test-dir build/ninja-msvc-debug -R '^spectiary_win32_jump_list_(native|gui_routing)_tests$' --output-on-failure
 ```
 
 它们标记为 `extended;real-gui;gui-integration`，不随 headless `extended` preset
-运行；确定性的发布协议测试属于 `fast`。启动和命名空间合同见
+运行；确定性的发布协议测试属于 `fast`。启动和 shell identity 合同见
 [ADR 0017](../adr/0017-source-jump-list-and-startup-policy.md)。
 
 共享配置写在 `CMakePresets.json`。本地个人配置写在 `CMakeUserPresets.json`，不要提交。

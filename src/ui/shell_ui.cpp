@@ -902,7 +902,7 @@ SourceCollectionSession SourceCollectionSessionForRuntimePaths(
     const RuntimePaths& paths,
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
 {
     return SourceCollectionSession(
         paths.source_session_state_path,
@@ -1005,7 +1005,7 @@ ShellUi::ShellUi(
     PlotTouchpadGestureSource* touchpad_gestures,
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
-    StartupSourcePolicy startup_source_policy)
+    SourceSessionRestorePolicy startup_source_policy)
     : session_(SourceCollectionSessionForRuntimePaths(
           startup.runtime_paths(),
           labeling_state_cache_load_policy, startup_source_policy)),
@@ -1078,7 +1078,7 @@ ShellUi::ShellUi(
         });
     observed_viewport_state_ = CurrentSpectrumViewportState();
     observed_viewport_revision_ = spectrum_view_session_.ViewportMutationRevision();
-    if (startup_source_policy == StartupSourcePolicy::RestoreSession) {
+    if (startup_source_policy == SourceSessionRestorePolicy::Restore) {
         shell_source_roster_dirty_ = true;
         BeginDeferredSourceRestore();
     }

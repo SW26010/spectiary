@@ -5337,7 +5337,7 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
     }
 }
 
-void TestStartupSourcePolicyPreventsPersistedRestore()
+void TestSourceSessionRestorePolicyPreventsPersistedRestore()
 {
     using namespace spectiary;
     using Access = ShellUiTestAccess;
@@ -5372,7 +5372,7 @@ void TestStartupSourcePolicyPreventsPersistedRestore()
             "selected annotation association should save");
         SourceCollectionSession session(paths.source_session_state_path, paths.sample_navigation_state_path,
             paths.sample_labeling_state_path, paths.sample_workflow_state_path,
-            SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, paths, StartupSourcePolicy::ExplicitSource);
+            SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, paths, SourceSessionRestorePolicy::Skip);
         Require(!session.TakeDeferredRestorePlan(), "explicit session must not prepare persisted restore");
         Require(session.AnnotationPathsForSource(selected_path) == std::vector<std::filesystem::path>{annotation},
             "normal explicit opening must retain selected source annotation context on demand");
@@ -5381,7 +5381,7 @@ void TestStartupSourcePolicyPreventsPersistedRestore()
     seed();
     {
         ShellUi explicit_shell(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
-            StartupSourcePolicy::ExplicitSource);
+            SourceSessionRestorePolicy::Skip);
         Require(!Access::Session(explicit_shell).TakeDeferredRestorePlan(), "explicit startup must not prepare a restore plan");
         Require(Access::PendingLoadCount(explicit_shell) == 0 && explicit_shell.runtime_resource_observation().idle(),
             "explicit startup must not enqueue old source work during construction");
@@ -5405,7 +5405,7 @@ void TestStartupSourcePolicyPreventsPersistedRestore()
     seed();
     {
         ShellUi stale(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
-            StartupSourcePolicy::ExplicitSource);
+            SourceSessionRestorePolicy::Skip);
         OpenInitialSource(stale, root / "deleted.csv");
         Require(DrainAllSourceLoads(stale), "stale destination must settle through normal load failure");
         Require(!Access::Session(stale).View().current_source_index, "stale destination must not fall back to unrelated saved source");
@@ -7157,7 +7157,7 @@ void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 int main()
 {
     try {
-        RUN_SHELL_TEST(TestStartupSourcePolicyPreventsPersistedRestore);
+        RUN_SHELL_TEST(TestSourceSessionRestorePolicyPreventsPersistedRestore);
         RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
         RUN_SHELL_TEST(TestAnnotationShellDropUsesExistingImport);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);

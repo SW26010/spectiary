@@ -308,7 +308,6 @@ add_library(spectiary_core STATIC
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
     src/platform/win32_process_launcher.cpp
-    src/platform/win32_shell_identity.cpp
     src/platform/win32_jump_list.cpp
     src/platform/win32_external_open_router.cpp
     src/profile/load_latency_trace_lifecycle.cpp

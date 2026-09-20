@@ -300,7 +300,7 @@ public:
                 SampleLabelingStateCacheLoadPolicy::
                     AllowPersistentOutputs,
         const RuntimePaths& runtime_paths = {},
-        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
+        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -311,7 +311,7 @@ public:
         SampleLabelingController::CanonicalDocumentPublisher
             canonical_document_publisher,
         const RuntimePaths& runtime_paths = {},
-        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
+        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
     SourceCollectionSession(
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
@@ -324,7 +324,7 @@ public:
         SampleLabelingController::CanonicalValuesPublisher
             canonical_values_publisher,
         const RuntimePaths& runtime_paths = {},
-        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
+        SourceSessionRestorePolicy startup_source_policy = SourceSessionRestorePolicy::Restore);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
