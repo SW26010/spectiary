@@ -245,7 +245,11 @@ void TestGuiRouting(const std::filesystem::path& root)
     metadata["deployment"] = {{"distribution", "portable"}, {"storage_profile", "portable"}};
     std::ofstream(root / "spectiary_metadata.json") << metadata.dump();
     std::filesystem::create_directories(root / "config");
-    std::filesystem::copy_file(build / "config" / "spectral_lines.public.json", root / "config" / "spectral_lines.public.json");
+    // Debug uses an adjacent reference file; Release embeds the same data.
+    const auto public_lines = build / "config" / "spectral_lines.public.json";
+    if (std::filesystem::exists(public_lines)) {
+        std::filesystem::copy_file(public_lines, root / "config" / "spectral_lines.public.json");
+    }
     std::ofstream(root / "config" / "external-source-settings.json") << R"({"format_kind":"spectiary.external_source.settings","schema_version":1,"open_external_source_as_folder":false,"instance_policy":"recent_instance"})";
     const auto old_source = root / L"old.csv";
     const auto routed_source = root / L"routed.csv";
@@ -320,6 +324,22 @@ void TestGuiRouting(const std::filesystem::path& root)
     const auto unchanged = LoadSourceCollectionSessionStateCache(runtime_paths, runtime_paths.source_session_state_path).cache;
     Require(unchanged.sources.size() == 2 && unchanged.active_source_index == 0,
         "closing untouched clean GUI preserves saved roster and active source");
+    const std::string locked = R"({"format_kind":"spectiary.spectrum_viewport.state","schema_version":1,"locked":true,"source_collection_identity":"saved-source-viewport","x_min":"5000.1","x_max":"5000.9","y_min":"1.1","y_max":"1.9"})";
+    std::ofstream(runtime_paths.spectrum_viewport_state_path, std::ios::binary) << locked;
+    const auto viewport_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+    std::filesystem::last_write_time(runtime_paths.spectrum_viewport_state_path, viewport_time);
+    const auto idle = start(L"");
+    Require(wait_title(idle, L"Spectiary "), "no-active GUI with saved locked viewport initializes");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    Require(title_for(GetProcessId(idle)).second.find(L".csv") == std::wstring::npos, "locked viewport must not activate a source");
+    PostMessageW(title_for(GetProcessId(idle)).first, WM_CLOSE, 0, 0);
+    Require(WaitForSingleObject(idle, 5000) == WAIT_OBJECT_0, "idle locked-viewport GUI closes");
+    {
+        std::ifstream viewport_file(runtime_paths.spectrum_viewport_state_path, std::ios::binary);
+        Require(std::string((std::istreambuf_iterator<char>(viewport_file)), {}) == locked &&
+            std::filesystem::last_write_time(runtime_paths.spectrum_viewport_state_path) == viewport_time,
+            "real empty plot frames, maintenance and close must not rewrite locked viewport");
+    }
     // A deterministic receiver avoids overriding Windows foreground restrictions
     // on unattended desktops. Its wire protocol is the production router.
     std::atomic<unsigned> forwarded = 0;

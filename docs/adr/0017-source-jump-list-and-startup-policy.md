@@ -30,11 +30,15 @@ or labeling workflow. An idle flush or close does not replace the saved active
 source with null. Explicit source mutations then use normal persistence, including
 selections and removals while background restore is still pending.
 Application preferences and layout retain their ordinary storage lifecycle.
+An idle no-active instance must also preserve the saved locked viewport without
+applying it to the empty plot. Explicit source activation or viewport intent resumes
+ordinary viewport persistence; plot color preferences remain independently writable.
 Explicit-source startup uses `RestoreSavedActive` with its explicit override.
 Automation and resource workloads are
 excluded. Discovery neither activates a peer nor sends a source request.
 Endpoint registration remains at ordinary GUI initialization; simultaneous
-launches before either endpoint is registered can both restore. No input polling,
+launches before either endpoint is registered can both restore; concurrent cold
+starts do not elect a first instance. No input polling,
 shell-origin detection, startup mutex or additional presence registry is added.
 There is no generic launch-intent framework or separate shell source loader.
 

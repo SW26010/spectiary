@@ -5378,6 +5378,84 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
     }
 }
 
+void TestNoActiveStartupPreservesLockedViewport()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_no_active_viewport");
+    std::filesystem::create_directories(root);
+    const auto a = root / "a.csv";
+    const auto b = root / "b.csv";
+    for (const auto& path : {a, b}) {
+        std::ofstream(path) << "wav,flux\n5000,1\n5001,2\n";
+    }
+    RuntimePathInputs inputs;
+    inputs.executable_path = CurrentExecutablePath();
+    inputs.application_data_root_override = root / "state";
+    const auto startup = PrepareSpectiaryStartup(std::move(inputs));
+    const auto& paths = startup.runtime_paths();
+    const auto seed = [&] {
+        Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path,
+            {.sources = {{.path = a}, {.path = b}}, .active_source_index = 1}), "seed A/B and active B");
+    };
+    seed();
+    std::string identity;
+    {
+        ShellUi ordinary(startup);
+        Require(DrainAllSourceLoads(ordinary), "resolve saved B identity");
+        identity = *Access::Session(ordinary).CurrentSourceCollectionIdentity();
+    }
+    const SpectrumViewportState locked{true, identity, {5000.1, 5000.9, 1.1, 1.9}};
+    // Idle, independent color edit, selection of either source, and viewport intent.
+    for (int scenario = 0; scenario != 5; ++scenario) {
+        seed();
+        Require(SaveSpectrumViewportState(paths.spectrum_viewport_state_path, locked), "seed locked viewport");
+        const auto source_bytes = SpectrumPersistenceBytes(paths.source_session_state_path);
+        const auto viewport_bytes = SpectrumPersistenceBytes(paths.spectrum_viewport_state_path);
+        const auto fixed_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+        std::filesystem::last_write_time(paths.spectrum_viewport_state_path, fixed_time);
+        {
+            ShellUi shell(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+                SourceSessionStartupPolicy::RestoreRosterWithoutActive);
+            Require(DrainAllSourceLoads(shell), "no-active roster restore completes");
+            Require(Access::Session(shell).View().sources.size() == 2 &&
+                !Access::Session(shell).CurrentSourceCollectionIdentity() &&
+                !Access::Session(shell).CurrentSampleSnapshot() && !Access::LockedViewportLimits(shell),
+                "restored Files must not apply saved source or viewport to the empty plot");
+            if (scenario == 1) {
+                Access::SetSpectrumSeriesColor(shell, SpectrumPlotSeries::RawSpectrum,
+                    PlotSeriesColor::ExplicitColor({0.2f, 0.3f, 0.4f, 1}));
+            } else if (scenario == 2 || scenario == 3) {
+                (void)Access::Submit(shell, SourceCollectionSessionIntent::EditSourceCollection(
+                    SourceCollectionIntent::SwitchActive(scenario - 2)));
+                Require(DrainAllSourceLoads(shell), "explicit selection settles");
+                Require(Access::Session(shell).CurrentSourceCollectionIdentity().has_value(), "user selection activates");
+            } else if (scenario == 4) {
+                Access::RequestSpectrumViewportFit(shell);
+            }
+            Access::ObserveSpectrumPersistence(shell);
+            Require(Access::ViewportStateDirty(shell) == (scenario >= 2),
+                "only source/viewport intent may replace saved startup viewport");
+            shell.RunMaintenance(LocalUserStateSaveScheduler::Clock::now() + 2s);
+            Require(shell.FlushLocalState().all_saved(), "no-active instance flush succeeds");
+        }
+        if (scenario < 2) {
+            Require(SpectrumPersistenceBytes(paths.source_session_state_path) == source_bytes &&
+                SpectrumPersistenceBytes(paths.spectrum_viewport_state_path) == viewport_bytes &&
+                std::filesystem::last_write_time(paths.spectrum_viewport_state_path) == fixed_time,
+                "maintenance and idle shutdown preserve durable source and locked viewport bytes");
+        } else {
+            Require(!LoadSpectrumViewportState(paths.spectrum_viewport_state_path).state.locked,
+                "explicit source or viewport intent resumes ordinary viewport persistence");
+        }
+        if (scenario == 1) {
+            Require(LoadSpectrumPlotPreferences(paths.spectrum_plot_preferences_path).state.plot_colors.raw_spectrum.mode() ==
+                PlotSeriesColorMode::ExplicitColor, "color preferences remain independently writable");
+        }
+    }
+    std::filesystem::remove_all(root);
+}
+
 void TestStartupActivationPreservesPersistedRoster()
 {
     using namespace spectiary;
@@ -7310,6 +7388,7 @@ int main()
 {
     try {
         RUN_SHELL_TEST(TestStartupActivationPreservesPersistedRoster);
+        RUN_SHELL_TEST(TestNoActiveStartupPreservesLockedViewport);
         RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
         RUN_SHELL_TEST(TestAnnotationShellDropUsesExistingImport);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);

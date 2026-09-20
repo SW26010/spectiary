@@ -84,7 +84,7 @@ A subsequent ordinary source-free GUI launch with a compatible registered peer
 in the same runtime/config namespace restores the Files roster but starts with
 no active source or sample. Background restore never presents a source before
 user selection. This transient activation override never replaces the durable
-source session; explicit source mutations persist normally.
+source session or locked viewport; explicit source/viewport mutations persist normally.
 Application settings/layout keep their normal lifecycle. Explicit-source and
 automation startup retain their existing contracts.
 

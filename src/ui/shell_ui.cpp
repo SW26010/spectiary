@@ -1134,8 +1134,8 @@ SpectrumViewportState
 ShellUi::CurrentSpectrumViewportState() const
 {
     SpectrumViewportState state;
-    // Until source restoration completes, retain the saved snapshot unless a
-    // live viewport intent has superseded it. Closing early must not erase it.
+    // Retain the saved snapshot until startup activation or a live source/viewport
+    // intent supersedes it. A no-active startup must not erase it on idle close.
     if (startup_spectrum_viewport_state_ &&
         startup_spectrum_view_mutation_revision_ ==
             spectrum_view_session_.ViewportMutationRevision()) {
@@ -1980,6 +1980,11 @@ void ShellUi::RestoreDeferredSpectrumViewport(
     std::optional<std::string>
         source_collection_identity)
 {
+    // No activation is a temporary presentation state, not an unlock intent.
+    // Keep the durable snapshot without applying it to the empty plot.
+    if (!source_collection_identity) {
+        return;
+    }
     std::optional<SpectrumViewportState> restored =
         std::exchange(
             startup_spectrum_viewport_state_,
@@ -1995,7 +2000,6 @@ void ShellUi::RestoreDeferredSpectrumViewport(
         !expected_mutation_revision ||
         current_mutation_revision !=
             *expected_mutation_revision ||
-        !source_collection_identity ||
         *source_collection_identity !=
             restored->source_collection_identity) {
         return;
@@ -2463,6 +2467,11 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
 {
+    if (action.snapshot_changed && !source_activation_.deferred_restore_active_) {
+        // An explicit activation/clear after startup takes over persistence.
+        startup_spectrum_viewport_state_.reset();
+        startup_spectrum_view_mutation_revision_.reset();
+    }
     shell_source_roster_dirty_ = shell_source_roster_dirty_ || action.source_roster_changed;
     if (action.snapshot_change_reason ==
             SourceCollectionSnapshotChangeReason::
