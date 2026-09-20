@@ -18,6 +18,7 @@ executable discovery, or a global replacement.
 | IPC | `\\.\pipe\0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation.v1.<instance>`; immutable namespace rooted in the complete token. |
 | Automation root lock | `.0238d5bf7b34bb99c006f9807537d31234ca2e3d.automation-root.v1.lock`; immutable, independent of product text. |
 | Jump List publication mutex | `Local\0238d5bf7b34bb99c006f9807537d31234ca2e3d.jump-list-publication.v1`; generated from the founding identity, independent of product text and Windows AppUserModelID. |
+| Bounded process launch gate | `Local\<founding_identity>.bounded-process-gate.v1.<GUID>`; reads the shared project identity contract, independent of script and environment-variable names. |
 | Automation sample evidence | Artifact lease, capacity lock and ownership marker use the full founding token plus `.automation-samples-*`; retained old test runs stay inert. Use `SPECTIARY_AUTOMATION_SAMPLES_ARTIFACTS` for a fresh isolated evidence root. |
 | Labeling coordination | Physical alias locks live under the full founding token in system temp. Edit-lease digest domain uses that token and `.sample-labeling.edit-lease.v1`. Normalized path locks retain their semantic filenames. |
 | ASDF internal digest domains | Full founding token plus `.sample-labeling.asdf-preservation-identity-v2` / `.sample-labeling.asdf-values-rewrite-identity-v1`; machine-only and immutable. |

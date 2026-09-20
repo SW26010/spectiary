@@ -542,7 +542,9 @@ function Invoke-SpectiaryBoundedProcess {
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     try {
         $jobHandle = New-SpectiaryBoundedProcessJob
-        $gateName = 'Local\SpectiaryBoundedProcess-' + [Guid]::NewGuid().ToString('N')
+        . (Join-Path $PSScriptRoot '../project-identity.ps1')
+        $gateName = 'Local\' + $ApplicationId + '.bounded-process-gate.v1.' +
+            [Guid]::NewGuid().ToString('N')
         $launchGate = [Threading.EventWaitHandle]::new(
             $false,
             [Threading.EventResetMode]::ManualReset,
