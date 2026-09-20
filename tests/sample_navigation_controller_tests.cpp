@@ -1499,6 +1499,53 @@ void TestRemoveSourceUsesExternalSourceKey()
     Require(!result.has_active_source, "removed source should not handle navigation requests");
 }
 
+void TestExplicitSampleOutsideNavigationSequence()
+{
+    using namespace spectiary;
+    SampleNavigationController controller(std::filesystem::path{});
+    SourceCollectionManifest manifest;
+    manifest.sample_names = {"alpha", "beta", "gamma", "delta", "omega"};
+    controller.ActivateSource("explicit", MakeSnapshot("C:/synthetic/explicit.npy", "explicit", 5, 0),
+        SourceCollectionIdentity{.id = "explicit", .source_fingerprint = "v1",
+            .context_fingerprint = "v1", .spectrum_count = 5}, std::move(manifest));
+    (void)controller.SetSampleFilter({false, true, false, true, false});
+    SampleNavigationSortChoice sort;
+    sort.active = true;
+    sort.direction = SampleNavigationSortDirection::Descending;
+    for (int i = 0; i < 5; ++i) sort.values.push_back(MakeSampleNavigationSortValue(double(i)));
+    (void)controller.SetSampleSorting(std::move(sort));
+    Require(controller.PresentExplicitSample(2), "explicit source row should be accepted");
+    Require(controller.current_index() == 2 && !controller.current_sample_in_filter() &&
+        !controller.current_sequence().current_sequence_position &&
+        !controller.can_move_previous() && !controller.can_move_next(),
+        "out-of-sequence display must have no navigation cursor");
+    auto next = controller.Navigate(SampleNavigationRequest::Next());
+    Require(!next.target_found && next.has_current_sample && next.current_source_row == 2 &&
+        !next.current_sequence_position && !next.current_sample_in_filter,
+        "unavailable next must retain the displayed source row");
+    Require(!controller.Navigate(SampleNavigationRequest::LocateSourceRowInSequence(0)).target_found &&
+        !controller.Navigate(SampleNavigationRequest::LocateSampleName("alpha")).target_found,
+        "ordinary location must still reject excluded samples");
+    Require(controller.Navigate(SampleNavigationRequest::LocateSampleName("delta")).target_found &&
+        controller.current_sequence().current_sequence_position == 0 && controller.can_move_next(),
+        "valid name location must restore the sorted sample-filter cursor");
+    Require(controller.PresentExplicitSample(1) &&
+        controller.current_sequence().current_sequence_position == 1,
+        "included explicit sample must retain its sorted position");
+    Require(controller.PresentExplicitSample(2), "explicit sample should reopen");
+    (void)controller.ClearSampleFilter(true);
+    Require(controller.current_index() == 2 && !controller.pending_index() &&
+        controller.current_sequence().current_sequence_position == 2 &&
+        controller.can_move_previous() && controller.can_move_next(),
+        "disabling sample filtering must retain explicit sample in sorted full sequence");
+    (void)controller.SetSampleFilter({false, false, false, false, false});
+    Require(controller.PresentExplicitSample(4) && controller.current_index() == 4 &&
+        controller.current_sequence().empty && !controller.current_sequence().current_sequence_position,
+        "empty sample-filter results must still allow explicit display");
+    Require(!controller.PresentExplicitSample(5) && controller.current_index() == 4,
+        "invalid explicit row must not mutate current sample");
+}
+
 void TestFilterConstrainsSequentialNavigation()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "spectiary_nav_filter.npy";
@@ -2222,6 +2269,7 @@ int main()
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
+    TestExplicitSampleOutsideNavigationSequence();
     TestEmptyFilterClearsCurrentSequenceRow();
     TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
     TestSequencePositionLocateFollowsFilteredSortedOrder();

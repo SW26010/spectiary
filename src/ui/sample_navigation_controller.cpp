@@ -864,6 +864,18 @@ bool SampleNavigationController::RetargetDeferredNavigation(std::size_t spectrum
     return true;
 }
 
+bool SampleNavigationController::PresentExplicitSample(std::size_t spectrum_index)
+{
+    SourceSession* session = ActiveSession();
+    if (!session || spectrum_index >= session->spectrum_count) return false;
+    session->current_index = spectrum_index;
+    session->pending_index.reset();
+    session->pending_navigation_remembers_labeling_position = false;
+    if (session->filter_active) session->index_before_active_filter = spectrum_index;
+    PersistActiveIndex();
+    return true;
+}
+
 bool SampleNavigationController::CommitDeferredNavigation(std::size_t spectrum_index)
 {
     SourceSession* session = ActiveSession();
@@ -1506,8 +1518,9 @@ void SampleNavigationController::PopulateResultFromSequence(
     const SampleNavigationSequence& sequence,
     const SampleNavigationSequenceProjection& projection)
 {
-    result.has_current_sample = projection.current_source_row.has_value();
-    result.current_source_row = projection.current_source_row;
+    result.current_source_row = projection.current_source_row
+        ? projection.current_source_row : session.current_index;
+    result.has_current_sample = result.current_source_row.has_value();
     result.current_sequence_position = projection.current_sequence_position;
     result.sequence_active = sequence.active;
     result.sequence_empty = sequence.empty;
@@ -1515,7 +1528,8 @@ void SampleNavigationController::PopulateResultFromSequence(
     result.sequence_count = sequence_count;
     result.filtered_sample_count = sequence_count;
     result.row_location_available = sequence.row_location_available;
-    result.current_sample_in_filter = !session.filter_active || projection.current_source_row.has_value();
+    result.current_sample_in_filter = !session.filter_active ||
+        (result.current_source_row && IsSampleInFilter(session, *result.current_source_row));
     if (projection.current_source_row) {
         result.current_index = *projection.current_source_row;
     } else {

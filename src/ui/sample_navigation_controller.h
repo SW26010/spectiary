@@ -144,6 +144,8 @@ public:
         NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] bool RetargetDeferredNavigation(std::size_t spectrum_index);
     [[nodiscard]] bool CommitDeferredNavigation(std::size_t spectrum_index);
+    // Explicit file opens select a source row independently of sequence membership.
+    [[nodiscard]] bool PresentExplicitSample(std::size_t spectrum_index);
     void CancelDeferredNavigation();
     [[nodiscard]] std::optional<std::size_t> current_index() const;
     [[nodiscard]] std::optional<std::size_t> pending_index() const;
