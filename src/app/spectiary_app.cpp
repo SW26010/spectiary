@@ -8,6 +8,7 @@
 #include "platform/win32_application_icon.h"
 #include "platform/win32_text.h"
 #include "platform/win32_system_theme.h"
+#include "platform/win32_shell_identity.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
 #include "ui/ui_scale_settings.h"
@@ -333,7 +334,8 @@ void ApplyTitleBarTheme(
 SpectiaryApp::SpectiaryApp(
     const SpectiaryStartup& startup,
     std::optional<AutomationStartupConfiguration>
-        automation)
+        automation,
+    StartupSourcePolicy startup_source_policy)
     : startup_(startup),
       imgui_layout_persistence_(
           startup.runtime_paths().imgui_ini_path),
@@ -347,7 +349,8 @@ SpectiaryApp::SpectiaryApp(
                  : SampleLabelingStateCacheLoadPolicy::
                        InternalDraftsOnly)
           : SampleLabelingStateCacheLoadPolicy::
-                AllowPersistentOutputs),
+                AllowPersistentOutputs,
+          startup_source_policy),
       automation_configuration_(
           std::move(automation))
 {
@@ -508,6 +511,16 @@ int SpectiaryApp::Run(
         }
 
         ApplyLocalizedWindowTitle();
+        if (jump_list_) {
+            if (const auto sources = ui_.TakeShellSourceRoster()) {
+                std::vector<JumpListSource> destinations;
+                for (const auto& source : *sources) {
+                    destinations.push_back({source.path, Utf8ToWide(source.display_name)});
+                }
+                jump_list_->Refresh(std::move(destinations),
+                    Utf8ToWide(UiText(ui_.ui_language(), UiTextId::DataSources)));
+            }
+        }
         (void)WaitForWin32MessageOrDeadline(
             render_wake_scheduler_.NextWakeDeadline(
                 window_renderable,
@@ -646,6 +659,12 @@ void SpectiaryApp::Initialize(
             ui_.SetFileDropHovered(static_cast<ShellUi::FileDropDestination>(destination));
             RequestMessageRender();
         });
+    if (!automation_configuration_ && !runtime_resource_workload_) {
+        const auto app_id = ShellAppUserModelId(startup_.runtime_paths().config_root);
+        // The drop target has initialized this thread's OLE apartment.
+        (void)ConfigureShellWindowIdentity(window_.hwnd(), app_id, CurrentExecutablePath());
+        jump_list_ = std::make_unique<Win32JumpList>(app_id, startup_.runtime_paths().config_root);
+    }
     const HWND profile_state_window = window_.hwnd();
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {
         (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
@@ -2110,6 +2129,7 @@ void SpectiaryApp::ApplyPendingApplicationSettings(
     }
     if (ui_.TakeAppliedUiLanguage()) {
         ApplyLocalizedWindowTitle();
+        ui_.RequestShellSourceRosterRefresh();
         applied = true;
     }
     if (applied && request_frame) {
@@ -3891,7 +3911,10 @@ void SpectiaryApp::LogDisplayEnvironment(std::string_view reason)
 
 LRESULT SpectiaryApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
-    if (message == WM_ACTIVATEAPP && wparam) external_open_router_.MarkUsed();
+    if (message == WM_ACTIVATEAPP && wparam) {
+        external_open_router_.MarkUsed();
+        if (jump_list_) ui_.RequestShellSourceRosterRefresh();
+    }
     if (message == kSourceLoadCompletionReadyMessage) {
         render_wake_scheduler_.RequestFrame();
         return 0;

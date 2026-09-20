@@ -901,14 +901,15 @@ void RenderDiagnosticRows(
 SourceCollectionSession SourceCollectionSessionForRuntimePaths(
     const RuntimePaths& paths,
     SampleLabelingStateCacheLoadPolicy
-        labeling_state_cache_load_policy)
+        labeling_state_cache_load_policy,
+    StartupSourcePolicy startup_source_policy)
 {
     return SourceCollectionSession(
         paths.source_session_state_path,
         paths.sample_navigation_state_path,
         paths.sample_labeling_state_path,
         paths.sample_workflow_state_path,
-        labeling_state_cache_load_policy, paths);
+        labeling_state_cache_load_policy, paths, startup_source_policy);
 }
 
 SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
@@ -1003,10 +1004,11 @@ ShellUi::ShellUi(
     const SpectiaryStartup& startup,
     PlotTouchpadGestureSource* touchpad_gestures,
     SampleLabelingStateCacheLoadPolicy
-        labeling_state_cache_load_policy)
+        labeling_state_cache_load_policy,
+    StartupSourcePolicy startup_source_policy)
     : session_(SourceCollectionSessionForRuntimePaths(
           startup.runtime_paths(),
-          labeling_state_cache_load_policy)),
+          labeling_state_cache_load_policy, startup_source_policy)),
       source_activation_(
           session_,
           SourceCollectionLoadQueueForRuntimePaths(
@@ -1076,7 +1078,10 @@ ShellUi::ShellUi(
         });
     observed_viewport_state_ = CurrentSpectrumViewportState();
     observed_viewport_revision_ = spectrum_view_session_.ViewportMutationRevision();
-    BeginDeferredSourceRestore();
+    if (startup_source_policy == StartupSourcePolicy::RestoreSession) {
+        shell_source_roster_dirty_ = true;
+        BeginDeferredSourceRestore();
+    }
 }
 
 ShellUi::ShellUi(
@@ -2460,6 +2465,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
 {
+    shell_source_roster_dirty_ = shell_source_roster_dirty_ || action.source_roster_changed;
     if (action.snapshot_change_reason ==
             SourceCollectionSnapshotChangeReason::
                 SourceCollectionChanged ||
@@ -2477,6 +2483,18 @@ void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
         source_collection_panel_ui_.SyncNavigationInputs(
             SessionView().navigation);
     }
+}
+
+std::optional<std::vector<SourceCollectionSourceView>> ShellUi::TakeShellSourceRoster()
+{
+    if (!shell_source_roster_dirty_ || !runtime_resource_observation().pending_completion_idle()) return std::nullopt;
+    shell_source_roster_dirty_ = false;
+    return SessionView().sources;
+}
+
+void ShellUi::RequestShellSourceRosterRefresh()
+{
+    shell_source_roster_dirty_ = true;
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)

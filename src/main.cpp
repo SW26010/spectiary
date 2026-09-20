@@ -5,6 +5,8 @@
 #include "automation/automation_startup.h"
 #include "platform/win32_text.h"
 #include "platform/win32_external_open_router.h"
+#include "platform/win32_shell_identity.h"
+#include <shobjidl.h>
 #include "ui/ui_text.h"
 
 #include <Windows.h>
@@ -240,9 +242,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
                 return 0;
             }
         }
+        if (!command_line.automation && !RuntimeResourceWorkloadEnabled()) {
+            (void)SetCurrentProcessExplicitAppUserModelID(
+                spectiary::ShellAppUserModelId(startup.runtime_paths().config_root).c_str());
+        }
         spectiary::SpectiaryApp app(
             startup,
-            command_line.automation);
+            command_line.automation,
+            !command_line.automation && command_line.initial_source
+                ? spectiary::StartupSourcePolicy::ExplicitSource
+                : spectiary::StartupSourcePolicy::RestoreSession);
         return app.Run(
             instance,
             show_command,

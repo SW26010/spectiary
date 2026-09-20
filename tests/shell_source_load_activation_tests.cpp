@@ -5337,6 +5337,86 @@ void TestLegacySpectrumLoadFailureCannotCreateSplitDefaults()
     }
 }
 
+void TestStartupSourcePolicyPreventsPersistedRestore()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_startup_source_policy");
+    std::filesystem::create_directories(root);
+    const auto old_path = root / "old.csv";
+    const auto selected_path = root / "selected.csv";
+    for (const auto& path : {old_path, selected_path}) {
+        std::ofstream(path) << "wav,flux\n5000,1\n5001,2\n";
+    }
+    RuntimePathInputs inputs;
+    inputs.executable_path = CurrentExecutablePath();
+    inputs.application_data_root_override = root / "state";
+    const auto startup = PrepareSpectiaryStartup(std::move(inputs));
+    const auto& paths = startup.runtime_paths();
+    std::filesystem::create_directories(paths.source_session_state_path.parent_path());
+    const auto seed = [&] {
+        Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path,
+            {.sources = {{.path = old_path}}, .active_source_index = 0}), "startup roster should save");
+    };
+    seed();
+    {
+        ShellUi ordinary(startup);
+        Require(DrainAllSourceLoads(ordinary), "ordinary restore should finish");
+        Require(CurrentSourceMatches(Access::Session(ordinary), old_path), "ordinary startup still restores its source");
+    }
+    seed();
+    {
+        const auto annotation = root / "saved-annotation.csv";
+        Require(SaveSourceCollectionSessionStateCache(paths, paths.source_session_state_path,
+            {.sources = {{.path = selected_path, .annotation_paths = {annotation}}}, .active_source_index = 0}),
+            "selected annotation association should save");
+        SourceCollectionSession session(paths.source_session_state_path, paths.sample_navigation_state_path,
+            paths.sample_labeling_state_path, paths.sample_workflow_state_path,
+            SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, paths, StartupSourcePolicy::ExplicitSource);
+        Require(!session.TakeDeferredRestorePlan(), "explicit session must not prepare persisted restore");
+        Require(session.AnnotationPathsForSource(selected_path) == std::vector<std::filesystem::path>{annotation},
+            "normal explicit opening must retain selected source annotation context on demand");
+        Require(!session.TakeDeferredRestorePlan() && session.View().sources.empty(), "context lookup must not restore any source");
+    }
+    seed();
+    {
+        ShellUi explicit_shell(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            StartupSourcePolicy::ExplicitSource);
+        Require(!Access::Session(explicit_shell).TakeDeferredRestorePlan(), "explicit startup must not prepare a restore plan");
+        Require(Access::PendingLoadCount(explicit_shell) == 0 && explicit_shell.runtime_resource_observation().idle(),
+            "explicit startup must not enqueue old source work during construction");
+        Require(!Access::Session(explicit_shell).View().current_source_index, "explicit startup begins without another active source");
+        Require(Access::Session(explicit_shell).FlushStateCaches(), "idle non-restoring shell should flush safely");
+        const auto unchanged = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path);
+        Require(unchanged.cache.sources.size() == 1 && unchanged.cache.sources[0].path == old_path &&
+            unchanged.cache.active_source_index == 0, "no-source shell must not overwrite saved session with empty state");
+        OpenInitialSource(explicit_shell, selected_path);
+        Require(DrainAllSourceLoads(explicit_shell), "explicit source should finish normal startup loading");
+        Require(CurrentSourceMatches(Access::Session(explicit_shell), selected_path), "first usable source must be the explicit source");
+        Require(Access::Session(explicit_shell).View().sources.size() == 1, "unrelated saved sources must never be restored");
+        const auto projection = explicit_shell.TakeShellSourceRoster();
+        Require(projection && projection->size() == 1 && (*projection)[0].path == selected_path,
+            "accepted source changes must produce a Files shell projection");
+        Require(!explicit_shell.TakeShellSourceRoster(), "unchanged source roster must not republish each frame");
+        (void)Access::Submit(explicit_shell, SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Remove(0)));
+        const auto removed = explicit_shell.TakeShellSourceRoster();
+        Require(removed && removed->empty(), "removing the final Files source must publish an empty replacement");
+    }
+    seed();
+    {
+        ShellUi stale(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            StartupSourcePolicy::ExplicitSource);
+        OpenInitialSource(stale, root / "deleted.csv");
+        Require(DrainAllSourceLoads(stale), "stale destination must settle through normal load failure");
+        Require(!Access::Session(stale).View().current_source_index, "stale destination must not fall back to unrelated saved source");
+        Require(!Access::LoadError(stale).empty(), "stale destination must expose normal source-opening diagnostics");
+    }
+    const auto after_stale = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path);
+    Require(after_stale.cache.sources.size() == 1 && after_stale.cache.sources[0].path == old_path,
+        "failed explicit source must not overwrite the saved session");
+    std::filesystem::remove_all(root);
+}
+
 void TestSpectrumViewLoadFailurePreservesOriginalOnFlush()
 {
     using namespace spectiary;
@@ -7077,6 +7157,7 @@ void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 int main()
 {
     try {
+        RUN_SHELL_TEST(TestStartupSourcePolicyPreventsPersistedRestore);
         RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
         RUN_SHELL_TEST(TestAnnotationShellDropUsesExistingImport);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);

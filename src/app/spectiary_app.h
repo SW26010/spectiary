@@ -1,5 +1,6 @@
 #pragma once
 #include "platform/win32_external_open_router.h"
+#include "platform/win32_jump_list.h"
 
 #include "app/automation_panel_command_coordinator.h"
 #include "app/automation_execution.h"
@@ -44,7 +45,8 @@ public:
     explicit SpectiaryApp(
         const SpectiaryStartup& startup,
         std::optional<AutomationStartupConfiguration>
-            automation = std::nullopt);
+            automation = std::nullopt,
+        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
     ~SpectiaryApp();
 
     SpectiaryApp(const SpectiaryApp&) = delete;
@@ -56,6 +58,7 @@ public:
         std::optional<std::filesystem::path> initial_source = std::nullopt);
 
 private:
+    std::unique_ptr<Win32JumpList> jump_list_;
     struct AutomationCaptureCommand {
         AutomationQueuedCommand command;
         std::filesystem::path output_path;

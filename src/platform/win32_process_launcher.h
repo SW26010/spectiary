@@ -43,6 +43,8 @@ ResolveCurrentExecutablePath();
 [[nodiscard]] std::wstring QuoteWindowsCommandLineArgument(
     std::wstring_view value);
 
+[[nodiscard]] std::wstring NewInstanceSourceArguments(const std::filesystem::path& path);
+
 [[nodiscard]] CurrentExecutableLaunchResult
 LaunchExecutableWithSource(
     const std::filesystem::path& executable_path,

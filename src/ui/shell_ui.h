@@ -1,4 +1,5 @@
 #pragma once
+#include "app/initial_source.h"
 #include <deque>
 
 #include "app/application_settings.h"
@@ -276,8 +277,12 @@ public:
         SampleLabelingStateCacheLoadPolicy
             labeling_state_cache_load_policy =
                 SampleLabelingStateCacheLoadPolicy::
-                    AllowPersistentOutputs);
+                    AllowPersistentOutputs,
+        StartupSourcePolicy startup_source_policy = StartupSourcePolicy::RestoreSession);
     ~ShellUi();
+
+    [[nodiscard]] std::optional<std::vector<SourceCollectionSourceView>> TakeShellSourceRoster();
+    void RequestShellSourceRosterRefresh();
 
     void Render(const ShellStatus& status);
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
@@ -379,6 +384,7 @@ public:
             viewport_states = {});
 
 private:
+    bool shell_source_roster_dirty_ = false;
     ShellUi(
         SourceCollectionSession session,
         SourceCollectionLoadQueue source_load_queue);

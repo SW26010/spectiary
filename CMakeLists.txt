@@ -308,6 +308,8 @@ add_library(spectiary_core STATIC
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
     src/platform/win32_process_launcher.cpp
+    src/platform/win32_shell_identity.cpp
+    src/platform/win32_jump_list.cpp
     src/platform/win32_external_open_router.cpp
     src/profile/load_latency_trace_lifecycle.cpp
     src/profile/navigation_latency_trace.cpp
@@ -318,6 +320,7 @@ add_library(spectiary_core STATIC
     src/profile/source_load_latency_trace.cpp
 )
 spectiary_configure_production_target(spectiary_core)
+target_link_libraries(spectiary_core PRIVATE ole32 shell32 propsys uuid)
 target_include_directories(spectiary_core PRIVATE
     "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
 )
@@ -1318,6 +1321,16 @@ spectiary_add_test(
     tests/win32_process_launcher_tests.cpp
     spectiary_core
 )
+spectiary_add_test(spectiary_win32_jump_list_tests tests/win32_jump_list_tests.cpp spectiary_core)
+target_link_libraries(spectiary_win32_jump_list_tests PRIVATE spectiary_automation)
+spectiary_set_test_tier(spectiary_win32_jump_list_tests fast)
+add_dependencies(spectiary_win32_jump_list_tests spectiary_native)
+add_test(NAME spectiary_win32_jump_list_native_tests COMMAND spectiary_win32_jump_list_tests --native-shell)
+add_test(NAME spectiary_win32_jump_list_gui_routing_tests COMMAND spectiary_win32_jump_list_tests --gui-routing)
+set_tests_properties(spectiary_win32_jump_list_native_tests spectiary_win32_jump_list_gui_routing_tests
+    PROPERTIES LABELS "real-gui;gui-integration" RUN_SERIAL TRUE TIMEOUT 90)
+spectiary_set_test_tier(spectiary_win32_jump_list_native_tests extended)
+spectiary_set_test_tier(spectiary_win32_jump_list_gui_routing_tests extended)
 spectiary_add_test(
     spectiary_win32_file_drop_target_tests
     tests/win32_file_drop_target_tests.cpp

@@ -209,6 +209,11 @@ std::wstring QuoteWindowsCommandLineArgument(
     return quoted;
 }
 
+std::wstring NewInstanceSourceArguments(const std::filesystem::path& path)
+{
+    return L"--new-instance " + QuoteWindowsCommandLineArgument(path.wstring());
+}
+
 CurrentExecutableLaunchResult LaunchExecutableWithSource(
     const std::filesystem::path& executable_path,
     const std::filesystem::path& source_path)
@@ -231,9 +236,6 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
                 source_path_error);
         }
     }
-    const std::wstring source_text =
-        launch_source_path.wstring();
-
     const std::wstring executable_text = executable_path.wstring();
     if (HasInvalidPathText(executable_text)) {
         return {
@@ -247,8 +249,7 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
 
     const std::wstring command_line =
         QuoteWindowsCommandLineArgument(executable_text) +
-        L" --new-instance " +
-        QuoteWindowsCommandLineArgument(source_text);
+        L" " + NewInstanceSourceArguments(launch_source_path);
     std::vector<wchar_t> mutable_command_line(
         command_line.begin(),
         command_line.end());

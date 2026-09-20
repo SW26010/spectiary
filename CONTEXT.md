@@ -80,6 +80,12 @@ restored sources remain removable, non-selectable Files rows. See the
 [source list and startup restore requirements](docs/product_requirements.md#文件源列表与启动恢复)
 for display, diagnostics, and persistence behavior.
 
+An explicit source startup bypasses persisted-source restore from session
+construction and opens its requested source through the normal source-opening
+path. The Windows taskbar Jump List projects Files into namespace-scoped shell
+destinations, each explicitly opening a new GUI instance. It is not a source
+registry. See [ADR 0017](docs/adr/0017-source-jump-list-and-startup-policy.md).
+
 **Sample label**:
 A classification assigned to one spectrum sample within a source collection. It
 is separate from spectral-line marker labels and does not define spectral
