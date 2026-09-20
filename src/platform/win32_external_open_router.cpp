@@ -56,6 +56,24 @@ std::wstring NamespaceName(const std::filesystem::path& root)
     const auto digest = hash.FinishHex();
     return project_identity::kExternalOpenNamespacePrefix + std::wstring(digest.begin(), digest.end());
 }
+
+HWND FindCompatibleInstance(const std::wstring& name, ULONGLONG deadline) noexcept
+{
+    HWND target = nullptr, current = nullptr;
+    ULONG_PTR latest = 0;
+    // Discovery cannot wait on another application's UI or enumerate files.
+    for (unsigned count = 0; count < 256 && GetTickCount64() < deadline; ++count) {
+        current = FindWindowExW(HWND_MESSAGE, current, name.c_str(), nullptr);
+        if (!current) break;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(current, &pid);
+        if (!pid || pid == GetCurrentProcessId() ||
+            reinterpret_cast<ULONG_PTR>(GetPropW(current, kProtocolProperty)) != kProtocol) continue;
+        const auto recency = reinterpret_cast<ULONG_PTR>(GetPropW(current, kRecencyProperty));
+        if (!target || recency > latest) { target = current; latest = recency; }
+    }
+    return target;
+}
 }
 
 class Win32ExternalOpenRouter::Impl {
@@ -190,25 +208,20 @@ std::vector<ExternalOpenRequest> Win32ExternalOpenRouter::TakeRequests()
     return result;
 }
 
+bool Win32ExternalOpenRouter::HasCompatibleInstance(const std::filesystem::path& root) noexcept
+{
+    try {
+        return FindCompatibleInstance(NamespaceName(root), GetTickCount64() + 1500) != nullptr;
+    } catch (...) { return false; }
+}
+
 bool Win32ExternalOpenRouter::Forward(const std::filesystem::path& root,
     const ExternalOpenRequest& request, unsigned timeout_ms) noexcept
 {
     try {
         const auto deadline = GetTickCount64() + std::min(timeout_ms, 1500U);
         const auto name = NamespaceName(root);
-        HWND target = nullptr, current = nullptr;
-        ULONG_PTR latest = 0;
-        // Discovery cannot wait on another application's UI or enumerate files.
-        for (unsigned count = 0; count < 256 && GetTickCount64() < deadline; ++count) {
-            current = FindWindowExW(HWND_MESSAGE, current, name.c_str(), nullptr);
-            if (!current) break;
-            DWORD pid = 0;
-            GetWindowThreadProcessId(current, &pid);
-            if (pid == GetCurrentProcessId() ||
-                reinterpret_cast<ULONG_PTR>(GetPropW(current, kProtocolProperty)) != kProtocol) continue;
-            const auto recency = reinterpret_cast<ULONG_PTR>(GetPropW(current, kRecencyProperty));
-            if (!target || recency > latest) { target = current; latest = recency; }
-        }
+        const HWND target = FindCompatibleInstance(name, deadline);
         if (!target || GetTickCount64() >= deadline) return false;
         const auto path = request.path.wstring();
         if (!request.path.is_absolute() || path.empty() || path.size() >= kMaxPath ||

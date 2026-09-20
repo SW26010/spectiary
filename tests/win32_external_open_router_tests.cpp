@@ -149,9 +149,18 @@ void Tests()
     const auto root = std::filesystem::temp_directory_path() /
         (L"spectiary-router-" + std::to_wstring(GetCurrentProcessId()));
     const ExternalOpenRequest request{root / L"数据 folder" / L"selected 光谱.fits", true};
+    Require(!Win32ExternalOpenRouter::HasCompatibleInstance(root), "first source-free launch has no peer");
+    {
+        Win32ExternalOpenRouter self;
+        Require(self.Start(root, [] { return true; }, {}), "self endpoint registration");
+        Require(!Win32ExternalOpenRouter::HasCompatibleInstance(root), "discovery excludes this process");
+    }
     Require(!Win32ExternalOpenRouter::Forward(root, request), "absent receiver must fall back");
     {
         Instance first(root);
+        Require(Win32ExternalOpenRouter::HasCompatibleInstance(root), "subsequent launch discovers ordinary GUI peer");
+        Require(!Win32ExternalOpenRouter::HasCompatibleInstance(root / L"other"), "clean-start discovery is namespace-local");
+        Require(first.state->count == 0, "discovery must not send a source request");
         Require(Win32ExternalOpenRouter::Forward(root, request), "normal request should transfer");
         first.WaitCount(1);
         Require(first.state->path == request.path.wstring() && first.state->folder,
@@ -174,8 +183,11 @@ void Tests()
         first.WaitCount(4);
     }
     Require(!Win32ExternalOpenRouter::Forward(root, request), "exited endpoint must disappear");
+    Require(!Win32ExternalOpenRouter::HasCompatibleInstance(root), "clean-start classification is transient after process exit");
     for (const int mode : {1, 2, 3, 4, 5, 8, 9}) {
         Instance target(root, mode);
+        Require(Win32ExternalOpenRouter::HasCompatibleInstance(root) == (mode != 3 && mode != 4),
+            "discovery requires compatible live registration, without waiting for receiver responsiveness");
         const auto start = GetTickCount64();
         Require(!Win32ExternalOpenRouter::Forward(root, request, 50), "unavailable receiver must fall back");
         Require(GetTickCount64() - start < 1000, "failure must have bounded latency");

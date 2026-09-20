@@ -30,6 +30,10 @@ public:
     void MarkUsed() noexcept;
     [[nodiscard]] std::vector<ExternalOpenRequest> TakeRequests();
 
+    // Read-only discovery of another compatible ordinary GUI endpoint. Does not
+    // activate it or send a request; shares Forward's namespace and lifetime.
+    [[nodiscard]] static bool HasCompatibleInstance(const std::filesystem::path& config_root) noexcept;
+
     // False leaves ownership with the caller, which continues normal startup.
     // A timed-out sender atomically cancels the request before falling back.
     [[nodiscard]] static bool Forward(const std::filesystem::path& config_root,

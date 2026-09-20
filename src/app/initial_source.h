@@ -9,7 +9,8 @@ class ShellUi;
 
 // Roster restore policy, decided before constructing ShellUi. Explicit-source
 // startup restores the roster and overrides activation through the transaction.
-// Skip is reserved for a source-free clean startup policy (#68).
+// Skip starts an additional source-free ordinary GUI clean, without persisting
+// its synthetic empty state. Explicit source mutations persist normally.
 enum class SourceSessionRestorePolicy { Restore, Skip };
 
 void OpenInitialSource(
