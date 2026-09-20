@@ -4,7 +4,8 @@ Status: Accepted. Date: 2026-09-20. Issue: #121.
 
 ## Startup boundary
 
-Ordinary and explicit-source GUI startup both restore the persisted Files roster.
+The first ordinary source-free GUI startup and explicit-source GUI startup
+restore the persisted Files roster.
 `OpenInitialSource` runs before the message loop drains source completions and
 uses the existing external-source resolver and asynchronous opening pipeline.
 Its explicit path overrides the deferred transaction's desired active source.
@@ -19,10 +20,17 @@ If that path belongs to an unresolved saved source, it retains a removable
 failure row in Files even when the explicit open replaced its restore job.
 An invalid path that was not saved does not add a Files row.
 
-`SourceSessionRestorePolicy::Skip` remains a small construction-time seam for
-#68's future source-free clean startup: no persisted roster preparation/enqueue,
-and no empty-state write on an idle flush. Explicit-source startup does not use
-it. Automation and ordinary source-free startup keep their existing contracts.
+For #68, before constructing the application, a subsequent ordinary source-free
+launch queries ADR 0016's existing namespace-local, protocol-compatible endpoint
+discovery. A registered peer selects `SourceSessionRestorePolicy::Skip`: no
+persisted roster preparation/enqueue, no current source/sample, and no empty-state
+write on idle flush or close. Explicit source mutations then use normal persistence.
+Application preferences and layout retain their ordinary storage lifecycle.
+Explicit-source startup never uses Skip. Automation and resource workloads are
+excluded. Discovery neither activates a peer nor sends a source request.
+Endpoint registration remains at ordinary GUI initialization; simultaneous
+launches before either endpoint is registered can both restore. No input polling,
+shell-origin detection, startup mutex or additional presence registry is added.
 There is no generic launch-intent framework or separate shell source loader.
 
 ## Windows shell identity
@@ -87,6 +95,9 @@ ordinary roster/saved-active restore, explicit activation overriding a saved
 active source while retaining the other sources, out-of-order load completion
 without presenting an unrelated source, full-roster Jump List projection, stale
 source diagnostics, and the independent clean-start restore gate.
+Router tests also cover read-only peer discovery, protocol compatibility,
+namespace isolation and process exit. The GUI routing smoke checks a first
+source-free restore followed by a distinct clean GUI and non-destructive close.
 
 The optional `spectiary_win32_jump_list_native_tests` checks real destination-list
 publication using the test executable's implicit identity, then deletes that list.

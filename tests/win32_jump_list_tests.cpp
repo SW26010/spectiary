@@ -303,8 +303,23 @@ void TestGuiRouting(const std::filesystem::path& root)
         }
         return false;
     };
-    const auto first = start(QuoteWindowsCommandLineArgument(old_source.wstring()));
-    Require(wait_title(first, L"old.csv | 1/1"), "first ordinary GUI must display initial source");
+    const auto first = start(L"");
+    Require(wait_title(first, L"old.csv | 1/1"), "first source-free ordinary GUI restores saved source");
+    const auto peer_deadline = GetTickCount64() + 5000;
+    while (!Win32ExternalOpenRouter::HasCompatibleInstance(runtime_paths.config_root) && GetTickCount64() < peer_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    Require(Win32ExternalOpenRouter::HasCompatibleInstance(runtime_paths.config_root), "first GUI registers for subsequent launches");
+    const auto clean = start(L"");
+    Require(wait_title(clean, L"Spectiary ") && GetProcessId(clean) != GetProcessId(first),
+        "subsequent source-free launch creates distinct GUI");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    Require(title_for(GetProcessId(clean)).second.find(L".csv") == std::wstring::npos,
+        "subsequent GUI must not restore a source");
+    PostMessageW(title_for(GetProcessId(clean)).first, WM_CLOSE, 0, 0);
+    Require(WaitForSingleObject(clean, 5000) == WAIT_OBJECT_0, "untouched clean GUI closes normally");
+    const auto unchanged = LoadSourceCollectionSessionStateCache(runtime_paths, runtime_paths.source_session_state_path).cache;
+    Require(unchanged.sources.size() == 2 && unchanged.active_source_index == 0,
+        "closing untouched clean GUI preserves saved roster and active source");
     // A deterministic receiver avoids overriding Windows foreground restrictions
     // on unattended desktops. Its wire protocol is the production router.
     std::atomic<unsigned> forwarded = 0;

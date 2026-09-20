@@ -5409,11 +5409,29 @@ void TestStartupActivationPreservesPersistedRoster()
             SourceSessionRestorePolicy::Skip);
         Require(!Access::Session(clean).TakeDeferredRestorePlan() && Access::PendingLoadCount(clean) == 0,
             "clean-start seam must not prepare or enqueue persisted roster restore");
+        Require(Access::Session(clean).View().sources.empty() &&
+            !Access::Session(clean).CurrentSampleSnapshot(),
+            "clean startup exposes neither source roster nor sample/spectrum");
         Require(Access::Session(clean).FlushStateCaches(), "clean shell flush should succeed");
         const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
         Require(saved.sources.size() == 2 && saved.active_source_index == 0,
             "idle clean shell must not overwrite persisted roster");
     }
+    {
+        const auto saved = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(saved.sources.size() == 2 && saved.active_source_index == 0,
+            "destroying untouched clean shell preserves durable session");
+        ShellUi clean(startup, nullptr, SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs,
+            SourceSessionRestorePolicy::Skip);
+        OpenInitialSource(clean, selected_path);
+        Require(DrainAllSourceLoads(clean) && CurrentSourceMatches(Access::Session(clean), selected_path),
+            "explicit open after clean startup uses normal activation");
+        Require(Access::Session(clean).FlushStateCaches(), "explicitly changed clean shell must persist");
+        const auto changed = LoadSourceCollectionSessionStateCache(paths, paths.source_session_state_path).cache;
+        Require(changed.sources.size() == 1 && changed.sources.front().path == selected_path &&
+            changed.active_source_index == 0, "explicit mutation ends synthetic clean persistence boundary");
+    }
+    seed();
     {
         ShellUi explicit_shell(startup);
         OpenInitialSource(explicit_shell, selected_path);

@@ -80,6 +80,13 @@ restored sources remain removable, non-selectable Files rows. See the
 [source list and startup restore requirements](docs/product_requirements.md#文件源列表与启动恢复)
 for display, diagnostics, and persistence behavior.
 
+A subsequent ordinary source-free GUI launch with a compatible registered peer
+in the same runtime/config namespace starts with no source or sample, skipping
+persisted source restore before preparation. This transient empty state never
+replaces the durable source session; explicit source mutations persist normally.
+Application settings/layout keep their normal lifecycle. Explicit-source and
+automation startup retain their existing contracts.
+
 An explicit source startup restores the persisted Files roster and overrides
 the deferred activation target through the normal source-opening path, without
 presenting another restored source first. The Windows taskbar Jump List projects
