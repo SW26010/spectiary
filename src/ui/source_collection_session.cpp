@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "domain/source_path_identity.h"
+#include "domain/spectrum_loader_support.h"
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/sample_navigation_state_cache_io.h"
@@ -1319,6 +1320,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     }
 
     if (prepared_plan != nullptr &&
+        !prepared_plan->present_explicit_member &&
         prepared_plan->preferred_member_path &&
         (!prepared_plan->workflow.current_index ||
          *prepared_plan->workflow.current_index != spectrum_index)) {
@@ -1407,7 +1409,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
                 roster_->current_source_key(),
                 roster_->snapshot(),
                 std::move(plan->context),
-                std::move(plan->workflow));
+                std::move(plan->workflow),
+                plan->present_explicit_member);
         MergeSourceCollectionSessionAction(
             result.action,
             activation.action);
@@ -1424,7 +1427,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             workflow_->SyncReusedPreparedKnownSource(
                 roster_->current_source_key(),
                 roster_->snapshot(),
-                reuse.identity);
+                reuse.identity,
+                reuse.present_explicit_member);
         MergeSourceCollectionSessionAction(
             result.action,
             transition.action);
@@ -1836,14 +1840,38 @@ void SourceCollectionSession::InvalidateView()
     ++session_view_revision_;
 }
 
-std::optional<std::size_t> SourceCollectionSession::FolderMemberIndex(
-    const std::filesystem::path& folder, const std::filesystem::path& member) const
+std::optional<std::pair<std::filesystem::path, std::size_t>>
+SourceCollectionSession::ExistingSpectrumMember(const std::filesystem::path& member)
 {
-    const auto generation = roster_->FolderListingGeneration(folder);
-    if (!generation) return std::nullopt;
+    if (!detail::IsSupportedSingleFileSpectrumPath(member)) return std::nullopt;
     const auto key = SourcePathIdentityKey(member);
-    for (std::size_t index = 0; index < generation->listing.spectra.size(); ++index) {
-        if (SourcePathIdentityKey(generation->listing.spectra[index].path) == key) return index;
+    const auto& view = View();
+    const auto resolve = [&](std::size_t index)
+        -> std::optional<std::pair<std::filesystem::path, std::size_t>> {
+        const auto& source = view.sources[index];
+        if (source.state != SourceCollectionSourceState::Loaded &&
+            source.state != SourceCollectionSourceState::LoadedWithDiagnostics) return std::nullopt;
+        const auto generation = roster_->FolderListingGeneration(source.path);
+        if (!generation && SourcePathIdentityKey(source.path) == key) {
+            const auto identity = workflow_->KnownSourceIdentity(key);
+            if (identity && identity->spectrum_count == 1) return std::pair{source.path, std::size_t{0}};
+        }
+        if (!generation || !generation->IsCurrent()) return std::nullopt;
+        std::optional<std::size_t> row;
+        for (std::size_t i = 0; i < generation->listing.spectra.size(); ++i) {
+            if (SourcePathIdentityKey(generation->listing.spectra[i].path) != key) continue;
+            if (row) return std::nullopt;
+            row = i;
+        }
+        if (!row) return std::nullopt;
+        return std::pair{source.path, *row};
+    };
+    if (view.current_source_index) {
+        if (auto match = resolve(*view.current_source_index)) return match;
+    }
+    for (std::size_t i = 0; i < view.sources.size(); ++i) {
+        if (view.current_source_index == i) continue;
+        if (auto match = resolve(i)) return match;
     }
     return std::nullopt;
 }

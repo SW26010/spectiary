@@ -153,6 +153,11 @@ _Avoid_: Source collection, narrowed-sequence index, labeling queue
 **Sample filtering**:
 The user-facing selection of a subset of spectrum samples from a source
 collection.
+Sample filtering owns navigation-sequence membership, not eligibility for
+explicit display. Opening an existing filesystem member can display its source
+row outside the sequence, with no sequence position or Previous/Next cursor.
+Ordinary sample location remains constrained by the sequence. Disabling sample
+filtering retains the explicitly displayed row, including under active sorting.
 _Avoid_: Unqualified filter language, spectrum smoothing, valid-point
 selection, grouping view search, marker visibility, plot zoom
 

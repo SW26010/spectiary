@@ -10774,6 +10774,63 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
         "byte-cap eviction should retain the newer row while below the eight-entry count cap");
 }
 
+void TestExistingMemberResolutionUsesRosterIdentityAndOrder()
+{
+    using namespace spectiary;
+    class Generation final : public DirectoryChangeGeneration {
+    public:
+        bool current = true;
+        bool IsCurrent() const noexcept override { return current; }
+    private:
+        void Close() noexcept override { current = false; }
+    };
+    SourceCollectionSession session({}, {}, {}, {});
+    const auto member = UniqueTempPath("_member") / std::filesystem::path(L"\u5149\u8c31\u00c4.CSV");
+    const auto first = UniqueTempPath("_first_collection");
+    const auto second = UniqueTempPath("_second_collection");
+    const auto unrelated = UniqueTempPath("_unrelated.npy");
+    auto first_generation = std::make_shared<Generation>();
+    auto second_generation = std::make_shared<Generation>();
+    const auto add = [&](const auto& path, std::string id, std::shared_ptr<Generation> generation,
+                         bool duplicate = false) {
+        auto snapshot = MakeSnapshot(path, 2, 0);
+        SourceCollectionContext context;
+        context.identity = {id, id, "source-" + id, "context-" + id, 2};
+        // Name resemblance alone must not establish filesystem membership.
+        context.manifest.sample_names = {PathToUtf8(member), "other"};
+        auto workflow = PrepareWorkflow(snapshot, context, 0, {}, {});
+        std::shared_ptr<SourceCollectionFolderListingGeneration> listing;
+        if (generation) {
+            listing = std::make_shared<SourceCollectionFolderListingGeneration>();
+            listing->change_generation = generation;
+            listing->listing.spectra = {{member, "csv", "stat"},
+                {duplicate ? member : path / "other.csv", "csv", "stat"}};
+        }
+        Require(session.OpenPreparedSource(path, 0, snapshot,
+            PreparedSourceCollectionPlan{std::move(context), std::move(workflow)}, listing).loaded,
+            "member resolution fixture must load");
+    };
+    add(first, "first", first_generation);
+    add(second, "second", second_generation);
+    auto match = session.ExistingSpectrumMember(member);
+    Require(match && match->first == second && match->second == 0,
+        "active containing source must win over roster order");
+    add(unrelated, "unrelated", {});
+    match = session.ExistingSpectrumMember(member.parent_path() / std::filesystem::path(L"\u5149\u8c31\u00e4.csv"));
+    Require(match && match->first == first && match->second == 0,
+        "Unicode case-normalized file identity must prefer earliest containing source");
+    Require(!session.ExistingSpectrumMember(member.parent_path() / "absent.csv"),
+        "shared directory prefix must not establish membership");
+    first_generation->current = false;
+    match = session.ExistingSpectrumMember(member);
+    Require(match && match->first == second, "stale member mapping must be skipped");
+    second_generation->current = false;
+    Require(!session.ExistingSpectrumMember(member),
+        "NPY display names must not substitute for stale filesystem membership");
+    add(UniqueTempPath("_ambiguous"), "ambiguous", std::make_shared<Generation>(), true);
+    Require(!session.ExistingSpectrumMember(member), "ambiguous member rows must not be reused");
+}
+
 void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
 {
     const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
@@ -11849,6 +11906,7 @@ void RunAllTests()
     TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement();
     TestResidentSnapshotByteCapEvictsBeforeCountCap();
     TestFolderListingGenerationFlowsIntoSubsequentLoadHint();
+    TestExistingMemberResolutionUsesRosterIdentityAndOrder();
     TestSourceSessionFlushFailureKeepsDirtyState();
     TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
     TestRejectedStaleTaskActivationReconcilesNavigation();

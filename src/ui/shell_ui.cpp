@@ -3,6 +3,7 @@
 
 #include "app/runtime_paths.h"
 #include "domain/source_path_identity.h"
+#include "domain/spectrum_loader_support.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
 #include "ui/immersive_context_overlay.h"
@@ -1550,6 +1551,10 @@ void ShellUi::ServiceRoutedExternalOpens()
 
 void ShellUi::ApplyRoutedExternalOpen(const std::filesystem::path& path, bool as_folder)
 {
+    if (detail::IsSupportedSingleFileSpectrumPath(path)) {
+        (void)source_activation_.OpenExternalSource(path, as_folder);
+        return;
+    }
     const SourceOpenRequest request{path, SourceOpenOrigin::ExternalStartup, as_folder};
     const auto candidate = SourceOpenRequestCandidatePath(request);
     const auto key = SourcePathIdentityKey(candidate);
@@ -1557,19 +1562,9 @@ void ShellUi::ApplyRoutedExternalOpen(const std::filesystem::path& path, bool as
     for (std::size_t index = 0; index < sources.size(); ++index) {
         if (SourcePathIdentityKey(sources[index].path) != key ||
             sources[index].state == SourceCollectionSourceState::Unavailable) continue;
-        const bool member_requested = SourceOpenRequestExpandsAsFolder(request);
-        const auto member = member_requested ? session_.FolderMemberIndex(candidate, path) : std::nullopt;
-        // A newly added folder member still needs the normal worker resolver.
-        if (member_requested && !member) break;
         if (session_.View().current_source_index != index) {
             (void)SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
                 SourceCollectionIntent::SwitchActive(index)));
-        }
-        if (member && session_.View().navigation.current_index != member) {
-            // Keep the path, not just the cached row: directory changes while
-            // the worker runs must not redirect this request to another member.
-            // The resolver also preserves explicit sample-filter diagnostics.
-            (void)source_activation_.OpenExternalSource(path, as_folder);
         }
         return;
     }

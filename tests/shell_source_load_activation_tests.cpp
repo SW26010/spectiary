@@ -4063,8 +4063,8 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         "external FITS source-load tracing should report the resolved preferred member index");
     Require(
         external_reports.front().attempts.front().preparation_rounds.size() == 1 &&
-            !external_reports.front().attempts.front().preparation_rounds.front().context_reused,
-        "preferred FITS preparation should report that its rebuilt context was not reused");
+            external_reports.front().attempts.front().preparation_rounds.front().context_reused,
+        "existing member preparation should reuse the healthy collection context");
 
     const std::filesystem::path csv_folder =
         UniqueTempPath("_external_csv_folder");
@@ -4101,9 +4101,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         disabled_snapshot &&
-            disabled_snapshot->source.path == preferred &&
-            disabled_snapshot->collection.current_index == 0,
-        "disabled external FITS startup should retain single-file semantics");
+            disabled_snapshot->source.path == folder &&
+            disabled_snapshot->collection.current_index == 1,
+        "disabled external FITS startup should reuse the existing containing collection");
 
     Require(
         Access::ApplySettingsUiIntent(
@@ -4120,9 +4120,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         in_app_snapshot &&
-            in_app_snapshot->source.path == preferred &&
-            in_app_snapshot->collection.current_index == 0,
-        "in-app FITS open should remain a single-file source");
+            in_app_snapshot->source.path == folder &&
+            in_app_snapshot->collection.current_index == 1,
+        "in-app FITS open should reuse the existing containing collection");
 
     (void)shell->OpenSourceForAutomation(preferred);
     Require(
@@ -4132,9 +4132,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         automation_snapshot &&
-            automation_snapshot->source.path == preferred &&
-            automation_snapshot->collection.current_index == 0,
-        "automation FITS open should remain a single-file source");
+            automation_snapshot->source.path == folder &&
+            automation_snapshot->collection.current_index == 1,
+        "automation FITS open should reuse the existing containing collection");
 
     folder_decode_indices.clear();
     shell->OpenExternalSource(csv_preferred);
@@ -4176,9 +4176,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         disabled_csv_snapshot &&
-            disabled_csv_snapshot->source.path == csv_preferred &&
-            disabled_csv_snapshot->collection.current_index == 0,
-        "disabled external CSV startup should retain single-file semantics");
+            disabled_csv_snapshot->source.path == csv_folder &&
+            disabled_csv_snapshot->collection.current_index == 1,
+        "disabled external CSV startup should reuse the existing containing collection");
 
     Require(
         Access::ApplySettingsUiIntent(
@@ -4215,10 +4215,10 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         file_menu_snapshot &&
-            file_menu_snapshot->source.path == csv_preferred &&
-            file_menu_snapshot->collection.current_index == 0 &&
+            file_menu_snapshot->source.path == csv_folder &&
+            file_menu_snapshot->collection.current_index == 1 &&
             folder_decode_indices.empty(),
-        "File > Open File CSV should use an in-app single-file source despite the external folder preference");
+        "File > Open File should reuse the existing member independently of the external folder preference");
 
 #endif
 
@@ -4230,9 +4230,9 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         in_app_csv_snapshot &&
-            in_app_csv_snapshot->source.path == csv_preferred &&
-            in_app_csv_snapshot->collection.current_index == 0,
-        "in-app CSV open should remain a single-file source");
+            in_app_csv_snapshot->source.path == csv_folder &&
+            in_app_csv_snapshot->collection.current_index == 1,
+        "in-app CSV open should reuse the existing containing collection");
 
     (void)shell->OpenSourceForAutomation(csv_preferred);
     Require(
@@ -4242,16 +4242,16 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
         Access::Session(*shell).CurrentSampleSnapshot();
     Require(
         automation_csv_snapshot &&
-            automation_csv_snapshot->source.path == csv_preferred &&
-            automation_csv_snapshot->collection.current_index == 0,
-        "automation CSV open should remain a single-file source");
+            automation_csv_snapshot->source.path == csv_folder &&
+            automation_csv_snapshot->collection.current_index == 1,
+        "automation CSV open should reuse the existing containing collection");
 
     shell.reset();
     std::filesystem::remove_all(folder);
     std::filesystem::remove_all(csv_folder);
 }
 
-void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
+void TestExistingMemberDisplaysOutsideSampleFilter()
 {
     using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
@@ -4364,6 +4364,11 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
             filtered_view.navigation.sequence_count == 2 &&
             filtered_view.navigation.current_index == 0,
         "filtered external FITS fixture should exclude the preferred member");
+    (void)Access::Submit(*shell, spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::SetSortSource("sample-name")));
+    (void)Access::Submit(*shell, spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
+        spectiary::SampleSortingIntent::SetSortDirection(spectiary::SampleNavigationSortDirection::Descending)));
+    Require(DrainAllSourceLoads(*shell), "active sorting should settle before explicit open");
     Require(
         session.FlushStateCaches(),
         "filtered external FITS fixture should persist its workflow state");
@@ -4379,28 +4384,51 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
     shell->OpenExternalSource(preferred);
     Require(
         DrainAllSourceLoads(*shell),
-        "filtered external FITS startup should settle after rejection");
+        "existing filtered member open should settle");
     const std::string load_error(Access::LoadError(*shell));
     const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSampleSnapshot();
     Require(
-        load_error.find("excluded by the active sample filter") !=
-            std::string::npos,
-        "a preferred member excluded by filtering should fail closed with a diagnostic");
+        load_error.empty(),
+        "explicit existing member should display outside sample-filter results");
     Require(
         folder_decode_indices.size() == 1 &&
             folder_decode_indices.front() == 1 &&
             snapshot &&
             snapshot->source.path == folder &&
-            snapshot->collection.current_index == 0,
-        "filter rejection must not silently activate the filtered first member");
+            snapshot->collection.current_index == 1 && session.View().sources.size() == 1 &&
+            session.View().navigation.current_source_row == 1 &&
+            !session.View().navigation.current_sequence_position &&
+            !session.View().navigation.current_sample_in_filter &&
+            !session.View().navigation.can_move_previous && !session.View().navigation.can_move_next &&
+            session.View().sorting.active &&
+            session.View().sorting.direction == spectiary::SampleNavigationSortDirection::Descending &&
+            session.View().filter.evaluation.included_count == 2,
+        "explicit member must retain source identity without a sample-filter cursor or duplicate source");
+    const auto blocked = shell->GotoSpectrumForAutomation(1, std::nullopt);
+    Require(blocked.error == spectiary::ShellAutomationNavigationError::FilteredOut,
+        "ordinary manual location must reject excluded member");
+    const auto relocated = shell->GotoSpectrumForAutomation(2, std::nullopt);
+    Require(relocated.error == spectiary::ShellAutomationNavigationError::None && DrainAllSourceLoads(*shell) &&
+        session.View().navigation.current_sequence_position == 0 && session.View().navigation.can_move_next,
+        "valid manual location must restore the sorted sample-filter cursor");
+    shell->OpenSource(preferred);
+    Require(DrainAllSourceLoads(*shell) && !session.View().navigation.current_sequence_position,
+        "in-app member reopening must use the same explicit display rule");
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(spectiary::SampleFilteringIntent::Clear()));
+    Require(DrainAllSourceLoads(*shell), "sample-filter disable should settle");
+    Require(session.CurrentSampleSnapshot()->collection.current_index == 1 &&
+        session.View().navigation.current_sequence_position == 1 &&
+        session.View().navigation.can_move_previous && session.View().navigation.can_move_next,
+        "sample-filter disable must keep the explicitly displayed member");
 
     shell.reset();
     std::filesystem::remove_all(folder);
     std::filesystem::remove_all(state_root);
 }
 
-void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
+void TestExistingMemberPreservesLiveSampleFilter()
 {
     using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
@@ -4548,16 +4576,17 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
     const spectiary::SpectrumSnapshotHandle snapshot =
         session.CurrentSampleSnapshot();
     Require(
-        load_error.find("excluded by the active sample filter") !=
-            std::string::npos,
-        "a live sample filter excluding the preferred member should fail closed with a diagnostic");
+        load_error.empty(),
+        "live sample filtering must not reject an explicit existing member");
     Require(
         folder_decode_indices.size() == 1 &&
             folder_decode_indices.front() == 1 &&
             snapshot &&
             snapshot->source.path == folder &&
-            snapshot->collection.current_index == 0,
-        "live sample filtering must not queue the first visible member over the preferred request");
+            snapshot->collection.current_index == 1 &&
+            !session.View().navigation.current_sequence_position &&
+            session.View().filter.evaluation.included_count == 2,
+        "live sample filtering must preserve the requested member without a sequence cursor");
 
     shell.reset();
     std::filesystem::remove_all(folder);
@@ -6825,6 +6854,51 @@ void TestRestoreDefaultLayout()
 
 }  // namespace
 
+void TestRealMemberOpenReusesActiveSource()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto folder = UniqueTempPath("_real_member_folder");
+    std::filesystem::create_directories(folder);
+    const auto first = folder / "first.csv";
+    const auto selected = folder / "selected.csv";
+    for (const auto& path : {first, selected}) {
+        std::ofstream stream(path);
+        stream << "wavelength,flux\n5000,1\n5001,2\n";
+    }
+    SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    auto shell = Access::Create(SourceCollectionSession({}, {}, {}, {}),
+        MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    auto& session = Access::Session(*shell);
+    shell->OpenSource(selected);
+    Require(DrainAllSourceLoads(*shell) && session.View().sources.size() == 1 &&
+        session.CurrentSampleSnapshot()->source.path == selected,
+        "unmatched real spectrum must open as an ordinary standalone source");
+    const auto standalone = session.CurrentSampleSnapshot();
+    shell->OpenSource(folder);
+    Require(DrainAllSourceLoads(*shell) && session.View().sources.size() == 2,
+        "folder source should coexist with the prior standalone source");
+    shell->OpenSource(selected);
+    Require(DrainAllSourceLoads(*shell) && session.View().sources.size() == 2 &&
+        session.CurrentSampleSnapshot()->source.path == folder &&
+        session.CurrentSampleSnapshot()->collection.current_index == 1,
+        "active folder must win even when standalone source is earlier in roster");
+    const auto folder_sample = session.CurrentSampleSnapshot();
+    shell->OpenRoutedExternalSource(selected, false);
+    Require(DrainAllSourceLoads(*shell) && session.CurrentSampleSnapshot() == folder_sample,
+        "forwarded member open must reuse the exact healthy resident snapshot");
+    (void)Access::Submit(*shell, SourceCollectionSessionIntent::EditSourceCollection(
+        SourceCollectionIntent::SwitchActive(0)));
+    Require(DrainAllSourceLoads(*shell), "standalone activation should settle");
+    shell->OpenSource(selected);
+    Require(DrainAllSourceLoads(*shell) && session.CurrentSampleSnapshot() == standalone &&
+        session.View().sources.size() == 2,
+        "active standalone member must win and retain its healthy snapshot");
+    shell.reset();
+    std::filesystem::remove_all(folder);
+}
+
 void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 {
     using namespace spectiary;
@@ -6895,6 +6969,7 @@ void TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember()
 int main()
 {
     try {
+        RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);
         RUN_SHELL_TEST(TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember);
 #ifdef IMGUI_ENABLE_TEST_ENGINE
         RUN_SHELL_TEST(TestRestoreDefaultLayout);
@@ -6903,8 +6978,8 @@ int main()
         RUN_SHELL_TEST(TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence);
         RUN_SHELL_TEST(TestExplicitOpenTracesAcceptedPathThroughFirstPresent);
         RUN_SHELL_TEST(TestSupersededExternalPreferredTraceUsesResolvedMemberIndex);
-        RUN_SHELL_TEST(TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback);
-        RUN_SHELL_TEST(TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter);
+        RUN_SHELL_TEST(TestExistingMemberDisplaysOutsideSampleFilter);
+        RUN_SHELL_TEST(TestExistingMemberPreservesLiveSampleFilter);
         RUN_SHELL_TEST(TestSourceOpenResolutionRunsOnWorkerAndCancels);
         RUN_SHELL_TEST(TestExternalStartupPreservesDeferredRestoreAnnotationContext);
         RUN_SHELL_TEST(TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect);

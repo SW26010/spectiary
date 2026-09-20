@@ -322,6 +322,35 @@ public:
         CheckUserInputPath(request.path);
         SourceCollectionLoadRequest resolved_request =
             request;
+        if (request.source_open_request && request.preferred_member_path) {
+            resolved_request.source_open_request.reset();
+            resolved_request.explicit_member_reuse = true;
+            try {
+                CheckUserInputPath(*request.preferred_member_path);
+                for (const auto& annotation : request.annotation_paths) CheckUserInputPath(annotation);
+                if (request.reuse && !request.reuse->folder_listing_generation() &&
+                    request.reuse->identity().spectrum_count == 1 &&
+                    SourcePathIdentityKey(request.path) == SourcePathIdentityKey(*request.preferred_member_path)) {
+                    resolved_request.preferred_member_path.reset();
+                    return PrepareFile(Work{task_id, resolved_request, checkpoint,
+                        workflow_cache_provider, 0, cancellation_token});
+                }
+                return PrepareFolder(Work{task_id, resolved_request, checkpoint,
+                    workflow_cache_provider, request.spectrum_index, cancellation_token});
+            } catch (const SourceCollectionPreparationStale&) {
+                // The cached member mapping is no longer provable. Resolve the
+                // original open normally. Keep source-local state only when
+                // the original policy independently resolves to this source.
+                resolved_request = request;
+                resolved_request.preferred_member_path.reset();
+                if (SourcePathIdentityKey(SourceOpenRequestCandidatePath(*request.source_open_request)) !=
+                    SourcePathIdentityKey(request.path)) {
+                    resolved_request.reuse.reset();
+                    resolved_request.annotation_paths.clear();
+                }
+                resolved_request.spectrum_index = 0;
+            }
+        }
         if (request.source_open_request) {
             const SourceOpenFilesystemProbe probe =
                 adapters_.source_open_probe(
@@ -353,7 +382,7 @@ public:
             resolved_request,
             checkpoint,
             workflow_cache_provider,
-            request.spectrum_index,
+            resolved_request.spectrum_index,
             cancellation_token,
         };
         std::error_code directory_error;
@@ -533,7 +562,7 @@ private:
             work.request.path,
             work.spectrum_index,
             std::move(snapshot),
-            PreparedSourceCollectionReuse{identity},
+            PreparedSourceCollectionReuse{identity, work.request.explicit_member_reuse},
         };
         prepared.context_reuse_proof =
             SourceCollectionContextReuseProof{
@@ -567,7 +596,7 @@ private:
             work.request.reuse
             ? &*work.request.reuse
             : nullptr;
-        if (!work.request.preferred_member_path &&
+        if ((!work.request.preferred_member_path || work.request.explicit_member_reuse) &&
             CanReusePreparedWorkflow(
                 context.identity,
                 reuse)) {
@@ -584,7 +613,7 @@ private:
                 work.spectrum_index,
                 std::move(snapshot),
                 PreparedSourceCollectionReuse{
-                    reuse_proof.identity},
+                    reuse_proof.identity, work.request.explicit_member_reuse},
             };
             prepared.context_reuse_proof =
                 std::move(reuse_proof);
@@ -598,7 +627,7 @@ private:
         }
         PreparedSampleWorkflowState workflow =
             PrepareWorkflow(work, *snapshot, context);
-        if (work.request.preferred_member_path &&
+        if (work.request.preferred_member_path && !work.request.explicit_member_reuse &&
             workflow.filter_evaluation.active &&
             (work.spectrum_index >=
                  workflow.filter_evaluation.included_samples.size() ||
@@ -625,7 +654,8 @@ private:
                     ? std::optional<std::uint64_t>{
                           reuse->live_workflow_revision()}
                     : std::nullopt,
-                work.request.preferred_member_path},
+                work.request.preferred_member_path,
+                work.request.explicit_member_reuse},
         };
         prepared.context_reuse_proof =
             std::move(reuse_proof);
@@ -665,6 +695,15 @@ private:
                 reuse
                 ? reuse->folder_listing_generation()
                 : SourceCollectionFolderListingGenerationHandle{};
+        if (work.request.explicit_member_reuse &&
+            (!listing_generation || !listing_generation->IsCurrent() ||
+             work.spectrum_index >= listing_generation->listing.spectra.size() ||
+             SourcePathIdentityKey(listing_generation->listing.spectra[work.spectrum_index].path) !=
+                 SourcePathIdentityKey(*work.request.preferred_member_path) ||
+             !SourceCollectionFolderSpectrumFileMatchesCurrentState(
+                 listing_generation->listing.spectra[work.spectrum_index]))) {
+            throw SourceCollectionPreparationStale();
+        }
         bool resident_candidate_available =
             reuse && reuse->resident_snapshot().has_value();
         for (std::size_t attempt = 0;
@@ -677,6 +716,9 @@ private:
                 listing_generation &&
                 listing_generation->change_generation &&
                 listing_generation->IsCurrent();
+            if (work.request.explicit_member_reuse && !generation_current_at_start) {
+                throw SourceCollectionPreparationStale();
+            }
             bool listing_scan_performed = false;
             if (listing_generation &&
                 ((listing_generation->change_generation &&
@@ -775,7 +817,7 @@ private:
                 const SourceCollectionResidentSnapshot& resident =
                     *reuse->resident_snapshot();
                 const bool resident_current =
-                    !work.request.preferred_member_path &&
+                    (!work.request.preferred_member_path || work.request.explicit_member_reuse) &&
                     !listing_scan_performed &&
                     generation_current_at_start &&
                     listing_generation ==
@@ -839,6 +881,7 @@ private:
                     if (!listing_generation_is_current) {
                         listing_generation.reset();
                     }
+                    if (work.request.explicit_member_reuse) throw SourceCollectionPreparationStale();
                     continue;
                 }
             }
@@ -884,7 +927,7 @@ private:
                         reuse->folder_listing_generation());
             const bool reuse_context =
                 can_reuse_context &&
-                !work.request.preferred_member_path;
+                (!work.request.preferred_member_path || work.request.explicit_member_reuse);
             std::optional<SourceCollectionContext> context;
             if (!reuse_context) {
                 if (work.request.snapshot_only) {
@@ -967,6 +1010,7 @@ private:
             } else {
                 listing_generation.reset();
             }
+            if (work.request.explicit_member_reuse) throw SourceCollectionPreparationStale();
         }
         throw std::runtime_error(
             "The source folder kept changing while it was loaded; "

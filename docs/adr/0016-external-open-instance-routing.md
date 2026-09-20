@@ -70,10 +70,13 @@ during loading resolve against the completed roster.
 
 Existing sources are activated without reload, preserving their selected sample
 and workflow. A folder-member request explicitly navigates to that member in
-the existing collection. Missing/new members and members excluded by active
-sample filtering use the normal external-open resolution/diagnostic path.
-Source loading and navigation remain asynchronous. In-app opens and automation
-`source.open` retain their existing contracts.
+the existing collection. Since #117, the activation transaction shares this
+member resolution with in-app opens and automation `source.open`, preferring the
+active containing source and then roster order. Explicit member display keeps
+sample filtering and sorting intact; an excluded displayed row has no sequence
+cursor. Missing/new or stale members use ordinary open resolution. Source
+loading and navigation remain asynchronous; new-process parent-folder
+interpretation remains independent.
 
 ## Verification
 

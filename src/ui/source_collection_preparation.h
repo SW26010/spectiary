@@ -74,11 +74,13 @@ struct SourceCollectionLoadRequest {
     // so filesystem probing stays inside the cancellable load worker. Restore,
     // follow-up, and prefetch requests already carry a resolved source path.
     std::optional<SourceOpenRequest> source_open_request;
-    // External source folder opens retain the originally requested member
-    // until the first-level folder listing has been prepared. Ordinary file,
-    // in-app folder, automation, restore, and prefetch requests leave this
-    // empty and keep their existing index semantics.
+    // Retain the requested member until its listing is validated. Together
+    // with source_open_request this is an existing-collection reuse candidate;
+    // a stale candidate falls back to that original request. External startup
+    // folder interpretation also sets this internally after resolution.
     std::optional<std::filesystem::path> preferred_member_path;
+    // Set internally after validating an existing collection's member mapping.
+    bool explicit_member_reuse = false;
     std::optional<SourceCollectionReuseCandidate> reuse;
     // Prefetch requests may only publish a snapshot under an already-proven
     // context. They never materialize or publish workflow state.

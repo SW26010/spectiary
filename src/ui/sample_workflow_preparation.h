@@ -65,10 +65,12 @@ struct PreparedSourceCollectionPlan {
     // A startup external source-folder request remains authoritative through live
     // workflow reconciliation at session admission.
     std::optional<std::filesystem::path> preferred_member_path;
+    bool present_explicit_member = false;
 };
 
 struct PreparedSourceCollectionReuse {
     SourceCollectionIdentity identity;
+    bool present_explicit_member = false;
 };
 
 using PreparedSourceCollectionPayload =

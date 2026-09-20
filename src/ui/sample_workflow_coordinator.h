@@ -148,14 +148,16 @@ public:
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
         SourceCollectionContext context,
-        PreparedSampleWorkflowState prepared_workflow);
+        PreparedSampleWorkflowState prepared_workflow,
+        bool present_explicit_member = false);
     [[nodiscard]] bool CanReusePreparedKnownSource(
         std::optional<std::string> source_key,
         const SourceCollectionIdentity& identity) const;
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncReusedPreparedKnownSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
-        const SourceCollectionIdentity& identity);
+        const SourceCollectionIdentity& identity,
+        bool present_explicit_member = false);
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActiveSourceIdentity() const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;

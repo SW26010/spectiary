@@ -724,6 +724,16 @@ void TestFolderGenerationReuseAndStalePrefetch()
     Require(
         preparation.Scans() == 1,
         "stale speculative preparation must not rescan");
+    const auto fallback = preparation.Load({
+        .path = folder,
+        .source_open_request = spectiary::SourceOpenRequest{
+            .source_path = folder / "sample.csv", .origin = spectiary::SourceOpenOrigin::InApp},
+        .preferred_member_path = folder / "sample.csv",
+        .reuse = reuse,
+    });
+    Require(fallback.path == folder / "sample.csv" && fallback.spectrum_index == 0 &&
+        !fallback.folder_listing_generation,
+        "member mapping invalidated after resolution must fall back to ordinary file open");
     std::filesystem::remove_all(folder);
 }
 

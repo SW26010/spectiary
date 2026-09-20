@@ -824,7 +824,8 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot,
     SourceCollectionContext context,
-    PreparedSampleWorkflowState prepared_workflow)
+    PreparedSampleWorkflowState prepared_workflow,
+    bool present_explicit_member)
 {
     PreparedSampleWorkflowActivationResult result;
     SourceCollectionSessionAction& action = result.action;
@@ -952,6 +953,10 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
             std::move(prepared_workflow))) {
         result.background_retirement.push_back(std::move(retired_navigation));
     }
+    if (present_explicit_member) {
+        (void)navigation_.PresentExplicitSample(snapshot->collection.current_index);
+        DiscardPreparedViewCaches();
+    }
     action.workflow_changed = true;
     action.navigation_inputs_changed = true;
     return result;
@@ -974,14 +979,23 @@ bool SampleWorkflowCoordinator::CanReusePreparedKnownSource(
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncReusedPreparedKnownSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot,
-    const SourceCollectionIdentity& identity)
+    const SourceCollectionIdentity& identity,
+    bool present_explicit_member)
 {
     if (!snapshot || !CanReusePreparedKnownSource(source_key, identity)) {
         return {};
     }
-    return SyncKnownActiveSource(
+    auto outcome = SyncKnownActiveSource(
         std::move(source_key),
         snapshot);
+    if (present_explicit_member &&
+        navigation_.PresentExplicitSample(snapshot->collection.current_index)) {
+        outcome.snapshot_index_to_load.reset();
+        outcome.action.navigation_inputs_changed = true;
+        outcome.invalidate_view = true;
+        DiscardPreparedViewCaches();
+    }
+    return outcome;
 }
 
 std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::ActiveSourceIdentity() const
@@ -2367,7 +2381,7 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     SourceCollectionNavigationView view;
     const SampleNavigationSequence& sequence = navigation_.current_sequence();
     view.current_index = navigation_.current_index();
-    view.current_source_row = sequence.current_source_row;
+    view.current_source_row = view.current_index;
     view.current_sequence_position = sequence.current_sequence_position;
     view.sample_count = navigation_.spectrum_count().value_or(snapshot ? snapshot->collection.spectrum_count : 0);
     view.has_active_source = snapshot && !snapshot->source.path.empty() && view.sample_count > 0;

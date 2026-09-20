@@ -125,8 +125,10 @@ SourceCollectionActivationTransaction::
     const bool session_changed =
         session_.CancelActivePendingSampleNavigation();
 
-    const std::filesystem::path path =
-        SourceOpenRequestCandidatePath(request);
+    const auto member = session_.ExistingSpectrumMember(request.source_path);
+    const std::filesystem::path path = member
+        ? member->first : SourceOpenRequestCandidatePath(request);
+    if (member) spectrum_index = member->second;
     if (deferred_restore_active_) {
         deferred_restore_active_path_ = path;
     }
@@ -139,7 +141,7 @@ SourceCollectionActivationTransaction::
         std::move(source_load_trace),
         std::nullopt,
         automation_sequence,
-        std::nullopt,
+        member ? std::optional{request.source_path} : std::nullopt,
         request);
     return {
         .path_key = SourcePathIdentityKey(path),
@@ -1916,7 +1918,7 @@ void SourceCollectionActivationTransaction::
     terminal_outcomes_.insert_or_assign(
         ticket.path_key,
         TerminalOutcome{
-            .path = ticket.path,
+            .path = !error && snapshot ? snapshot->source.path : ticket.path,
             .generation = ticket.generation,
             .automation_sequence =
                 ticket.automation_sequence,
