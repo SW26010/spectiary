@@ -40,6 +40,7 @@ public:
         view.snapshot = snapshot;
         view.current_sample_snapshot = snapshot;
         view.navigation.has_active_source = true;
+        view.can_add_read_only_annotation = true;
         view.navigation.current_index = 0;
         view.navigation.sample_count = 1;
         view.labeling.has_active_source = true;
@@ -54,6 +55,7 @@ public:
 
     void Render()
     {
+        if (!show_annotations) return;
         constexpr bool capture_text = true;
         ImGui::SetNextWindowPos(
             ImVec2(20.0f, 20.0f),
@@ -61,6 +63,7 @@ public:
         ImGui::SetNextWindowSize(
             ImVec2(560.0f, 520.0f),
             ImGuiCond_Always);
+        ImGui::SetNextWindowCollapsed(collapsed, ImGuiCond_Always);
         if (capture_text) {
             ImGui::LogToBuffer();
         }
@@ -105,6 +108,15 @@ public:
             ImGuiPopupFlags_AnyPopupId |
                 ImGuiPopupFlags_AnyPopupLevel);
 
+        if (show_files) {
+            ImGui::SetNextWindowPos(ImVec2(610, 20), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(280, 520), ImGuiCond_Always);
+            panel.RenderFiles(interaction, spectiary::UiLanguage::English, &open,
+                []() -> std::optional<std::filesystem::path> { return {}; },
+                []() -> std::optional<std::filesystem::path> { return {}; },
+                [](const auto&) {}, {});
+        }
+
     }
 
     AnnotationPanelFrameObservation observation;
@@ -115,6 +127,9 @@ public:
     std::optional<std::filesystem::path> selected_path;
     std::function<void()> after_submit;
     bool submit_loaded = false;
+    bool show_annotations = true;
+    bool show_files = false;
+    bool collapsed = false;
     int choose_file_count = 0;
     int submit_count = 0;
 };
@@ -419,8 +434,55 @@ void TestHiddenAnnotationPanelObservesIntermediateSourceSwitch()
 
 }
 
+void TestAnnotationShellDropTarget()
+{
+    AnnotationPanelFixture fixture;
+    fixture.show_files = true;
+    fixture.ui.Frames(2);
+    Require(fixture.panel.AnnotationsDropViewport() != 0 &&
+        fixture.panel.AnnotationsDropViewport() == fixture.panel.FilesDropViewport(),
+        "Files and Annotations can share one native viewport");
+    Require(fixture.panel.HitTestAnnotationsDrop(150, 150) &&
+        !fixture.panel.HitTestFilesDrop(150, 150) &&
+        fixture.panel.HitTestFilesDrop(650, 150) &&
+        !fixture.panel.HitTestAnnotationsDrop(650, 150),
+        "shared viewport resolves annotation versus source by panel bounds");
+    Require(!fixture.panel.HitTestAnnotationsDrop(150, 25), "annotation title is not a drop target");
+    auto* window = ImGui::FindWindowByName(fixture.panel.AnnotationsWindowName());
+    auto* original = window->Viewport;
+    ImGuiViewportP detached;
+    detached.ID = 456;
+    window->Viewport = &detached;
+    Require(fixture.panel.AnnotationsDropViewport() == 456 &&
+        fixture.panel.HitTestAnnotationsDrop(150, 150), "detached Annotations accepts shell coordinates");
+    window->Viewport = original;
+    fixture.panel.SetAnnotationsDropHovered(true);
+    fixture.ui.Frames();
+    Require(ImGui::GetForegroundDrawList(window->Viewport)->VtxBuffer.Size > 0,
+        "annotation target has active feedback");
+    fixture.panel.SetAnnotationsDropHovered(false);
+    fixture.view.can_add_read_only_annotation = false;
+    fixture.ui.Frames();
+    Require(!fixture.panel.AnnotationsDropViewport() && !fixture.panel.HitTestAnnotationsDrop(150, 150),
+        "source that cannot import annotations rejects drops");
+    fixture.view.can_add_read_only_annotation = true;
+    fixture.view.snapshot.reset();
+    fixture.ui.Frames();
+    Require(!fixture.panel.AnnotationsDropViewport(), "no active snapshot means no annotation drop");
+    fixture.view.snapshot = fixture.snapshot;
+    fixture.collapsed = true;
+    fixture.ui.Frames();
+    Require(!fixture.panel.AnnotationsDropViewport(), "collapsed annotation panel rejects drops");
+    fixture.collapsed = false;
+    fixture.ui.Frames(2);
+    fixture.show_annotations = false;
+    fixture.ui.Frames();
+    Require(!fixture.panel.AnnotationsDropViewport(), "hidden annotation panel forgets old target");
+}
+
 int main()
 {
+    TestAnnotationShellDropTarget();
     TestAnnotationImportFailureRendersInlineWithoutHoverOrPopup();
     TestMissingLocalAnnotationRemovalRequiresConfirmation();
     TestSourceSwitchDismissesMissingLocalRemovalWarning();

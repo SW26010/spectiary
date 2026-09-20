@@ -21,6 +21,7 @@
 #include <imgui.h>
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -287,12 +288,12 @@ public:
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
-    [[nodiscard]] unsigned int FilesDropViewport() const
-    { return source_collection_panel_ui_.FilesDropViewport(); }
-    [[nodiscard]] bool HitTestFilesDrop(float x, float y) const
-    { return source_collection_panel_ui_.HitTestFilesDrop(x, y); }
-    void SetFilesDropHovered(bool hovered)
-    { source_collection_panel_ui_.SetFilesDropHovered(hovered); }
+    enum class FileDropDestination : unsigned int { None, Files, Annotations };
+    [[nodiscard]] std::array<unsigned int, 2> FileDropViewports() const;
+    [[nodiscard]] FileDropDestination HitTestFileDrop(unsigned int viewport, float x, float y, bool all_files) const;
+    void SetFileDropHovered(FileDropDestination destination);
+    void OpenDroppedPaths(FileDropDestination destination, std::span<const std::filesystem::path> paths);
+    void OpenAnnotation(const std::filesystem::path& path);
     void OpenExternalSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);

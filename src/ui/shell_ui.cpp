@@ -2322,19 +2322,56 @@ void ShellUi::OpenAnnotationFromFilePicker()
     if (std::optional<std::filesystem::path> path =
             ShowAnnotationFilePicker(
                 application_settings_.View().language)) {
-        source_collection_panel_ui_.
-            PrepareAnnotationImportAttempt(
-                SessionView(),
-                *path);
-        SourceCollectionSessionResult result =
-            SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
-                SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
-        source_collection_panel_ui_.
-            CompleteAnnotationImportAttempt(
-                result.loaded);
-        SetPanelVisibility(
-            ApplicationPanel::Annotations,
-            true);
+        OpenAnnotation(*path);
+    }
+}
+
+void ShellUi::OpenAnnotation(const std::filesystem::path& path)
+{
+    if (!SessionView().can_add_read_only_annotation) return;
+    source_collection_panel_ui_.PrepareAnnotationImportAttempt(SessionView(), path);
+    SourceCollectionSessionResult result =
+        SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
+            SourceCollectionIntent::AddReadOnlyAnnotationResult(path)));
+    source_collection_panel_ui_.CompleteAnnotationImportAttempt(result.loaded);
+    SetPanelVisibility(ApplicationPanel::Annotations, true);
+}
+
+std::array<unsigned int, 2> ShellUi::FileDropViewports() const
+{
+    return {source_collection_panel_ui_.FilesDropViewport(),
+        source_collection_panel_ui_.AnnotationsDropViewport()};
+}
+
+ShellUi::FileDropDestination ShellUi::HitTestFileDrop(unsigned int viewport, float x, float y, bool all_files) const
+{
+    if (all_files && viewport && source_collection_panel_ui_.AnnotationsDropViewport() == viewport &&
+        source_collection_panel_ui_.HitTestAnnotationsDrop(x, y)) return FileDropDestination::Annotations;
+    if (viewport && source_collection_panel_ui_.FilesDropViewport() == viewport &&
+        source_collection_panel_ui_.HitTestFilesDrop(x, y)) return FileDropDestination::Files;
+    return FileDropDestination::None;
+}
+
+void ShellUi::SetFileDropHovered(FileDropDestination destination)
+{
+    source_collection_panel_ui_.SetFilesDropHovered(destination == FileDropDestination::Files);
+    source_collection_panel_ui_.SetAnnotationsDropHovered(destination == FileDropDestination::Annotations);
+}
+
+void ShellUi::OpenDroppedPaths(FileDropDestination destination, std::span<const std::filesystem::path> paths)
+{
+    if (destination == FileDropDestination::Annotations) {
+        if (!SessionView().can_add_read_only_annotation) return;
+        // Recheck outside OLE callbacks in case a path changed after dragging.
+        // Never partially import a file/folder mixture into Annotations.
+        for (const auto& path : paths) {
+            std::error_code error;
+            if (std::filesystem::is_directory(path, error)) return;
+        }
+    }
+    for (const auto& path : paths) {
+        if (destination == FileDropDestination::Files) OpenSource(path);
+        else if (destination == FileDropDestination::Annotations) OpenAnnotation(path);
     }
 }
 

@@ -1,7 +1,9 @@
 #include "platform/win32_file_drop_target.h"
 #include <shellapi.h>
 #include <shlobj.h>
+#include <wrl/client.h>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -63,14 +65,38 @@ public:
     HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
 };
 
+Microsoft::WRL::ComPtr<IDataObject> ShellData(std::span<const std::filesystem::path> paths)
+{
+    struct IdLists {
+        std::vector<PIDLIST_ABSOLUTE> values;
+        ~IdLists() { for (const auto value : values) CoTaskMemFree(value); }
+    } ids;
+    for (const auto& path : paths) {
+        PIDLIST_ABSOLUTE id = nullptr;
+        Require(SUCCEEDED(SHParseDisplayName(path.c_str(), nullptr, &id, 0, nullptr)), "parse shell test item");
+        ids.values.push_back(id);
+    }
+    Microsoft::WRL::ComPtr<IShellItemArray> items;
+    Require(SUCCEEDED(SHCreateShellItemArrayFromIDLists(static_cast<UINT>(ids.values.size()),
+        const_cast<PCIDLIST_ABSOLUTE*>(ids.values.data()), &items)), "create shell test selection");
+    Microsoft::WRL::ComPtr<IDataObject> data;
+    Require(SUCCEEDED(items->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(&data))), "create Explorer-style data object");
+    return data;
+}
+
 void TestShellDrop()
 {
     using namespace spectiary;
     bool inside = true;
-    bool hover = false;
-    Win32FileDropTarget target([&](float x, float y) {
-        return inside && x >= 100 && x < 200 && y >= 100 && y < 200;
-    }, [&](bool active) { hover = active; });
+    unsigned int hover = 0;
+    unsigned int destination = 1;
+    bool file_only_panel = false;
+    HWND hit_window = nullptr;
+    Win32FileDropTarget target([&](HWND window, float x, float y, bool all_files) {
+        hit_window = window;
+        return inside && (!file_only_panel || all_files) &&
+            x >= 100 && x < 400 && y >= 100 && y < 200 ? destination : 0U;
+    }, [&](unsigned int active) { hover = active; });
     WNDCLASSW window_class{};
     window_class.lpfnWndProc = DefWindowProcW;
     window_class.hInstance = GetModuleHandleW(nullptr);
@@ -91,21 +117,22 @@ void TestShellDrop()
     Require(SUCCEEDED(receiver->DragEnter(&data, 0, {150, 150}, &effect)) &&
         effect == DROPEFFECT_COPY && hover, "compatible shell drag shows copy feedback");
     effect = DROPEFFECT_COPY;
-    receiver->DragOver(0, {200, 150}, &effect);
+    receiver->DragOver(0, {400, 150}, &effect);
     Require(effect == DROPEFFECT_NONE && !hover, "outside target is rejected");
+    const auto reads_before_drop = data.reads;
     effect = DROPEFFECT_COPY;
     receiver->Drop(&data, 0, {150, 150}, &effect);
-    Require(effect == DROPEFFECT_COPY && !hover && data.reads == 1,
+    Require(effect == DROPEFFECT_COPY && !hover && data.reads == reads_before_drop + 1,
         "drop reads filesystem paths only once and clears feedback");
     effect = DROPEFFECT_COPY;
     receiver->DragEnter(&data, 0, {150, 150}, &effect);
     Require(effect == DROPEFFECT_NONE, "one bounded pending batch at a time");
-    Require(target.TakePaths() == data.paths, "Unicode, spaces, folders and unsupported paths preserve order verbatim");
-    Require(target.TakePaths().empty(), "batch consumed exactly once");
+    Require(target.TakeDrop().paths == data.paths, "Unicode, spaces, folders and unsupported paths preserve order verbatim");
+    Require(target.TakeDrop().paths.empty(), "batch consumed exactly once");
     inside = false;
     effect = DROPEFFECT_COPY;
     receiver->Drop(&data, 0, {150, 150}, &effect);
-    Require(effect == DROPEFFECT_NONE && target.TakePaths().empty(), "drop rechecks target at release");
+    Require(effect == DROPEFFECT_NONE && target.TakeDrop().paths.empty(), "drop rechecks target at release");
     inside = true;
     data.supported = false;
     effect = DROPEFFECT_COPY;
@@ -116,16 +143,70 @@ void TestShellDrop()
     effect = DROPEFFECT_COPY;
     receiver->DragEnter(&data, 0, {150, 150}, &effect);
     receiver->Drop(&data, 0, {150, 150}, &effect);
-    Require(effect == DROPEFFECT_NONE && target.TakePaths().empty(), "failed data transfer adds nothing");
+    Require(effect == DROPEFFECT_NONE && target.TakeDrop().paths.empty(), "failed data transfer adds nothing");
     data.fail_read = false;
     data.paths.resize(Win32FileDropTarget::MaximumPaths + 1, L"C:\\a.csv");
     effect = DROPEFFECT_COPY;
     receiver->DragEnter(&data, 0, {150, 150}, &effect);
     receiver->Drop(&data, 0, {150, 150}, &effect);
-    Require(effect == DROPEFFECT_NONE && target.TakePaths().empty(), "oversized batch is rejected atomically");
+    Require(effect == DROPEFFECT_NONE && target.TakeDrop().paths.empty(), "oversized batch is rejected atomically");
     effect = DROPEFFECT_MOVE;
     receiver->DragEnter(&data, 0, {150, 150}, &effect);
     Require(effect == DROPEFFECT_NONE, "never move or delete Explorer files");
+    data.paths.resize(1);
+    effect = DROPEFFECT_COPY;
+    receiver->DragEnter(&data, 0, {150, 150}, &effect);
+    Require(hover == 1, "source panel feedback");
+    destination = 2;
+    effect = DROPEFFECT_COPY;
+    receiver->DragOver(0, {150, 150}, &effect);
+    Require(hover == 2, "moving to annotations within the same HWND changes feedback");
+    receiver->Drop(&data, 0, {150, 150}, &effect);
+    destination = 1;
+    const auto annotation_drop = target.TakeDrop();
+    Require(annotation_drop.destination == 2 && annotation_drop.paths == data.paths && !hover,
+        "release destination survives cleared feedback and subsequent hit-test changes");
+    Window detached;
+    SetWindowPos(detached.value, HWND_TOPMOST, 300, 100, 100, 100, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    const HWND both[] = {window.value, detached.value, window.value};
+    target.SetWindows(both);
+    target.SetWindows(both);
+    effect = DROPEFFECT_COPY;
+    receiver->DragEnter(&data, 0, {350, 150}, &effect);
+    receiver->Drop(&data, 0, {350, 150}, &effect);
+    Require(target.TakeDrop().destination == 1 && hit_window == detached.value,
+        "separate viewport registers while shared HWND is deduplicated; hit test receives the top native window");
+    DestroyWindow(detached.value);
+    detached.value = nullptr;
+    effect = DROPEFFECT_COPY;
+    receiver->DragEnter(&data, 0, {150, 150}, &effect);
+    Require(effect == DROPEFFECT_COPY, "destroying one viewport retains the other target");
+    receiver->DragLeave();
+    Require(!hover && target.TakeDrop().paths.empty(), "canceling a drag imports nothing");
+    const auto root = std::filesystem::temp_directory_path() /
+        (L"spectiary-shell-annotation-drop-" + std::to_wstring(GetTickCount64()));
+    std::filesystem::create_directories(root / L"folder");
+    const auto file = root / L"标注 file.csv";
+    { std::ofstream stream(file); stream << "sample,label\na,A\n"; }
+    file_only_panel = true;
+    destination = 2;
+    for (const std::vector<std::filesystem::path>& selection : {
+            std::vector<std::filesystem::path>{file},
+            std::vector<std::filesystem::path>{root / L"folder"},
+            std::vector<std::filesystem::path>{file, root / L"folder"}}) {
+        const auto shell_data = ShellData(selection);
+        effect = DROPEFFECT_COPY;
+        receiver->DragEnter(shell_data.Get(), 0, {150, 150}, &effect);
+        const bool files_only = selection.size() == 1 && selection.front() == file;
+        Require(effect == (files_only ? DROPEFFECT_COPY : DROPEFFECT_NONE) && hover == (files_only ? 2U : 0U),
+            "file-only target rejects folder and mixed shell selections during hover");
+        effect = DROPEFFECT_COPY;
+        receiver->Drop(shell_data.Get(), 0, {150, 150}, &effect);
+        const auto batch = target.TakeDrop();
+        Require(files_only ? batch.destination == 2 && batch.paths == selection : batch.paths.empty(),
+            "folder and mixed shell drops import nothing; file drop preserves Unicode path");
+    }
+    std::filesystem::remove_all(root);
     DestroyWindow(window.value);
     window.value = nullptr;
     target.SetWindow(nullptr);

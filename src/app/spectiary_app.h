@@ -180,7 +180,7 @@ private:
 
     SpectiaryStartup startup_;
     Win32Window window_;
-    std::unique_ptr<Win32FileDropTarget> files_drop_target_;
+    std::unique_ptr<Win32FileDropTarget> shell_drop_target_;
     D3D11Renderer renderer_;
     D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;

@@ -6854,6 +6854,68 @@ void TestRestoreDefaultLayout()
 
 }  // namespace
 
+void TestAnnotationShellDropUsesExistingImport()
+{
+    using namespace spectiary;
+    using Access = ShellUiTestAccess;
+    const auto root = UniqueTempPath("_annotation_drop");
+    std::filesystem::create_directories(root);
+    const auto source = root / "spectra";
+    std::filesystem::create_directories(source);
+    for (const auto* member : {"a.csv", "b.csv", "c.csv"}) {
+        std::ofstream stream(source / member);
+        stream << "wavelength,flux\n5000,1\n5001,2\n";
+    }
+    const auto first = root / std::filesystem::path(L"分类 结果.csv");
+    const auto second = root / "second.csv";
+    for (const auto& path : {first, second}) {
+        std::ofstream stream(path);
+        stream << "filename,label\na.csv,A\nb.csv,B\nc.csv,C\n";
+    }
+    const auto invalid = root / "invalid.xyz";
+    WriteFixture(invalid);
+    const auto missing = root / "missing.csv";
+    const std::array paths{first, invalid, missing, second};
+    SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    auto shell = Access::Create(SourceCollectionSession({}, {}, {}, {}),
+        MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    shell->OpenSource(source);
+    Require(DrainAllSourceLoads(*shell), "real annotation drop source must load");
+    auto& session = Access::Session(*shell);
+    const auto snapshot = session.CurrentSampleSnapshot();
+    const std::array mixed{first, root, second};
+    shell->OpenDroppedPaths(ShellUi::FileDropDestination::Annotations, mixed);
+    Require(session.AnnotationPathsForSource(source).empty(),
+        "file/folder mixture is rejected atomically before any annotation import");
+    shell->OpenDroppedPaths(ShellUi::FileDropDestination::Annotations, paths);
+    Require(session.View().sources.size() == 1 && session.CurrentSampleSnapshot() == snapshot,
+        "annotation drop must not add sources, change active source, or replace the spectrum");
+    const auto imported = session.AnnotationPathsForSource(source);
+    Require(imported.size() == 2 && imported[0] == first && imported[1] == second,
+        "annotation batch imports valid CSV files in order despite failures");
+    const auto& diagnostics = session.View().navigation.annotation_diagnostics;
+    for (const auto& failed : {invalid, missing}) {
+        Require(std::any_of(diagnostics.begin(), diagnostics.end(), [&](const auto& diagnostic) {
+            return diagnostic.kind == SourceCollectionManifestDiagnosticKind::AnnotationIgnored &&
+                diagnostic.path == failed;
+        }), "unsupported and missing files must retain normal import diagnostics");
+    }
+    const std::array duplicate{first};
+    shell->OpenDroppedPaths(ShellUi::FileDropDestination::Annotations, duplicate);
+    Require(session.AnnotationPathsForSource(source).size() == 2,
+        "duplicate annotation drop reuses normal import identity");
+    shell.reset();
+    SourceCollectionLoadDependencies empty_dependencies;
+    empty_dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    auto empty_shell = Access::Create(SourceCollectionSession({}, {}, {}, {}),
+        MakeSourceCollectionLoadQueueForTesting(std::move(empty_dependencies)));
+    empty_shell->OpenDroppedPaths(ShellUi::FileDropDestination::Annotations, duplicate);
+    Require(Access::Session(*empty_shell).View().sources.empty(), "annotation drop without an active source adds no source");
+    empty_shell.reset();
+    std::filesystem::remove_all(root);
+}
+
 void TestInAppShellDropBatchUsesNormalSourcePipeline()
 {
     using namespace spectiary;
@@ -6878,7 +6940,8 @@ void TestInAppShellDropBatchUsesNormalSourcePipeline()
         "external-only folder preference should be enabled for this regression");
     // Same ordered submission as the native shell-drop adapter, without a
     // presentation/drain between paths. Includes two controlled failures.
-    for (const auto& path : {file, unsupported, missing, folder}) shell->OpenSource(path);
+    const std::array paths{file, unsupported, missing, folder};
+    shell->OpenDroppedPaths(ShellUi::FileDropDestination::Files, paths);
     Require(DrainAllSourceLoads(*shell), "mixed shell-drop batch must settle");
     auto& session = Access::Session(*shell);
     Require(session.View().sources.size() == 2,
@@ -7015,6 +7078,7 @@ int main()
 {
     try {
         RUN_SHELL_TEST(TestInAppShellDropBatchUsesNormalSourcePipeline);
+        RUN_SHELL_TEST(TestAnnotationShellDropUsesExistingImport);
         RUN_SHELL_TEST(TestRealMemberOpenReusesActiveSource);
         RUN_SHELL_TEST(TestRoutedExternalOpenPreservesExistingSourcesAndPreferredMember);
 #ifdef IMGUI_ENABLE_TEST_ENGINE

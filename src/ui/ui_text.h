@@ -285,6 +285,7 @@ enum class UiTextId {
     AddFile,
     AddFolder,
     FilesDropHint,
+    AnnotationsDropHint,
     OpenSourceInNewInstance,
     OpenSourceInNewInstanceFailed,
     SourceSingular,

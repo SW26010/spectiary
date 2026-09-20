@@ -428,12 +428,12 @@ int SpectiaryApp::Run(
             render_wake_scheduler_.RequestFrame();
         }
 
-        // Shell drops are ordinary in-app opens, in the shell's path order.
-        // OpenSource retains pending explicit opens; the existing load queue
-        // bounds worker concurrency and owns failures/duplicates/activation.
-        if (files_drop_target_) {
-            for (const auto& path : files_drop_target_->TakePaths()) {
-                ui_.OpenSource(path);
+        // The release-time panel chooses the ordinary in-app opener. Process
+        // copied paths outside OLE callbacks and retain the shell's path order.
+        if (shell_drop_target_) {
+            const auto drop = shell_drop_target_->TakeDrop();
+            if (!drop.paths.empty()) {
+                ui_.OpenDroppedPaths(static_cast<ShellUi::FileDropDestination>(drop.destination), drop.paths);
                 render_wake_scheduler_.RequestFrame();
             }
         }
@@ -633,10 +633,17 @@ void SpectiaryApp::Initialize(
         throw std::runtime_error("Failed to create the Win32 window.");
     }
     applied_window_title_ = window_title;
-    files_drop_target_ = std::make_unique<Win32FileDropTarget>(
-        [this](float x, float y) { return ui_.HitTestFilesDrop(x, y); },
-        [this](bool hovered) {
-            ui_.SetFilesDropHovered(hovered);
+    shell_drop_target_ = std::make_unique<Win32FileDropTarget>(
+        [this](HWND window, float x, float y, bool all_files) {
+            for (const auto id : ui_.FileDropViewports()) {
+                const auto* viewport = ImGui::FindViewportByID(id);
+                if (viewport && viewport->PlatformHandleRaw == window)
+                    return static_cast<unsigned int>(ui_.HitTestFileDrop(id, x, y, all_files));
+            }
+            return 0U;
+        },
+        [this](unsigned int destination) {
+            ui_.SetFileDropHovered(static_cast<ShellUi::FileDropDestination>(destination));
             RequestMessageRender();
         });
     const HWND profile_state_window = window_.hwnd();
@@ -875,7 +882,7 @@ void SpectiaryApp::SaveImGuiLayoutForShutdown()
 
 void SpectiaryApp::Shutdown()
 {
-    files_drop_target_.reset();
+    shell_drop_target_.reset();
     external_open_router_.Stop();
     if (shutdown_complete_) {
         return;
@@ -1105,9 +1112,13 @@ RenderFrameOutcome SpectiaryApp::RenderFrame()
             {
                 presentation_trace::Span update({.name = "platform_windows_update"});
                 ImGui::UpdatePlatformWindows();
-                const auto* files_viewport = ImGui::FindViewportByID(ui_.FilesDropViewport());
-                files_drop_target_->SetWindow(files_viewport
-                    ? static_cast<HWND>(files_viewport->PlatformHandleRaw) : nullptr);
+                std::array<HWND, 2> drop_windows{};
+                const auto viewport_ids = ui_.FileDropViewports();
+                for (std::size_t index = 0; index < viewport_ids.size(); ++index) {
+                    const auto* viewport = ImGui::FindViewportByID(viewport_ids[index]);
+                    if (viewport) drop_windows[index] = static_cast<HWND>(viewport->PlatformHandleRaw);
+                }
+                shell_drop_target_->SetWindows(drop_windows);
             }
             {
                 presentation_trace::Span render({.name = "platform_windows_render"});

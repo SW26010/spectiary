@@ -916,18 +916,19 @@ void SourceCollectionPanelUi::ReloadNavigationNumberInputFromBuffer(
     input.reload_deactivate_pending = true;
 }
 
-unsigned int SourceCollectionPanelUi::FilesDropViewport() const
+namespace {
+unsigned int PanelDropViewport(const char* name, int rendered_frame)
 {
-    if (files_drop_frame_ != ImGui::GetFrameCount()) return 0;
-    const auto* window = ImGui::FindWindowByName(FilesWindowName());
+    if (rendered_frame != ImGui::GetFrameCount()) return 0;
+    const auto* window = ImGui::FindWindowByName(name);
     return window && window->Active && !window->Hidden && !window->Collapsed
         ? window->Viewport->ID : 0;
 }
 
-bool SourceCollectionPanelUi::HitTestFilesDrop(float x, float y) const
+bool HitTestPanelDrop(const char* name, int rendered_frame, float x, float y)
 {
-    if (!FilesDropViewport()) return false;
-    auto* window = ImGui::FindWindowByName(FilesWindowName());
+    if (!PanelDropViewport(name, rendered_frame)) return false;
+    auto* window = ImGui::FindWindowByName(name);
     const ImVec2 point(x, y);
     if (!window->InnerRect.Contains(point) ||
         !window->ClipRect.Contains(point)) return false;
@@ -942,6 +943,27 @@ bool SourceCollectionPanelUi::HitTestFilesDrop(float x, float y) const
     GImGui->MouseViewport = previous_viewport;
     return content_hoverable && hovered == window;
 }
+
+void RenderShellDropOutline()
+{
+    const auto* window = ImGui::GetCurrentWindow();
+    ImGui::GetForegroundDrawList(window->Viewport)->AddRect(
+        window->InnerRect.Min, window->InnerRect.Max,
+        ImGui::GetColorU32(ImGuiCol_DragDropTarget), 0.0f, 0, 3.0f);
+}
+} // namespace
+
+unsigned int SourceCollectionPanelUi::FilesDropViewport() const
+{ return PanelDropViewport(FilesWindowName(), files_drop_frame_); }
+
+bool SourceCollectionPanelUi::HitTestFilesDrop(float x, float y) const
+{ return HitTestPanelDrop(FilesWindowName(), files_drop_frame_, x, y); }
+
+unsigned int SourceCollectionPanelUi::AnnotationsDropViewport() const
+{ return PanelDropViewport(AnnotationsWindowName(), annotations_drop_frame_); }
+
+bool SourceCollectionPanelUi::HitTestAnnotationsDrop(float x, float y) const
+{ return HitTestPanelDrop(AnnotationsWindowName(), annotations_drop_frame_, x, y); }
 
 void SourceCollectionPanelUi::RenderFiles(
     PanelSessionInteraction& interaction,
@@ -966,10 +988,7 @@ void SourceCollectionPanelUi::RenderFiles(
     ImGui::TextWrapped("%s", UiText(language, UiTextId::FilesDropHint).data());
     if (!open || *open) files_drop_frame_ = ImGui::GetFrameCount();
     if (files_drop_hovered_) {
-        const auto* window = ImGui::GetCurrentWindow();
-        ImGui::GetForegroundDrawList(window->Viewport)->AddRect(
-            window->InnerRect.Min, window->InnerRect.Max,
-            ImGui::GetColorU32(ImGuiCol_DragDropTarget), 0.0f, 0, 3.0f);
+        RenderShellDropOutline();
     }
     ImGui::Separator();
 
@@ -1590,6 +1609,7 @@ void SourceCollectionPanelUi::RenderAnnotations(
     const SourceCollectionSessionView& session_view =
         interaction.View();
     SyncAnnotationDiagnosticSource(session_view);
+    annotations_drop_frame_ = -1;
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Annotations,
@@ -1610,6 +1630,11 @@ void SourceCollectionPanelUi::RenderAnnotations(
         return;
     }
 
+    if (session_view.can_add_read_only_annotation && (!open || *open)) {
+        annotations_drop_frame_ = ImGui::GetFrameCount();
+        ImGui::TextWrapped("%s", UiText(language, UiTextId::AnnotationsDropHint).data());
+        if (annotations_drop_hovered_) RenderShellDropOutline();
+    }
     const std::string add_file_label = StableUiLabel(
         language,
         UiTextId::AddFile,
