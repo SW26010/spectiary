@@ -1,5 +1,4 @@
 #include "ui/spectral_lines_name_localization.h"
-#include "ui/spectral_lines_ui_identity.h"
 
 #include <algorithm>
 
@@ -66,16 +65,6 @@ std::string ResolveSpectralLineRenameSubmission(
     return user_edited
         ? std::string(edited_name)
         : std::string(stored_name);
-}
-
-std::string SpectralLineListOptionLabel(
-    std::string_view visible_name,
-    std::string_view line_list_id)
-{
-    std::string label(visible_name);
-    label += "###";
-    label += SpectralLineUiId(line_list_id);
-    return label;
 }
 
 }  // namespace spectiary

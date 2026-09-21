@@ -3,6 +3,7 @@
 #include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_name_localization.h"
 #include "ui/spectral_lines_ui_identity.h"
+#include "ui/spectral_lines_plain_text.h"
 #include "ui/theme.h"
 
 #include <imgui.h>
@@ -845,10 +846,9 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 }
                 const std::string marker_row_label =
-                    label + "  " + marker_suffix +
-                    "###marker";
-                (void)ImGui::Selectable(
-                    marker_row_label.c_str(),
+                    label + "  " + marker_suffix;
+                (void)SpectralLineTextSelectable(
+                    "###marker", marker_row_label,
                     false,
                     marker_flags,
                     ImVec2(
@@ -922,10 +922,8 @@ void SpectralLinesGroupingViewUi::Render(
                                 const std::string target_label =
                                     LocalizedGroupName(
                                         language,
-                                        target_group) +
-                                    "###" +
-                                    SpectralLineUiId(target_group.id);
-                                if (ImGui::Selectable(target_label.c_str())) {
+                                        target_group);
+                                if (SpectralLineTextSelectable(("###" + SpectralLineUiId(target_group.id)).c_str(), target_label)) {
                                     (void)panel.Submit(SpectralLineStateIntent::CopyMarkerReference(
                                         view.id,
                                         reference.marker_id,

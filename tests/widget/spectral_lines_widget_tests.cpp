@@ -1,6 +1,7 @@
 #include "imgui_widget_harness.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_ui_identity.h"
+#include "ui/spectral_lines_plain_text.h"
 #include "../helpers/temporary_directory.h"
 
 #include <iostream>
@@ -71,13 +72,13 @@ void TestOpaqueIdentities()
     }};
     ui.Frames(3);
     ui.Click("LineListColorScheme");
-    Require(ui.Find("Red###scheme").id != ui.Find("Green###scheme").id, "color choices have distinct widget identities");
-    ui.Click("Green###scheme");
+    Require(ui.Observe("scheme", SpectralLineUiId(a)).value().id != ui.Observe("scheme", SpectralLineUiId(b)).value().id, "color choices have distinct widget identities");
+    ClickScoped(ui, "scheme", b);
     Require(controller.View().active_color_scheme_id == b, "second scheme selects original opaque identity");
-    ui.Click("LineListColorScheme"); ui.Click("Red###scheme");
+    ui.Click("LineListColorScheme"); ClickScoped(ui, "scheme", a);
     Require(controller.View().active_color_scheme_id == a, "first scheme remains independently selectable");
-    const auto tab_a = "View A###" + SpectralLineUiId(a);
-    const auto tab_b = "View B###" + SpectralLineUiId(b);
+    const auto tab_a = "###" + SpectralLineUiId(a);
+    const auto tab_b = "###" + SpectralLineUiId(b);
     Require(ui.Find(tab_a).id != ui.Find(tab_b).id, "grouping tabs have distinct identities");
     ui.Click(tab_b); ui.Frames(2);
     Require(controller.View().grouping_views[1].active, "second grouping tab selects canonical ID");
@@ -104,6 +105,107 @@ void TestOpaqueIdentities()
             "second marker can be restored independently");
     Require(restored_source.list == list && LoadSpectralLineListFromPath(file).list == list,
             "widget encoding never rewrites canonical identities or file contents");
+}
+
+void TestPlainTextDrawOutput()
+{
+    const std::string name = "Carbon ## label ### reference";
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(900, 680), ImGuiCond_Always);
+        ImGui::Begin("Plain text draw output");
+        auto* draw = ImGui::GetWindowDrawList();
+        const auto before = draw->VtxBuffer.Size;
+        (void)SpectralLineTextSelectable("###choice", name);
+        const auto actual = draw->VtxBuffer.Size - before;
+        const auto item_id = ImGui::GetItemID();
+        const auto reference_start = draw->VtxBuffer.Size;
+        draw->AddText(ImVec2(30, 100), ImGui::GetColorU32(ImGuiCol_Text), name.data(), name.data() + name.size());
+        Require(actual == draw->VtxBuffer.Size - reference_start,
+                "selectable emits all plain-text glyphs, not just an untruncated log entry");
+        Require(item_id == ImGui::GetID("###choice"), "plain drawing retains the selectable identity");
+        ImGui::End();
+    }};
+    ui.Frames(3);
+}
+
+void TestPlainTextNames()
+{
+    test_support::TemporaryDirectory temporary;
+    RuntimePaths paths; paths.application_data_root = temporary.path() / "managed";
+    std::filesystem::create_directories(paths.application_data_root);
+    auto list = BuiltIn(); list.id = "plain-text";
+    list.name = "Carbon ## list ### reference";
+    list.markers[0].name = "Carbon ## marker ### reference";
+    list.grouping_views[0].name = "Carbon ## view ### reference";
+    list.grouping_views[0].groups[0].name = "Carbon ## group ### reference";
+    list.color_schemes = {{"red", "Carbon ## red ### reference", {{"marker", "#FF0000FF"}}},
+                          {"green", "Carbon ## green ### reference", {{"marker", "#00FF00FF"}}}};
+    const auto file = temporary.path() / "plain.json";
+    std::string error;
+    Require(SaveSpectralLineListToPathAtomic(file, list, error), "plain authored names are valid canonical data");
+    SpectralLinesPanelController controller(BuiltIn(), {});
+    Require(controller.OpenUserLineList(file, paths).changed, "open plain text fixture");
+    (void)controller.Submit(SpectralLineStateIntent::SetGroupExpanded("base", "group", true));
+    SpectralLinesPanelUi panel;
+    auto snapshot = std::make_shared<SpectrumSnapshot>(); snapshot->capabilities.can_show_spectral_lines = true;
+    std::string text;
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(1100, 740), ImGuiCond_Always);
+        ImGui::LogToBuffer();
+        bool open = true; panel.Render(controller, snapshot, UiLanguage::English, &open);
+        text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+    }};
+    ui.Frames(3);
+    for (const auto& name : {list.name, list.markers[0].name, list.grouping_views[0].name,
+                            list.grouping_views[0].groups[0].name, list.color_schemes[0].name})
+        Require(text.find(name) != std::string::npos, "closed previews, tabs, groups and marker rows render full authored names");
+    const auto tab = ui.Find("###" + SpectralLineUiId("base"));
+    Require(tab.raw_bounds.GetWidth() >= ImGui::CalcTextSize(list.grouping_views[0].name.c_str(), nullptr, false).x,
+            "tab width includes the authored suffix");
+    ui.Click("LineListColorScheme");
+    Require(text.find(list.color_schemes[1].name) != std::string::npos, "scheme popup renders full authored name");
+    ClickScoped(ui, "scheme", "green");
+    Require(controller.View().active_color_scheme_id == "green" && text.find(list.color_schemes[1].name) != std::string::npos,
+            "plain scheme choice is interactive and its preview retains the full name");
+    ui.Click("SpectralLineList");
+    Require(text.find(list.name, text.find(list.name) + list.name.size()) != std::string::npos,
+            "list popup and preview both render full authored name");
+    ui.Click("opened_user_line_list");
+    Require(controller.PlotSource().list == list && LoadSpectralLineListFromPath(file).list == list,
+            "plain rendering preserves canonical data and the source file");
+
+    // The editable built-in customization has a separate copy-target menu.
+    Require(controller.SelectBuiltInLineList().changed, "return to editable built-in owner");
+    const auto catalog_view = controller.View().grouping_views.front().id;
+    Require(controller.Submit(SpectralLineStateIntent::DuplicateGroupingView(catalog_view)).changed, "duplicate built-in view");
+    std::string view_id;
+    for (const auto& view : controller.View().grouping_views) if (view.editable) view_id = view.id;
+    Require(!view_id.empty(), "editable view exists");
+    Require(controller.Submit(SpectralLineStateIntent::AddUserGroup(view_id)).changed, "add copy target");
+    std::string source_id, target_id;
+    for (const auto& view : controller.View().grouping_views) if (view.id == view_id)
+        for (const auto& group : view.groups) {
+            if (!group.marker_references.empty()) source_id = group.id;
+            else if (!group.is_unassigned) target_id = group.id;
+        }
+    const std::string target_name = "Carbon ## target ### reference";
+    Require(controller.Submit(SpectralLineStateIntent::RenameUserGroup(view_id, target_id, target_name,
+        SpectralLineRenameEditState::Edited)).changed, "rename copy target");
+    (void)controller.Submit(SpectralLineStateIntent::SetGroupExpanded(view_id, source_id, true));
+    ui.Frames(3);
+    ui.Click("marker", ImGuiMouseButton_Right);
+    ui.Click("CopySpectralLineMarkerToGroup");
+    Require(text.find(target_name, text.find(target_name) + target_name.size()) != std::string::npos,
+            "group row and copy target menu both retain authored markup-like text");
+    ui.Click("###" + SpectralLineUiId(target_id));
+    bool copied = false;
+    for (const auto& view : controller.View().grouping_views) if (view.id == view_id)
+        for (const auto& group : view.groups) if (group.id == target_id)
+            copied = group.marker_references.size() == 1 && group.marker_references[0].marker_id == "marker";
+    Require(copied, "plain target label keeps the copy action bound to its canonical identity");
 }
 
 void TestPanel()
@@ -151,7 +253,7 @@ void TestPanel()
     ui.Click("LineListColorScheme");
     // Color choices share a semantic label under scheme identity scopes.
     Require(ui.Observe("scheme", SpectralLineUiId("green")).has_value(), "canonical schemes appear in chooser");
-    ui.Click("Green###scheme");
+    ClickScoped(ui, "scheme", "green");
     Require(controller.View().active_color_scheme_id == "green", "color chooser selects canonical scheme without editing");
     Require(controller.Submit(SpectralLineStateIntent::SetGroupExpanded("base", "group", true)).changed, "expand fixture group");
     ui.Frames(2);
@@ -189,6 +291,6 @@ void TestPanel()
 }
 int main()
 {
-    try { TestOpaqueIdentities(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
+    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextNames(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

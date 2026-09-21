@@ -18,8 +18,4 @@ namespace spectiary {
     std::string_view stored_name,
     bool user_edited);
 
-[[nodiscard]] std::string SpectralLineListOptionLabel(
-    std::string_view visible_name,
-    std::string_view line_list_id);
-
 }  // namespace spectiary

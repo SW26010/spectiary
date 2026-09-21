@@ -1408,32 +1408,6 @@ void TestGeneratedSpectralLineNamesUseExplicitMetadata()
         "an unedited long localized copy must not persist a truncated UTF-8 display name");
 }
 
-void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
-{
-    const std::string english =
-        spectiary::SpectralLineListOptionLabel(
-            spectiary::UiText(
-                spectiary::UiLanguage::English,
-                spectiary::UiTextId::
-                    PublicSpectralLineCatalog),
-            "public-spectral-lines.v1");
-    const std::string chinese =
-        spectiary::SpectralLineListOptionLabel(
-            spectiary::UiText(
-                spectiary::UiLanguage::
-                    SimplifiedChinese,
-                spectiary::UiTextId::
-                    PublicSpectralLineCatalog),
-            "public-spectral-lines.v1");
-
-    Require(
-        english ==
-                "Public catalog###line-id-7075626c69632d737065637472616c2d6c696e65732e7631" &&
-            chinese ==
-                "公共目录###line-id-7075626c69632d737065637472616c2d6c696e65732e7631",
-        "the spectral-line catalog option should keep its catalog identity while localizing visible text");
-}
-
 void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
 {
     using spectiary::SampleAnnotationWorkflowRelationship;
@@ -1709,7 +1683,6 @@ int main()
         TestSampleWorkflowMappingsAreExact();
         TestSpectralLineMappingsAreExact();
         TestGeneratedSpectralLineNamesUseExplicitMetadata();
-        TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches();
         TestSessionSemanticsAreLocalizedAtTheUiBoundary();
         TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary();
         TestSourceLoadFailuresAreLocalizedAtTheUiBoundary();

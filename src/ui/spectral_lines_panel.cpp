@@ -2,6 +2,7 @@
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_name_localization.h"
 #include "ui/spectral_lines_ui_identity.h"
+#include "ui/spectral_lines_plain_text.h"
 #include "ui/theme.h"
 
 #include <imgui.h>
@@ -168,17 +169,17 @@ void SpectralLinesPanelUi::Render(
 
     const std::string selected_line_list = LocalizedLineListName(language, state);
     const std::string line_list_label = StableUiLabel(language, UiTextId::SpectralLineList, "SpectralLineList");
-    if (ImGui::BeginCombo(line_list_label.c_str(), selected_line_list.c_str())) {
+    if (ImGui::BeginCombo(line_list_label.c_str(), nullptr, ImGuiComboFlags_CustomPreview)) {
         if (ImGui::Selectable(UiText(language, UiTextId::BuiltInLineList).data(), !state.user_owned))
             (void)panel.SelectBuiltInLineList();
         if (!state.user_line_list_path.empty()) {
-            const auto label = state.user_line_list_name + "###opened_user_line_list";
-            if (ImGui::Selectable(label.c_str(), state.user_owned)) (void)panel.SelectOpenedUserLineList();
+            if (SpectralLineTextSelectable("###opened_user_line_list", state.user_line_list_name, state.user_owned)) (void)panel.SelectOpenedUserLineList();
         }
         ImGui::Separator();
         if (ImGui::Selectable(UiText(language, UiTextId::OpenLineList).data())) open_requested_ = true;
         ImGui::EndCombo();
     }
+    SpectralLineTextComboPreview(selected_line_list);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", state.user_owned ? state.user_line_list_path.c_str() : state.line_list_id.c_str());
     }
@@ -212,15 +213,16 @@ void SpectralLinesPanelUi::Render(
         std::string selected;
         for (const auto& [id, name] : state.color_schemes) if (id == state.active_color_scheme_id) selected = name;
         const auto label = StableUiLabel(language, UiTextId::LineListColorScheme, "LineListColorScheme");
-        if (ImGui::BeginCombo(label.c_str(), selected.c_str())) {
+        if (ImGui::BeginCombo(label.c_str(), nullptr, ImGuiComboFlags_CustomPreview)) {
             for (const auto& [id, name] : state.color_schemes) {
                 ImGui::PushID(SpectralLineUiId(id).c_str());
-                if (ImGui::Selectable((name + "###scheme").c_str(), id == state.active_color_scheme_id))
+                if (SpectralLineTextSelectable("###scheme", name, id == state.active_color_scheme_id))
                     (void)panel.Submit(SpectralLineStateIntent::SelectColorScheme(id));
                 ImGui::PopID();
             }
             ImGui::EndCombo();
         }
+        SpectralLineTextComboPreview(selected);
     }
     if (!state.line_list_load_error.empty()) {
         const std::string error =
@@ -314,10 +316,9 @@ void SpectralLinesPanelUi::Render(
                     grouping_view.name,
                     grouping_view.generated_name);
             const std::string tab_label =
-                grouping_view_display_name +
                 "###" +
                 SpectralLineUiId(grouping_view.id);
-            if (ImGui::BeginTabItem(tab_label.c_str(), nullptr, flags)) {
+            if (BeginSpectralLineTextTab(tab_label.c_str(), grouping_view_display_name, flags)) {
                 if (!grouping_view.active) {
                     (void)panel.Submit(SpectralLineStateIntent::SelectGroupingView(grouping_view.id));
                 }
