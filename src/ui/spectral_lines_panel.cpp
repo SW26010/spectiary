@@ -1,6 +1,7 @@
 #include "overlays/spectral_line_projection.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_name_localization.h"
+#include "ui/spectral_lines_ui_identity.h"
 #include "ui/theme.h"
 
 #include <imgui.h>
@@ -213,7 +214,7 @@ void SpectralLinesPanelUi::Render(
         const auto label = StableUiLabel(language, UiTextId::LineListColorScheme, "LineListColorScheme");
         if (ImGui::BeginCombo(label.c_str(), selected.c_str())) {
             for (const auto& [id, name] : state.color_schemes) {
-                ImGui::PushID(id.c_str());
+                ImGui::PushID(SpectralLineUiId(id).c_str());
                 if (ImGui::Selectable((name + "###scheme").c_str(), id == state.active_color_scheme_id))
                     (void)panel.Submit(SpectralLineStateIntent::SelectColorScheme(id));
                 ImGui::PopID();
@@ -315,7 +316,7 @@ void SpectralLinesPanelUi::Render(
             const std::string tab_label =
                 grouping_view_display_name +
                 "###" +
-                grouping_view.id;
+                SpectralLineUiId(grouping_view.id);
             if (ImGui::BeginTabItem(tab_label.c_str(), nullptr, flags)) {
                 if (!grouping_view.active) {
                     (void)panel.Submit(SpectralLineStateIntent::SelectGroupingView(grouping_view.id));

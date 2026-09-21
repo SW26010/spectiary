@@ -2,6 +2,7 @@
 #include "plot/series_color.h"
 #include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_name_localization.h"
+#include "ui/spectral_lines_ui_identity.h"
 #include "ui/theme.h"
 
 #include <imgui.h>
@@ -536,7 +537,7 @@ void SpectralLinesGroupingViewUi::Render(
             return;
         }
         ImGui::PushID("group_reorder_gap");
-        ImGui::PushID(target_group.id.c_str());
+        ImGui::PushID(SpectralLineUiId(target_group.id).c_str());
         current_reorder_gap = RenderUserGroupReorderGap(false);
         ImGui::PopID();
         ImGui::PopID();
@@ -549,7 +550,7 @@ void SpectralLinesGroupingViewUi::Render(
         const bool group_has_search_matches = !group.marker_references.empty();
         const bool group_dimmed_by_search = group.dimmed_by_search;
 
-        ImGui::PushID(group.id.c_str());
+        ImGui::PushID(SpectralLineUiId(group.id).c_str());
         ImGui::AlignTextToFramePadding();
         bool next_group_visible = true;
         if (RenderGroupVisibilityControl(
@@ -749,7 +750,7 @@ void SpectralLinesGroupingViewUi::Render(
                 const bool marker_visible = reference.visible;
                 const std::string& label = reference.label;
 
-                ImGui::PushID(reference.marker_id.c_str());
+                ImGui::PushID(SpectralLineUiId(reference.marker_id).c_str());
 
                 ImGui::AlignTextToFramePadding();
                 const ImRect marker_hover_rect = CurrentFullWidthFrameRect();
@@ -923,7 +924,7 @@ void SpectralLinesGroupingViewUi::Render(
                                         language,
                                         target_group) +
                                     "###" +
-                                    target_group.id;
+                                    SpectralLineUiId(target_group.id);
                                 if (ImGui::Selectable(target_label.c_str())) {
                                     (void)panel.Submit(SpectralLineStateIntent::CopyMarkerReference(
                                         view.id,

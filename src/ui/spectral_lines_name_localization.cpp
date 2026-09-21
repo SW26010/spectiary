@@ -1,4 +1,5 @@
 #include "ui/spectral_lines_name_localization.h"
+#include "ui/spectral_lines_ui_identity.h"
 
 #include <algorithm>
 
@@ -73,7 +74,7 @@ std::string SpectralLineListOptionLabel(
 {
     std::string label(visible_name);
     label += "###";
-    label += line_list_id;
+    label += SpectralLineUiId(line_list_id);
     return label;
 }
 

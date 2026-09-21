@@ -1428,9 +1428,9 @@ void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
 
     Require(
         english ==
-                "Public catalog###public-spectral-lines.v1" &&
+                "Public catalog###line-id-7075626c69632d737065637472616c2d6c696e65732e7631" &&
             chinese ==
-                "公共目录###public-spectral-lines.v1",
+                "公共目录###line-id-7075626c69632d737065637472616c2d6c696e65732e7631",
         "the spectral-line catalog option should keep its catalog identity while localizing visible text");
 }
 
