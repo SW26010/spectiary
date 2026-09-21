@@ -14,7 +14,11 @@ inline bool SpectralLineTextSelectable(const char* identity, std::string_view te
     const auto text_size = ImGui::CalcTextSize(text.data(), text.data() + text.size(), false);
     auto pos = ImGui::GetCursorScreenPos();
     pos.y += ImGui::GetCurrentWindow()->DC.CurrLineTextBaseOffset;
-    if (size.x == 0.0f) size.x = text_size.x;
+    if (size.x == 0.0f) {
+        // Keep full-text measurement for popup sizing and the default full-row hit area.
+        size.x = text_size.x;
+        flags |= ImGuiSelectableFlags_SpanAvailWidth;
+    }
     if (size.y == 0.0f) size.y = text_size.y;
     const bool chosen = ImGui::Selectable(identity, selected, flags, size);
     if (ImGui::IsItemVisible()) {

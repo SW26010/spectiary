@@ -129,6 +129,35 @@ void TestPlainTextDrawOutput()
     ui.Frames(3);
 }
 
+void TestPlainTextSelectableHitArea()
+{
+    bool chosen = false;
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_Always);
+        ImGui::Begin("Selectable hit area");
+        if (ImGui::BeginCombo("Choices", "R")) {
+            if (SpectralLineTextSelectable("###short", "R")) chosen = true;
+            (void)SpectralLineTextSelectable("###long", "Carbon ## longer ### reference");
+            ImGui::EndCombo();
+        }
+        (void)SpectralLineTextSelectable("###fixed", "R", false, 0, ImVec2(80, 0));
+        ImGui::End();
+    }};
+    ui.Frames(3);
+    Require(ui.Find("fixed").raw_bounds.GetWidth() < 100, "explicit selectable width stays bounded");
+    ui.Click("Choices");
+    const auto short_row = ui.Find("short");
+    const auto long_row = ui.Find("long");
+    const ImVec2 blank(long_row.bounds.Max.x - 12, short_row.bounds.GetCenter().y);
+    Require(blank.x > short_row.bounds.Min.x + 80, "click is well beyond the short label");
+    ImGui::GetIO().AddMousePosEvent(blank.x, blank.y); ui.Frames(2);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true); ui.Frames();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false); ui.Frames(2);
+    Require(chosen, "clicking trailing blank space selects the short plain-text menu item");
+    Require(!ui.Observe("short").has_value(), "successful blank-space selection closes the popup");
+}
+
 void TestPlainTextNames()
 {
     test_support::TemporaryDirectory temporary;
@@ -291,6 +320,6 @@ void TestPanel()
 }
 int main()
 {
-    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextNames(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
+    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextSelectableHitArea(); TestPlainTextNames(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
