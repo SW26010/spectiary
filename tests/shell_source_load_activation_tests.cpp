@@ -2794,14 +2794,21 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         session,
         spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    std::promise<void> completion_ready_promise;
-    std::shared_future<void> completion_ready =
-        completion_ready_promise.get_future().share();
+    // Retirement can notify during shutdown, after this function's locals die.
+    // Keep the signal alive until the queue unregisters and joins the callback.
+    struct CompletionSignal {
+        std::promise<void> ready;
+        std::atomic_bool signaled = false;
+    };
+    const auto signal = std::make_shared<CompletionSignal>();
+    std::shared_future<void> completion_ready = signal->ready.get_future().share();
     spectiary::ShellUiTestAccess::
         RegisterCompletionReadyCallback(
             activation,
-            [&completion_ready_promise]() {
-                completion_ready_promise.set_value();
+            [signal]() {
+                if (!signal->signaled.exchange(true)) {
+                    signal->ready.set_value();
+                }
             });
 
     const spectiary::SourceCollectionSessionResult
