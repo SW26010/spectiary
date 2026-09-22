@@ -18,14 +18,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 ctest --test-dir build/ninja-msvc-debug -L widget --output-on-failure --no-tests=error
 ```
 
-The `widget` label covers Settings, SourceCollection annotations and Files,
+The `widget` label covers Settings, SourceCollection annotations, Files and
+numeric navigation, annotation-to-labeling confirmation, Spectral Lines,
 SampleWorkflow, and the Shell file-menu interaction. Settings and panel cases
 belong to `fast`; the existing Shell suite retains its `extended` tier. Build all
 targets before running the label. The standalone widget executables have
 30-second timeouts; existing mixed suites retain their CTest timeouts.
 For repeatability, add `--repeat until-fail:20` to a focused widget selection.
 The Settings executable also accepts `failures`, `input`, `theme`, `scale`, or
-`recording`; `input` includes General and Language controls.
+`recording`; `input` includes General, Language and legal-document controls,
+and `recording` also checks repair of warned fallback settings.
 
 Run `fast` for each migration commit, and `extended` at major panel and final
 checkpoints. Do not build concurrently with `extended`: its metadata regression
@@ -87,6 +89,19 @@ SourceCollection and SampleWorkflow retain no test-only widget rectangle members
 or maps. Their tests locate ordinary controls through native item observations.
 Settings ordinary checkbox, language, scale and reset scans are consolidated
 into owner-asserting widget tests. Shell File > Open File uses stable menu IDs.
+The localized sorting-source popup uses rendered clicks and checks the exact
+submitted source. Numeric navigation widget cases cover source-row and sequence
+position commits, blur, cancellation and live prefixes; the component suite
+retains its precise topology and presentation transitions. Annotation activation
+drags the real annotation row onto the labeling selector before confirming or
+cancelling. Spectral-line grouping creation, rename, duplicate and deletion
+check the controller result by stable identity.
+
+Settings warning-repair tests load malformed files, reselect fallback controls,
+and verify the repaired owner reloads cleanly. Legal-document widget tests embed
+the production resources and cover opening, switching and full-content copying
+with a captured clipboard. They scroll the actual content pane with a bounded
+wheel loop; the harness itself does not implement offscreen discovery.
 
 The mixed SampleWorkflow and Shell files keep component cases when widget tests
 are OFF. Only rendered controls requiring instrumentation are compiled under
@@ -105,7 +120,7 @@ Remaining seams have explicit responsibilities:
 - Header layout and disabled/occluded hit-tests intentionally use pointer
   coordinates. Recovery identity text has no widget ID: its bounded hover scan
   checks the full tooltip and remains a geometry test.
-- Settings retains focused layout, artifact identity, legal disclosure, text
+- Settings retains focused layout, artifact identity, legal disclosure geometry, text
   hit-testing, viewport constraints and platform-focus seams. The General
   action-driving private render accessor was removed.
 - Shell retains component session/controller injection and a narrow menu-render
