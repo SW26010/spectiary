@@ -237,6 +237,8 @@ private:
     friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
+    friend struct SourceCollectionPanelUiTestAccess;
+
     SampleSortingIntent() = default;
 
     SampleSortingIntentKind kind = SampleSortingIntentKind::ClearSorting;

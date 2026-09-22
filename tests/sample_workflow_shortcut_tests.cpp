@@ -37,6 +37,12 @@ std::optional<std::array<float, 4>> WidgetBounds(std::string_view label, std::st
 namespace spectiary {
 
 struct SourceCollectionPanelUiTestAccess {
+    static bool IsAddSampleNameSortSource(const SourceCollectionSessionIntent& intent)
+    {
+        return intent.kind == SourceCollectionSessionIntentKind::SampleSorting &&
+            intent.sample_sorting.kind == SampleSortingIntentKind::AddSortSource &&
+            intent.sample_sorting.source_id == "sample-name";
+    }
     [[nodiscard]] static ActiveSampleWorkflowIntentKind
     ActiveWorkflowKind(const SourceCollectionSessionIntent& intent)
     {
@@ -1140,73 +1146,6 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     return observation;
 }
 
-struct SortingPopupFrameObservation {
-    int submission_count = 0;
-    bool popup_open = false;
-    ImGuiID add_source_button_id = 0;
-    ImGuiID localized_sample_name_item_id = 0;
-};
-
-SortingPopupFrameObservation RenderSortingPopupFrame(
-    spectiary::SampleWorkflowPanelUi& panel,
-    const spectiary::SourceCollectionSessionView& view)
-{
-    BeginFrame();
-    ImGui::SetNextWindowPos(
-        ImVec2(20.0f, 20.0f),
-        ImGuiCond_Always);
-    ImGui::SetNextWindowSize(
-        ImVec2(520.0f, 500.0f),
-        ImGuiCond_Always);
-    bool open = true;
-    SortingPopupFrameObservation observation;
-    spectiary::PanelSessionInteraction interaction(
-        [&](
-            spectiary::SourceCollectionSessionIntent,
-            std::optional<
-                spectiary::NavigationLatencyInputKind>) {
-            ++observation.submission_count;
-            return spectiary::SourceCollectionSessionResult{};
-        },
-        [&]() -> const spectiary::SourceCollectionSessionView& {
-            return view;
-        });
-    panel.RenderSorting(
-        interaction,
-        spectiary::UiLanguage::SimplifiedChinese,
-        &open);
-    if (ImGuiWindow* window = ImGui::FindWindowByName(
-            spectiary::SampleWorkflowPanelUi::
-                SortingWindowName())) {
-        observation.add_source_button_id =
-            window->GetID("+##AddSampleSortSource");
-    }
-    observation.popup_open = ImGui::IsPopupOpen(
-        nullptr,
-        ImGuiPopupFlags_AnyPopupId |
-            ImGuiPopupFlags_AnyPopupLevel);
-    if (!GImGui->OpenPopupStack.empty()) {
-        if (ImGuiWindow* popup_window =
-                GImGui->OpenPopupStack.back().Window) {
-            const ImGuiID source_id =
-                popup_window->GetID("sample-name");
-            const std::string_view localized_name =
-                spectiary::UiText(
-                    spectiary::UiLanguage::
-                        SimplifiedChinese,
-                    spectiary::UiTextId::
-                        SampleNameSortSource);
-            observation.localized_sample_name_item_id =
-                ImHashStr(
-                    localized_name.data(),
-                    localized_name.size(),
-                    source_id);
-        }
-    }
-    ImGui::EndFrame();
-    return observation;
-}
-
 void TestCanonicalAnnotationActivationUsesSingleFileConfirmation()
 {
     spectiary::SampleWorkflowPanelUi panel;
@@ -1702,39 +1641,40 @@ void TestShortcutDisplayUsesKeyboardLegends()
     Require(spectiary::FormatSampleLabelShortcut('\0') == "None", "unbound shortcut should display as None");
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
 void TestAddSortSourcePopupLocalizesBuiltInSampleName()
 {
     ScopedImGuiContext context;
     spectiary::SampleWorkflowPanelUi panel;
     spectiary::SourceCollectionSessionView view;
     view.sorting.has_active_source = true;
-    view.sorting.available_sources.push_back(
-        {
-            .id = "sample-name",
-            .name = "Sample name",
-        });
-
-    SortingPopupFrameObservation observation =
-        RenderSortingPopupFrame(panel, view);
-    Require(
-        observation.add_source_button_id != 0,
-        "integration fixture should find the add-sort-source button");
-    ImGui::ActivateItemByID(
-        observation.add_source_button_id);
-    observation = RenderSortingPopupFrame(panel, view);
-    Require(
-        observation.popup_open &&
-            observation.localized_sample_name_item_id != 0,
-        "integration fixture should open the add-sort-source popup");
-
-    ImGui::ActivateItemByID(
-        observation.localized_sample_name_item_id);
-    observation = RenderSortingPopupFrame(panel, view);
-    Require(
-        observation.submission_count == 1,
-        "the Chinese add-sort-source popup should expose the built-in sample-name item as 样本名称");
+    view.sorting.available_sources.push_back({.id = "sample-name", .name = "Sample name"});
+    int submissions = 0;
+    const auto render = [&] {
+        BeginFrame();
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(520, 500), ImGuiCond_Always);
+        bool open = true;
+        spectiary::PanelSessionInteraction interaction(
+            [&](spectiary::SourceCollectionSessionIntent intent,
+                std::optional<spectiary::NavigationLatencyInputKind>) {
+                ++submissions;
+                Require(spectiary::SourceCollectionPanelUiTestAccess::IsAddSampleNameSortSource(intent),
+                    "Localized selection must submit AddSortSource for sample-name");
+                return spectiary::SourceCollectionSessionResult{};
+            },
+            [&]() -> const spectiary::SourceCollectionSessionView& { return view; });
+        panel.RenderSorting(interaction, spectiary::UiLanguage::SimplifiedChinese, &open);
+        ImGui::EndFrame();
+    };
+    render();
+    auto& ui = spectiary::test::WidgetHarness::Current();
+    ui.Click("+##AddSampleSortSource", render);
+    Require(submissions == 0, "Opening the sort source popup must not submit an intent");
+    ui.Click("样本名称", render);
+    Require(submissions == 1, "Selecting the localized sample-name source must submit exactly once");
 }
-
+#endif
 void TestShortcutCaptureAcceptsLettersAndKeypadDigits()
 {
     ScopedImGuiContext context;
@@ -4802,7 +4742,9 @@ int main()
 #endif
     TestLabelExportFormatControlsDefaultExtension();
     TestShortcutDisplayUsesKeyboardLegends();
+#ifdef IMGUI_ENABLE_TEST_ENGINE
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
+#endif
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();
     TestShortcutCaptureRejectsModifiedAndReservedKeys();
     TestShortcutCaptureSupportsClearAndCancel();
