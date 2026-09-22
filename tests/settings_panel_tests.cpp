@@ -284,8 +284,6 @@ constexpr LegalDocumentUiFixture kLegalDocumentUiFixtures[] = {
 struct LegalRenderObservation {
     ImGuiID entry_id = 0;
     bool entry_hovered = false;
-    ImGuiID copy_id = 0;
-    bool copy_hovered = false;
     bool any_popup_open = false;
     int open_disclosure_count = 0;
     ImVec2 document_content_center;
@@ -342,10 +340,6 @@ LegalRenderObservation RenderLegalFrame(
                     window->GetID(fixture.entry_label);
                 observation.entry_hovered =
                     GImGui->HoveredId == observation.entry_id;
-                observation.copy_id = window->GetID(
-                    "Copy Document###CopyLegalDocument");
-                observation.copy_hovered =
-                    GImGui->HoveredId == observation.copy_id;
                 break;
             }
         }
@@ -449,55 +443,6 @@ ImVec2 FindLegalEntryPosition(
     Require(
         false,
         "each Legal entry should remain pointer-accessible in the narrow About content area");
-    return ImVec2();
-}
-
-ImVec2 FindLegalCopyPosition(
-    spectiary::SettingsPanelUi& panel,
-    const LegalDocumentUiFixture& fixture)
-{
-    LegalRenderObservation observation =
-        RenderLegalFrame(panel, fixture);
-    Require(
-        observation.settings_content_window != nullptr,
-        "the expanded Legal disclosure should remain inside Settings content");
-
-    const float viewport_height = std::max(
-        1.0f,
-        observation.settings_content_clip_rect.GetHeight());
-    const float scroll_step = viewport_height * 0.5f;
-    for (float scroll_y = 0.0f;;
-         scroll_y = std::min(
-             scroll_y + scroll_step,
-             observation.settings_content_scroll_max_y)) {
-        observation.settings_content_window->Scroll.y = scroll_y;
-        observation = RenderLegalFrame(panel, fixture);
-
-        for (float y =
-                 observation.settings_content_clip_rect.Min.y + 1.0f;
-             y < observation.settings_content_clip_rect.Max.y;
-             y += 3.0f) {
-            for (float x =
-                     observation.settings_content_clip_rect.Min.x + 1.0f;
-                 x < observation.settings_content_clip_rect.Max.x;
-                 x += 24.0f) {
-                ImGui::GetIO().AddMousePosEvent(x, y);
-                observation = RenderLegalFrame(panel, fixture);
-                if (observation.copy_hovered) {
-                    return ImVec2(x, y);
-                }
-            }
-        }
-
-        if (scroll_y >=
-            observation.settings_content_scroll_max_y) {
-            break;
-        }
-    }
-
-    Require(
-        false,
-        "Copy Document should remain pointer-accessible in the expanded disclosure");
     return ImVec2();
 }
 
@@ -1875,19 +1820,6 @@ void TestEmbeddedLegalDocumentInlineDisclosures()
     Require(
         observation.open_disclosure_count == 1,
         "a primary click inside the legal document should not collapse it");
-
-    const ImVec2 copy_position =
-        FindLegalCopyPosition(panel, third_party);
-    constexpr char kClipboardSentinel[] =
-        "Spectiary Legal copy button sentinel";
-    ImGui::SetClipboardText(kClipboardSentinel);
-    observation = ClickLegalPosition(panel, third_party, copy_position);
-    Require(
-        imgui.clipboard_text() ==
-            spectiary::EmbeddedLegalDocumentContent(
-                third_party.document) &&
-            observation.open_disclosure_count == 1,
-        "Copy Document should copy complete legal content without collapsing the disclosure");
 
     const LegalDocumentUiFixture& data_sources =
         kLegalDocumentUiFixtures[1];

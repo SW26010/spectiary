@@ -237,6 +237,63 @@ void TestPlainTextNames()
     Require(copied, "plain target label keeps the copy action bound to its canonical identity");
 }
 
+void TestGroupingViewEditing()
+{
+    test_support::TemporaryDirectory temporary;
+    SpectralLinesPanelController controller(BuiltIn(), temporary.path() / "state.json");
+    SpectralLinesPanelUi panel;
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(900, 680), ImGuiCond_Always);
+        bool open = true;
+        panel.Render(controller, {}, UiLanguage::English, &open);
+    }};
+    ui.Frames(3);
+    ui.Click("+");
+    auto state = controller.View();
+    Require(state.user_grouping_view_count == 1, "Add tab must create exactly one user view");
+    std::string id;
+    std::string original_name;
+    for (const auto& view : state.grouping_views) {
+        if (view.editable) { id = view.id; original_name = view.name; }
+    }
+    Require(!id.empty(), "New user view must have a stable identity");
+    const std::string tab = "###" + SpectralLineUiId(id);
+    const auto name = [&]() {
+        for (const auto& view : controller.View().grouping_views)
+            if (view.id == id) return view.name;
+        throw std::runtime_error("Expected user view disappeared");
+    };
+    const auto rename = [&](const char* text, bool cancel) {
+        ui.Click(tab, ImGuiMouseButton_Right);
+        ui.Click("RenameSpectralLineGroupingView");
+        ui.Click("SpectralLineGroupingViewName");
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+        ui.Key(ImGuiKey_A);
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false); ui.Frames();
+        ui.Text(text);
+        ui.Click(cancel ? "CancelRenameSpectralLineGroupingView" : "ConfirmRenameSpectralLineGroupingView");
+    };
+    rename("Discarded name", true);
+    Require(name() == original_name, "Cancel rename must preserve the selected view");
+    rename("Authored grouping", false);
+    Require(name() == "Authored grouping", "Confirm rename must target the same stable view ID");
+    ui.Click(tab, ImGuiMouseButton_Right);
+    ui.Click("DuplicateSpectralLineGroupingView");
+    Require(controller.View().user_grouping_view_count == 2, "Duplicate must create one independent user view");
+    ui.Click(tab);
+    for (bool cancel : {true, false}) {
+        ui.Click(tab, ImGuiMouseButton_Right);
+        ui.Click("DeleteSpectralLineGroupingView");
+        ui.Click(cancel ? "CancelDeleteSpectralLineGroupingView" : "ConfirmDeleteSpectralLineGroupingView");
+        Require(controller.View().user_grouping_view_count == (cancel ? 2u : 1u),
+            "Delete confirmation must control whether the selected view is removed");
+        if (cancel) Require(name() == "Authored grouping", "Cancel delete must retain the target identity");
+    }
+    for (const auto& view : controller.View().grouping_views)
+        Require(view.id != id, "Delete must remove the requested view, preserving the duplicate");
+}
+
 void TestPanel()
 {
     test_support::TemporaryDirectory temporary;
@@ -320,6 +377,6 @@ void TestPanel()
 }
 int main()
 {
-    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextSelectableHitArea(); TestPlainTextNames(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
+    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextSelectableHitArea(); TestPlainTextNames(); TestGroupingViewEditing(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

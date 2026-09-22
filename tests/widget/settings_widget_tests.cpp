@@ -1,6 +1,9 @@
 #include "imgui_widget_harness.h"
 #include "ui/settings_panel.h"
+#include "app/embedded_legal_documents.h"
+#include "../helpers/temporary_directory.h"
 
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -86,6 +89,126 @@ void TestThemeCombo()
     Require(f.settings.View().theme_selection == ThemeSelection::Explicit(BuiltInLightThemeId()),
             "Rendered theme popup must select the light theme");
     Require(f.intents == 1, "Theme selection must emit one intent");
+}
+
+void TestWarnedFallbackRepairThroughControls()
+{
+    test_support::TemporaryDirectory temporary;
+    const auto& root = temporary.path();
+    ApplicationSettingsStorage storage{
+        .language_settings_path = root / "language.json",
+        .appearance_settings_path = root / "appearance.json",
+        .ui_scale_settings_path = root / "scale.json",
+        .input_settings_path = root / "input.json",
+        .external_source_settings_path = root / "external.json",
+        .profile_settings_path = root / "profile.json",
+        .panel_visibility_path = root / "panels.json",
+        .default_profile_output_directory = root / "profiles"};
+    for (const auto& path : {storage.language_settings_path, storage.profile_settings_path}) {
+        std::ofstream file(path);
+        file << "{invalid";
+    }
+    ApplicationSettings settings(storage);
+    for (auto setting : {ApplicationSetting::Language, ApplicationSetting::ProfileOutputDirectory})
+        Require(settings.View().StatusFor(setting).kind == ApplicationSettingsStatusKind::LoadWarning,
+            "Malformed persisted settings must start with a load warning");
+    const auto fallback_language = settings.View().language;
+    SettingsPanelUi panel{SettingsPanelEnvironment{}};
+    std::vector<ApplicationSettingsIntentKind> intents;
+    WidgetHarness ui{[&] {
+        panel.Render(settings.View(), {});
+        if (auto intent = panel.TakeApplicationSettingsIntent()) {
+            intents.push_back(intent->kind);
+            Require(settings.Apply(std::move(*intent), {}).applied(),
+                "Reselecting a warned fallback must repair the settings owner");
+            Require(!panel.TakeApplicationSettingsIntent(), "Repair intent must be one-shot");
+        }
+    }};
+    panel.Open(); ui.Frames(3);
+    ui.Click("SettingsLanguage");
+    ui.Click("ApplicationLanguage");
+    ui.Click(fallback_language == UiLanguage::English ? "UiLanguageEnglish" : "UiLanguageSimplifiedChinese");
+    Require(settings.View().language == fallback_language &&
+        settings.View().StatusFor(ApplicationSetting::Language).kind == ApplicationSettingsStatusKind::Ready,
+        "Selecting the current fallback language must clear its warning without changing its value");
+    ui.Click("SettingsDiagnostics");
+    Require(!ui.Find("RestoreProfileOutputDefault").disabled,
+        "Warned default directory must remain repairable");
+    ui.Click("RestoreProfileOutputDefault");
+    Require(settings.View().profile_output_directory == storage.default_profile_output_directory &&
+        settings.View().StatusFor(ApplicationSetting::ProfileOutputDirectory).kind == ApplicationSettingsStatusKind::Ready,
+        "Restoring the current default directory must clear its warning");
+    Require(intents == std::vector<ApplicationSettingsIntentKind>{ApplicationSettingsIntentKind::SetLanguage,
+        ApplicationSettingsIntentKind::RestoreDefaultProfileOutputDirectory},
+        "Each repair must submit exactly its own settings intent once");
+    Require(settings.Flush().all_saved(), "Repaired settings must persist");
+    ApplicationSettings reopened(storage);
+    Require(reopened.View().StatusFor(ApplicationSetting::Language).kind == ApplicationSettingsStatusKind::Ready &&
+        reopened.View().StatusFor(ApplicationSetting::ProfileOutputDirectory).kind == ApplicationSettingsStatusKind::Ready,
+        "Repaired settings must reload without warnings");
+}
+
+void TestLegalDocumentControls()
+{
+    SettingsFixture f;
+    std::string clipboard;
+    int copies = 0;
+    struct ClipboardCapture { std::string& text; int& count; } capture{clipboard, copies};
+    auto& platform = ImGui::GetPlatformIO();
+    platform.Platform_ClipboardUserData = &capture;
+    platform.Platform_SetClipboardTextFn = [](ImGuiContext* context, const char* text) {
+        auto& output = *static_cast<ClipboardCapture*>(context->PlatformIO.Platform_ClipboardUserData);
+        output.text = text;
+        ++output.count;
+    };
+    f.ui.Click("SettingsAbout");
+    const auto reveal = [&](std::string_view label) {
+        // Scroll the real content pane; do not scan coordinates to discover a control.
+        for (int frame = 0; frame < 40 && !f.ui.Observe(label); ++frame) {
+            ImGuiWindow* settings = ImGui::FindWindowByName("Settings###SettingsV1");
+            Require(settings != nullptr, "Settings must be visible");
+            ImGuiWindow* content = nullptr;
+            for (auto* window : GImGui->Windows)
+                if (window->ParentWindow == settings && window->ChildId == settings->GetID("##SettingsContent"))
+                    content = window;
+            Require(content != nullptr, "Settings content pane must exist");
+            const auto point = ImVec2(content->InnerClipRect.Max.x - 2, content->InnerClipRect.Min.y + 10);
+            ImGui::GetIO().AddMousePosEvent(point.x, point.y); f.ui.Frames(2);
+            ImGui::GetIO().AddMouseWheelEvent(0, -2); f.ui.Frames(2);
+        }
+        (void)f.ui.Find(label);
+    };
+    const auto check_disclosure = [&](LegalDocument expected) {
+        int count = 0;
+        for (auto* window : GImGui->Windows) {
+            if (!window->Active || !window->ParentWindow) continue;
+            for (const auto& [child, document] : {
+                     std::pair{"##ThirdPartyNoticesContent", LegalDocument::ThirdPartyNotices},
+                     std::pair{"##DataSourcesContent", LegalDocument::DataSources}}) {
+                if (window->ChildId == window->ParentWindow->GetID(child)) {
+                    ++count;
+                    Require(document == expected, "Switching disclosures must close the previous document");
+                }
+            }
+        }
+        Require(count == 1, "Exactly the selected legal disclosure must remain open");
+    };
+    for (const auto& [label, document] : {
+             std::pair{"OpenThirdPartyNotices", LegalDocument::ThirdPartyNotices},
+             std::pair{"OpenDataSources", LegalDocument::DataSources}}) {
+        reveal(label);
+        f.ui.Click(label);
+        reveal("CopyLegalDocument");
+        check_disclosure(document);
+        Require(!EmbeddedLegalDocumentContent(document).empty(), "Legal fixture must embed production resources");
+        const int before = copies;
+        f.ui.Click("CopyLegalDocument");
+        Require(copies == before + 1 && clipboard == EmbeddedLegalDocumentContent(document),
+            "Copy must emit exactly the complete selected legal document once");
+        check_disclosure(document);
+    }
+    platform.Platform_ClipboardUserData = nullptr;
+    platform.Platform_SetClipboardTextFn = nullptr;
 }
 
 void TestExternalOpenInstanceCombo()
@@ -248,10 +371,10 @@ int main(int argc, char** argv)
         Require(name == "all" || name == "failures" || name == "input" ||
                 name == "theme" || name == "scale" || name == "recording", "Unknown widget test case");
         if (name == "all" || name == "failures") { TestBoundedFailures(); TestClippedWidgetBounds(); }
-        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestExternalOpenInstanceCombo(); TestLayoutRecoveryControlAndSettingsPlacement(); }
+        if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestExternalOpenInstanceCombo(); TestLayoutRecoveryControlAndSettingsPlacement(); TestLegalDocumentControls(); }
         if (name == "all" || name == "theme") TestThemeCombo();
         if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();
-        if (name == "all" || name == "recording") TestRecordingDisablesDirectoryReset();
+        if (name == "all" || name == "recording") { TestRecordingDisablesDirectoryReset(); TestWarnedFallbackRepairThroughControls(); }
         std::cout << "Widget regression passed: " << name << '\n';
         return 0;
     } catch (const std::exception& error) {
