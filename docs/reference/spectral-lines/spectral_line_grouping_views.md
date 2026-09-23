@@ -46,14 +46,14 @@ It does not encode inheritance. Explicit colors use v1 RGBA8; Auto has no mappin
 
 The existing path stays `state/spectral-line-grouping-views.json`, beneath the
 resolved Portable or LocalAppData application root. The internal envelope retains
-`format_kind: "spectiary.catalog_user_state.cache"` and uses schema version **7**.
+`format_kind: "spectiary.catalog_user_state.cache"` and uses schema version **8**.
 It is not an importable public v1 file. All record fields are closed and null is
 invalid. One `catalogs` mapping key scopes the record to the packaged list ID:
 
 ```json
 {
   "format_kind": "spectiary.catalog_user_state.cache",
-  "schema_version": 7,
+  "schema_version": 8,
   "catalogs": {
     "public-spectral-lines.v1": {
       "overlay": {"grouping_views": []},
@@ -61,7 +61,7 @@ invalid. One `catalogs` mapping key scopes the record to the packaged list ID:
         "active_view_id": "__catalog_grouping_view__",
         "active_color_scheme_id": "",
         "marker_visibility": {},
-        "expanded_group_ids": [],
+        "expanded_groups": [],
         "view_names": {},
         "group_names": {}
       }
@@ -86,7 +86,13 @@ Restore defaults removes the entire collection override; explicit empty is a
 different operation. Explicit ownership is retained even if values match base.
 
 Session owns active view/scheme, visibility, expansion, and generated-name
-localization metadata. `view_names` and `group_names` map stable IDs to records
+localization metadata. Expansion uses structured `(view_id, group_id)` pairs,
+including derived Unassigned areas. `expanded_groups` is an array of objects
+with exactly two nonempty string fields, `view_id` and `group_id`; duplicate
+pairs are invalid. IDs remain opaque and may contain `/`. Pairs are written in
+lexicographic order by view ID, then group ID.
+
+`view_names` and `group_names` map stable IDs to records
 with optional `name_source`, `name_ordinal`, `generated_copy_count`, and
 `generated_copy_base_name`. Existing name-source enum spellings and copy-count
 limit (1024) are retained. No ownership is inferred from display text. Search
@@ -99,22 +105,27 @@ input produce a nonblocking diagnostic and leave the file untouched. A valid bas
 can still be displayed. Fallback does not authorize overwriting rejected state.
 No guessed reference repair, placeholder content, or automatic reset is performed.
 
-## Bounded schema 6 conversion
+## Bounded schema 6/7 conversion
 
-Only immediately preceding schema 6 is supported. Earlier pre-release schemas
+Schemas 6 and 7 are supported as migration inputs. Earlier pre-release schemas
 are rejected unchanged. Validate old shapes, names, identities, references,
 Unassigned identity/flag pairing, and explicit colors before producing a complete
 valid effective model. Reject unrelated list identities, duplicate/dangling
 references and composed collisions without publishing a partial conversion.
 
-Preserve ordinary group membership, stored array order and stable identities.
+Both legacy schemas convert `expanded_group_ids` strings only at the migration
+boundary: exactly one `/` separates two nonempty IDs. Malformed or ambiguous
+keys and repeated pairs are rejected. Schema 7 otherwise preserves overlay and
+session fields. A successful legacy load requests a save as schema 8.
+
+For schema 6, preserve ordinary group membership, stored array order and stable identities.
 Migration does not normalize marker arrays to UI wavelength order. Omit only the validated legacy system Unassigned
 group; an ordinary group named Unassigned survives. Move localization provenance
 to session maps. Quantize finite normalized old color channels to RGBA8 using the
 v1 conversion, putting explicit colors in one ordinary scheme. No old explicit
 colors means no override. Preserve compatible selections/visibility/expansion.
 Conversion is reloaded and validated under the existing commit lease before
-atomic publication. Schema 7 becomes the sole writable owner; no old writer or
+atomic publication. Schema 8 becomes the sole writable owner; no old writer or
 legacy runtime domain model remains.
 
 ## Concurrent user-state write contract

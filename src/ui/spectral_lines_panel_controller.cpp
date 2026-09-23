@@ -504,8 +504,8 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
     const auto group_exists = [&](std::string_view id) { return id == unassigned || find_group(id) != nullptr; };
     if (intent.kind_ == Kind::SetGroupExpanded) {
         if (!group_exists(intent.group_id_)) return Rejected("Group does not exist.");
-        const auto key = view.id + "/" + intent.group_id_;
-        bool changed = intent.enabled_ ? session.expanded_group_ids.insert(key).second : session.expanded_group_ids.erase(key) != 0;
+        const SpectralLineGroupExpansionKey key{view.id, intent.group_id_};
+        bool changed = intent.enabled_ ? session.expanded_groups.insert(key).second : session.expanded_groups.erase(key) != 0;
         return changed ? Applied(true) : NoChange();
     }
     if (intent.kind_ == Kind::SetGroupMarkerVisibility) {
@@ -545,7 +545,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
     if (intent.kind_ == Kind::DeleteUserGroup) {
         if (!std::erase_if(view.groups, [&](const auto& group) { return group.id == intent.group_id_; })) return Rejected("Editable group does not exist.");
         if (!adapter_.PutView(view, error)) return Rejected(error);
-        session.expanded_group_ids.erase(view.id + "/" + intent.group_id_); return Applied(true);
+        session.expanded_groups.erase({view.id, intent.group_id_}); return Applied(true);
     }
     if (intent.kind_ == Kind::ReorderUserGroupBefore) {
         if (!find_group(intent.source_group_id_) || !group_exists(intent.target_group_id_) || intent.source_group_id_ == intent.target_group_id_)
@@ -579,7 +579,7 @@ SpectralLineStateResult SpectralLinesPanelController::Submit(SpectralLineStateIn
         view.groups.push_back(std::move(group));
         if (!adapter_.PutView(view, error)) return Rejected(error);
         session.group_names[id] = {GeneratedNameSource::DefaultGroup, ordinal, 0, {}};
-        if (intent.kind_ != Kind::AddUserGroup) session.expanded_group_ids.insert(view.id + "/" + id);
+        if (intent.kind_ != Kind::AddUserGroup) session.expanded_groups.insert({view.id, id});
         return Applied(true);
     }
     if (!FindMarker(intent.marker_id_)) return Rejected("Marker does not exist.");
@@ -646,7 +646,7 @@ SpectralLinePanelView SpectralLinesPanelController::View() const
             SpectralLineGroupView group;
             group.id = std::move(id); group.name = std::move(name); group.is_unassigned = unassigned;
             group.generated_name = NameMetadata(session.group_names, group.id);
-            group.expanded = session.expanded_group_ids.contains(view.id + "/" + group.id);
+            group.expanded = session.expanded_groups.contains({view.id, group.id});
             std::size_t visible = 0;
             auto displayed = members;
             std::stable_sort(displayed.begin(), displayed.end(), [&](const auto& left, const auto& right) {

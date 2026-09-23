@@ -1,6 +1,7 @@
 #pragma once
 #include "overlays/spectral_line_session_state.h"
 #include <set>
+#include <unordered_set>
 
 namespace spectiary {
 struct BuiltInSpectralLineTaskIntent {

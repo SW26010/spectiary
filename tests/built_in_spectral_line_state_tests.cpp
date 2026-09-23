@@ -28,10 +28,18 @@ void Run()
     Require(ReconcileBuiltInSpectralLineTask(base, initial, a, b, intent, merged, error), error);
     const auto& colors = merged.overlay.color_schemes->front().colors;
     Require(colors.at("a") == "#FF0000FF" && colors.at("b") == "#00FF00FF", "concurrent first overrides preserve disjoint fields");
+    merged.session.expanded_groups = {{"a/b", "c"}, {"a", "b/c"}};
     Require(SaveBuiltInSpectralLineState(path, base, merged, error), error);
     auto loaded = LoadBuiltInSpectralLineState(path, base);
     NormalizeSpectralLineSession(merged.session, *ComposeBuiltInSpectralLineList(base, merged.overlay).list);
     Require(loaded.error.empty() && loaded.state == merged, "state round trip");
+    const auto read = [&] { std::ifstream stream(path); return Json::parse(stream); };
+    const auto schema_eight = read();
+    Require(schema_eight.at("schema_version") == 8 &&
+            schema_eight.at("catalogs").at(base.id).at("session").at("expanded_groups") ==
+                Json::array({{{"view_id", "a"}, {"group_id", "b/c"}}, {{"view_id", "a/b"}, {"group_id", "c"}}}) &&
+            !schema_eight.at("catalogs").at(base.id).at("session").contains("expanded_group_ids"),
+            "schema 8 writes ordered pair objects without delimiter encoding");
     auto restored = merged;
     restored.overlay.color_schemes.reset();
     intent.whole_color_collection = true;
@@ -53,12 +61,25 @@ void Run()
     auto add_a = groups, add_b = groups;
     add_a.overlay.grouping_views[0].groups.push_back({"new", "A", {"a"}});
     add_b.overlay.grouping_views[0].groups.push_back({"new", "B", {"b"}});
+    add_a.session.expanded_groups.insert({"v", "new"});
     add_a.session.group_names["new"] = {GeneratedNameSource::DefaultGroup, 2, 0, {}};
     add_b.session.group_names["new"] = {GeneratedNameSource::DefaultGroup, 3, 0, {}};
     Require(ReconcileBuiltInSpectralLineTask(base, groups, add_a, add_b, {}, loaded.state, error), error);
     Require(loaded.state.overlay.grouping_views[0].groups.size() == 3, "concurrent ID collision preserves both additions");
     Require(loaded.state.session.group_names.at("new").ordinal == 3 && loaded.state.session.group_names.at("new-2").ordinal == 2,
             "remapping must preserve each writer's localization metadata independently");
+
+    Require(loaded.state.session.expanded_groups.contains({"v", "new-2"}) &&
+            !loaded.state.session.expanded_groups.contains({"v", "new"}),
+            "group remap moves expansion to the local writer's new identity");
+    auto view_a = initial, view_b = initial;
+    view_a.overlay.grouping_views = {{"v/x", "A", {{"g/x", "A", {"a"}}}}};
+    view_b.overlay.grouping_views = {{"v/x", "B", {{"g/x", "B", {"b"}}}}};
+    view_a.session.expanded_groups.insert({"v/x", "g/x"});
+    Require(ReconcileBuiltInSpectralLineTask(base, initial, view_a, view_b, {}, loaded.state, error), error);
+    Require(loaded.state.session.expanded_groups.contains({"v/x-2", "g/x-2"}) &&
+            !loaded.state.session.expanded_groups.contains({"v/x", "g/x"}),
+            "simultaneous view/group remap uses the original opaque view identity");
 
     Json legacy = {{"format_kind", "spectiary.catalog_user_state.cache"}, {"schema_version", 6},
         {"catalogs", {{base.id, {{"active_view_id", "v"}, {"marker_visibility", {{"a", true}}},
@@ -69,9 +90,47 @@ void Run()
                     {{"id", "__unassigned__"}, {"name", "Unassigned"}, {"is_unassigned", true}, {"marker_references", Json::array()}}})}}})}}}}},
         {"catalog_panel_state", {{base.id, {{"expanded_group_ids", {"v/g"}}}}}}};
     const auto write = [&](const Json& value) { std::ofstream(path) << value.dump(2); };
+    auto seven = schema_eight;
+    seven["schema_version"] = 7;
+    auto& seven_session = seven["catalogs"][base.id]["session"];
+    seven_session.erase("expanded_groups");
+    seven_session["expanded_group_ids"] = {"v/g"};
+    write(seven);
+    loaded = LoadBuiltInSpectralLineState(path, base);
+    Require(loaded.error.empty() && loaded.requires_save &&
+            loaded.state.session.expanded_groups == std::set<SpectralLineGroupExpansionKey>{{"v", "g"}},
+            "schema 7 migrates expansion pairs and requests save");
+    Require(SaveBuiltInSpectralLineState(path, base, loaded.state, error), error);
+    Require(read().at("schema_version") == 8 &&
+            read().at("catalogs").at(base.id).at("session").at("expanded_groups") ==
+                Json::array({{{"view_id", "v"}, {"group_id", "g"}}}),
+            "migrated schema 7 saves as schema 8");
+    for (const Json& entries : std::vector<Json>{
+            Json::array({"v/g"}), Json::array({{{"view_id", ""}, {"group_id", "g"}}}),
+            Json::array({{{"view_id", "v"}, {"group_id", 1}}}),
+            Json::array({{{"view_id", "v"}}}),
+            Json::array({{{"view_id", "v"}, {"group_id", "g"}, {"extra", true}}}),
+            Json::array({{{"view_id", "v"}, {"group_id", "g"}}, {{"view_id", "v"}, {"group_id", "g"}}})}) {
+        auto invalid_eight = schema_eight;
+        invalid_eight["catalogs"][base.id]["session"]["expanded_groups"] = entries;
+        write(invalid_eight);
+        Require(LoadBuiltInSpectralLineState(path, base).issue_kind == VersionedJsonCacheLoadIssueKind::InvalidDocument,
+                "schema 8 rejects malformed or repeated expansion pairs");
+    }
+    for (const auto& key : {"v", "/g", "v/", "a/b/c"}) {
+        auto invalid_seven = seven;
+        invalid_seven["catalogs"][base.id]["session"]["expanded_group_ids"] = {key};
+        write(invalid_seven);
+        Require(!LoadBuiltInSpectralLineState(path, base).error.empty(), "schema 7 rejects ambiguous legacy keys");
+        auto invalid_six = legacy;
+        invalid_six["catalog_panel_state"][base.id]["expanded_group_ids"] = {key};
+        write(invalid_six);
+        Require(!LoadBuiltInSpectralLineState(path, base).error.empty(), "schema 6 rejects ambiguous legacy keys");
+    }
     write(legacy);
     loaded = LoadBuiltInSpectralLineState(path, base);
     Require(loaded.error.empty() && loaded.requires_save, loaded.error);
+    Require(loaded.state.session.expanded_groups.contains({"v", "g"}), "schema 6 migrates expansion pair");
     Require(loaded.state.overlay.grouping_views[0].groups.size() == 1 &&
             loaded.state.overlay.grouping_views[0].groups[0].marker_ids == std::vector<std::string>{"a", "b"},
             "migration preserves stored representation order and removes only system Unassigned");
@@ -85,7 +144,7 @@ void Run()
     Require(!LoadBuiltInSpectralLineState(path, base).error.empty(), "unresolved legacy references rejected");
     invalid = legacy; invalid["schema_version"] = 5; write(invalid);
     Require(LoadBuiltInSpectralLineState(path, base).issue_kind == VersionedJsonCacheLoadIssueKind::UnsupportedFormatOrSchema,
-            "only immediately preceding schema supported");
+            "schemas older than 6 are unsupported");
     write(legacy);
     const auto old_size = std::filesystem::file_size(path);
     Require(!SaveBuiltInSpectralLineState(path, base, merged, error, [](const auto&, const auto&) { throw std::runtime_error("interruption"); }),

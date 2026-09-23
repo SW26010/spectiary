@@ -2,7 +2,8 @@
 #include "overlays/built_in_spectral_line_overlay.h"
 #include "plot/series_color_model.h"
 #include <unordered_map>
-#include <unordered_set>
+#include <compare>
+#include <set>
 
 namespace spectiary {
 inline constexpr std::size_t kMaximumGeneratedNameCopyCount = 1024;
@@ -22,11 +23,18 @@ struct GeneratedNameMetadata {
     [[nodiscard]] bool operator==(const GeneratedNameMetadata&) const = default;
 };
 
+struct SpectralLineGroupExpansionKey {
+    std::string view_id;
+    std::string group_id;
+
+    auto operator<=>(const SpectralLineGroupExpansionKey&) const = default;
+};
+
 struct SpectralLineSessionState {
     std::string active_view_id;
     std::string active_color_scheme_id;
     std::unordered_map<std::string, bool> marker_visibility;
-    std::unordered_set<std::string> expanded_group_ids;
+    std::set<SpectralLineGroupExpansionKey> expanded_groups;
     // UI localization provenance, never canonical grouping content.
     std::unordered_map<std::string, GeneratedNameMetadata> view_names;
     std::unordered_map<std::string, GeneratedNameMetadata> group_names;

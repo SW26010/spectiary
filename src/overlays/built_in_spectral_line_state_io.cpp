@@ -3,12 +3,13 @@
 #include <charconv>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace spectiary {
 namespace {
 using Json = nlohmann::json;
 constexpr const char* kFormat = "spectiary.catalog_user_state.cache";
-constexpr int kSchema = 7;
+constexpr int kSchema = 8;
 
 void Fields(const Json& value, std::initializer_list<std::string_view> required,
             std::initializer_list<std::string_view> optional = {})
@@ -73,21 +74,37 @@ void Visibility(const Json& value, SpectralLineSessionState& session)
         session.marker_visibility[id] = visible.get<bool>();
     }
 }
+// Delimiter encoding is accepted only at the schema 6/7 migration boundary.
+Json MigrateExpandedGroups(const Json& value)
+{
+    Json expanded = Json::array();
+    for (const auto& entry : Array(value)) {
+        const auto id = entry.get<std::string>();
+        const auto separator = id.find('/');
+        if (separator == std::string::npos || separator == 0 || separator + 1 == id.size() ||
+            id.find('/', separator + 1) != std::string::npos)
+            throw std::runtime_error("invalid or ambiguous legacy expansion key");
+        expanded.push_back({{"view_id", id.substr(0, separator)}, {"group_id", id.substr(separator + 1)}});
+    }
+    return expanded;
+}
 void Expanded(const Json& value, SpectralLineSessionState& session)
 {
     for (const auto& entry : Array(value)) {
-        const auto id = entry.get<std::string>();
-        if (id.empty() || !session.expanded_group_ids.insert(id).second) throw std::runtime_error("invalid repeated expansion key");
+        Fields(entry, {"view_id", "group_id"});
+        SpectralLineGroupExpansionKey key{entry.at("view_id").get<std::string>(), entry.at("group_id").get<std::string>()};
+        if (key.view_id.empty() || key.group_id.empty() || !session.expanded_groups.insert(key).second)
+            throw std::runtime_error("invalid or repeated expansion key");
     }
 }
 SpectralLineSessionState ReadSession(const Json& value)
 {
-    Fields(value, {"active_view_id", "active_color_scheme_id", "marker_visibility", "expanded_group_ids", "view_names", "group_names"});
+    Fields(value, {"active_view_id", "active_color_scheme_id", "marker_visibility", "expanded_groups", "view_names", "group_names"});
     SpectralLineSessionState session;
     session.active_view_id = value.at("active_view_id").get<std::string>();
     session.active_color_scheme_id = value.at("active_color_scheme_id").get<std::string>();
     Visibility(value.at("marker_visibility"), session);
-    Expanded(value.at("expanded_group_ids"), session);
+    Expanded(value.at("expanded_groups"), session);
     for (const char* key : {"view_names", "group_names"}) {
         auto& names = std::string_view(key) == "view_names" ? session.view_names : session.group_names;
         for (const auto& [id, metadata] : Object(value.at(key)).items()) {
@@ -100,14 +117,23 @@ SpectralLineSessionState ReadSession(const Json& value)
 }
 Json WriteSession(const SpectralLineSessionState& value)
 {
-    std::vector<std::string> expanded(value.expanded_group_ids.begin(), value.expanded_group_ids.end());
-    std::sort(expanded.begin(), expanded.end());
+    Json expanded = Json::array();
+    for (const auto& key : value.expanded_groups)
+        expanded.push_back({{"view_id", key.view_id}, {"group_id", key.group_id}});
     Json result = {{"active_view_id", value.active_view_id}, {"active_color_scheme_id", value.active_color_scheme_id},
-        {"marker_visibility", value.marker_visibility}, {"expanded_group_ids", expanded},
+        {"marker_visibility", value.marker_visibility}, {"expanded_groups", expanded},
         {"view_names", Json::object()}, {"group_names", Json::object()}};
     for (const auto& [id, name] : value.view_names) result["view_names"][id] = WriteName(name);
     for (const auto& [id, name] : value.group_names) result["group_names"][id] = WriteName(name);
     return result;
+}
+
+SpectralLineSessionState MigrateSevenSession(Json value)
+{
+    Fields(value, {"active_view_id", "active_color_scheme_id", "marker_visibility", "expanded_group_ids", "view_names", "group_names"});
+    value["expanded_groups"] = MigrateExpandedGroups(value.at("expanded_group_ids"));
+    value.erase("expanded_group_ids");
+    return ReadSession(value);
 }
 
 float LegacyChannel(const Json& value)
@@ -185,7 +211,7 @@ BuiltInSpectralLineState MigrateSix(const Json& root, const SpectralLineList& ba
         for (const auto& [id, value] : Object(root.at("catalog_panel_state")).items()) {
             if (id != base.id) throw std::runtime_error("legacy panel state belongs to another line list");
             Fields(value, {"expanded_group_ids"});
-            Expanded(value.at("expanded_group_ids"), state.session);
+            Expanded(MigrateExpandedGroups(value.at("expanded_group_ids")), state.session);
         }
     }
     return state;
@@ -195,7 +221,7 @@ BuiltInSpectralLineState MigrateSix(const Json& root, const SpectralLineList& ba
 BuiltInSpectralLineStateLoadResult LoadBuiltInSpectralLineState(const std::filesystem::path& path, const SpectralLineList& base)
 {
     BuiltInSpectralLineStateLoadResult result;
-    auto loaded = LoadVersionedJsonCacheFile(path, kFormat, {6, kSchema}, "built-in spectral-line state");
+    auto loaded = LoadVersionedJsonCacheFile(path, kFormat, {6, 7, kSchema}, "built-in spectral-line state");
     if (!loaded.document) {
         result.issue_kind = loaded.issue_kind;
         result.error = loaded.diagnostic_detail.empty() ? loaded.warning : loaded.diagnostic_detail;
@@ -212,13 +238,14 @@ BuiltInSpectralLineStateLoadResult LoadBuiltInSpectralLineState(const std::files
             const auto& record = records.at(base.id);
             Fields(record, {"overlay", "session"});
             state.overlay = DecodeBuiltInSpectralLineOverlay(record.at("overlay"));
-            state.session = ReadSession(record.at("session"));
+            state.session = loaded.document->schema_version == 7
+                ? MigrateSevenSession(record.at("session")) : ReadSession(record.at("session"));
         }
         const auto effective = ComposeBuiltInSpectralLineList(base, state.overlay);
         if (!effective.list) throw std::runtime_error(effective.error);
         NormalizeSpectralLineSession(state.session, *effective.list);
         result.state = std::move(state);
-        result.requires_save = loaded.document->schema_version == 6;
+        result.requires_save = loaded.document->schema_version != kSchema;
     } catch (const std::exception& error) {
         result.issue_kind = VersionedJsonCacheLoadIssueKind::InvalidDocument;
         result.error = error.what();

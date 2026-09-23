@@ -21,8 +21,8 @@ and LocalAppData storage contracts.
 Built-in spectral-line customization retains startup snapshots, with no watcher,
 IPC owner or live propagation. The #104/#114 cutover replaces the old catalog
 monolith with a complete canonical SpectralLineList plus an internal overlay and
-separate session state. The same application-managed state file now has schema 7;
-only immediately preceding schema 6 is a bounded read-only conversion input.
+separate session state. The same application-managed state file now has schema 8;
+schemas 6 and 7 are bounded read-only conversion inputs.
 Canonical user-owned line-list saves do not inherit this merge policy.
 
 The built-in adapter holds `<state-path>.commit.lock` through reload, trust

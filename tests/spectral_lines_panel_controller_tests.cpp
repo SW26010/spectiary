@@ -252,6 +252,34 @@ void TestUserLineLists(const std::filesystem::path& root)
     Require(controller.Flush(), "built-in editing still persists after user switching");
 }
 
+void TestExpansionIdentity(const std::filesystem::path& path)
+{
+    auto base = Base();
+    base.grouping_views = {{"a/b", "First", {{"c", "First group", {"a"}}}},
+                           {"a", "Second", {{"b/c", "Second group", {"b"}}}}};
+    SpectralLinesPanelController controller(base, path);
+    const auto expanded = [&](const std::string& view, const std::string& group) {
+        const auto state = controller.View();
+        for (const auto& candidate : View(state, view).groups)
+            if (candidate.id == group) return candidate.expanded;
+        throw std::runtime_error("missing expansion group");
+    };
+    Applied(controller.Submit(Intent::SetGroupExpanded("a/b", "c", true)));
+    Require(expanded("a/b", "c") && !expanded("a", "b/c"), "opaque IDs do not collide");
+    Applied(controller.Submit(Intent::SetGroupExpanded("a", "b/c", true)));
+    Require(expanded("a/b", "c") && expanded("a", "b/c"), "both pairs expand independently");
+    Applied(controller.Submit(Intent::SetGroupExpanded("a/b", "c", false)));
+    Require(!expanded("a/b", "c") && expanded("a", "b/c"), "collapse preserves the other pair");
+    Applied(controller.Submit(Intent::SetGroupExpanded("a/b", "__unassigned__", true)));
+    Require(expanded("a/b", "__unassigned__") && !expanded("a", "__unassigned__"),
+            "derived Unassigned expansion belongs to its view");
+    Applied(controller.Submit(Intent::SetGroupExpanded("a", "__unassigned__", true)));
+    Applied(controller.Submit(Intent::SetGroupExpanded("a/b", "__unassigned__", false)));
+    Require(!expanded("a/b", "__unassigned__") && expanded("a", "__unassigned__"),
+            "derived Unassigned collapse preserves the other view");
+    Require(controller.Flush(), "structured expansion persists");
+}
+
 void TestOperations(const std::filesystem::path& path)
 {
     SpectralLinesPanelController controller(Base(), path);
@@ -419,6 +447,7 @@ int wmain(int argc, wchar_t* argv[])
         if (argc == 4 && std::wstring_view(argv[1]) == L"--child") return Child(argv[2], std::wstring_view(argv[3]) == L"a" ? "a" : "b");
         spectiary::test_support::TemporaryDirectory directory;
         TestUserLineLists(directory.path() / "user-files");
+        TestExpansionIdentity(directory.path() / "expansion.json");
         TestOperations(directory.path() / "operations.json"); TestPersistence(directory.path()); TestProcesses(directory.path() / "processes");
         std::cout << "Spectral-line controller tests passed\n"; return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

@@ -505,55 +505,43 @@ void MergeMarkerFields(
     }
 }
 
-void RemapExpansionKey(
-    std::string& key,
+SpectralLineGroupExpansionKey RemapExpansionKey(
+    SpectralLineGroupExpansionKey key,
     const ReconciliationContext& context)
 {
-    const std::size_t separator = key.find('/');
-    if (separator == std::string::npos) {
-        return;
-    }
-    const std::string local_view_id = key.substr(0, separator);
-    const std::string local_group_id = key.substr(separator + 1);
-    std::string effective_view_id = local_view_id;
+    const std::string local_view_id = key.view_id;
     if (const auto view_match = context.local_view_id_remap.find(local_view_id);
         view_match != context.local_view_id_remap.end()) {
-        effective_view_id = view_match->second;
+        key.view_id = view_match->second;
     }
-    std::string effective_group_id = local_group_id;
     const auto group_map = context.local_group_id_remap.find(local_view_id);
     if (group_map != context.local_group_id_remap.end()) {
-        if (const auto group_match = group_map->second.find(local_group_id);
+        if (const auto group_match = group_map->second.find(key.group_id);
             group_match != group_map->second.end()) {
-            effective_group_id = group_match->second;
+            key.group_id = group_match->second;
         }
     }
-    key = effective_view_id + "/" + effective_group_id;
+    return key;
 }
 
 void MergeExpandedGroups(
-    const std::unordered_set<std::string>& base,
-    const std::unordered_set<std::string>& local,
-    const std::unordered_set<std::string>& latest,
+    const std::set<SpectralLineGroupExpansionKey>& base,
+    const std::set<SpectralLineGroupExpansionKey>& local,
+    const std::set<SpectralLineGroupExpansionKey>& latest,
     const ReconciliationContext& context,
-    std::unordered_set<std::string>& result)
+    std::set<SpectralLineGroupExpansionKey>& result)
 {
-    std::unordered_set<std::string> remapped_local = local;
-    std::unordered_set<std::string> remapped_keys;
-    remapped_keys.reserve(remapped_local.size());
-    for (const std::string& key : remapped_local) {
-        std::string remapped_key = key;
-        RemapExpansionKey(remapped_key, context);
-        remapped_keys.insert(std::move(remapped_key));
+    std::set<SpectralLineGroupExpansionKey> remapped_local;
+    for (const auto& key : local) {
+        remapped_local.insert(RemapExpansionKey(key, context));
     }
-    remapped_local = std::move(remapped_keys);
 
     result.clear();
-    std::unordered_set<std::string> keys;
+    std::set<SpectralLineGroupExpansionKey> keys;
     keys.insert(base.begin(), base.end());
     keys.insert(remapped_local.begin(), remapped_local.end());
     keys.insert(latest.begin(), latest.end());
-    for (const std::string& key : keys) {
+    for (const auto& key : keys) {
         const bool base_present = base.contains(key);
         const bool local_present = remapped_local.contains(key);
         const bool latest_present = latest.contains(key);
@@ -662,7 +650,7 @@ bool ReconcileBuiltInSpectralLineTask(const SpectralLineList& packaged,
     if (intent.view_selection && context.local_view_id_remap.contains(session.active_view_id))
         session.active_view_id = context.local_view_id_remap.at(session.active_view_id);
     MergeMarkerFields(base.session.marker_visibility, local.session.marker_visibility, latest.session.marker_visibility, session.marker_visibility);
-    MergeExpandedGroups(base.session.expanded_group_ids, local.session.expanded_group_ids, latest.session.expanded_group_ids, context, session.expanded_group_ids);
+    MergeExpandedGroups(base.session.expanded_groups, local.session.expanded_groups, latest.session.expanded_groups, context, session.expanded_groups);
     auto local_view_names = local.session.view_names;
     auto local_group_names = local.session.group_names;
     for (const auto& [old, fresh] : context.local_view_id_remap) {
