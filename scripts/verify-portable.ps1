@@ -108,7 +108,8 @@ if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
 $expectedPackageEntries = @(
     'config', 'state', 'logs', 'unsaved',
     $ArtifactFileName,
-    $MetadataFileName
+    $MetadataFileName,
+    'LICENSE'
 )
 $actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
 $actualPackageEntries = @($actualPackageItems | ForEach-Object { $_.Name })
@@ -248,6 +249,13 @@ if ($configuration -ceq 'Release') {
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+$packageLicensePath = Join-Path $PackageRoot 'LICENSE'
+$sourceLicensePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'LICENSE'
+if (-not (Test-Path -LiteralPath $packageLicensePath -PathType Leaf) -or
+    (Get-Sha256 -Path $packageLicensePath) -cne (Get-Sha256 -Path $sourceLicensePath)) {
+    throw 'Portable LICENSE must match the repository license.'
+}
+
 $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
     $expectedZipEntries = @(
@@ -256,7 +264,8 @@ try {
         'logs/',
         'unsaved/',
         $ArtifactFileName,
-        $MetadataFileName
+        $MetadataFileName,
+        'LICENSE'
     )
     $actualZipEntries = @($archive.Entries.FullName)
     $cfitsioDllEntries = @(
@@ -281,6 +290,11 @@ try {
         -EntryName $MetadataFileName `
         -FilePath $packageMetadataPath `
         -Description 'Portable ZIP metadata'
+    Assert-ZipEntryMatchesFile `
+        -Archive $archive `
+        -EntryName 'LICENSE' `
+        -FilePath $packageLicensePath `
+        -Description 'Portable ZIP license'
 }
 finally {
     $archive.Dispose()

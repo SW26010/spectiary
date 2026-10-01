@@ -151,9 +151,9 @@ The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/1
 
 ## License
 
-Spectiary has not yet specified a license for its own source code. The planned license when the project is open-sourced is MIT; that plan is not currently in effect.
+Spectiary is licensed under the [MIT License](LICENSE).
 
-[Third-party software notices](legal/THIRD_PARTY_NOTICES.txt) and [data source notices](legal/DATA_SOURCES.txt) cover their respective components and data, and do not specify a license for Spectiary itself.
+Third-party software and data remain under their respective licenses; see [third-party software notices](legal/THIRD_PARTY_NOTICES.txt) and [data source notices](legal/DATA_SOURCES.txt).
 
 ---
 

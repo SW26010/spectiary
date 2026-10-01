@@ -400,6 +400,7 @@ New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 foreach ($role in @('config', 'state', 'logs', 'unsaved')) {
     New-Item -ItemType Directory -Path (Join-Path $packageRoot $role) -Force | Out-Null
 }
+Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $packageRoot 'LICENSE') -Force
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot $ArtifactFileName) -Force
 $packagedExecutableHash = (
     Get-FileHash `
@@ -460,6 +461,11 @@ try {
             $archive,
             $packageMetadataPath,
             $MetadataFileName,
+            [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive,
+            (Join-Path $packageRoot 'LICENSE'),
+            'LICENSE',
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         foreach ($role in @('config/', 'state/', 'logs/', 'unsaved/')) {
             [void]$archive.CreateEntry($role)

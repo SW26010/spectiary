@@ -329,7 +329,8 @@ function Assert-PortablePackage {
     $expectedPackageEntries = @(
         'config', 'state', 'logs', 'unsaved',
         'Spectiary.exe',
-        'spectiary_metadata.json'
+        'spectiary_metadata.json',
+        'LICENSE'
     )
     $actualPackageItems = @(Get-ChildItem -LiteralPath $PackageRoot -Force)
     $actualPackageEntries = @(
@@ -408,7 +409,8 @@ function Assert-PortablePackage {
         $expectedZipEntries = @(
             'config/', 'state/', 'logs/', 'unsaved/',
             'Spectiary.exe',
-            'spectiary_metadata.json'
+            'spectiary_metadata.json',
+            'LICENSE'
         )
         $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
         $cfitsioDllEntries = @(
@@ -1359,6 +1361,8 @@ try {
         -Description 'Direct checkout head-mode packaging'
 
     $snapshotPackageRoot = Join-Path $testRoot 'package-script-snapshot'
+    New-Item -ItemType Directory -Path $snapshotPackageRoot -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'LICENSE') -Destination $snapshotPackageRoot
     $snapshotPackageScriptsRoot = Join-Path $snapshotPackageRoot 'scripts'
     $snapshotPackageScriptsLibRoot = Join-Path $snapshotPackageScriptsRoot 'lib'
     $snapshotPackageLegalRoot = Join-Path $snapshotPackageRoot 'legal'
@@ -1580,6 +1584,7 @@ try {
         -LiteralPath $verifiedPackageMetadataPath `
         -Destination (
             Join-Path $wrongDataTypePackageRoot 'spectiary_metadata.json')
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'LICENSE') -Destination $wrongDataTypePackageRoot
     foreach ($role in @('config', 'logs', 'unsaved')) {
         New-Item -ItemType Directory -Path (Join-Path $wrongDataTypePackageRoot $role) | Out-Null
     }
@@ -1599,6 +1604,32 @@ try {
         ) `
         -ExpectedMessage 'Portable package root state must be a directory' `
         -Description 'Portable verifier rejects a state file in place of the directory'
+
+    $packageLicensePath = Join-Path $verifiedPackageRoot 'LICENSE'
+    $originalLicenseBytes = [IO.File]::ReadAllBytes($packageLicensePath)
+    try {
+        [IO.File]::WriteAllText($packageLicensePath, 'incorrect license')
+        Assert-ScriptFails `
+            -CaseId 'reject-packaged-license-tamper' `
+            -ScriptPath $portableVerifierPath `
+            -Arguments @('-BuildExecutable', $resolvedBuiltExecutable,
+                '-PackageRoot', $verifiedPackageRoot, '-ZipPath', $verifiedPackageZip) `
+            -ExpectedMessage 'Portable LICENSE must match the repository license' `
+            -Description 'Portable verifier rejects a modified project license'
+    }
+    finally {
+        [IO.File]::WriteAllBytes($packageLicensePath, $originalLicenseBytes)
+    }
+    $tamperedLicenseZip = Join-Path $testRoot 'tampered-license.zip'
+    Copy-ZipWithMutations -SourcePath $verifiedPackageZip `
+        -DestinationPath $tamperedLicenseZip -TamperedEntryName 'LICENSE'
+    Assert-ScriptFails `
+        -CaseId 'reject-zip-license-tamper' `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @('-BuildExecutable', $resolvedBuiltExecutable,
+            '-PackageRoot', $verifiedPackageRoot, '-ZipPath', $tamperedLicenseZip) `
+        -ExpectedMessage "Portable ZIP license ZIP entry 'LICENSE' hash" `
+        -Description 'Portable verifier rejects a modified license inside the ZIP'
 
     $originalPackageMetadataBytes = [IO.File]::ReadAllBytes($verifiedPackageMetadataPath)
     try {

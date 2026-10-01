@@ -122,15 +122,15 @@ Run the working-tree or isolated-`HEAD` entrypoint described in
    requirement;
 3. checks that `artifact.sha256` equals the hash of the build-directory EXE;
 4. copies `Spectiary.exe` and metadata to a package root containing only the
-   executable file, metadata file, and `config/`, `state/`, `logs/`, `unsaved/` directories; exact enumeration
+   executable file, metadata file, MIT `LICENSE`, and `config/`, `state/`, `logs/`, `unsaved/` directories; exact enumeration
    includes hidden entries and validates each entry type;
 5. adds `deployment.distribution: "portable"` and
    `deployment.storage_profile: "portable"` to the package metadata copy;
 6. checks the metadata digest against the packaged EXE;
 7. writes the ZIP and its lowercase SHA-256 sidecar; and
 8. invokes `scripts/verify-portable.ps1` to verify the ZIP entry set and check
-   that the ZIP entries for the executable and metadata have the same SHA-256
-   digests as their package-root counterparts. For a Release artifact, the
+   that the ZIP entries for the executable, metadata, and license have the same SHA-256
+   digests as their package-root counterparts, and that the packaged license matches the repository LICENSE. For a Release artifact, the
    verifier also parses the ordinary and delay-load PE import tables and rejects
    a CFITSIO runtime DLL, PThreads4W runtime DLL, or curl/bzip2 DLLs from accidentally enabled CFITSIO
    features. The exact package
