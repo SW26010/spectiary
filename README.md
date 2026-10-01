@@ -17,6 +17,8 @@
   A native Windows spectrum viewer for fast, focused inspection of astronomical spectra.
 </p>
 
+<p align="center"><em>Pronounced /ˈspɛk.tiˌɛr.i/.</em></p>
+
 Spectiary is a focused desktop tool for opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references. It keeps the main plot at the center of the workflow and treats interaction latency as a product requirement rather than trading responsiveness for a broader application stack.
 
 > [!NOTE]
