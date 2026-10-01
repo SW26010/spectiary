@@ -21,6 +21,8 @@
 
 Spectiary is a focused desktop tool for opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references. It keeps the main plot at the center of the workflow and treats interaction latency as a product requirement rather than trading responsiveness for a broader application stack.
 
+![Spectiary workspace showing a LAMOST spectrum with spectral-line markers and dockable panels](docs/images/spectiary-spectrum-workspace.png)
+
 > [!NOTE]
 > Spectiary is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while FITS coverage and higher-level analysis workflows are still evolving.
 
