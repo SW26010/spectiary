@@ -4,11 +4,7 @@
 
 <h1 align="center">Spectiary</h1>
 
-Formerly SpecForge. See [project identity and rename contracts](docs/development/project_rename.md)
-for the pre-1.0 format cutover and historical compatibility boundaries.
-
 <p align="center">
-  <a href="https://github.com/SW26010/spectiary/actions/workflows/automation.yml"><img src="https://github.com/SW26010/spectiary/actions/workflows/automation.yml/badge.svg?branch=master&amp;event=workflow_dispatch" alt="Spectiary automation status"></a>
   <a href="https://github.com/SW26010/spectiary/releases/latest"><img src="https://img.shields.io/github/v/release/SW26010/spectiary?label=Release&amp;color=2ea44f&amp;logo=github&amp;logoColor=white" alt="Latest Spectiary release"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus" alt="C++20">
   <img src="https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE" alt="Dear ImGui with docking">
@@ -18,12 +14,10 @@ for the pre-1.0 format cutover and historical compatibility boundaries.
 
 <p align="center">
   <strong>Lightweight. Fast. Fluid.</strong><br>
-  A native Windows spectrum viewer for fast, focused inspection of LAMOST and SDSS spectra.
+  A native Windows spectrum viewer for fast, focused inspection of astronomical spectra.
 </p>
 
-Spectiary is built for the part of spectral analysis that happens with your eyes and hands: opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
-
-It is designed as a focused desktop tool rather than a general scientific platform. The main plot stays at the center of the experience, interaction latency is treated as a product requirement, and features are expected to preserve the responsiveness of pan, zoom, navigation, and spectrum switching.
+Spectiary is a focused desktop tool for opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references. It keeps the main plot at the center of the workflow and treats interaction latency as a product requirement rather than trading responsiveness for a broader application stack.
 
 > [!NOTE]
 > Spectiary is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while FITS coverage and higher-level analysis workflows are still evolving.
@@ -32,26 +26,19 @@ It is designed as a focused desktop tool rather than a general scientific platfo
 
 ### Lightweight
 
-Spectiary is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to inspect spectra, and it avoids a large cross-platform UI framework in the hot path.
+Spectiary is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to inspect spectra, and it avoids a large cross-platform UI framework in the interaction path.
 
-The application also uses an event-driven render policy: when nothing is changing, it does not keep redrawing just to look alive.
+Its render policy is event-driven: when nothing is changing, the application does not keep redrawing just to look alive.
 
 ### Fast
 
-The architecture keeps data loading, diagnostics, and other potentially expensive work away from the plot interaction path. Spectrum sources can load in the background, while the UI consumes stable spectrum snapshots rather than parsing files inside the renderer.
+Data loading, diagnostics, and other potentially expensive work stay away from the plot interaction path. Spectrum sources can load in the background, while the UI consumes stable spectrum snapshots rather than parsing files inside the renderer.
 
 Performance work is validated with **real spectral data and recorded interaction timing**, not synthetic-only benchmark claims.
 
 ### Fluid
 
-The main plot is designed around direct manipulation:
-
-- drag to pan
-- cursor-centered wheel zoom
-- Windows Precision Touchpad two-finger pan and pinch zoom
-- axis-constrained touchpad gestures when starting over an axis
-- wavelength and flux range navigation
-- fast previous/next spectrum switching for supported multi-spectrum sources
+The plot is designed around direct manipulation. Mouse and Windows Precision Touchpad input support panning, cursor-centered zoom, axis-constrained gestures, wavelength and flux range navigation, and rapid previous/next spectrum switching for supported multi-spectrum sources.
 
 On supported Windows 11 systems, Spectiary can integrate with **Dynamic Refresh Rate (DRR)** through the Windows compositor clock so active plot interaction can request a higher-refresh presentation path and return to the base rate afterwards.
 
@@ -67,18 +54,7 @@ On supported Windows 11 systems, Spectiary can integrate with **Dynamic Refresh 
 - **Enter an immersive plot view** with `F11` when the spectrum itself needs the full screen.
 - **Record bounded performance diagnostics** when investigating interaction or presentation behavior.
 
-## Designed For
-
-Spectiary is especially suited to workflows such as:
-
-- visually inspecting **LAMOST and SDSS FITS spectra** on a local Windows workstation
-- rapidly reviewing many observations for quality control, candidate triage, or manual inspection
-- zooming into local wavelength regions and comparing features with reference lines or bands
-- moving repeatedly between neighboring spectra without breaking visual focus
-- long desktop inspection sessions where low interaction latency and high information density matter
-- high-refresh Windows desktops and laptops where the plotting surface should feel as direct as the rest of the system
-
-## FITS First
+## Supported Data
 
 Spectiary's user-facing data path is centered on astronomical FITS spectra, with **LAMOST and SDSS as the primary compatibility targets**.
 
@@ -95,22 +71,7 @@ For `.fits.gz`, Spectiary first performs bounded transport decompression and the
 
 Spectiary also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
 
-For the exact loader and data-boundary behavior, see [Spectrum Snapshot Contract](docs/reference/spectra/spectrum_snapshot_contract.md).
-
-## A Native, Performance-First Stack
-
-Spectiary deliberately uses a small native stack:
-
-- **C++20** for the application and domain layer
-- **Win32** for native Windows integration
-- **DirectX 11 / DXGI flip model** for presentation
-- **Dear ImGui docking branch** for a flexible desktop workspace
-- **ImPlot** for interactive spectrum plotting
-- **Windows Direct Manipulation** for native Precision Touchpad gestures
-- **Windows 11 compositor clock / DRR integration** for high-refresh interaction where supported
-- **CMake + vcpkg** for reproducible project configuration and dependency management
-
-This stack is not an abstraction exercise. It is chosen to keep the path from input to plot update to presentation short, observable, and maintainable.
+For exact loader and data-boundary behavior, see the [Spectrum Snapshot Contract](docs/reference/spectra/spectrum_snapshot_contract.md).
 
 ## Workspace and Interaction
 
@@ -118,11 +79,7 @@ The main spectrum plot is the first visual layer. Supporting tools live in ordin
 
 Panels can be docked, undocked, and restored through the Dear ImGui docking layout. Detached panels use native Windows viewports, while `F11` provides a dedicated immersive plot presentation for focused inspection.
 
-Spectral references come from the tracked public Spectral Line List in [`config/spectral_lines.public.json`](config/spectral_lines.public.json). The Spectral Lines panel can search and organize those references and render line or band overlays on the main plot.
-
-Use **Spectral Line List → Open...** to open your own [canonical JSON line list](docs/reference/spectral-lines/spectral_line_list_v1.md). The selected list is the only active list; the built-in public list remains available in the selector. User files stay at their original location and are read-only. Grouping/color selection, visibility, expansion, search and label settings remain available for the current session. Restarting returns to the built-in list; use Open again to read changed or moved files.
-
-All valid v1 line lists can be inspected, including empty lists. Opening preserves every coordinate value and its declared unit/medium. The current downstream plot path supports laboratory/rest **vacuum Angstrom** coordinates; other coordinate semantics show a diagnostic and suppress the overlay while the list stays active. User documents must be outside Spectiary's reserved `config/`, `state/`, `logs/` and `unsaved/` directories.
+The Spectral Lines panel can search and organize the built-in public spectral references and render line or band overlays on the main plot. You can also open your own [canonical JSON line list](docs/reference/spectral-lines/spectral_line_list_v1.md). The current downstream plot path supports laboratory/rest **vacuum Angstrom** coordinates; other coordinate semantics remain inspectable but show a diagnostic and suppress the overlay.
 
 ## Platform
 
@@ -147,16 +104,21 @@ Start with the [documentation index](docs/README.md), or go directly to:
 - [Presentation](docs/presentation/README.md) — display policy, telemetry and window resizing
 - [Release artifacts](docs/development/release_artifacts.md) — portable packaging and metadata contracts
 
-The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/development/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
+The current native stack uses:
+
+- **C++20** for the application and domain layer
+- **Win32** for native Windows integration
+- **DirectX 11 / DXGI flip model** for presentation
+- **Dear ImGui docking branch** for a flexible desktop workspace
+- **ImPlot** for interactive spectrum plotting
+- **Windows Direct Manipulation** for native Precision Touchpad gestures
+- **Windows 11 compositor clock / DRR integration** for high-refresh interaction where supported
+- **CMake + vcpkg** for reproducible project configuration and dependency management
+
+Building from source requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/development/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
 
 ## License
 
 Spectiary is licensed under the [MIT License](LICENSE).
 
 Third-party software and data remain under their respective licenses; see [third-party software notices](legal/THIRD_PARTY_NOTICES.txt) and [data source notices](legal/DATA_SOURCES.txt).
-
----
-
-<p align="center">
-  <strong>Spectiary is about one thing first: making spectrum inspection feel light, fast, and fluid.</strong>
-</p>
