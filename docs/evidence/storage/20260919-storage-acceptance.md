@@ -89,7 +89,7 @@ target passed after that correction. Native GUI integration, long-running
 resource stability, fresh static Release builds and the pinned external ASDF
 oracle are outside this local storage acceptance run; no result is claimed for them.
 
-The test changes are recorded in local commit `c63793b`
+The test changes are recorded in local commit `a78d1c0085bd`
 (`test(storage): complete final ownership and path acceptance matrix`). The
 following documentation commit records this final acceptance. No P0/P1 issue
 remained identified by this review and the executed suites.

@@ -5,9 +5,10 @@ subsequent clarification of marker-array semantics. The original implementation
 session made local commits without pushing or closing issues; those commits have
 since been published to GitHub.
 
-On 2026-09-20, a read-only GitHub API check confirmed remote `master` at
-[`36b09ef`](https://github.com/SW26010/spectiary/commit/36b09effb7aeb3f09ec6998409b5b2742f728b5c).
-For that exact SHA, workflow runs, check runs, and commit statuses each had a
+On 2026-09-20, a read-only GitHub API check confirmed remote `master` at a commit
+whose sanitized equivalent is
+[`13463382e499`](https://github.com/SW26010/spectiary/commit/13463382e499dc41fe908fdba801b24f336b65dc).
+For the original pre-rewrite SHA, workflow runs, check runs, and commit statuses each had a
 count of zero. The combined status API reported `pending` with zero statuses;
 this is not evidence of a running or passing CI job. The results below are local
 validation evidence, not GitHub CI results. This is a dated snapshot, not a claim

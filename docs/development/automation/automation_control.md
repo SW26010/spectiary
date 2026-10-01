@@ -807,7 +807,7 @@ useful as the files evolve.
 | Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, deadline-bound response helpers; `automation_named_pipe.cpp`: `AutomationNamedPipeClient::SendUntil` and `ReceiveUntil`; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | hello-no-response, no-accepted/accepted-command, accepted pipeline, pipeline-write-stall, and EOF app.quit-no-terminal fake GUI/pipe fixture cases, with retained-root and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **Verified.** Launcher-owned response/write deadlines close the pipe and preserve the existing exact-child handle/Job Object cleanup path; accepted requests remain explicitly outcome-ambiguous and are never retried. |
 | Orderly shutdown, panel rollback, state flush, and writer retirement | `spectiary_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
 
-The 2026-08-06 audit at base commit `4472fad` found no P0 or P1 defect and one
+The 2026-08-06 audit at base commit `9d46c321a58f` found no P0 or P1 defect and one
 P2 defect, tracked by Issue #30. This follow-up closes that audit gap with the
 launcher deadlines and fake-GUI regression described above. The repository
 wrapper rebuilt the control, panel-coordinator, state-isolation, launcher, and

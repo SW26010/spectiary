@@ -5,8 +5,8 @@ compatibility and future rename requirements are maintained in
 [Project identity and rename procedure](../../development/project_rename.md).
 This record describes the measured commits and does not assert a new test run.
 
-Implementation commit: `32f15fe` (preceded by machine identity `5aeaa43` and
-format cutover `9cb11ea`). Review covered immutable namespaces, legacy ownership,
+Implementation commit: `490af6a8d298` (preceded by machine identity `85c79fb84214` and
+format cutover `65c9bbd8e3a8`). Review covered immutable namespaces, legacy ownership,
 canonical read/write identity, producer/consumer names, resources, CMake targets,
 workflow triggers, current documentation, and every remaining old-brand source hit.
 No unresolved P0/P1 finding was identified in this change review.

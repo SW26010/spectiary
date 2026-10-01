@@ -2,7 +2,7 @@
 # The benchmark and local hardening runs used the clean source commit shown below.
 
 git rev-parse HEAD
-# 9873608166134a09ad72d38d807cf0a222321a32
+# 064d461d1b6f5b76675755e965ceb3ff7c7e2d98
 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-asdf-labeling-production-benchmark.ps1 -SampleCount 1000000 -WarmupCount 1 -Iterations 5 -OutputDirectory build\asdf-labeling-production-hardening-commit6 -BuildTimeoutSec 1800
 

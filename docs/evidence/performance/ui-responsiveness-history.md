@@ -5,11 +5,11 @@
 
 ## 复盘：2026-06-21 session view 退化
 
-范围：`4b3d6ee699dca8834f7f90ff9c678207838981bc` 及之前没有明显卡顿；从 `7d820223f238eebfe1dc2b8bc2c4179ab96dbd0b` 开始，UI 响应变慢；`e767293b23a1591d8c4705a85451fcce0ecbacbf` 修复。
+范围：`40035536dd78a6b100e09e5330569b8a28ac6965` 及之前没有明显卡顿；从 `4c86dc7e78fe19c9dc9e15b95df408a2ffad5801` 开始，UI 响应变慢；`868a5c4f250410f55bb91ec44b505e6bdf8b2ee0` 修复。
 
 引入原因：
 
-- `7d820223` 把 source collection 操作收敛到 session command/view 边界，这是方向正确的结构化改动。
+- `4c86dc7e78fe` 把 source collection 操作收敛到 session command/view 边界，这是方向正确的结构化改动。
 - 但新的 `SourceCollectionSession::View()` 变成了宽 view 聚合：一次构造 source list、navigation、labeling、filter 等多个子视图。
 - `ShellUi` 多个 panel 和主图代码直接调用 `session_.View()`；主图 pan 期间，为了拿 snapshot 也会付出 full session view 构造成本。
 - filter view 构造复用了 domain evaluation 所需的全量 filter source builder，把本该只在状态变化时做的 work 变成每帧 work。
@@ -33,7 +33,7 @@
 
 ## 复盘：2026-06-29 sample navigation sequence 退化
 
-范围：`7c02e87d7cb6441be8159396b05a99887349fb8f` sample navigation sequence、filtering、sorting、empty sequence 等能力接入后，用户反馈上一条/下一条、打标签和主图 pan 都有卡顿感；随后通过缩窄热路径恢复正常。
+范围：`bd593a3fad04e78f8da971b63ed86bd79d7e8fd2` sample navigation sequence、filtering、sorting、empty sequence 等能力接入后，用户反馈上一条/下一条、打标签和主图 pan 都有卡顿感；随后通过缩窄热路径恢复正常。
 
 引入原因：
 
@@ -64,11 +64,11 @@
 
 ## 复盘：2026-07-17 catalog user state 投影退化
 
-范围：`fee63a6892cc64866ffc5eae0fa3ec18615b956a` 深化 spectral-line catalog user state Module 后，用户反馈 UI 性能明显退化；`b3be6d441c22d6092574e2fe2ca3f2ef1bfb1901` 修复。
+范围：`98642bf5da84525805b41adf371c3a26df12e36e` 深化 spectral-line catalog user state Module 后，用户反馈 UI 性能明显退化；`8c9fce8deb06d4e65a6b1dd7d520a0193b1548c7` 修复。
 
 引入原因：
 
-- `fee63a6` 把 catalog user state 收敛为 intent/result/view Interface，并由 Module 统一验证 identity、不变量、dirty 状态和持久化；这个结构方向正确。
+- `98642bf5da84` 把 catalog user state 收敛为 intent/result/view Interface，并由 Module 统一验证 identity、不变量、dirty 状态和持久化；这个结构方向正确。
 - 但普通与沉浸式 plot 为了读取 marker label visibility，在每帧调用完整 `SpectralLinesPanelController::View()`；该 view 同时投影全部 grouping views、groups、marker references、grouping view search 和 panel 状态。
 - `View()` 还会对每个 user grouping view 重复调用 `EffectiveUserGroupingView()`。owned state 已经在 load 和 persistent intent 后规范化，这次 per-frame 修复既冗余，又让 plot `view_update` 成本随 grouping view set 增长。
 - 结果是只需要当前可见 spectral-line markers 和一个 label flag 的 overlay render path，承担了只属于 panel 展示的完整 catalog user state 投影。

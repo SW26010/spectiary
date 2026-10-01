@@ -1,7 +1,7 @@
 # Issue #4 local implementation and acceptance
 
-Date: 2026-09-20. Windows x64, Ninja/MSVC Debug. Base: `4dbf811`.
-Implementation commits: `9cd2230`, `5f8e487`, `6457073`.
+Date: 2026-09-20. Windows x64, Ninja/MSVC Debug. Base: `3a3fea8db72b`.
+Implementation commits: `ed271ca3b265`, `10672a82b3a1`, `d431c4f94b9a`.
 Work was performed on local `master`; no push or issue closure was performed.
 
 ## Requirements checked

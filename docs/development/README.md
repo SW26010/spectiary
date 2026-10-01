@@ -21,3 +21,5 @@ Ninja/MSVC configure 与 build 必须通过仓库的
 Automation workflow 保持 `workflow_dispatch` 手动触发；release 的版本 tag
 触发规则不授权其他 workflow 增加自动触发。完整执行与 runner 规则见
 [Automation CI](automation/automation_ci.md#manual-execution-policy)。
+
+- [Public history preparation](public_history_preparation.md)

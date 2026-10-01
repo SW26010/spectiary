@@ -244,9 +244,9 @@ absence of a cross-HWND DWM composition flicker.
 - #48 — detached-panel minimize/restore and reactivation gaps.
 - #53 — restore-time application-window-group z-order gap.
 - #57 — redundant detached-panel taskbar and Alt+Tab targets.
-- `170a2fef14f70bb5969ec4d4e904ebebf1bc5e5a` — keeps floating panels in
+- `f177b8189c3e9d3f370027ed0e93200c3997199b` — keeps floating panels in
   independent viewports.
-- `3f2a24f2252a7504e6490bb30d3a065096eaaf39` — temporary explicit detached
+- `34164b27b3ae13b9ee3f4b7fd00566bce07db336` — temporary explicit detached
   window lifecycle synchronization.
-- `e89e526c4805623cc867e8a58a1baa5130bf26ac` — establishes the current
+- `211c44e7af4e8afa584ed582cff364b86aec5b9c` — establishes the current
   Win32 owner-group implementation and regression coverage.

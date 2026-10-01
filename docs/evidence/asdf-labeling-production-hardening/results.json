@@ -2,7 +2,7 @@
   "format_kind": "specforge.asdf_labeling.production_hardening_results",
   "schema_version": 1,
   "generated_at_utc": "2026-08-31T16:25:50.9727813Z",
-  "measurement_source_commit": "9873608166134a09ad72d38d807cf0a222321a32",
+  "measurement_source_commit": "064d461d1b6f5b76675755e965ceb3ff7c7e2d98",
   "benchmark_protocol": {
     "build_configuration": "Release",
     "warmup_iterations_per_operation": 1,
@@ -393,7 +393,7 @@
     "github_ci": {
       "run_id": 33411277559,
       "url": "https://github.com/SW26010/SpecForge/actions/runs/33411277559",
-      "head_sha": "9873608166134a09ad72d38d807cf0a222321a32",
+      "head_sha": "064d461d1b6f5b76675755e965ceb3ff7c7e2d98",
       "native_headless_job": "success",
       "required_ctest_gate": "success",
       "pinned_interoperability_and_checksum_ctest": "success",
@@ -406,11 +406,11 @@
     "production_fix_commits_inserted": [],
     "test_or_ci_reproducibility_defects_fixed": [
       {
-        "commit": "04661e6",
+        "commit": "60a5b019015d",
         "summary": "Preserve binary ASDF fixture bytes across checkouts."
       },
       {
-        "commit": "9873608",
+        "commit": "064d461d1b6f",
         "summary": "Pin the ASDF oracle to a compatible Python 3.12 ABI."
       }
     ]

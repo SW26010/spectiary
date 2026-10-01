@@ -10,7 +10,7 @@ Status: accepted evidence for [GitHub issue #78](https://github.com/SW26010/Spec
 
 This report records the bounded hardening and scale evidence for the schema 2.0
 sample-labeling production codec and store. The measured binary came from clean
-commit `9873608166134a09ad72d38d807cf0a222321a32`. The evidence commit adds only
+commit `064d461d1b6f5b76675755e965ceb3ff7c7e2d98`. The evidence commit adds only
 this report and its small structured records; it does not change the measured
 implementation.
 
@@ -36,7 +36,7 @@ No production codec or store defect was found, so issue #78 did not require a
 synthetic `fix(labeling)` commit. CI did expose two reproducibility defects in
 the test infrastructure: binary fixture bytes were vulnerable to checkout line
 ending conversion, and the Python oracle needed an explicitly compatible ABI.
-They were fixed independently by commits `04661e6` and `9873608`.
+They were fixed independently by commits `60a5b019015d` and `064d461d1b6f`.
 
 The checksum policy remains the decision in
 [ADR 0007](../../adr/0007-asdf-labeling-block-checksum-policy.md): the writer emits an

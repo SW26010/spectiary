@@ -5,7 +5,7 @@
 
 ## 按原记录顺序保留的证据
 
-- commit `8282a95` 的 compositor-clock tick 可以在本机 DRR 交互时形成约 120 Hz 的提交节奏，
+- commit `3aa0680140e9` 的 compositor-clock tick 可以在本机 DRR 交互时形成约 120 Hz 的提交节奏，
   交互路径使用 `Present(0, ALLOW_TEARING)`，真实 pan 可见稳定水平断层。它满足约 120 Hz
   节奏，但只能归类为 `tearing_at_target_rate`，不是首选的最高刷新率无撕裂状态。
 - 临时 `Present(1, 0)` A/B 消除了撕裂，但约 60 Hz，只能归类为

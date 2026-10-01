@@ -2,7 +2,7 @@
   "format_kind": "specforge.asdf_labeling.production_hardening_environment",
   "schema_version": 1,
   "captured_at_utc": "2026-08-31T16:23:45.1766661Z",
-  "measurement_source_commit": "9873608166134a09ad72d38d807cf0a222321a32",
+  "measurement_source_commit": "064d461d1b6f5b76675755e965ceb3ff7c7e2d98",
   "working_tree_dirty_at_measurement": false,
   "host": {
     "os": "Microsoft Windows 11 Pro",
