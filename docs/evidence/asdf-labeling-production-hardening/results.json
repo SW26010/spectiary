@@ -392,7 +392,8 @@
     },
     "github_ci": {
       "run_id": 33411277559,
-      "url": "https://github.com/SW26010/SpecForge/actions/runs/33411277559",
+      "url": null,
+      "migration_note": "Historical Actions run; workflow history was not migrated.",
       "head_sha": "064d461d1b6f5b76675755e965ceb3ff7c7e2d98",
       "native_headless_job": "success",
       "required_ctest_gate": "success",

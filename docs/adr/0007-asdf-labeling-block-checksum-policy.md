@@ -230,7 +230,7 @@ input does not automatically require emitting checksums.
 
 ## Related Decisions and Evidence
 
-- [Issue #78](https://github.com/SW26010/SpecForge/issues/78) defines the ASDF
+- issue #78 defines the ASDF
   production-hardening scope.
 - [ASDF Standard low-level file layout][asdf-block-layout] defines block fields
   and zero-checksum semantics.

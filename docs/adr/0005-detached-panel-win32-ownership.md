@@ -11,22 +11,22 @@ the main-window boundary, minimized, restored, focused, docked, or undocked.
 
 The window model converged through four related regressions:
 
-- [#35](https://github.com/SW26010/SpecForge/issues/35) showed visible flicker
+- issue #35 showed visible flicker
   in the tested `FLIP_DISCARD` + Dear ImGui viewport AutoMerge configurations.
   The A/B results were consistent with a cross-HWND presentation handoff gap
   while a floating panel repeatedly merges into and separates from the main
   viewport. Keeping floating panels in stable secondary viewports with
   `ConfigViewportsNoAutoMerge = true` avoided that observed flicker without
   abandoning the modern presentation path.
-- [#48](https://github.com/SW26010/SpecForge/issues/48) then showed that stable
+- issue #48 then showed that stable
   secondary viewports implemented as unrelated top-level HWNDs do not naturally
   follow the main window's minimize/restore lifecycle and can become difficult
   to reach. SpecForge temporarily synchronized secondary visibility explicitly.
-- [#53](https://github.com/SW26010/SpecForge/issues/53) showed the remaining
+- issue #53 showed the remaining
   architectural gap: explicit hide/show does not create a persistent Win32
   window group, so another application's window can interleave between the main
   HWND and detached panels after restore.
-- [#57](https://github.com/SW26010/SpecForge/issues/57) showed that owned
+- issue #57 showed that owned
   secondary viewports still exposed independent shell identities when the
   backend created them with `WS_EX_APPWINDOW`. The resulting multiple taskbar
   targets interrupted the normal one-click minimize/restore interaction even

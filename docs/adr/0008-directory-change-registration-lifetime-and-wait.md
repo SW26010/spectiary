@@ -6,7 +6,7 @@ Keep the long-lived `DirectoryChangeGenerationMonitor` registration thread.
 Use a request-local condition variable with a stop-aware deadline wait instead
 of polling a future every 2 ms. Completion, task cancellation, and the existing
 five-second deadline end the wait. This decision addresses the agreed waiting
-and lifetime scope of [issue #89](https://github.com/SW26010/SpecForge/issues/89).
+and lifetime scope of issue #89.
 
 ## Evidence
 

@@ -7,7 +7,7 @@ lifetime, cancellation, completion ordering, speculative work and retirement.
 Preparation remains a private implementation collaborator. Callers submit source
 requests and consume completions; they do not assemble preparation steps.
 
-For [issue #45](https://github.com/SW26010/SpecForge/issues/45), replace the nine
+For issue #45, replace the nine
 callback fields in `SourceCollectionPreparationAdapters` with four narrow
 dependencies in `SourceCollectionLoadDependencies`. This is a reduction in
 replaceable behavior, not just a renamed container. The preparation class is no

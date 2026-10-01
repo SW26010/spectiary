@@ -4,9 +4,10 @@ Date: 2026-08-31 (UTC measurement). Status: accepted historical evidence for the
 recorded implementation commit. Current schema and persistence ownership are
 maintained in [sample labeling](../../reference/labeling/sample_labeling.md) and
 [labeling persistence ownership](../../reference/labeling/labeling_persistence_ownership.md).
-Old product names and run URLs in the raw records describe the measured version.
+Old product names and run IDs in the raw records describe the measured version.
+Historical Actions runs and their artifacts were not migrated to this repository.
 
-Status: accepted evidence for [GitHub issue #78](https://github.com/SW26010/SpecForge/issues/78)
+Status: accepted evidence for issue #78
 
 This report records the bounded hardening and scale evidence for the schema 2.0
 sample-labeling production codec and store. The measured binary came from clean
@@ -211,7 +212,7 @@ profile.
 
 The broader pinned interoperability evidence contained 36 records and zero
 failures. GitHub Actions run
-[`33411277559`](https://github.com/SW26010/SpecForge/actions/runs/33411277559)
+`33411277559` (historical run, not migrated)
 ran at the same source commit. Its native/headless required gate and the two
 pinned interoperability/checksum CTests passed. The uploaded headless evidence
 artifact digest is recorded in `results.json`.

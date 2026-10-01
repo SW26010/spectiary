@@ -14,6 +14,6 @@ ctest --test-dir build\ninja-msvc-debug -R ^specforge_sample_labeling_asdf_store
 
 # The pinned Python interoperability and checksum matrix was also rerun by
 # .github/workflows/automation.yml at the same commit. The accepted run is:
-# https://github.com/SW26010/SpecForge/actions/runs/33411277559
+# Historical Actions run 33411277559 (not migrated)
 # Its exact workflow commands are the checked-in automation.yml commands at
 # measurement_source_commit; Python was pinned by actions/setup-python to 3.12.

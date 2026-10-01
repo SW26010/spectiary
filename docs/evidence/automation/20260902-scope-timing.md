@@ -28,11 +28,11 @@ the before total, so the comparison understates the removed workflow scope.
 
 The clean GitHub-hosted Windows comparison was completed with manual workflow
 dispatches. The successful broad-scope
-[before run 33486495510](https://github.com/SW26010/SpecForge/actions/runs/33486495510/job/99787686232)
+before run 33486495510 (job `99787686232`; historical run, not migrated)
 still configured Debug, static Release, and the pinned ASDF tree; built the two
 `all` targets plus the specialized ASDF targets; and ran both `ci-headless`
 suites plus the pinned ASDF oracle. The post-merge
-[after run 33573250819](https://github.com/SW26010/SpecForge/actions/runs/33573250819/job/100071558764)
+after run 33573250819 (job `100071558764`; historical run, not migrated)
 configured only Debug, built `spectiary_automation_headless_targets`, and ran
 the five-test `automation-headless` selector:
 
@@ -52,7 +52,7 @@ includes checkout, runner setup, evidence preparation, and artifact handling.
 ## Repository fast tier
 
 2026-09-02 合并后的代表性 GitHub-hosted Windows/MSVC/Ninja 验证在
-[repository verification run 33573199441](https://github.com/SW26010/SpecForge/actions/runs/33573199441/job/100071400948)
+repository verification run 33573199441 (job `100071400948`; historical run, not migrated)
 中通过同一正式入口运行了 `ctest --preset fast`：74/74 项测试通过，
 `Total Test time (real) = 54.18 sec`。该结果满足低于 1 分钟的受控耗时门槛，
 但尚未达到约 30 秒的首选预算。
