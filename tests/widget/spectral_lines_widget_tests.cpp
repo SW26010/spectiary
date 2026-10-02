@@ -1,5 +1,6 @@
 #include "imgui_widget_harness.h"
 #include "ui/spectral_lines_panel.h"
+#include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_ui_identity.h"
 #include "ui/spectral_lines_plain_text.h"
 #include "../helpers/temporary_directory.h"
@@ -237,6 +238,70 @@ void TestPlainTextNames()
     Require(copied, "plain target label keeps the copy action bound to its canonical identity");
 }
 
+void TestSharedReferenceVisibility()
+{
+    SpectralLinesPanelController controller(BuiltIn(), {});
+    Require(controller.Submit(SpectralLineStateIntent::DuplicateGroupingView("base")).changed, "duplicate view");
+    std::string view_id, source_id, target_id;
+    for (const auto& view : controller.View().grouping_views) if (view.editable) {
+        view_id = view.id;
+        source_id = view.groups.front().id;
+    }
+    Require(controller.Submit(SpectralLineStateIntent::AddUserGroup(view_id)).changed, "add target group");
+    for (const auto& view : controller.View().grouping_views) if (view.id == view_id)
+        for (const auto& group : view.groups)
+            if (!group.is_unassigned && group.id != source_id) target_id = group.id;
+    for (const auto& group_id : {source_id, target_id})
+        (void)controller.Submit(SpectralLineStateIntent::SetGroupExpanded(view_id, group_id, true));
+
+    SpectralLinesGroupingViewUi grouping;
+    float width = 260;
+    int visible_stars = 0;
+    WidgetHarness ui{[&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(width, 600), ImGuiCond_Always);
+        ImGui::Begin("Shared references");
+        const auto state = controller.View();
+        for (const auto& view : state.grouping_views) if (view.id == view_id)
+            grouping.Render(controller, {}, view, state.line_list_marker_count, UiLanguage::English);
+        // Inspect emitted glyph geometry: text logs also include clipped text,
+        // which would miss the original off-panel indicator regression.
+        visible_stars = 0;
+        const auto* star = ImGui::GetFontBaked()->FindGlyph('*');
+        const auto* draw = ImGui::GetWindowDrawList();
+        for (const auto& command : draw->CmdBuffer) {
+            for (unsigned int i = command.IdxOffset; i + 5 < command.IdxOffset + command.ElemCount; ++i) {
+                const auto& first = draw->VtxBuffer[command.VtxOffset + draw->IdxBuffer[i]];
+                const auto& opposite = draw->VtxBuffer[command.VtxOffset + draw->IdxBuffer[i + 2]];
+                if (draw->IdxBuffer[i] == draw->IdxBuffer[i + 3] &&
+                    first.uv.x == star->U0 && first.uv.y == star->V0 &&
+                    opposite.uv.x == star->U1 && opposite.uv.y == star->V1 &&
+                    first.pos.x >= command.ClipRect.x && first.pos.y >= command.ClipRect.y &&
+                    opposite.pos.x <= command.ClipRect.z && opposite.pos.y <= command.ClipRect.w)
+                    ++visible_stars;
+            }
+        }
+        ImGui::End();
+    }};
+    ui.Frames(3);
+    Require(visible_stars == 0, "single reference has no shared indicator");
+    Require(controller.Submit(SpectralLineStateIntent::CopyMarkerReference(
+        view_id, "marker", source_id, target_id)).changed, "copy reference");
+    for (float panel_width : {260.0f, 460.0f}) {
+        width = panel_width;
+        for (const char* query : {"", "marker"}) {
+            (void)controller.Submit(SpectralLineStateIntent::SetGroupingViewSearch(query));
+            ui.Frames(3);
+            Require(visible_stars == 2, "both shared indicators are inside the panel, with and without search");
+        }
+    }
+    Require(controller.Submit(SpectralLineStateIntent::RemoveMarkerReference(
+        view_id, "marker", target_id)).changed, "remove copied reference");
+    ui.Frames(3);
+    Require(visible_stars == 0, "remaining reference loses shared indicator");
+    Require(controller.View().line_list_marker_count == 1, "reference edits preserve the physical marker");
+}
+
 void TestGroupingViewEditing()
 {
     test_support::TemporaryDirectory temporary;
@@ -377,6 +442,6 @@ void TestPanel()
 }
 int main()
 {
-    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextSelectableHitArea(); TestPlainTextNames(); TestGroupingViewEditing(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
+    try { TestOpaqueIdentities(); TestPlainTextDrawOutput(); TestPlainTextSelectableHitArea(); TestPlainTextNames(); TestSharedReferenceVisibility(); TestGroupingViewEditing(); TestPanel(); std::cout << "Spectral-line widget tests passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

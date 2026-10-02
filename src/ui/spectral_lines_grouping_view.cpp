@@ -829,6 +829,12 @@ void SpectralLinesGroupingViewUi::Render(
                 }
 
                 ImGui::SameLine();
+                // The selectable consumes the remaining row width. Keep the
+                // shared indicator before it so it cannot land outside the clip rect.
+                if (reference.shared) {
+                    RenderSharedReferenceMarker(language);
+                    ImGui::SameLine();
+                }
                 ImGuiSelectableFlags marker_flags =
                     ImGuiSelectableFlags_None;
                 if (editable && ordinary_group) {
@@ -941,11 +947,6 @@ void SpectralLinesGroupingViewUi::Render(
                         }
                     }
                     ImGui::EndPopup();
-                }
-
-                if (reference.shared) {
-                    ImGui::SameLine();
-                    RenderSharedReferenceMarker(language);
                 }
 
                 bool reference_removed = false;
