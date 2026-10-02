@@ -293,6 +293,14 @@ Bounds ComputeBounds(const SpectrumSnapshot& snapshot, SpectrumPlotState& state)
     const auto [x_min, x_max] = std::minmax_element(x_values->begin(), x_values->end());
     bounds.x_min = *x_min;
     bounds.x_max = *x_max;
+    if (bounds.x_min == bounds.x_max) {
+        // Give a single wavelength a readable viewport, not just the tiny
+        // numerical span enforced by the zoom constraints. Scale the padding
+        // for large coordinates where adding half a unit would round away.
+        const double padding = std::max(0.5, std::abs(bounds.x_min) * 1.0e-6);
+        bounds.x_min = std::max(std::numeric_limits<double>::lowest(), bounds.x_min - padding);
+        bounds.x_max = std::min(std::numeric_limits<double>::max(), bounds.x_max + padding);
+    }
 
     bool has_y_bounds = false;
     if (state.show_raw_curve || state.show_points) {

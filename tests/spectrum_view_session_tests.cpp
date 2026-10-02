@@ -1043,6 +1043,68 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
         "snapshot reset should discard old plot limits");
 }
 
+void TestCoincidentWavelengthsFitOnActivation()
+{
+    ScopedPlotUi ui;
+    for (const bool immersive : {false, true}) {
+        for (const double wavelength : {5000.0, 1.0e20}) {
+            for (const std::size_t count : {1u, 3u}) {
+                spectiary::SpectrumViewSession session;
+                session.Submit(spectiary::SpectrumViewSessionCommand::SetShowPoints(true));
+                const auto snapshot = MakeSnapshot(
+                    std::vector<double>(count, wavelength), std::vector<double>(count, 3.0));
+                spectiary::SpectrumPlotDisplayOptions display;
+                display.native_transparent_axes = immersive;
+                display.include_edge_pixels = immersive;
+                const auto inspect = [&](ImPlotPlot& plot) {
+                    for (const ImAxis index : {ImAxis_X1, ImAxis_Y1}) {
+                        const auto& axis = plot.Axes[index];
+                        const double value = index == ImAxis_X1 ? wavelength : 3.0;
+                        Require(std::isfinite(axis.Range.Min) && std::isfinite(axis.Range.Max) &&
+                            axis.Range.Min < value && value < axis.Range.Max,
+                            "coincident data must lie inside finite nondegenerate fit bounds");
+                        Require(axis.Ticker.TickCount() > 1 && axis.Ticker.TickCount() < 1000,
+                            "coincident data must produce useful bounded axis ticks");
+                        if (index == ImAxis_X1 && wavelength == 5000.0) {
+                            RequireNear(axis.Range.Min, 4999.5,
+                                "single-wavelength fit should provide a readable lower bound");
+                            RequireNear(axis.Range.Max, 5000.5,
+                                "single-wavelength fit should provide a readable upper bound");
+                        }
+                        const float pixel = axis.PlotToPixels(value);
+                        Require(std::isfinite(pixel) &&
+                            pixel > std::min(axis.PixelMin, axis.PixelMax) &&
+                            pixel < std::max(axis.PixelMin, axis.PixelMax),
+                            "data point must map inside the visible plot");
+                    }
+                };
+                const auto render = [&]() {
+                    const auto feedback = ui.RenderFrame(session, snapshot,
+                        ImVec2(-100, -100), false, nullptr, display, 0, false,
+                        ImVec2(800, 600), inspect);
+                    Require(feedback.plot_submitted && feedback.visible_limits,
+                        "coincident wavelengths must present a usable plot");
+                    return feedback;
+                };
+                Require(render().fit_applied, "initial activation must fit coincident wavelengths");
+                render();
+                session.Submit(spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+                    spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged));
+                ui.RenderFrame(session, MakeSnapshot({1.0, 2.0}, {1.0, 2.0}));
+                session.Submit(spectiary::SpectrumViewSessionCommand::ApplySnapshotChange(
+                    spectiary::SourceCollectionSnapshotChangeReason::SourceCollectionChanged));
+                Require(render().fit_applied, "reactivation must fit coincident wavelengths");
+                session.Submit(spectiary::SpectrumViewSessionCommand::RequestFitView());
+                Require(render().fit_applied, "explicit fit must retain usable bounds");
+                Require(snapshot->current_spectrum.x_values->front() == wavelength &&
+                    snapshot->current_spectrum.y_values->front() == 3.0 &&
+                    snapshot->current_spectrum.point_count == count,
+                    "fit must preserve original spectrum values and point count");
+            }
+        }
+    }
+}
+
 void TestHiddenCurvesStillReportPresentedPlotFrame()
 {
     ScopedPlotUi ui;
@@ -1720,6 +1782,7 @@ int main()
     TestIndependentSpectrumViewsDoNotShareViewportLock();
     TestSourceRosterClassifiesSnapshotChanges();
     TestSnapshotResetPreservesControlsAndFitsNewData();
+    TestCoincidentWavelengthsFitOnActivation();
     TestHiddenCurvesStillReportPresentedPlotFrame();
     TestNativeYTicksSurviveImmersiveModeTransitions();
     TestNearlyCoincidentAxisEndpointsRemainResponsive();
