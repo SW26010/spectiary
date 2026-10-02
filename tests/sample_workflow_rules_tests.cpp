@@ -1,3 +1,4 @@
+#include "domain/sample_annotation_io.h"
 #include "domain/sample_filter.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -529,6 +531,78 @@ void TestTypedAnnotationSortingPreservesNumericPrecision()
         "adjacent doubles should have distinct round-trip display projections");
 }
 
+void TestCsvMissingLabelsAreNotSortable()
+{
+    const std::filesystem::path path = TempPath("_missing_labels.csv");
+    spectiary::SourceCollectionManifest manifest;
+    manifest.sample_names = {"f", "a", "e", "b", "d", "c"};
+    // Cover mixed missing values, entirely missing values, and the escaped
+    // literal label which must remain comparable despite identical text.
+    for (const bool all_missing : {false, true}) {
+        for (const bool literal_label : {false, true}) {
+            {
+                std::ofstream csv(path);
+                csv << "sample,label\n";
+                for (std::size_t row = 0; row < manifest.sample_names.size(); ++row) {
+                    csv << manifest.sample_names[row] << ',';
+                    if (all_missing || row < 4) {
+                        csv << (literal_label ? "\\unlabeled" : "unlabeled");
+                    } else {
+                        csv << (row == 4 ? "good" : "bad");
+                    }
+                    csv << '\n';
+                }
+            }
+            std::string error;
+            auto annotation = spectiary::SampleAnnotationIoAdapter{}.LoadForSource(
+                path,
+                spectiary::SampleAnnotationSourceCompatibility{
+                    .source_kind = "npy",
+                    .sample_count = manifest.sample_names.size(),
+                    .sample_names = manifest.sample_names,
+                },
+                &error);
+            Require(annotation.has_value(), error.empty() ? "CSV should load" : error);
+            Require(annotation->values[0].missing == !literal_label,
+                    "CSV missing sentinel must remain distinct from a literal label");
+            manifest.annotations = {*annotation};
+            const std::string source_id = spectiary::BuildAnnotationFilterSourceId(*annotation);
+            const auto views = spectiary::BuildSampleSortingSourceViews(
+                &manifest, nullptr, manifest.sample_names.size());
+            Require(
+                std::any_of(views.begin(), views.end(), [&](const auto& view) {
+                    return view.id == source_id;
+                }) == literal_label,
+                "CSV with missing labels must not appear in sample sorting candidates");
+            const auto source = spectiary::BuildSampleSortingSource(
+                &manifest, nullptr, manifest.sample_names.size(), source_id);
+            Require(source.has_value() == literal_label,
+                    "CSV with missing labels must also reject direct sample sorting activation");
+            if (source) {
+                Require(source->values.size() == manifest.sample_names.size(),
+                        "sample sorting must retain every sample");
+            }
+        }
+    }
+    std::filesystem::remove(path);
+}
+
+void TestAnnotationSortingRejectsMissingNumericValues()
+{
+    for (auto annotation : {
+             MakeIntegerAnnotation("Rank", TempPath("_missing_rank.npy"), {2, 1, 3}),
+             MakeFloatAnnotation("Score", TempPath("_missing_score.npy"), {2.0, 1.0, 3.0})}) {
+        annotation.values.back().missing = true;
+        spectiary::SourceCollectionManifest manifest;
+        manifest.annotations = {annotation};
+        Require(spectiary::BuildSampleSortingSourceViews(&manifest, nullptr, 3).empty(),
+                "missing numeric values must exclude the entire annotation from sample sorting");
+        Require(!spectiary::BuildSampleSortingSource(
+                    &manifest, nullptr, 3, spectiary::BuildAnnotationFilterSourceId(annotation)),
+                "missing numeric values must reject direct sample sorting activation");
+    }
+}
+
 void TestAnnotationSortingExclusions()
 {
     const std::filesystem::path rank_path = TempPath("_local_rank.npy");
@@ -944,6 +1018,7 @@ void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
 }  // namespace
 
 int main()
+try
 {
     TestTaskNamingRules();
     TestPlainAnnotationActivationPlanCreatesEditableTask();
@@ -956,10 +1031,17 @@ int main()
     TestAnnotationSortingSources();
     TestTypedAnnotationSortingPreservesNumericPrecision();
     TestAnnotationSortingExclusions();
+    TestCsvMissingLabelsAreNotSortable();
+    TestAnnotationSortingRejectsMissingNumericValues();
     TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
     TestLocalTaskDisplayNameWithoutLoadedAnnotation();
     TestCanonicalOwnerFilterCanBeAddedAndEvaluated();
     TestWorkflowSourcePolicyTracksOwnerGenerations();
     TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys();
     return 0;
+}
+catch (const std::exception& error)
+{
+    std::cerr << error.what() << '\n';
+    return 1;
 }
