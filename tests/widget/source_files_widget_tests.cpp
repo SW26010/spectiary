@@ -491,8 +491,74 @@ void TestFilesShellDropHitTesting()
     Require(!panel.FilesDropViewport(), "hidden Files panel discards prior target");
 }
 
+void TestLoadFailuresAreVisibleWithoutHoverAndDoNotBecomeSources()
+{
+    spectiary::SourceCollectionSessionView view;
+    int submissions = 0;
+    spectiary::PanelSessionInteraction interaction(
+        [&](auto, auto) {
+            ++submissions;
+            return spectiary::SourceCollectionSessionResult{};
+        },
+        [&]() -> const spectiary::SourceCollectionSessionView& { return view; });
+    spectiary::SourceCollectionPanelUi panel;
+    std::vector<spectiary::SourceCollectionLoadFailure> failures{
+        {std::filesystem::path{L"C:\\观测\\empty.csv"},
+            {spectiary::SourceCollectionLoadErrorKind::BackgroundLoadingFailed,
+                "CSV has no spectrum rows (100% empty)."}},
+        {"broken.fits", {spectiary::SourceCollectionLoadErrorKind::BackgroundLoadingFailed,
+            "Unsupported FITS table.\nExpected a single spectrum."}},
+    };
+    const std::string diagnostic = spectiary::FormatSourceCollectionLoadFailures(
+        spectiary::UiLanguage::English, failures);
+    bool open = true;
+    int dismiss_count = 0;
+    std::string text;
+    const auto render = [&]() {
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(700, 600), ImGuiCond_Always);
+        ImGui::LogToBuffer();
+        const bool dismiss = panel.RenderFiles(interaction, spectiary::UiLanguage::English,
+            &open, {}, {}, {}, {}, failures);
+        text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+        if (dismiss) {
+            ++dismiss_count;
+            failures.clear();
+        }
+    };
+    spectiary::test::WidgetHarness ui{render};
+    ui.Frames(2);
+    Require(text.find("empty.csv") != std::string::npos &&
+            text.find("Background source loading failed.") != std::string::npos &&
+            text.find("CSV has no spectrum rows (100% empty).") != std::string::npos &&
+            text.find("Unsupported FITS table.") != std::string::npos &&
+            text.find("No spectrum is currently displayed.") != std::string::npos,
+        "Files must show failed paths, semantics and raw diagnostics without hover or a snapshot");
+    ui.Frames(20);
+    Require(dismiss_count == 0 && !failures.empty() && view.sources.empty(),
+        "merely displaying failures must neither acknowledge them nor add source rows");
+
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
+    snapshot->source.path = "previous.csv";
+    view.current_sample_snapshot = snapshot;
+    ui.Frames();
+    Require(text.find("Source shown in Spectrum and Information: previous.csv") != std::string::npos &&
+            text.find("empty.csv") != std::string::npos,
+        "a retained snapshot must be identified separately from the failed candidate");
+    ui.Click("CopySourceLoadFailures");
+    Require(ImGui::GetClipboardText() == diagnostic && dismiss_count == 0,
+        "copy must preserve all diagnostic text without dismissing failures");
+    ui.Click("DismissSourceLoadFailures");
+    ui.Frames();
+    Require(dismiss_count == 1 && text.find("CSV has no spectrum rows") == std::string::npos &&
+            view.current_sample_snapshot == snapshot && submissions == 0,
+        "dismiss must clear the diagnostic presentation without changing the active source");
+}
+
 int main()
 {
+    TestLoadFailuresAreVisibleWithoutHoverAndDoNotBecomeSources();
     TestFilesShellDropHitTesting();
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
     TestFilesPanelContextActionLaunchesWithoutMutatingSession();

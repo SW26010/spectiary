@@ -162,7 +162,10 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "%.3f ms/frame · %.1f FPS",
         "%.3f 毫秒/帧 · %.1f FPS"},
-    UiTextEntry{"Load failed (click to dismiss):", "加载失败（单击可忽略）："},
+    UiTextEntry{"Load failed (click for details in Files):", "加载失败（单击在文件面板中查看详情）："},
+    UiTextEntry{"Source load failures", "源加载失败详情"},
+    UiTextEntry{"Source shown in Spectrum and Information", "光谱与信息面板当前显示的源"},
+    UiTextEntry{"No spectrum is currently displayed.", "当前未显示光谱。"},
     UiTextEntry{"Performance recording", "正在录制性能诊断"},
     UiTextEntry{"Finishing recording...", "正在完成录制…"},
     UiTextEntry{"Start Recording", "开始录制"},

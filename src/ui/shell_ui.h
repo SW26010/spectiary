@@ -491,6 +491,7 @@ private:
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
+    bool focus_files_requested_ = false;
     SettingsPanelUi settings_panel_ui_;
     ApplicationSettings application_settings_;
     std::filesystem::path spectrum_plot_preferences_path_;

@@ -967,14 +967,15 @@ unsigned int SourceCollectionPanelUi::AnnotationsDropViewport() const
 bool SourceCollectionPanelUi::HitTestAnnotationsDrop(float x, float y) const
 { return HitTestPanelDrop(AnnotationsWindowName(), annotations_drop_frame_, x, y); }
 
-void SourceCollectionPanelUi::RenderFiles(
+bool SourceCollectionPanelUi::RenderFiles(
     PanelSessionInteraction& interaction,
     UiLanguage language,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
     const SourceCollectionPathPicker& choose_source_folder,
     const SourceCollectionPathOpener& open_source,
-    const SourceCollectionPathLauncher& launch_source_in_new_instance)
+    const SourceCollectionPathLauncher& launch_source_in_new_instance,
+    std::span<const SourceCollectionLoadFailure> load_failures)
 {
     const std::string window_label = StableUiLabel(
         language,
@@ -982,7 +983,7 @@ void SourceCollectionPanelUi::RenderFiles(
         "FilesV2");
     if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
-        return;
+        return false;
     }
 
     const SourceCollectionSessionView& view = interaction.View();
@@ -993,6 +994,30 @@ void SourceCollectionPanelUi::RenderFiles(
         RenderShellDropOutline();
     }
     ImGui::Separator();
+
+    bool dismiss_failures = false;
+    if (!load_failures.empty()) {
+        RenderText(UiText(language, UiTextId::SourceLoadFailures));
+        const std::string diagnostic =
+            FormatSourceCollectionLoadFailures(language, load_failures);
+        ImGui::TextWrapped("%s", diagnostic.c_str());
+        ImGui::Spacing();
+        if (view.current_sample_snapshot) {
+            ImGui::TextWrapped("%s: %s",
+                UiText(language, UiTextId::DisplayedSource).data(),
+                PathToUtf8(view.current_sample_snapshot->source.path).c_str());
+        } else {
+            ImGui::TextWrapped("%s", UiText(language, UiTextId::NoSpectrumDisplayed).data());
+        }
+        if (ImGui::Button(StableUiLabel(language,
+                UiTextId::CopyDiagnosticInformation, "CopySourceLoadFailures").c_str())) {
+            ImGui::SetClipboardText(diagnostic.c_str());
+        }
+        ImGui::SameLine();
+        dismiss_failures = ImGui::Button(StableUiLabel(language,
+            UiTextId::Dismiss, "DismissSourceLoadFailures").c_str());
+        ImGui::Separator();
+    }
 
     if (source_launch_error_) {
         RenderText(
@@ -1181,6 +1206,7 @@ void SourceCollectionPanelUi::RenderFiles(
         }
     }
     ImGui::End();
+    return dismiss_failures;
 }
 
 void SourceCollectionPanelUi::RenderNavigation(

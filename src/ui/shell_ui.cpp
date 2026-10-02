@@ -338,17 +338,17 @@ bool RenderTopBarStatus(
         IsTopBarStatusHoverTarget(
             operation_rect.Min,
             operation_rect.Max)) {
-        const std::string_view dismiss_hint = UiText(
+        const std::string_view details_hint = UiText(
             language,
-            UiTextId::LoadFailedDismissHint);
+            UiTextId::LoadFailedDetailsHint);
         const std::string source_load_error =
             FormatSourceCollectionLoadFailures(
                 language,
                 source_load_failures);
         ImGui::SetTooltip(
             "%.*s\n%s",
-            static_cast<int>(dismiss_hint.size()),
-            dismiss_hint.data(),
+            static_cast<int>(details_hint.size()),
+            details_hint.data(),
             source_load_error.c_str());
     }
     if (layout.show_operation && show_persistence &&
@@ -2873,7 +2873,8 @@ void ShellUi::RenderMainMenuBar(
             activation_status.failures,
             persistence,
             language)) {
-        source_activation_.AcknowledgeLoadFailures();
+        SetPanelVisibility(ApplicationPanel::Files, true);
+        focus_files_requested_ = true;
     }
 
     ImGui::EndMenuBar();
@@ -2883,7 +2884,11 @@ void ShellUi::RenderFilesPanel(
     bool panel_open,
     UiLanguage language)
 {
-    source_collection_panel_ui_.RenderFiles(
+    if (std::exchange(focus_files_requested_, false)) {
+        ImGui::SetNextWindowFocus();
+        ImGui::SetNextWindowCollapsed(false);
+    }
+    const bool dismiss_failures = source_collection_panel_ui_.RenderFiles(
         panel_session_interaction_,
         language,
         &panel_open,
@@ -2904,7 +2909,11 @@ void ShellUi::RenderFilesPanel(
                 return std::nullopt;
             }
             return result.diagnostic;
-        });
+        },
+        source_activation_.status().failures);
+    if (dismiss_failures) {
+        source_activation_.AcknowledgeLoadFailures();
+    }
     HandleSessionAction(
         panel_session_interaction_.TakeAction());
     SetPanelVisibility(ApplicationPanel::Files, panel_open);
@@ -3332,6 +3341,9 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
+        ImGui::TextWrapped("%s: %s",
+            UiText(language, UiTextId::DisplayedSource).data(),
+            PathToUtf8(snapshot->source.path).c_str());
         const std::string_view separator =
             LabelValueSeparator(language);
         const std::string_view name_label = UiText(

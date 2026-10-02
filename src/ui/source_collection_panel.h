@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -47,14 +48,16 @@ public:
     void FinalizeNavigationInputEdits(
         PanelSessionInteraction& interaction);
 
-    void RenderFiles(
+    // Returns true when the user requests acknowledgement of the shown failures.
+    bool RenderFiles(
         PanelSessionInteraction& interaction,
         UiLanguage language,
         bool* open,
         const SourceCollectionPathPicker& choose_source_file,
         const SourceCollectionPathPicker& choose_source_folder,
         const SourceCollectionPathOpener& open_source,
-        const SourceCollectionPathLauncher& launch_source_in_new_instance);
+        const SourceCollectionPathLauncher& launch_source_in_new_instance,
+        std::span<const SourceCollectionLoadFailure> load_failures = {});
 
     void RenderNavigation(
         PanelSessionInteraction& interaction,

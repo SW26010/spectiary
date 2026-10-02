@@ -39,6 +39,18 @@
 namespace spectiary {
 
 struct ShellUiTestAccess {
+    static void RenderSourceDiagnostics(ShellUi& shell)
+    {
+        if (shell.application_settings_.View().panel_visibility.files) {
+            shell.RenderFilesPanel(true, UiLanguage::English);
+        }
+    }
+
+    static void RenderInformation(ShellUi& shell)
+    {
+        shell.RenderInfoTagsPanel(true);
+    }
+
     static void RenderLayout(ShellUi& shell)
     {
         shell.RenderDockHost({});
@@ -1510,6 +1522,84 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
             load_error_visible,
         "the failed report should include completion drain and preserve the UI error");
 }
+
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+void TestFailedOpenPresentationKeepsSourceOwnershipAndOpensDetails()
+{
+    using Access = spectiary::ShellUiTestAccess;
+    const auto previous = UniqueTempPath("_previous.csv");
+    const auto failed = UniqueTempPath("_empty.csv");
+    WriteFixture(previous);
+    { std::ofstream empty(failed); }
+    // Use a real empty CSV decode, while retaining the already adopted source.
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    auto shell = Access::Create(MakePreparedDeferredSession(previous),
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    const auto retained = Access::Session(*shell).CurrentSampleSnapshot();
+    shell->OpenSource(failed);
+    Require(DrainAllSourceLoads(*shell) && !Access::LoadError(*shell).empty(),
+        "empty CSV should produce a real source load diagnostic");
+    Require(Access::Session(*shell).CurrentSampleSnapshot() == retained &&
+            Access::Session(*shell).View().sources.size() == 1,
+        "failed new candidate must preserve the adopted source without a new roster entry");
+    (void)shell->SetPanelVisibilityForAutomation(spectiary::ApplicationPanel::Files, false);
+    std::string files_text;
+    std::string information_text;
+    ImVec2 failure_position;
+    spectiary::test::WidgetHarness ui{[&]() {
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(1100, 100), ImGuiCond_Always);
+        ImGui::Begin(kFileMenuTestHost, nullptr, ImGuiWindowFlags_MenuBar);
+        Access::RenderMainMenuBar(*shell, {}, {});
+        const auto* host = ImGui::GetCurrentWindow();
+        const auto& style = ImGui::GetStyle();
+        failure_position = ImVec2(
+            host->InnerClipRect.Max.x - style.FramePadding.x -
+                ImGui::CalcTextSize("0x0").x - style.ItemSpacing.x * 2 -
+                ImGui::CalcTextSize("|").x - ImGui::CalcTextSize("Load failed").x * 0.5f,
+            host->MenuBarRect().GetCenter().y);
+        ImGui::End();
+        ImGui::SetNextWindowPos(ImVec2(20, 140), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(700, 650), ImGuiCond_Always);
+        ImGui::LogToBuffer();
+        Access::RenderSourceDiagnostics(*shell);
+        files_text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+        ImGui::SetNextWindowPos(ImVec2(740, 140), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(750, 650), ImGuiCond_Always);
+        ImGui::LogToBuffer();
+        Access::RenderInformation(*shell);
+        information_text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+    }};
+    ui.Frames(2);
+    ImGui::GetIO().AddMousePosEvent(failure_position.x, failure_position.y);
+    ui.Frames(2);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    ui.Frames();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    ui.Frames(2);
+    Require(Access::Settings(*shell).panel_visibility.files &&
+            !Access::LoadError(*shell).empty(),
+        "clicking Load failed must open Files without acknowledging the failure");
+    Require(files_text.find(failed.filename().string()) != std::string::npos &&
+            files_text.find("Diagnostic details") != std::string::npos &&
+            files_text.find(previous.filename().string()) != std::string::npos,
+        "Files must expose the real failure and separately identify the retained source");
+    Require(information_text.find(previous.filename().string()) != std::string::npos &&
+            information_text.find(failed.filename().string()) == std::string::npos,
+        "Information must identify its adopted snapshot, never the failed candidate");
+    ui.Click("DismissSourceLoadFailures");
+    Require(Access::LoadError(*shell).empty() &&
+            Access::Session(*shell).CurrentSampleSnapshot() == retained &&
+            Access::Session(*shell).View().sources.size() == 1,
+        "explicit dismiss must acknowledge failures without changing the source session");
+    shell.reset();
+    std::filesystem::remove(previous);
+    std::filesystem::remove(failed);
+}
+#endif
 
 void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
 {
@@ -7514,6 +7604,9 @@ int main()
         RUN_SHELL_TEST(TestExternalStartupPreservesDeferredRestoreAnnotationContext);
         RUN_SHELL_TEST(TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect);
         RUN_SHELL_TEST(TestFailedExplicitOpenProducesTerminalSourceLoadReport);
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+        RUN_SHELL_TEST(TestFailedOpenPresentationKeepsSourceOwnershipAndOpensDetails);
+#endif
         RUN_SHELL_TEST(TestRealDrainCommitsOnlyTheLatestRapidNavigation);
         RUN_SHELL_TEST(TestAcceptedNavigationUsesLatestMatchingRawKeyInput);
         RUN_SHELL_TEST(TestGenericRowLocationDoesNotStartPreviousNextTrace);
