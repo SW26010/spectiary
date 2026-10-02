@@ -8881,10 +8881,16 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
     const std::string filter_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    const auto filtered = Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
     Require(
-        Submit(session, SetFilterValueSelected(filter_source_id, "1", true))
-                .follow_up_spectrum_index == 1,
+        filtered.follow_up_spectrum_index == 1 && filtered.follow_up_source_path == source_path &&
+            !filtered.canceled_source_follow_up_path,
         "filter reconciliation should queue row 1 without labeling-position semantics");
+    const auto maintenance = session.RunMaintenance(
+        spectiary::LocalUserStateSaveScheduler::Clock::now() + std::chrono::hours(1));
+    Require(!maintenance.follow_up_spectrum_index && !maintenance.canceled_source_follow_up_path &&
+            session.EffectiveSampleNavigationIndex() == 1,
+        "maintenance must retain the filter's pending worker before labeling upgrades its semantics");
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -8894,7 +8900,7 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
-        !labeled.follow_up_spectrum_index,
+        !labeled.follow_up_spectrum_index && !labeled.canceled_source_follow_up_path,
         "auto-advance to the same pending row should retain the filter's existing worker ticket");
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
@@ -8974,7 +8980,8 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
-        labeled.follow_up_spectrum_index == 1,
+        labeled.follow_up_spectrum_index == 1 && labeled.follow_up_source_path == source_path &&
+            !labeled.canceled_source_follow_up_path,
         "label filtering should preserve the newly required row 1 follow-up when auto-advance reuses it");
     Require(
         session.View().current_sample_snapshot == initial_snapshot &&
@@ -9098,7 +9105,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
     const spectiary::SourceCollectionSessionResult undone =
         Submit(session, UndoLastLabelWrite());
     Require(
-        !undone.follow_up_spectrum_index,
+        !undone.follow_up_spectrum_index && !undone.canceled_source_follow_up_path,
         "undo restore to the visible row should clear the superseded filter follow-up");
     Require(
         session.View().current_sample_snapshot ==

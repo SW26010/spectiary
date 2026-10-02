@@ -4,6 +4,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
+#include "profile/navigation_latency_trace.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session.h"
@@ -391,6 +392,14 @@ void MergeSampleWorkflowTransitionOutcome(
     SampleWorkflowTransitionOutcome& target,
     SampleWorkflowTransitionOutcome source)
 {
+    if (source.follow_up.cancel_source_path) {
+        if (target.follow_up.load && SourcePathIdentityKey(target.follow_up.load->path) ==
+                SourcePathIdentityKey(*source.follow_up.cancel_source_path)) {
+            target.follow_up.load.reset();
+        }
+        target.follow_up.cancel_source_path = std::move(source.follow_up.cancel_source_path);
+    }
+    if (source.follow_up.load) target.follow_up.load = std::move(source.follow_up.load);
     MergeSourceCollectionSessionAction(
         target.action,
         source.action);
@@ -516,8 +525,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     SourceCollectionIntent intent,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     SampleWorkflowTransitionOutcome outcome;
     switch (intent.kind) {
     case SourceCollectionIntentKind::AddReadOnlyAnnotationResult:
@@ -538,7 +546,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before);
+        before);
 }
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
@@ -546,8 +554,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     const SpectrumSnapshotHandle& snapshot,
     NavigationTargetResolutionReport* target_resolution)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition(target_resolution);
     SampleWorkflowTransitionOutcome outcome;
     switch (intent.kind) {
     case SampleNavigationIntentKind::Move:
@@ -570,7 +577,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before);
+        before);
 }
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
@@ -578,8 +585,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     const SpectrumSnapshotHandle& snapshot,
     NavigationTargetResolutionReport* target_resolution)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition(target_resolution);
     const bool reconcile_external_formalization =
         intent.kind ==
             ActiveSampleWorkflowIntentKind::
@@ -676,15 +682,14 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before);
+        before);
 }
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     SampleFilteringIntent intent,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     SampleWorkflowTransitionOutcome outcome;
     switch (intent.kind) {
     case SampleFilteringIntentKind::ClearFilters:
@@ -711,15 +716,14 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before);
+        before);
 }
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     SampleSortingIntent intent,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     SampleWorkflowTransitionOutcome outcome;
     switch (intent.kind) {
     case SampleSortingIntentKind::ClearSorting:
@@ -749,14 +753,30 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before);
+        before);
+}
+
+std::optional<SampleWorkflowLoadTarget> SampleWorkflowCoordinator::PendingLoadTarget() const
+{
+    const auto row = navigation_.pending_index();
+    const auto path = navigation_.active_source_path();
+    if (!row || !path) return std::nullopt;
+    return SampleWorkflowLoadTarget{*path, *row};
+}
+
+SampleWorkflowCoordinator::TransitionState SampleWorkflowCoordinator::CaptureTransition(
+    NavigationTargetResolutionReport* target_resolution) const
+{
+    TransitionState before{labeling_.View().revision, PendingLoadTarget()};
+    if (target_resolution) target_resolution->pending_present = before.pending_load.has_value();
+    return before;
 }
 
 SampleWorkflowTransitionOutcome
 SampleWorkflowCoordinator::CompleteTransition(
     SampleWorkflowTransitionOutcome outcome,
     const SpectrumSnapshotHandle& snapshot,
-    std::uint64_t presentation_revision_before,
+    const TransitionState& before,
     bool align_snapshot_target) const
 {
     if (align_snapshot_target &&
@@ -779,6 +799,26 @@ SampleWorkflowCoordinator::CompleteTransition(
     if (outcome.snapshot_index_to_load) {
         outcome.action.navigation_inputs_changed = true;
     }
+    const auto pending_after = PendingLoadTarget();
+    const auto same_target = [](const auto& first, const auto& second) {
+        return first && second && first->spectrum_index == second->spectrum_index &&
+            SourcePathIdentityKey(first->path) == SourcePathIdentityKey(second->path);
+    };
+    outcome.follow_up = {};
+    if (before.pending_load && !same_target(before.pending_load, pending_after)) {
+        outcome.follow_up.cancel_source_path = before.pending_load->path;
+    }
+    if (outcome.snapshot_index_to_load) {
+        if (const auto path = navigation_.active_source_path()) {
+            outcome.follow_up.load = SampleWorkflowLoadTarget{*path, *outcome.snapshot_index_to_load};
+        }
+        // Keeping the same pending target may still upgrade remembered-position
+        // semantics inside navigation; it must not replace the worker ticket.
+        if (same_target(before.pending_load, pending_after) &&
+            same_target(before.pending_load, outcome.follow_up.load)) {
+            outcome.follow_up.load.reset();
+        }
+    }
     outcome.invalidate_view =
         outcome.invalidate_view ||
         outcome.action.source_roster_changed ||
@@ -787,8 +827,7 @@ SampleWorkflowCoordinator::CompleteTransition(
         outcome.action.navigation_inputs_changed ||
         outcome.changed ||
         outcome.loaded ||
-        labeling_.View().revision !=
-            presentation_revision_before;
+        labeling_.View().revision != before.presentation_revision;
     return outcome;
 }
 
@@ -796,8 +835,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     DiscardPreparedViewCaches();
     SampleWorkflowTransitionOutcome outcome;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
@@ -806,7 +844,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSource(
         return CompleteTransition(
             std::move(outcome),
             snapshot,
-            presentation_revision_before,
+            before,
             true);
     }
 
@@ -818,7 +856,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSource(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before,
+        before,
         true);
 }
 
@@ -1189,8 +1227,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     DiscardPreparedViewCaches();
     SampleWorkflowTransitionOutcome outcome;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
@@ -1199,7 +1236,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
         return CompleteTransition(
             std::move(outcome),
             snapshot,
-            presentation_revision_before,
+            before,
             true);
     }
 
@@ -1211,7 +1248,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
         return CompleteTransition(
             std::move(outcome),
             snapshot,
-            presentation_revision_before,
+            before,
             true);
     }
 
@@ -1231,7 +1268,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
         return CompleteTransition(
             std::move(outcome),
             snapshot,
-            presentation_revision_before,
+            before,
             true);
     }
     if (workflow_identity_changed || workflow_context_changed) {
@@ -1253,7 +1290,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        presentation_revision_before,
+        before,
         true);
 }
 
@@ -1314,14 +1351,13 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSourceWithC
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearActiveWorkflow()
 {
-    const std::uint64_t presentation_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     SampleWorkflowTransitionOutcome outcome;
     ClearSampleWorkflow(outcome.action);
     return CompleteTransition(
         std::move(outcome),
         nullptr,
-        presentation_revision_before);
+        before);
 }
 
 void SampleWorkflowCoordinator::BeginRestoringSourceSession()
@@ -1411,9 +1447,11 @@ void SampleWorkflowCoordinator::CompletePreparedDeferredSampleNavigation(
     }
 }
 
-void SampleWorkflowCoordinator::CancelDeferredSampleNavigation()
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::CancelDeferredSampleNavigation()
 {
+    const auto before = CaptureTransition();
     navigation_.CancelDeferredNavigation();
+    return CompleteTransition({}, nullptr, before);
 }
 
 std::optional<std::size_t> SampleWorkflowCoordinator::pending_sample_index() const
@@ -2759,8 +2797,7 @@ SampleWorkflowCoordinator::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now,
     const SpectrumSnapshotHandle& snapshot)
 {
-    const std::uint64_t labeling_revision_before =
-        labeling_.View().revision;
+    const auto before = CaptureTransition();
     const std::uint64_t labeling_generation_before =
         labeling_.active_source_tasks_generation();
     SampleWorkflowTransitionOutcome outcome;
@@ -2795,7 +2832,7 @@ SampleWorkflowCoordinator::RunMaintenance(
     return CompleteTransition(
         std::move(outcome),
         snapshot,
-        labeling_revision_before);
+        before);
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator::NextMaintenanceDeadline() const

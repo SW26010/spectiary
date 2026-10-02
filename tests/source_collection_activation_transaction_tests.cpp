@@ -477,7 +477,8 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
 
     std::filesystem::remove(path);
     Require(
-        second.follow_up_spectrum_index == 2,
+        second.follow_up_spectrum_index == 2 && second.follow_up_source_path == path &&
+            second.canceled_source_follow_up_path == path,
         "second navigation should resolve from the pending row");
     Require(
         latest_activated,

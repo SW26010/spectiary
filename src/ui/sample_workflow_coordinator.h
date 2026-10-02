@@ -33,7 +33,19 @@ struct ActiveSampleWorkflowIntent;
 struct SampleFilteringIntent;
 struct SampleSortingIntent;
 
+struct SampleWorkflowLoadTarget {
+    std::filesystem::path path;
+    std::size_t spectrum_index = 0;
+};
+
+struct SampleWorkflowFollowUp {
+    // Empty means retain existing work. Replacement supplies both fields.
+    std::optional<SampleWorkflowLoadTarget> load;
+    std::optional<std::filesystem::path> cancel_source_path;
+};
+
 struct SampleWorkflowTransitionOutcome {
+    SampleWorkflowFollowUp follow_up;
     SourceCollectionSessionAction action;
     SampleNavigationResult navigation;
     // When true, snapshot_index_to_load replaces an earlier composed target;
@@ -194,7 +206,7 @@ public:
     void DiscardPreparedViewCaches();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
     void SetDeferredSampleNavigation(bool enabled);
-    void CancelDeferredSampleNavigation();
+    SampleWorkflowTransitionOutcome CancelDeferredSampleNavigation();
     [[nodiscard]] std::optional<std::size_t> pending_sample_index() const;
 
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
@@ -228,6 +240,13 @@ public:
     [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;
 
 private:
+    struct TransitionState {
+        std::uint64_t presentation_revision = 0;
+        std::optional<SampleWorkflowLoadTarget> pending_load;
+    };
+    [[nodiscard]] std::optional<SampleWorkflowLoadTarget> PendingLoadTarget() const;
+    [[nodiscard]] TransitionState CaptureTransition(
+        NavigationTargetResolutionReport* target_resolution = nullptr) const;
     [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
@@ -258,7 +277,7 @@ private:
     [[nodiscard]] SampleWorkflowTransitionOutcome CompleteTransition(
         SampleWorkflowTransitionOutcome outcome,
         const SpectrumSnapshotHandle& snapshot,
-        std::uint64_t presentation_revision_before,
+        const TransitionState& before,
         bool align_snapshot_target = false) const;
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSourceWithContext(
         std::optional<std::string> source_key,

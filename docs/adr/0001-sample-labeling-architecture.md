@@ -79,8 +79,16 @@ match. The final completion publishes the matching snapshot once.
 An empty navigation sequence and explicit display outside that sequence retain
 their existing contracts.
 
-These are the source-opening and prepared-navigation slices of #47. Other stable
-session projections and intent-submission plumbing remain follow-up work. The
+Ordinary workflow transitions and maintenance finish through the same coordinator
+path. Their outcome binds any requested row to its source and identifies any
+source follow-up to cancel; an empty effect retains existing work. The coordinator
+compares pending targets before and after the entire transition, so a matching
+target can upgrade remembered-position semantics without replacing its worker,
+and intermediate filter targets superseded by undo never escape. Session consumes
+these effects without comparing pending navigation state or retaining a staging row.
+
+These are the source-opening, prepared-navigation, and ordinary follow-up slices
+of #47. Other stable session projections remain follow-up work. The
 coordinator and labeling controller ownership and independent persistence
 lifecycles are unchanged.
 

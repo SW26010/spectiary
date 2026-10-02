@@ -435,12 +435,6 @@ private:
         std::optional<std::size_t> current_sample_index,
         std::optional<int> accepted_label_value =
             std::nullopt);
-    void FinalizePendingSourceFollowUp(
-        SourceCollectionSessionResult& result,
-        std::optional<std::size_t>
-            pending_sample_index_before,
-        const std::optional<std::filesystem::path>&
-            pending_source_path_before);
     [[nodiscard]] SourceCollectionSessionAction AdoptRosterOpenResult(
         SourceCollectionRosterOpenResult result);
 
@@ -452,7 +446,6 @@ private:
     std::optional<SourceCollectionDeferredRestorePlan> deferred_restore_plan_;
     std::vector<SourceCollectionSavedSource> unresolved_deferred_restore_sources_;
     bool deferred_restore_active_ = false;
-    std::optional<std::size_t> pending_background_spectrum_index_;
     std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;
     std::optional<SourceCollectionSampleTransitionView>
