@@ -1685,7 +1685,7 @@ void TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation()
         "a GUI-superseded automation open must stay side-effect-free after its worker eventually returns");
 }
 
-void TestReselectingCurrentSourceSupersedesPendingOpen(bool completion_ready)
+void TestSourceRosterIntentSupersedesPendingOpen(bool completion_ready, bool remove_current)
 {
     const auto source_a = UniqueTempPath("_reselected_a.csv");
     const auto source_b = UniqueTempPath("_superseded_b.csv");
@@ -1725,9 +1725,10 @@ void TestReselectingCurrentSourceSupersedesPendingOpen(bool completion_ready)
         }
         completion_published = ActivationAccess::CompletedLoadCount(activation) == 1;
     }
-    const auto reselected = activation.Submit(
+    const auto roster_result = activation.Submit(
         spectiary::SourceCollectionSessionIntent::EditSourceCollection(
-            spectiary::SourceCollectionIntent::SwitchActive(0)));
+            remove_current ? spectiary::SourceCollectionIntent::Remove(0)
+                           : spectiary::SourceCollectionIntent::SwitchActive(0)));
     const bool intent_advanced = activation.activation_generation() > pending_generation;
     if (!completion_ready) release_promise.set_value();
 
@@ -1744,15 +1745,23 @@ void TestReselectingCurrentSourceSupersedesPendingOpen(bool completion_ready)
 
     Require(worker_started && original_still_current &&
             (!completion_ready || completion_published),
-        "source B must be pending while source A is still current before reselection");
+        "source B must be pending while source A is still current before the roster intent");
     Require(intent_advanced && drained && !activation.status().loading,
-        "reselecting current source A must supersede and drain the old B intent");
-    Require(session.View().current_source_index == 0 &&
-            session.View().sources.size() == 1 &&
-            session.CurrentSampleSnapshot() == original_snapshot,
-        "a late source B completion must not replace or enter the current A session");
-    Require(!reselected.action.snapshot_changed && presentation_changes == 0,
-        "current-source reselection and the superseded B completion must not change presentation");
+        "editing current source A must supersede and drain the old B intent");
+    if (remove_current) {
+        Require(!session.View().current_source_index &&
+                session.View().sources.empty() && !session.CurrentSampleSnapshot(),
+            "a late B completion must not repopulate the session after removing current A");
+        Require(roster_result.action.snapshot_changed && presentation_changes == 1,
+            "only removing A may change presentation; late B must remain unobservable");
+    } else {
+        Require(session.View().current_source_index == 0 &&
+                session.View().sources.size() == 1 &&
+                session.CurrentSampleSnapshot() == original_snapshot,
+            "a late source B completion must not replace or enter the current A session");
+        Require(!roster_result.action.snapshot_changed && presentation_changes == 0,
+            "current-source reselection and superseded B must not change presentation");
+    }
     Require(reports.size() == 1 &&
             reports.front().outcome == spectiary::SourceLoadLatencyOutcome::Superseded,
         "the old B load must finish as superseded rather than presentable");
@@ -2035,8 +2044,10 @@ int main()
         TestAutomationOpenCompletesAfterPresentationWithoutProfiling();
         TestAutomationOpensSupersedeBeforeSingleCompletionDrain();
         TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation();
-        TestReselectingCurrentSourceSupersedesPendingOpen(false);
-        TestReselectingCurrentSourceSupersedesPendingOpen(true);
+        TestSourceRosterIntentSupersedesPendingOpen(false, false);
+        TestSourceRosterIntentSupersedesPendingOpen(true, false);
+        TestSourceRosterIntentSupersedesPendingOpen(false, true);
+        TestSourceRosterIntentSupersedesPendingOpen(true, true);
         TestSameIdentityOpenRequiresLatestActivationPresent();
         TestSamePathOpenTokenSurvivesProductionFollowUp();
         TestIdlePrefetchReportsLifecycleCompletion();

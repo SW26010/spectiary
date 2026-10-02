@@ -8842,6 +8842,7 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
 
 void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics()
 {
+    using namespace std::chrono_literals;
     const std::filesystem::path source_path = UniqueTempPath("_deferred_label_merge.npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_deferred_label_merge_filter.npy");
     SaveLabelResultFixture(
@@ -8854,9 +8855,8 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     spectiary::SourceCollectionSession session({}, {}, {}, {});
 
     const spectiary::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
-    spectiary::SourceCollectionContext context;
-    context.identity = {"deferred-label-merge", "source", "source-fingerprint", "context", 3};
-    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    TouchFile(source_path);
+    auto context = spectiary::LoadSourceCollectionContext(*initial_snapshot);
     const spectiary::SourceCollectionIdentity identity = context.identity;
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
@@ -8872,7 +8872,29 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
     const std::string filter_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
-    const auto filtered = Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
+    std::atomic_size_t decoder_calls{0};
+    std::atomic_bool worker_canceled{false};
+    std::promise<void> entered_promise, release_promise;
+    auto entered = entered_promise.get_future();
+    auto release = release_promise.get_future().share();
+    spectiary::SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = spectiary::test_support::EmptyWorkflowCachePaths();
+    dependencies.snapshot_loader = [&](const auto& path, std::size_t row, const auto& canceled) {
+        if (decoder_calls.fetch_add(1) == 0) entered_promise.set_value();
+        while (release.wait_for(2ms) != std::future_status::ready) {
+            if (canceled()) {
+                worker_canceled = true;
+                break;
+            }
+        }
+        if (canceled()) worker_canceled = true;
+        return MakeSnapshot(path, 3, row);
+    };
+    spectiary::SourceCollectionActivationTransaction activation(session,
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    const auto filtered = activation.Submit(SetFilterValueSelected(filter_source_id, "1", true));
+    Require(entered.wait_for(2s) == std::future_status::ready,
+        "the filter follow-up must start its real worker before the matching auto-advance");
     Require(
         filtered.follow_up_spectrum_index() == 1 && filtered.follow_up_source_path() == source_path &&
             !filtered.canceled_source_follow_up_path,
@@ -8888,27 +8910,27 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
             session.EffectiveSampleNavigationIndex() == 1,
         "maintenance must retain the filter's pending worker before labeling upgrades its semantics");
 
-    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    (void)activation.Submit(StartOrResumeTemporaryLabelingTask());
     Require(
-        Submit(session, UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "accepted", 'a'})).changed,
+        activation.Submit(UpsertActiveLabel(spectiary::SampleLabelDefinition{1, "accepted", 'a'})).changed,
         "deferred label merge fixture should add its label");
-    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
+    (void)activation.Submit(SetActiveLabelingAutoAdvance(true));
     const spectiary::SourceCollectionSessionResult labeled =
-        Submit(session, AssignActiveLabelToCurrentSample(1));
+        activation.Submit(AssignActiveLabelToCurrentSample(1));
     Require(
         !labeled.follow_up_spectrum_index() && !labeled.canceled_source_follow_up_path,
         "auto-advance to the same pending row should retain the filter's existing worker ticket");
 
-    const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
-    Require(
-        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
-            .path = source_path,
-            .spectrum_index = 1,
-            .snapshot = next_snapshot,
-            .payload = spectiary::PreparedSourceCollectionReuse{identity},
-        })
-            .loaded,
-        "the merged row 1 request should commit through the retained ticket");
+    release_promise.set_value();
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (activation.status().loading && std::chrono::steady_clock::now() < deadline) {
+        (void)activation.Drain(false);
+        std::this_thread::sleep_for(2ms);
+    }
+    Require(!activation.status().loading && decoder_calls == 1 && !worker_canceled &&
+            session.CurrentSampleSnapshot() &&
+            session.CurrentSampleSnapshot()->collection.current_index == 1,
+        "the merged row 1 request must drain through the original uncanceled worker");
     Require(
         session.View().labeling.remembered_position == 1,
         "label auto-advance should upgrade the matching filter pending request to remember row 1");
