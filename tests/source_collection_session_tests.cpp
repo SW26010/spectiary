@@ -486,13 +486,7 @@ private:
             throw std::runtime_error(completion.error_message);
         }
         auto prepared = std::move(*completion.prepared);
-        return OpenPreparedSource(
-            std::move(prepared.path),
-            prepared.spectrum_index,
-            std::move(prepared.snapshot),
-            std::move(prepared.payload),
-            std::move(prepared.folder_listing_generation),
-            std::move(prepared.context_reuse_proof));
+        return CommitPreparedOpen(std::move(prepared));
     }
 
     [[nodiscard]] spectiary::SourceCollectionSessionResult ServiceFollowUps(
@@ -6672,12 +6666,12 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
                     spectrum_index,
                     {},
                     {});
-            return session.OpenPreparedSource(
-                path,
-                spectrum_index,
-                snapshot,
-                std::move(context),
-                std::move(prepared));
+            return session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = path,
+                .spectrum_index = spectrum_index,
+                .snapshot = snapshot,
+                .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+            });
         };
 
     Require(
@@ -6693,12 +6687,13 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
     const spectiary::SpectrumSnapshotHandle source_a_row_one =
         MakeSnapshot(source_a, 2, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_a,
-                   1,
-                   source_a_row_one,
-                   spectiary::PreparedSourceCollectionReuse{
-                       shared_identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_a,
+            .spectrum_index = 1,
+            .snapshot = source_a_row_one,
+            .payload = spectiary::PreparedSourceCollectionReuse{
+                       shared_identity},
+        })
             .loaded,
         "source A row 1 should become its cached presentation");
 
@@ -6721,12 +6716,13 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
     const spectiary::SpectrumSnapshotHandle source_b_row_one =
         MakeSnapshot(source_b, 2, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_b,
-                   1,
-                   source_b_row_one,
-                   spectiary::PreparedSourceCollectionReuse{
-                       shared_identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_b,
+            .spectrum_index = 1,
+            .snapshot = source_b_row_one,
+            .payload = spectiary::PreparedSourceCollectionReuse{
+                       shared_identity},
+        })
             .loaded,
         "source B auto-advance target should commit");
     Require(
@@ -7509,12 +7505,12 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
         warning_labeling_cache,
         warning_workflow_cache);
     Require(
-        warning_session.OpenPreparedSource(
-                           warning_source,
-                           0,
-                           warning_snapshot,
-                           std::move(warning_context),
-                           std::move(warning_prepared))
+        warning_session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = warning_source,
+            .spectrum_index = 0,
+            .snapshot = warning_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(warning_context), std::move(warning_prepared)},
+        })
             .loaded,
         "the direct prepared source should open despite cache warnings");
     const spectiary::LocalUserStateHealthView warning_health =
@@ -7581,12 +7577,12 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
         labeling_cache,
         workflow_cache);
     Require(
-        session.OpenPreparedSource(
-                   source,
-                   0,
-                   snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "the direct navigation-base source should open");
     const spectiary::SourceCollectionSessionResult pending =
@@ -7598,11 +7594,12 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
         pending.follow_up_spectrum_index == 1,
         "the direct navigation-base fixture should request row 1");
     Require(
-        session.OpenPreparedSource(
-                   source,
-                   1,
-                   MakeSnapshot(source, 3, 1),
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source,
+            .spectrum_index = 1,
+            .snapshot = MakeSnapshot(source, 3, 1),
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the direct navigation-base row should commit without another cache load");
     Require(
@@ -7723,12 +7720,12 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         labeling_cache,
         workflow_cache);
     Require(
-        session.OpenPreparedSource(
-                   source_a,
-                   0,
-                   snapshot_a,
-                   std::move(context_a),
-                   std::move(prepared_a))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_a,
+            .spectrum_index = 0,
+            .snapshot = snapshot_a,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_a), std::move(prepared_a)},
+        })
             .loaded,
         "the first stale-warning source should open");
     Require(
@@ -7758,12 +7755,12 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "only the navigation warning should remain before its first save");
 
     Require(
-        session.OpenPreparedSource(
-                   source_b,
-                   0,
-                   snapshot_b,
-                   std::move(context_b),
-                   std::move(prepared_b))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_b,
+            .spectrum_index = 0,
+            .snapshot = snapshot_b,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_b), std::move(prepared_b)},
+        })
             .loaded,
         "the same-batch stale source should open");
     const spectiary::LocalUserStateHealthView
@@ -7793,11 +7790,12 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         moved.follow_up_spectrum_index == 1,
         "the navigation repair should request its prepared row");
     Require(
-        session.OpenPreparedSource(
-                   source_b,
-                   1,
-                   MakeSnapshot(source_b, 3, 1),
-                   spectiary::PreparedSourceCollectionReuse{identity_b})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_b,
+            .spectrum_index = 1,
+            .snapshot = MakeSnapshot(source_b, 3, 1),
+            .payload = spectiary::PreparedSourceCollectionReuse{identity_b},
+        })
             .loaded,
         "the navigation repair should commit its prepared row");
     Require(
@@ -7809,12 +7807,12 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "all repaired cache owners should become healthy");
 
     Require(
-        session.OpenPreparedSource(
-                   source_c,
-                   0,
-                   snapshot_c,
-                   std::move(context_c),
-                   std::move(prepared_c))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_c,
+            .spectrum_index = 0,
+            .snapshot = snapshot_c,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_c), std::move(prepared_c)},
+        })
             .loaded,
         "the distinct stale-bundle source should open");
     Require(
@@ -7937,12 +7935,12 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
     context.identity = spectiary::BuildSourceCollectionIdentity(*snapshot);
     spectiary::PreparedSampleWorkflowState prepared_workflow =
         PrepareWorkflow(snapshot, context, 2, labeling_cache, workflow_cache);
-    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
-        source_path,
-        2,
-        snapshot,
-        std::move(context),
-        std::move(prepared_workflow));
+    const spectiary::SourceCollectionSessionResult result = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 2,
+        .snapshot = snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared_workflow)},
+    });
     Require(result.loaded, "prepared deferred source should commit");
     Require(
         session.View().snapshot->collection.current_index == 2,
@@ -8002,12 +8000,12 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
     spectiary::PreparedSampleWorkflowState prepared_workflow_d =
         PrepareWorkflow(snapshot_d, context_d, 0, labeling_cache, workflow_cache);
     Require(
-        session.OpenPreparedSource(
-            source_d,
-            0,
-            snapshot_d,
-            std::move(context_d),
-            std::move(prepared_workflow_d)).loaded,
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_d,
+            .spectrum_index = 0,
+            .snapshot = snapshot_d,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_d), std::move(prepared_workflow_d)},
+        }).loaded,
         "new explicit source should commit");
     Require(session.FlushStateCaches(), "new explicit source should flush the source-session cache");
 
@@ -8129,12 +8127,12 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     spectiary::PreparedSampleWorkflowState prepared_workflow =
         PrepareWorkflow(prepared_snapshot, context, 2, labeling_cache, workflow_cache);
 
-    const spectiary::SourceCollectionSessionResult result = restored.OpenPreparedSource(
-        source_path,
-        2,
-        prepared_snapshot,
-        std::move(context),
-        std::move(prepared_workflow));
+    const spectiary::SourceCollectionSessionResult result = restored.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 2,
+        .snapshot = prepared_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared_workflow)},
+    });
     const spectiary::SourceCollectionSessionView view = restored.View();
     Require(view.navigation.current_index == 0, "restored filter should reconcile navigation to row 0");
     Require(
@@ -8152,12 +8150,12 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     corrected_context.manifest.annotations.push_back(std::move(*corrected_annotation));
     spectiary::PreparedSampleWorkflowState corrected_workflow =
         PrepareWorkflow(corrected_snapshot, corrected_context, 0, labeling_cache, workflow_cache);
-    const spectiary::SourceCollectionSessionResult corrected = restored.OpenPreparedSource(
-        source_path,
-        0,
-        corrected_snapshot,
-        std::move(corrected_context),
-        std::move(corrected_workflow));
+    const spectiary::SourceCollectionSessionResult corrected = restored.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 0,
+        .snapshot = corrected_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(corrected_context), std::move(corrected_workflow)},
+    });
     Require(!corrected.follow_up_spectrum_index, "corrected row should complete prepared restoration");
     Require(
         restored.CurrentSampleSnapshot() &&
@@ -8192,12 +8190,12 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred transition-return fixture should load");
 
@@ -8248,12 +8246,12 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred transition-source fixture should load");
 
@@ -8275,11 +8273,12 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
     const spectiary::SpectrumSnapshotHandle final_snapshot =
         MakeSnapshot(source_path, 3, 2);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   2,
-                   final_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 2,
+            .snapshot = final_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the final pending row should commit directly");
     const auto& transition =
@@ -8318,12 +8317,12 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
             {},
             {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(initial_context),
-                   std::move(initial_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(initial_context), std::move(initial_workflow)},
+        })
             .loaded,
         "empty prepared-reconciliation fixture should load");
     Require(
@@ -8358,12 +8357,12 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
     empty_workflow.navigation_sequence.current_sequence_position.reset();
 
     const spectiary::SourceCollectionSessionResult reconciled =
-        session.OpenPreparedSource(
-            source_path,
-            1,
-            intermediate_snapshot,
-            std::move(changed_context),
-            std::move(empty_workflow));
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = intermediate_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(changed_context), std::move(empty_workflow)},
+        });
     Require(
         reconciled.load_error.kind ==
                 spectiary::SourceCollectionLoadErrorKind::
@@ -8392,12 +8391,12 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-            source_path,
-            0,
-            initial_snapshot,
-            std::move(context),
-            std::move(prepared)).loaded,
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        }).loaded,
         "initial prepared source should commit");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const spectiary::SourceCollectionLabelingView initial_labeling = session.View().labeling;
@@ -8479,11 +8478,12 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         "navigation after a failed load should resume from the presented row");
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
-    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
-        source_path,
-        1,
-        next_snapshot,
-        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionResult committed = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = next_snapshot,
+        .payload = spectiary::PreparedSourceCollectionReuse{identity},
+    });
     const spectiary::SourceCollectionSessionView committed_view = session.View();
     Require(committed.loaded, "prepared row 1 should commit");
     Require(!committed.follow_up_spectrum_index, "the committed row should need no corrective follow-up");
@@ -8520,12 +8520,12 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred filter fixture should load");
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
@@ -8547,11 +8547,12 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
         "filter reconciliation should retain the complete committed row 0 presentation");
 
     const spectiary::SpectrumSnapshotHandle filtered_snapshot = MakeSnapshot(source_path, 3, 2);
-    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
-        source_path,
-        2,
-        filtered_snapshot,
-        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionResult committed = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 2,
+        .snapshot = filtered_snapshot,
+        .payload = spectiary::PreparedSourceCollectionReuse{identity},
+    });
     const spectiary::SourceCollectionSessionView committed_view = session.View();
     Require(committed.loaded && !committed.follow_up_spectrum_index, "filtered row 2 should commit once");
     Require(
@@ -8580,12 +8581,12 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred sequence-cancel fixture should load");
 
@@ -8622,7 +8623,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
         "explicitly resubmitting committed A should cancel B's source-bound follow-up");
     Require(
         session.EffectiveSampleNavigationIndex() == 0 &&
-            !session.CancelActivePendingSampleNavigation(),
+            !session.PlanSourceOpen({.source_path = source_path}).session_changed,
         "latest intent A should clear the deferred B target");
 }
 
@@ -8639,12 +8640,12 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred label fixture should load");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -8672,11 +8673,12 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   next_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = next_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the retained row 1 ticket should still commit");
     Require(
@@ -8717,12 +8719,12 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "manual matching-target fixture should load");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -8755,11 +8757,12 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
     const spectiary::SpectrumSnapshotHandle next_snapshot =
         MakeSnapshot(source_path, 2, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   next_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = next_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the manually claimed row 1 ticket should commit");
     const auto& transition = session.View().sample_transition;
@@ -8793,12 +8796,12 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "pending cancellation fixture should load");
 
@@ -8828,7 +8831,7 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
         session.View();
     (void)session.TakeViewRetirement();
     Require(
-        session.CancelActivePendingSampleNavigation(),
+        session.PlanSourceOpen({.source_path = source_path}).session_changed,
         "active pending navigation should cancel");
     Require(
         &session.View() != &active_pending_view &&
@@ -8858,12 +8861,12 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred label merge fixture should load");
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
@@ -8887,11 +8890,12 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   next_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = next_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the merged row 1 request should commit through the retained ticket");
     Require(
@@ -8922,12 +8926,12 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred local label filter fixture should load");
 
@@ -8972,12 +8976,13 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     const spectiary::SpectrumSnapshotHandle next_snapshot =
         MakeSnapshot(source_path, 3, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   next_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{
-                       identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = next_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{
+                       identity},
+        })
             .loaded,
         "the preserved row 1 follow-up should commit");
     Require(
@@ -9009,12 +9014,12 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(row_zero_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   row_zero_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = row_zero_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "deferred local label undo filter fixture should load");
 
@@ -9035,12 +9040,13 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                 .follow_up_spectrum_index == 1,
         "undo fixture should request row 1");
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   MakeSnapshot(source_path, 3, 1),
-                   spectiary::PreparedSourceCollectionReuse{
-                       identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = MakeSnapshot(source_path, 3, 1),
+            .payload = spectiary::PreparedSourceCollectionReuse{
+                       identity},
+        })
             .loaded,
         "undo fixture should commit row 1");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
@@ -9053,12 +9059,13 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                 .follow_up_spectrum_index == 0,
         "undo fixture should request row 0");
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   row_zero_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{
-                       identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = row_zero_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{
+                       identity},
+        })
             .loaded,
         "undo fixture should commit row 0");
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
@@ -9093,7 +9100,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
             !session.View().navigation.current_sample_in_filter,
         "undo should keep the complete restored row 0 presentation outside the active filter");
     Require(
-        !session.CancelActivePendingSampleNavigation(),
+        !session.PlanSourceOpen({.source_path = source_path}).session_changed,
         "undo restore to the visible row should leave no pending navigation");
 }
 
@@ -9115,12 +9122,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(initial_context),
-                   std::move(initial_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(initial_context), std::move(initial_workflow)},
+        })
             .loaded,
         "initial prepared source should commit");
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -9146,12 +9153,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     reconciled_workflow.current_index = 2;
     reconciled_workflow.navigation_sequence.current_source_row = 2;
 
-    const spectiary::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
-        source_path,
-        1,
-        intermediate_snapshot,
-        std::move(changed_context),
-        std::move(reconciled_workflow));
+    const spectiary::SourceCollectionSessionResult reconciled = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = intermediate_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(changed_context), std::move(reconciled_workflow)},
+    });
     const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(reconciled.loaded, "the intermediate prepared plan should be accepted");
     Require(
@@ -9201,12 +9208,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     second_reconciled_workflow.current_index = 2;
     second_reconciled_workflow.navigation_sequence.current_source_row = 2;
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   second_intermediate_snapshot,
-                   std::move(second_changed_context),
-                   std::move(second_reconciled_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = second_intermediate_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(second_changed_context), std::move(second_reconciled_workflow)},
+        })
                 .follow_up_spectrum_index == 2,
         "a retried intermediate plan should again request its reconciled final row");
 
@@ -9222,12 +9229,12 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     spectiary::PreparedSampleWorkflowState final_workflow =
         PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
-    const spectiary::SourceCollectionSessionResult final_result = session.OpenPreparedSource(
-        source_path,
-        2,
-        final_snapshot,
-        std::move(final_context),
-        std::move(final_workflow));
+    const spectiary::SourceCollectionSessionResult final_result = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 2,
+        .snapshot = final_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(final_context), std::move(final_workflow)},
+    });
     const spectiary::SourceCollectionSessionView final_view = session.View();
     Require(final_result.loaded && !final_result.follow_up_spectrum_index, "the final row should commit once");
     Require(
@@ -9259,12 +9266,12 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
     spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(initial_context),
-                   std::move(initial_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(initial_context), std::move(initial_workflow)},
+        })
             .loaded,
         "stale prepared plan fixture should commit its initial source");
     Require(
@@ -9295,14 +9302,15 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         !sorted.follow_up_spectrum_index && session.View().sorting.active,
         "new live sorting should retain the existing row 1 worker");
 
-    const spectiary::SourceCollectionSessionResult committed = session.OpenPreparedSource(
-        source_path,
-        1,
-        prepared_snapshot,
-        spectiary::PreparedSourceCollectionPlan{
+    const spectiary::SourceCollectionSessionResult committed = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = prepared_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
-            load_hint->reuse.live_workflow_revision()});
+            load_hint->reuse.live_workflow_revision()},
+    });
     const spectiary::SourceCollectionSessionView view = session.View();
     Require(committed.loaded && !committed.follow_up_spectrum_index, "row 1 should commit once");
     Require(
@@ -9346,12 +9354,12 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     spectiary::PreparedSampleWorkflowState initial_workflow =
         PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(initial_context),
-                   std::move(initial_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(initial_context), std::move(initial_workflow)},
+        })
             .loaded,
         "live context fixture should commit its initial source");
     const std::string filter_source_id = AnnotationSourceId(annotation_path);
@@ -9398,14 +9406,15 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(intermediate_snapshot, changed_context, 1, {}, {});
 
-    const spectiary::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
-        source_path,
-        1,
-        intermediate_snapshot,
-        spectiary::PreparedSourceCollectionPlan{
+    const spectiary::SourceCollectionSessionResult reconciled = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = intermediate_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
-            load_hint->reuse.live_workflow_revision()});
+            load_hint->reuse.live_workflow_revision()},
+    });
     Require(
         reconciled.loaded && reconciled.follow_up_spectrum_index == 2,
         "the live filter should retarget the changed context to row 2");
@@ -9432,14 +9441,15 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     spectiary::PreparedSampleWorkflowState final_workflow =
         PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   2,
-                   final_snapshot,
-                   spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 2,
+            .snapshot = final_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                        std::move(final_context),
                        std::move(final_workflow),
-                       load_hint->reuse.live_workflow_revision()})
+                       load_hint->reuse.live_workflow_revision()},
+        })
             .loaded,
         "the reconciled final row should atomically commit its full context plan");
     Require(
@@ -9470,12 +9480,12 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
         context.manifest.sample_names = {"alpha", "beta", "gamma"};
         spectiary::PreparedSampleWorkflowState workflow =
             PrepareWorkflow(snapshot, context, 0, {}, {});
-        return session.OpenPreparedSource(
-            path,
-            0,
-            snapshot,
-            std::move(context),
-            std::move(workflow));
+        return session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = path,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+        });
     };
 
     const spectiary::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
@@ -9525,12 +9535,12 @@ void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
     spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_a,
-                   0,
-                   snapshot_a,
-                   std::move(context_a),
-                   std::move(workflow_a))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_a,
+            .spectrum_index = 0,
+            .snapshot = snapshot_a,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_a), std::move(workflow_a)},
+        })
             .loaded,
         "source A should load");
 
@@ -9541,12 +9551,12 @@ void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
     spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_b,
-                   0,
-                   snapshot_b,
-                   std::move(context_b),
-                   std::move(workflow_b))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_b,
+            .spectrum_index = 0,
+            .snapshot = snapshot_b,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_b), std::move(workflow_b)},
+        })
             .loaded,
         "source B should load");
     (void)Submit(session, SwitchSourceCollection(0));
@@ -9563,11 +9573,12 @@ void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
         "removing inactive source B should cancel only B's tickets and retain source A's pending ticket");
     const spectiary::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
     Require(
-        session.OpenPreparedSource(
-                   source_a,
-                   1,
-                   row_one_snapshot,
-                   spectiary::PreparedSourceCollectionReuse{identity_a})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_a,
+            .spectrum_index = 1,
+            .snapshot = row_one_snapshot,
+            .payload = spectiary::PreparedSourceCollectionReuse{identity_a},
+        })
             .loaded,
         "the retained source A ticket should still commit row 1");
     Require(
@@ -9622,12 +9633,12 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(initial_snapshot, context, 0, {}, {});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   initial_snapshot,
-                   std::move(context),
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = initial_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        })
             .loaded,
         "initial prepared source should load");
 
@@ -9637,11 +9648,12 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
     Require(filter_result.follow_up_spectrum_index == 1, "live filter should move navigation to row 1");
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   MakeSnapshot(source_path, 3, 1),
-                   spectiary::PreparedSourceCollectionReuse{identity})
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = MakeSnapshot(source_path, 3, 1),
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        })
             .loaded,
         "the filtered row should commit only after its complete snapshot is prepared");
     (void)Submit(session, AddSampleSortSource(annotation_source_id));
@@ -9661,12 +9673,12 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     other_context.manifest.sample_names = {"x", "y", "z"};
     spectiary::PreparedSampleWorkflowState other_workflow =
         PrepareWorkflow(other_snapshot, other_context, 0, {}, {});
-    (void)session.OpenPreparedSource(
-        other_source_path,
-        0,
-        other_snapshot,
-        std::move(other_context),
-        std::move(other_workflow));
+    (void)session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = other_source_path,
+        .spectrum_index = 0,
+        .snapshot = other_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(other_context), std::move(other_workflow)},
+    });
 
     const std::optional<spectiary::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
@@ -9676,11 +9688,12 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         "non-active source reload should expose its stable generation");
 
     const spectiary::SpectrumSnapshotHandle reloaded_snapshot = MakeSnapshot(source_path, 3, 1);
-    const spectiary::SourceCollectionSessionResult reload_result = session.OpenPreparedSource(
-        source_path,
-        1,
-        reloaded_snapshot,
-        spectiary::PreparedSourceCollectionReuse{identity});
+    const spectiary::SourceCollectionSessionResult reload_result = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = reloaded_snapshot,
+        .payload = spectiary::PreparedSourceCollectionReuse{identity},
+    });
     const spectiary::SourceCollectionSessionView view = session.View();
     Require(reload_result.loaded, "matching same-identity snapshot-only reload should commit");
     Require(
@@ -9743,14 +9756,18 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
     (void)activation_a;
     (void)activation_b;
 
-    const std::optional<spectiary::SampleWorkflowSourceState> workflow_a =
-        coordinator.WorkflowStateForSourceIdentity(context_a.identity.id);
-    const std::optional<spectiary::SampleLabelingSourceState> restored_labeling_a =
-        coordinator.LabelingStateForSourceIdentity(context_a.identity.id);
-    Require(workflow_a.has_value(), "prepared workflow cache state should remain available in memory");
-    Require(
-        restored_labeling_a && restored_labeling_a->sample_count == 3,
-        "prepared labeling cache state should remain available in memory");
+    spectiary::PreparedSourceCollectionPayload candidate =
+        spectiary::PreparedSourceCollectionPlan{context_a,
+            spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_a, context_a, 0, *cache), 0};
+    const auto reconciled = coordinator.ReconcilePreparedSource(
+        "prepared-cache-a-key", snapshot_a, 0, 0, candidate);
+    const auto& restored =
+        std::get<spectiary::PreparedSourceCollectionPlan>(candidate).workflow;
+    Require(reconciled.error.kind == spectiary::SourceCollectionLoadErrorKind::None &&
+            !restored.workflow_source_state.annotation_display_names.empty(),
+        "reconciliation must retain the in-memory workflow of a non-active source");
+    Require(restored.labeling_source_state && restored.labeling_source_state->sample_count == 3,
+        "reconciliation must retain the in-memory labeling state of a non-active source");
     Require(
         workflow_cache_loads == 0 && labeling_cache_loads == 0,
         "prepared commits and non-active state hints must not reopen either cache on the UI thread");
@@ -9810,12 +9827,12 @@ void TestPreparedProjectionsMoveIntoTheSessionView()
     const auto* prepared_filter_storage = prepared.filter_view.sources.data();
     const auto* prepared_sorting_storage = prepared.sorting_view.sources.data();
 
-    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
-        source_path,
-        0,
-        snapshot,
-        std::move(context),
-        std::move(prepared));
+    const spectiary::SourceCollectionSessionResult result = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 0,
+        .snapshot = snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+    });
     Require(result.loaded, "prepared projection fixture should load");
     const spectiary::SourceCollectionSessionView& view = session.View();
     Require(
@@ -9864,12 +9881,12 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     spectiary::PreparedSampleWorkflowState prepared =
         PrepareWorkflow(snapshot, context, 0, {}, {});
     const spectiary::SourceCollectionSessionResult load_result =
-        session.OpenPreparedSource(
-            source_path,
-            0,
-            snapshot,
-            std::move(context),
-            std::move(prepared));
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+        });
     Require(
         load_result.loaded,
         "load completion fixture should load");
@@ -10152,12 +10169,12 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     context_a.manifest.sample_names = {"a", "b", "c"};
     spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
-    (void)session.OpenPreparedSource(
-        source_a,
-        0,
-        snapshot_a,
-        std::move(context_a),
-        std::move(workflow_a));
+    (void)session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_a,
+        .spectrum_index = 0,
+        .snapshot = snapshot_a,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_a), std::move(workflow_a)},
+    });
 
     const spectiary::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
     spectiary::SourceCollectionContext context_b;
@@ -10165,12 +10182,12 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     context_b.manifest.sample_names = {"x", "y", "z"};
     spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
-    (void)session.OpenPreparedSource(
-        source_b,
-        0,
-        snapshot_b,
-        std::move(context_b),
-        std::move(workflow_b));
+    (void)session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_b,
+        .spectrum_index = 0,
+        .snapshot = snapshot_b,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_b), std::move(workflow_b)},
+    });
 
     const std::optional<spectiary::SourceCollectionLoadHint> stale_plan_hint =
         session.LoadHintForSource(source_a);
@@ -10185,11 +10202,12 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         "removing an inactive source should cancel that source's non-explicit Shell tickets");
 
     const spectiary::SpectrumSnapshotHandle stale_snapshot = MakeSnapshot(source_a, 3, 1);
-    const spectiary::SourceCollectionSessionResult rejected = session.OpenPreparedSource(
-        source_a,
-        1,
-        stale_snapshot,
-        spectiary::PreparedSourceCollectionReuse{{"reuse-a", "a", "a-source", "a-context", 3}});
+    const spectiary::SourceCollectionSessionResult rejected = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_a,
+        .spectrum_index = 1,
+        .snapshot = stale_snapshot,
+        .payload = spectiary::PreparedSourceCollectionReuse{{"reuse-a", "a", "a-source", "a-context", 3}},
+    });
     Require(!rejected.loaded, "reuse for a removed source must be rejected");
     Require(
         rejected.message.empty() &&
@@ -10211,14 +10229,15 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     stale_context.manifest.sample_names = {"a", "b", "c"};
     spectiary::PreparedSampleWorkflowState stale_workflow =
         PrepareWorkflow(stale_plan_snapshot, stale_context, 1, {}, {});
-    const spectiary::SourceCollectionSessionResult rejected_plan = session.OpenPreparedSource(
-        source_a,
-        1,
-        stale_plan_snapshot,
-        spectiary::PreparedSourceCollectionPlan{
+    const spectiary::SourceCollectionSessionResult rejected_plan = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_a,
+        .spectrum_index = 1,
+        .snapshot = stale_plan_snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{
             std::move(stale_context),
             std::move(stale_workflow),
-            stale_plan_hint->reuse.live_workflow_revision()});
+            stale_plan_hint->reuse.live_workflow_revision()},
+    });
     Require(!rejected_plan.loaded, "a late full plan for a removed source must be rejected");
     Require(
         rejected_plan.message.empty() &&
@@ -10266,12 +10285,12 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
     context_a.manifest.annotations.push_back(std::move(*annotation));
     spectiary::PreparedSampleWorkflowState workflow_a =
         PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
-    (void)session.OpenPreparedSource(
-        source_a,
-        0,
-        snapshot_a,
-        std::move(context_a),
-        std::move(workflow_a));
+    (void)session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_a,
+        .spectrum_index = 0,
+        .snapshot = snapshot_a,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_a), std::move(workflow_a)},
+    });
     const std::string annotation_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(annotation_source_id));
     Require(
@@ -10290,12 +10309,12 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
     context_b.manifest.sample_names = {"x", "y", "z"};
     spectiary::PreparedSampleWorkflowState workflow_b =
         PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
-    (void)session.OpenPreparedSource(
-        source_b,
-        0,
-        snapshot_b,
-        std::move(context_b),
-        std::move(workflow_b));
+    (void)session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_b,
+        .spectrum_index = 0,
+        .snapshot = snapshot_b,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_b), std::move(workflow_b)},
+    });
 
     const spectiary::SourceCollectionSessionResult reactivated =
         Submit(session, SwitchSourceCollection(0));
@@ -10423,15 +10442,16 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
     spectiary::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
     spectiary::SourceCollectionSessionResult initial =
-        session.OpenPreparedSource(
-            source_path,
-            0,
-            first_snapshot,
-            spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = first_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
-            {},
-            proof);
+            .context_reuse_proof = proof,
+            .folder_listing_generation = {},
+        });
     Require(initial.loaded, "resident fixture should load row 0");
     first_mutable.reset();
     first_snapshot.reset();
@@ -10453,14 +10473,15 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             navigation.follow_up_spectrum_index == row,
             "resident history should request the next raw row");
         spectiary::SourceCollectionSessionResult loaded =
-            session.OpenPreparedSource(
-                source_path,
-                row,
-                MakeSnapshot(source_path, 12, row),
-                spectiary::PreparedSourceCollectionReuse{
+            session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = source_path,
+                .spectrum_index = row,
+                .snapshot = MakeSnapshot(source_path, 12, row),
+                .payload = spectiary::PreparedSourceCollectionReuse{
                     identity},
-                {},
-                proof);
+                .context_reuse_proof = proof,
+                .folder_listing_generation = {},
+            });
         Require(loaded.loaded, "resident history row should load");
         for (spectiary::BackgroundRetirementHandle& resource :
              loaded.background_retirement) {
@@ -10512,13 +10533,14 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
                 .follow_up_spectrum_index == 9,
         "resident eviction should be driven by a committed row 9 navigation");
     spectiary::SourceCollectionSessionResult eviction =
-        session.OpenPreparedSource(
-            source_path,
-            9,
-            MakeSnapshot(source_path, 12, 9),
-            spectiary::PreparedSourceCollectionReuse{identity},
-            {},
-            proof);
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 9,
+            .snapshot = MakeSnapshot(source_path, 12, 9),
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+            .context_reuse_proof = proof,
+            .folder_listing_generation = {},
+        });
     Require(eviction.loaded, "row 9 should commit");
     const std::optional<spectiary::SourceCollectionLoadHint>
         row_zero_after_eviction =
@@ -10567,15 +10589,16 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
                 .follow_up_spectrum_index == 10,
         "context invalidation should be driven by row 10 navigation");
     spectiary::SourceCollectionSessionResult changed =
-        session.OpenPreparedSource(
-            source_path,
-            10,
-            MakeSnapshot(source_path, 12, 10),
-            spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 10,
+            .snapshot = MakeSnapshot(source_path, 12, 10),
+            .payload = spectiary::PreparedSourceCollectionPlan{
                 std::move(changed_context),
                 std::move(changed_workflow)},
-            {},
-            changed_proof);
+            .context_reuse_proof = changed_proof,
+            .folder_listing_generation = {},
+        });
     Require(changed.loaded, "changed context row should load");
     const std::optional<spectiary::SourceCollectionLoadHint>
         invalidated_old_row =
@@ -10645,15 +10668,16 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
     spectiary::SourceCollectionLoadQueue retirement_queue;
     spectiary::SourceCollectionSessionResult initial =
-        session.OpenPreparedSource(
-            source_path,
-            0,
-            first_snapshot,
-            spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = first_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
-            {},
-            proof);
+            .context_reuse_proof = proof,
+            .folder_listing_generation = {},
+        });
     for (spectiary::BackgroundRetirementHandle& resource :
          initial.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
@@ -10666,13 +10690,14 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
                 .follow_up_spectrum_index == 1,
         "prepared retirement fixture should prepare row 1");
     spectiary::SourceCollectionSessionResult second =
-        session.OpenPreparedSource(
-            source_path,
-            1,
-            MakeSnapshot(source_path, 3, 1),
-            spectiary::PreparedSourceCollectionReuse{identity},
-            {},
-            proof);
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = MakeSnapshot(source_path, 3, 1),
+            .payload = spectiary::PreparedSourceCollectionReuse{identity},
+            .context_reuse_proof = proof,
+            .folder_listing_generation = {},
+        });
     for (spectiary::BackgroundRetirementHandle& resource :
          second.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
@@ -10706,15 +10731,16 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
             proof.dependency_state,
         };
     spectiary::SourceCollectionSessionResult prepared =
-        session.OpenPreparedSource(
-            source_path,
-            2,
-            changed_snapshot,
-            spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 2,
+            .snapshot = changed_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                 std::move(changed_context),
                 std::move(changed_workflow)},
-            {},
-            changed_proof);
+            .context_reuse_proof = changed_proof,
+            .folder_listing_generation = {},
+        });
     Require(
         payload_destroyed.wait_for(std::chrono::milliseconds(0)) !=
             std::future_status::ready,
@@ -10788,15 +10814,16 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
         PrepareWorkflow(first_snapshot, context, 0, {}, {});
     spectiary::SourceCollectionLoadQueue retirement_queue;
     spectiary::SourceCollectionSessionResult initial =
-        session.OpenPreparedSource(
-            source_path,
-            0,
-            first_snapshot,
-            spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = first_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                 std::move(context),
                 std::move(workflow)},
-            {},
-            proof);
+            .context_reuse_proof = proof,
+            .folder_listing_generation = {},
+        });
     for (spectiary::BackgroundRetirementHandle& resource :
          initial.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
@@ -10812,14 +10839,15 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
                     .follow_up_spectrum_index == row,
             "resident byte-cap fixture should request the next row");
         spectiary::SourceCollectionSessionResult loaded =
-            session.OpenPreparedSource(
-                source_path,
-                row,
-                make_large_snapshot(row),
-                spectiary::PreparedSourceCollectionReuse{
+            session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = source_path,
+                .spectrum_index = row,
+                .snapshot = make_large_snapshot(row),
+                .payload = spectiary::PreparedSourceCollectionReuse{
                     identity},
-                {},
-                proof);
+                .context_reuse_proof = proof,
+                .folder_listing_generation = {},
+            });
         for (spectiary::BackgroundRetirementHandle& resource :
              loaded.background_retirement) {
             retirement_queue.RetireResource(
@@ -10873,29 +10901,75 @@ void TestExistingMemberResolutionUsesRosterIdentityAndOrder()
             listing->listing.spectra = {{member, "csv", "stat"},
                 {duplicate ? member : path / "other.csv", "csv", "stat"}};
         }
-        Require(session.OpenPreparedSource(path, 0, snapshot,
-            PreparedSourceCollectionPlan{std::move(context), std::move(workflow)}, listing).loaded,
+        Require(session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = path,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+            .folder_listing_generation = listing,
+        }).loaded,
             "member resolution fixture must load");
     };
     add(first, "first", first_generation);
     add(second, "second", second_generation);
-    auto match = session.ExistingSpectrumMember(member);
-    Require(match && match->first == second && match->second == 0,
-        "active containing source must win over roster order");
+    auto plan = session.PlanSourceOpen({.source_path = member});
+    Require(plan.load.path == second && plan.load.spectrum_index == 0 &&
+            plan.load.preferred_member_path == member && plan.load.reuse &&
+            plan.load.reuse->identity().id == "second",
+        "open planning must capture the active containing source and its reuse identity");
+    const auto prepare_member = [&]() {
+        PreparedSourceCollection prepared{
+            .path = second,
+            .spectrum_index = 0,
+            .snapshot = MakeSnapshot(second, 2, 0),
+            .payload = PreparedSourceCollectionReuse{plan.load.reuse->identity(), true},
+            .folder_listing_generation = plan.load.reuse->folder_listing_generation(),
+            .explicit_member_path = member,
+        };
+        return prepared;
+    };
+    auto stale_completion = prepare_member();
+    auto removed_completion = prepare_member();
+    auto wrong_row = prepare_member();
+    wrong_row.spectrum_index = 1;
+    const auto original_snapshot = session.CurrentSampleSnapshot();
+    Require(!session.CommitPreparedOpen(std::move(wrong_row)).loaded &&
+            session.CurrentSampleSnapshot() == original_snapshot,
+        "commit must reject a member mapped to another row without changing presentation");
+    Require(session.CommitPreparedOpen(prepare_member()).loaded,
+        "a current member plan must commit through the session transition");
     add(unrelated, "unrelated", {});
-    match = session.ExistingSpectrumMember(member.parent_path() / std::filesystem::path(L"\u5149\u8c31\u00e4.csv"));
-    Require(match && match->first == first && match->second == 0,
+    plan = session.PlanSourceOpen({.source_path =
+        member.parent_path() / std::filesystem::path(L"\u5149\u8c31\u00e4.csv")});
+    Require(plan.load.path == first && plan.load.spectrum_index == 0,
         "Unicode case-normalized file identity must prefer earliest containing source");
-    Require(!session.ExistingSpectrumMember(member.parent_path() / "absent.csv"),
+    Require(!session.PlanSourceOpen({.source_path = member.parent_path() / "absent.csv"})
+                .load.preferred_member_path,
         "shared directory prefix must not establish membership");
     first_generation->current = false;
-    match = session.ExistingSpectrumMember(member);
-    Require(match && match->first == second, "stale member mapping must be skipped");
+    plan = session.PlanSourceOpen({.source_path = member});
+    Require(plan.load.path == second, "stale member mapping must be skipped");
     second_generation->current = false;
-    Require(!session.ExistingSpectrumMember(member),
+    const auto retained = session.CurrentSampleSnapshot();
+    const auto stale_result = session.CommitPreparedOpen(std::move(stale_completion));
+    Require(!stale_result.loaded &&
+            stale_result.load_error.kind == SourceCollectionLoadErrorKind::PreparedKnownSourcePlanStale &&
+            session.CurrentSampleSnapshot() == retained && session.View().sources.size() == 3,
+        "directory invalidation after preparation must reject commit without replacing the live session");
+    // A still-current worker generation does not authorize resurrecting a removed source.
+    second_generation->current = true;
+    (void)Submit(session, SourceCollectionSessionIntent::EditSourceCollection(
+        SourceCollectionIntent::Remove(1)));
+    Require(!session.CommitPreparedOpen(std::move(removed_completion)).loaded &&
+            session.View().sources.size() == 2 && session.CurrentSampleSnapshot() == retained,
+        "completion from a removed source must not resurrect its roster or workflow");
+    second_generation->current = false;
+    Require(!session.PlanSourceOpen({.source_path = member}).load.preferred_member_path,
         "NPY display names must not substitute for stale filesystem membership");
     add(UniqueTempPath("_ambiguous"), "ambiguous", std::make_shared<Generation>(), true);
-    Require(!session.ExistingSpectrumMember(member), "ambiguous member rows must not be reused");
+    Require(!session.PlanSourceOpen({.source_path = member}).load.preferred_member_path,
+        "ambiguous member rows must not be reused");
+
 }
 
 void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
@@ -10945,15 +11019,16 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
             .companion_annotation_fingerprint = "none",
         }};
 
-    const spectiary::SourceCollectionSessionResult result = session.OpenPreparedSource(
-        source_path,
-        0,
-        snapshot,
-        spectiary::PreparedSourceCollectionPlan{
+    const spectiary::SourceCollectionSessionResult result = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 0,
+        .snapshot = snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{
             std::move(context),
             std::move(workflow)},
-        verified_generation,
-        reuse_proof);
+        .context_reuse_proof = reuse_proof,
+        .folder_listing_generation = verified_generation,
+    });
     Require(result.loaded, "prepared folder generation should load");
     std::optional<spectiary::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
@@ -10983,12 +11058,13 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
                 .follow_up_spectrum_index == 1,
         "the listing retirement fixture should prepare a row replacement");
 
-    spectiary::SourceCollectionSessionResult replacement = session.OpenPreparedSource(
-        source_path,
-        1,
-        MakeSnapshot(source_path, 2, 1),
-        spectiary::PreparedSourceCollectionReuse{identity},
-        std::make_shared<const spectiary::SourceCollectionFolderListingGeneration>());
+    spectiary::SourceCollectionSessionResult replacement = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+        .path = source_path,
+        .spectrum_index = 1,
+        .snapshot = MakeSnapshot(source_path, 2, 1),
+        .payload = spectiary::PreparedSourceCollectionReuse{identity},
+        .folder_listing_generation = std::make_shared<const spectiary::SourceCollectionFolderListingGeneration>(),
+    });
     Require(replacement.loaded, "the replacement folder generation should load");
     Require(
         !retired_listing_generation.expired(),
@@ -11158,12 +11234,12 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                 fixture.labeling_cache,
                 fixture.workflow_cache);
         Require(
-            seed.OpenPreparedSource(
-                    fixture.source_path,
-                    0,
-                    row_zero,
-                    fixture.context,
-                    std::move(prepared))
+            seed.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = fixture.source_path,
+                .spectrum_index = 0,
+                .snapshot = row_zero,
+                .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(prepared)},
+            })
                 .loaded,
             "labeling projection handoff fixture should open its source");
         (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
@@ -11198,12 +11274,13 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                     .follow_up_spectrum_index == 1,
             "labeling projection handoff fixture should request row 1");
         Require(
-            seed.OpenPreparedSource(
-                    fixture.source_path,
-                    1,
-                    MakeSnapshot(fixture.source_path, 3, 1),
-                    spectiary::PreparedSourceCollectionReuse{
-                        fixture.context.identity})
+            seed.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = fixture.source_path,
+                .spectrum_index = 1,
+                .snapshot = MakeSnapshot(fixture.source_path, 3, 1),
+                .payload = spectiary::PreparedSourceCollectionReuse{
+                        fixture.context.identity},
+            })
                 .loaded,
             "labeling projection handoff fixture should commit row 1");
         (void)Submit(seed, AssignActiveLabelToCurrentSample(2));
@@ -11414,12 +11491,12 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
                 fixture.labeling_cache,
                 fixture.workflow_cache);
         Require(
-            configured.OpenPreparedSource(
-                    fixture.source_path,
-                    0,
-                    snapshot,
-                    fixture.context,
-                    prepared)
+            configured.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = fixture.source_path,
+                .spectrum_index = 0,
+                .snapshot = snapshot,
+                .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, prepared},
+            })
                 .loaded,
             "navigation refresh fixture should open the formalized projection");
 
@@ -11684,12 +11761,12 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
         fixture.labeling_cache,
         fixture.workflow_cache);
     Require(
-        session.OpenPreparedSource(
-                fixture.source_path,
-                1,
-                snapshot,
-                fixture.context,
-                std::move(stale_workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = fixture.source_path,
+            .spectrum_index = 1,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
+        })
             .loaded,
         "prepared labeling handoff should commit the source");
     const spectiary::SourceCollectionSessionView view =
@@ -11748,12 +11825,12 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
         fixture.labeling_cache,
         fixture.workflow_cache);
     Require(
-        stale.OpenPreparedSource(
-                 fixture.source_path,
-                 1,
-                 snapshot,
-                 fixture.context,
-                 std::move(stale_workflow))
+        stale.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = fixture.source_path,
+            .spectrum_index = 1,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
+        })
             .loaded,
         "stale deletion fixture should open its old task projection");
     Require(
@@ -11837,12 +11914,12 @@ void TestReloadedFormalOwnerDoesNotReplayPendingValues()
         fixture.labeling_cache,
         fixture.workflow_cache);
     Require(
-        session.OpenPreparedSource(
-                fixture.source_path,
-                1,
-                snapshot,
-                fixture.context,
-                std::move(workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = fixture.source_path,
+            .spectrum_index = 1,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(workflow)},
+        })
             .loaded,
         "retry projection fixture should commit its stale source");
     Require(

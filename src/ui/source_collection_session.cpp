@@ -1306,16 +1306,50 @@ SampleWorkflowTransitionOutcome SourceCollectionSession::RemoveSource(
     return outcome;
 }
 
-SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
-    std::filesystem::path path,
-    std::size_t spectrum_index,
-    SpectrumSnapshotHandle snapshot,
-    PreparedSourceCollectionPayload payload,
-    SourceCollectionFolderListingGenerationHandle folder_listing_generation,
-    std::optional<SourceCollectionContextReuseProof> context_reuse_proof,
-    bool activate,
-    bool recover_failed_presentation)
+SourceOpenPlan SourceCollectionSession::PlanSourceOpen(
+    const SourceOpenRequest& request, std::size_t spectrum_index)
 {
+    SourceOpenPlan plan;
+    plan.session_changed = CancelActivePendingSampleNavigation();
+    const auto member = ExistingSpectrumMember(request.source_path);
+    plan.load.path = member ? member->first : SourceOpenRequestCandidatePath(request);
+    plan.load.spectrum_index = member ? member->second : spectrum_index;
+    plan.load.annotation_paths = AnnotationPathsForSource(plan.load.path);
+    plan.load.source_open_request = request;
+    if (member) plan.load.preferred_member_path = request.source_path;
+    if (auto hint = LoadHintForSource(plan.load.path, plan.load.spectrum_index)) {
+        plan.load.reuse = std::move(hint->reuse);
+    }
+    return plan;
+}
+
+SourceCollectionSessionResult SourceCollectionSession::CommitPreparedOpen(
+    PreparedSourceCollection prepared, bool activate, bool recover_failed_presentation)
+{
+    if (prepared.explicit_member_path && prepared.folder_listing_generation) {
+        const auto& generation = *prepared.folder_listing_generation;
+        const auto& members = generation.listing.spectra;
+        const auto member_key = SourcePathIdentityKey(*prepared.explicit_member_path);
+        const bool valid = generation.IsCurrent() &&
+            prepared.spectrum_index < members.size() &&
+            SourcePathIdentityKey(members[prepared.spectrum_index].path) == member_key &&
+            std::count_if(members.begin(), members.end(), [&](const auto& member) {
+                return SourcePathIdentityKey(member.path) == member_key;
+            }) == 1;
+        if (!valid) {
+            SourceCollectionSessionResult result;
+            result.load_error.kind = SourceCollectionLoadErrorKind::PreparedKnownSourcePlanStale;
+            result.background_retirement.push_back(
+                MakeBackgroundRetirementHandle(std::move(prepared)));
+            return result;
+        }
+    }
+    auto path = std::move(prepared.path);
+    const auto spectrum_index = prepared.spectrum_index;
+    auto snapshot = std::move(prepared.snapshot);
+    auto payload = std::move(prepared.payload);
+    auto folder_listing_generation = std::move(prepared.folder_listing_generation);
+    auto context_reuse_proof = std::move(prepared.context_reuse_proof);
     SourceCollectionSessionResult result;
     if (current_sample_failure_ && activate && recover_failed_presentation) {
         // A successful explicit retry may reconcile to another row before its
@@ -1328,19 +1362,6 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
                 std::move(folder_listing_generation));
         }
     };
-    if (const auto* reuse = std::get_if<PreparedSourceCollectionReuse>(&payload);
-        reuse != nullptr && !workflow_->CanReusePreparedKnownSource(
-                                SourcePathIdentityKey(path),
-                                reuse->identity)) {
-        if (snapshot) {
-            result.background_retirement.push_back(std::move(snapshot));
-        }
-        retire_folder_listing_generation();
-        result.load_error.kind =
-            SourceCollectionLoadErrorKind::
-                PreparedReuseTargetUnavailable;
-        return result;
-    }
     SpectrumSnapshotHandle previous_snapshot = roster_->snapshot();
     const std::optional<std::size_t> previous_sample_index =
         PresentedSampleIndex();
@@ -1354,54 +1375,24 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         pending_navigation && pending_navigation->spectrum_index == spectrum_index &&
         prepared_for_presented_source;
     auto* prepared_plan = std::get_if<PreparedSourceCollectionPlan>(&payload);
-    const std::optional<SourceCollectionIdentity> known_identity =
-        workflow_->KnownSourceIdentity(prepared_path_key);
     const auto live_revision = prepared_plan == nullptr
         ? live_workflow_revisions_.end()
         : live_workflow_revisions_.find(prepared_plan->context.identity.id);
     const std::uint64_t current_live_revision =
         live_revision == live_workflow_revisions_.end() ? 0 : live_revision->second;
 
-    const bool derives_from_known_source =
-        prepared_plan != nullptr && prepared_plan->base_live_workflow_revision.has_value();
-    const bool known_source_plan_is_current =
-        derives_from_known_source && snapshot && known_identity &&
-        known_identity->id == prepared_plan->context.identity.id &&
-        known_identity->spectrum_count == prepared_plan->context.identity.spectrum_count &&
-        current_live_revision >= *prepared_plan->base_live_workflow_revision;
-    if (derives_from_known_source && !known_source_plan_is_current) {
-        if (snapshot) {
-            result.background_retirement.push_back(std::move(snapshot));
+    auto reconciliation = workflow_->ReconcilePreparedSource(
+        prepared_path_key, snapshot, spectrum_index, current_live_revision, payload);
+    result.background_retirement = std::move(reconciliation.background_retirement);
+    if (reconciliation.error.kind != SourceCollectionLoadErrorKind::None) {
+        if (snapshot) result.background_retirement.push_back(std::move(snapshot));
+        if (prepared_plan) {
+            result.background_retirement.push_back(
+                MakeBackgroundRetirementHandle(std::move(payload)));
         }
-        result.background_retirement.push_back(
-            MakeBackgroundRetirementHandle(std::move(payload)));
         retire_folder_listing_generation();
-        result.load_error.kind =
-            SourceCollectionLoadErrorKind::
-                PreparedKnownSourcePlanStale;
+        result.load_error = std::move(reconciliation.error);
         return result;
-    }
-
-    if (known_source_plan_is_current) {
-        std::optional<SampleWorkflowSourceState> live_workflow_state =
-            workflow_->WorkflowStateForSourceIdentity(prepared_plan->context.identity.id);
-        std::optional<SampleLabelingSourceState> live_labeling_state =
-            workflow_->LabelingStateForSourceIdentity(prepared_plan->context.identity.id);
-        std::shared_ptr<const SampleWorkflowPreparationCacheBundle> preparation_cache =
-            prepared_plan->workflow.preparation_cache;
-        const SampleWorkflowPreparationCacheBundle empty_cache;
-        PreparedSampleWorkflowState reconciled_workflow =
-            PrepareSampleWorkflowStateFromCache(
-                *snapshot,
-                prepared_plan->context,
-                spectrum_index,
-                preparation_cache ? *preparation_cache : empty_cache,
-                live_workflow_state ? &*live_workflow_state : nullptr,
-                live_labeling_state ? &*live_labeling_state : nullptr);
-        reconciled_workflow.preparation_cache = std::move(preparation_cache);
-        result.background_retirement.push_back(
-            MakeBackgroundRetirementHandle(std::move(prepared_plan->workflow)));
-        prepared_plan->workflow = std::move(reconciled_workflow);
     }
 
     if (prepared_plan != nullptr &&
@@ -1591,20 +1582,6 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     AppendPendingBackgroundRetirement(
         result.background_retirement);
     return result;
-}
-
-SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
-    std::filesystem::path path,
-    std::size_t spectrum_index,
-    SpectrumSnapshotHandle snapshot,
-    SourceCollectionContext context,
-    PreparedSampleWorkflowState prepared_workflow)
-{
-    return OpenPreparedSource(
-        std::move(path),
-        spectrum_index,
-        std::move(snapshot),
-        PreparedSourceCollectionPlan{std::move(context), std::move(prepared_workflow)});
 }
 
 std::optional<SourceCollectionDeferredRestorePlan> SourceCollectionSession::TakeDeferredRestorePlan()

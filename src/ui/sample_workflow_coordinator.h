@@ -8,6 +8,7 @@
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_source_policy.h"
 #include "ui/sample_workflow_state_cache_io.h"
+#include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -81,6 +82,11 @@ struct SampleWorkflowStateFlushResult {
     }
 };
 
+struct PreparedWorkflowReconciliation {
+    SourceCollectionLoadError error;
+    std::vector<BackgroundRetirementHandle> background_retirement;
+};
+
 class SampleWorkflowCoordinator {
 public:
     using WorkflowStateCacheLoader =
@@ -144,6 +150,12 @@ public:
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
+    // Reconcile against live navigation/labeling state before source adoption.
+    // A newer live revision is preserved, not overwritten by worker caches.
+    [[nodiscard]] PreparedWorkflowReconciliation ReconcilePreparedSource(
+        std::string_view source_key, const SpectrumSnapshotHandle& snapshot,
+        std::size_t spectrum_index, std::uint64_t live_revision,
+        PreparedSourceCollectionPayload& payload);
     [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
@@ -151,9 +163,6 @@ public:
         PreparedSampleWorkflowState prepared_workflow,
         bool present_explicit_member = false,
         bool activate = true);
-    [[nodiscard]] bool CanReusePreparedKnownSource(
-        std::optional<std::string> source_key,
-        const SourceCollectionIdentity& identity) const;
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncReusedPreparedKnownSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
@@ -162,10 +171,6 @@ public:
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActiveSourceIdentity() const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;
-    [[nodiscard]] std::optional<SampleWorkflowSourceState> WorkflowStateForSourceIdentity(
-        std::string_view source_identity);
-    [[nodiscard]] std::optional<SampleLabelingSourceState> LabelingStateForSourceIdentity(
-        std::string_view source_identity);
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncKnownActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
@@ -214,6 +219,13 @@ public:
     [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;
 
 private:
+    [[nodiscard]] bool CanReusePreparedKnownSource(
+        std::optional<std::string> source_key,
+        const SourceCollectionIdentity& identity) const;
+    [[nodiscard]] std::optional<SampleWorkflowSourceState> WorkflowStateForSourceIdentity(
+        std::string_view source_identity);
+    [[nodiscard]] std::optional<SampleLabelingSourceState> LabelingStateForSourceIdentity(
+        std::string_view source_identity);
     [[nodiscard]] SampleWorkflowTransitionOutcome CompleteTransition(
         SampleWorkflowTransitionOutcome outcome,
         const SpectrumSnapshotHandle& snapshot,

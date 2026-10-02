@@ -126,27 +126,14 @@ SourceCollectionActivationTransaction::
             NavigationLatencyTrace::Now());
     BeginActivationIntent(
         preserve_pending_explicit_opens);
-    const bool session_changed =
-        session_.CancelActivePendingSampleNavigation();
-
-    const auto member = session_.ExistingSpectrumMember(request.source_path);
-    const std::filesystem::path path = member
-        ? member->first : SourceOpenRequestCandidatePath(request);
-    if (member) spectrum_index = member->second;
+    SourceOpenPlan plan = session_.PlanSourceOpen(request, spectrum_index);
+    const auto path = plan.load.path;
+    const bool session_changed = plan.session_changed;
     if (deferred_restore_active_) {
         deferred_restore_active_path_ = path;
     }
-    (void)QueueSourceLoad(
-        path,
-        spectrum_index,
-        session_.AnnotationPathsForSource(path),
-        Purpose::ExplicitOpen,
-        {},
-        std::move(source_load_trace),
-        std::nullopt,
-        automation_sequence,
-        member ? std::optional{request.source_path} : std::nullopt,
-        request);
+    (void)QueueSourceLoad(std::move(plan.load), Purpose::ExplicitOpen,
+        {}, std::move(source_load_trace), std::nullopt, automation_sequence);
     return {
         .path_key = SourcePathIdentityKey(path),
         .generation =
@@ -815,15 +802,29 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     SourceLoadLatencyTraceHandle source_load_trace,
     std::optional<SampleNavigationDirection>
         prefetch_direction,
-    std::uint64_t automation_sequence,
-    std::optional<std::filesystem::path>
-        preferred_member_path,
-    std::optional<SourceOpenRequest>
-        source_open_request)
+    std::uint64_t automation_sequence)
+{
+    auto hint = session_.LoadHintForSource(path, spectrum_index);
+    SourceCollectionLoadRequest request{
+        .path = path,
+        .spectrum_index = spectrum_index,
+        .annotation_paths = std::move(annotation_paths),
+        .reuse = hint ? std::optional{std::move(hint->reuse)} : std::nullopt,
+    };
+    return QueueSourceLoad(std::move(request), purpose, std::move(navigation_trace),
+        std::move(source_load_trace), prefetch_direction, automation_sequence);
+}
+
+std::uint64_t SourceCollectionActivationTransaction::QueueSourceLoad(
+    SourceCollectionLoadRequest request, Purpose purpose,
+    NavigationLatencyTraceHandle navigation_trace,
+    SourceLoadLatencyTraceHandle source_load_trace,
+    std::optional<SampleNavigationDirection> prefetch_direction,
+    std::uint64_t automation_sequence)
 {
     CancelSnapshotPrefetch();
-    std::optional<SourceCollectionLoadHint> hint =
-        session_.LoadHintForSource(path, spectrum_index);
+    const auto& path = request.path;
+    const auto spectrum_index = request.spectrum_index;
     LoadLatencyAttemptHandle latency_attempt;
     if (navigation_trace) {
         navigation_trace->SetTargetIndex(spectrum_index);
@@ -848,22 +849,9 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
         std::move(source_load_trace),
         prefetch_direction,
         automation_sequence);
-    const std::uint64_t task_id = load_queue_.Enqueue({
-        .path = path,
-        .spectrum_index = spectrum_index,
-        .annotation_paths = std::move(annotation_paths),
-        .source_open_request =
-            std::move(source_open_request),
-        .preferred_member_path =
-            std::move(preferred_member_path),
-        .reuse =
-            hint ? std::optional<SourceCollectionReuseCandidate>{
-                       std::move(hint->reuse)}
-                 : std::nullopt,
-        .latency_attempt = std::move(latency_attempt),
-        .source_load_trace =
-            source_load_trace_for_request,
-    });
+    request.latency_attempt = std::move(latency_attempt);
+    request.source_load_trace = source_load_trace_for_request;
+    const std::uint64_t task_id = load_queue_.Enqueue(std::move(request));
     CancelPendingTasks(
         RegisterOrReplaceLoad(task_id, std::move(ticket)));
     ScheduleServiceNow();
@@ -1114,15 +1102,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             (deferred_restore_active_path_ &&
             SourcePathIdentityKey(*deferred_restore_active_path_) == ticket.path_key));
         SourceCollectionSessionResult result =
-            session_.OpenPreparedSource(
-                prepared.path,
-                prepared.spectrum_index,
-                std::move(prepared.snapshot),
-                std::move(prepared.payload),
-                std::move(
-                    prepared.folder_listing_generation),
-                std::move(
-                    prepared.context_reuse_proof), activate,
+            session_.CommitPreparedOpen(std::move(prepared), activate,
                 ticket.current_presentation_request && ticket.purpose != Purpose::SessionFollowUp);
         MergeSourceCollectionSessionAction(
             action,

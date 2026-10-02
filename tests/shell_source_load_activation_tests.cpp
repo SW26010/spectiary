@@ -683,12 +683,12 @@ spectiary::SourceCollectionSession MakePreparedDeferredSession(
     spectiary::PreparedSampleWorkflowState workflow =
         spectiary::PrepareSampleWorkflowState(*snapshot, context, 0, {{}, {}});
     Require(
-        session.OpenPreparedSource(
-                   path,
-                   0,
-                   snapshot,
-                   std::move(context),
-                   std::move(workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = path,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+        })
             .loaded,
         "Shell drain fixture should commit its initial source");
     return session;
@@ -729,12 +729,12 @@ void OpenPreparedFixtureSource(
             spectrum_index,
             preparation_paths);
     Require(
-        session.OpenPreparedSource(
-                   path,
-                   spectrum_index,
-                   snapshot,
-                   std::move(context),
-                   std::move(workflow))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = path,
+            .spectrum_index = spectrum_index,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+        })
             .loaded,
         "fixture source should enter the session");
 }
@@ -916,21 +916,22 @@ void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
                 0,
                 {{}, {}});
         Require(
-            saved.OpenPreparedSource(
-                     source_path,
-                     0,
-                     snapshot,
-                     spectiary::PreparedSourceCollectionPlan{
+            saved.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = source_path,
+                .spectrum_index = 0,
+                .snapshot = snapshot,
+                .payload = spectiary::PreparedSourceCollectionPlan{
                          std::move(context),
                          std::move(workflow)},
-                     {},
-                     spectiary::SourceCollectionContextReuseProof{
+                .context_reuse_proof = spectiary::SourceCollectionContextReuseProof{
                          .identity =
                              spectiary::BuildSourceCollectionIdentity(
                                  *snapshot,
                                  file_state),
                          .dependency_state = file_state,
-                     })
+                     },
+                .folder_listing_generation = {},
+            })
                 .loaded,
             "viewport restore source should seed the saved session");
         Require(
@@ -1072,21 +1073,22 @@ void TestShellShutdownFlushPersistsLockedViewport()
             0,
             {{}, {}});
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   0,
-                   snapshot,
-                   spectiary::PreparedSourceCollectionPlan{
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 0,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{
                        std::move(context),
                        std::move(workflow)},
-                   {},
-                   spectiary::SourceCollectionContextReuseProof{
+            .context_reuse_proof = spectiary::SourceCollectionContextReuseProof{
                        .identity =
                            spectiary::BuildSourceCollectionIdentity(
                                *snapshot,
                                file_state),
                        .dependency_state = file_state,
-                   })
+                   },
+            .folder_listing_generation = {},
+        })
             .loaded,
         "viewport flush fixture should activate its source");
 
@@ -2300,12 +2302,12 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
     spectiary::PreparedSampleWorkflowState workflow_b =
         spectiary::PrepareSampleWorkflowState(*snapshot_b, context_b, 0, {{}, {}});
     Require(
-        session.OpenPreparedSource(
-                   path_b,
-                   0,
-                   snapshot_b,
-                   std::move(context_b),
-                   std::move(workflow_b))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = path_b,
+            .spectrum_index = 0,
+            .snapshot = snapshot_b,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(context_b), std::move(workflow_b)},
+        })
             .loaded,
         "source B should be cached before the navigation fixture starts");
     (void)session.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
@@ -2926,12 +2928,12 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         completion_ready.wait_for(2s) ==
         std::future_status::ready;
     const spectiary::SourceCollectionSessionResult
-        switched_to_b = session.OpenPreparedSource(
-            other_path,
-            0,
-            other_snapshot,
-            std::move(other_context),
-            std::move(other_workflow));
+        switched_to_b = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = other_path,
+            .spectrum_index = 0,
+            .snapshot = other_snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{std::move(other_context), std::move(other_workflow)},
+        });
     const bool session_navigation_preserved =
         switched_to_b.loaded &&
         !switched_to_b.canceled_source_follow_up_path;
@@ -6697,12 +6699,12 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
                 1,
                 paths);
         Require(
-            seed.OpenPreparedSource(
-                    source_path,
-                    1,
-                    snapshot,
-                    context,
-                    std::move(prepared))
+            seed.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = source_path,
+                .spectrum_index = 1,
+                .snapshot = snapshot,
+                .payload = spectiary::PreparedSourceCollectionPlan{context, std::move(prepared)},
+            })
                 .loaded,
             "maintenance topology fixture should open its seed source");
         const std::string filter_source_id =
@@ -6759,12 +6761,12 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
             1,
             paths);
     Require(
-        session.OpenPreparedSource(
-                   source_path,
-                   1,
-                   snapshot,
-                   context,
-                   std::move(prepared))
+        session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
+            .path = source_path,
+            .spectrum_index = 1,
+            .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{context, std::move(prepared)},
+        })
             .loaded,
         "maintenance topology fixture should open its stale source");
     Require(

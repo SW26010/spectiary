@@ -193,12 +193,12 @@ spectiary::SourceCollectionSession MakePreparedSession(
             {{}, {}});
     Require(
         session
-            .OpenPreparedSource(
-                path,
-                spectrum_index,
-                snapshot,
-                std::move(context),
-                std::move(workflow))
+            .CommitPreparedOpen(spectiary::PreparedSourceCollection{
+                .path = path,
+                .spectrum_index = spectrum_index,
+                .snapshot = snapshot,
+                .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+            })
             .loaded,
         "activation fixture should commit row zero");
     return session;

@@ -708,6 +708,17 @@ void TestFolderGenerationReuseAndStalePrefetch()
             second.payload),
         "current folder generation should reuse its context");
 
+    const auto member_open = preparation.Load({
+        .path = folder,
+        .source_open_request = spectiary::SourceOpenRequest{
+            .source_path = folder / "sample.csv", .origin = spectiary::SourceOpenOrigin::InApp},
+        .preferred_member_path = folder / "sample.csv",
+        .reuse = reuse,
+    });
+    Require(member_open.explicit_member_path == folder / "sample.csv" &&
+            member_open.folder_listing_generation == first.folder_listing_generation,
+        "worker completion must retain explicit member identity and generation for session commit");
+
     generation->Invalidate();
     bool stale = false;
     try {
@@ -735,7 +746,7 @@ void TestFolderGenerationReuseAndStalePrefetch()
         .reuse = reuse,
     });
     Require(fallback.path == folder / "sample.csv" && fallback.spectrum_index == 0 &&
-        !fallback.folder_listing_generation,
+        !fallback.folder_listing_generation && !fallback.explicit_member_path,
         "member mapping invalidated after resolution must fall back to ordinary file open");
     std::filesystem::remove_all(folder);
 }

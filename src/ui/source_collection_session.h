@@ -37,6 +37,11 @@ struct SourceCollectionLoadHint {
     SourceCollectionReuseCandidate reuse;
 };
 
+struct SourceOpenPlan {
+    SourceCollectionLoadRequest load;
+    bool session_changed = false;
+};
+
 struct SourceCollectionSnapshotPrefetchPlan {
     std::filesystem::path path;
     std::size_t spectrum_index = 0;
@@ -339,8 +344,14 @@ public:
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] const SourceCollectionSessionView& View();
-    [[nodiscard]] std::optional<std::pair<std::filesystem::path, std::size_t>>
-    ExistingSpectrumMember(const std::filesystem::path& member);
+    // Supersedes pending navigation and captures one coherent in-memory source
+    // candidate. Filesystem resolution and validation remain worker operations.
+    [[nodiscard]] SourceOpenPlan PlanSourceOpen(
+        const SourceOpenRequest& request, std::size_t spectrum_index = 0);
+    // The caller must admit the completion against its activation intent first.
+    [[nodiscard]] SourceCollectionSessionResult CommitPreparedOpen(
+        PreparedSourceCollection prepared, bool activate = true,
+        bool recover_failed_presentation = true);
     [[nodiscard]] ExactSampleNameResolution
     ResolveExactSampleName(std::string_view name) const;
     // A deferred pending target is the origin for a subsequent navigation command.
@@ -365,22 +376,6 @@ public:
         StorePrefetchedSnapshot(
             const std::filesystem::path& path,
             SourceCollectionResidentSnapshot resident);
-    [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
-        std::filesystem::path path,
-        std::size_t spectrum_index,
-        SpectrumSnapshotHandle snapshot,
-        PreparedSourceCollectionPayload payload,
-        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
-        std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
-            std::nullopt,
-        bool activate = true,
-        bool recover_failed_presentation = true);
-    [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
-        std::filesystem::path path,
-        std::size_t spectrum_index,
-        SpectrumSnapshotHandle snapshot,
-        SourceCollectionContext context,
-        PreparedSampleWorkflowState prepared_workflow);
     [[nodiscard]] std::optional<SourceCollectionDeferredRestorePlan> TakeDeferredRestorePlan();
     void FinishDeferredRestore();
     void RecordExplicitSourceActivation();
@@ -398,7 +393,6 @@ public:
     [[nodiscard]] bool CancelPendingSampleNavigation(
         const std::filesystem::path& path,
         std::size_t spectrum_index);
-    [[nodiscard]] bool CancelActivePendingSampleNavigation();
 
     [[nodiscard]] SourceCollectionSessionResult RunMaintenance(
         LocalUserStateSaveScheduler::TimePoint now);
@@ -412,6 +406,9 @@ public:
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
 private:
+    [[nodiscard]] bool CancelActivePendingSampleNavigation();
+    [[nodiscard]] std::optional<std::pair<std::filesystem::path, std::size_t>>
+    ExistingSpectrumMember(const std::filesystem::path& member);
     [[nodiscard]] SampleWorkflowTransitionOutcome ActivateSource(
         std::size_t source_index);
     [[nodiscard]] SampleWorkflowTransitionOutcome RemoveSource(

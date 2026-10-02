@@ -973,6 +973,43 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     return result;
 }
 
+PreparedWorkflowReconciliation SampleWorkflowCoordinator::ReconcilePreparedSource(
+    std::string_view source_key, const SpectrumSnapshotHandle& snapshot,
+    std::size_t spectrum_index, std::uint64_t live_revision,
+    PreparedSourceCollectionPayload& payload)
+{
+    PreparedWorkflowReconciliation result;
+    if (const auto* reuse = std::get_if<PreparedSourceCollectionReuse>(&payload)) {
+        if (!CanReusePreparedKnownSource(std::string{source_key}, reuse->identity)) {
+            result.error.kind = SourceCollectionLoadErrorKind::PreparedReuseTargetUnavailable;
+        }
+        return result;
+    }
+    auto& plan = std::get<PreparedSourceCollectionPlan>(payload);
+    if (!plan.base_live_workflow_revision) return result;
+    const auto known = KnownSourceIdentity(source_key);
+    if (!snapshot || !known || known->id != plan.context.identity.id ||
+        known->spectrum_count != plan.context.identity.spectrum_count ||
+        live_revision < *plan.base_live_workflow_revision) {
+        result.error.kind = SourceCollectionLoadErrorKind::PreparedKnownSourcePlanStale;
+        return result;
+    }
+
+    const auto live_workflow = WorkflowStateForSourceIdentity(plan.context.identity.id);
+    const auto live_labeling = LabelingStateForSourceIdentity(plan.context.identity.id);
+    auto cache = plan.workflow.preparation_cache;
+    const SampleWorkflowPreparationCacheBundle empty_cache;
+    auto reconciled = PrepareSampleWorkflowStateFromCache(
+        *snapshot, plan.context, spectrum_index, cache ? *cache : empty_cache,
+        live_workflow ? &*live_workflow : nullptr,
+        live_labeling ? &*live_labeling : nullptr);
+    reconciled.preparation_cache = std::move(cache);
+    result.background_retirement.push_back(
+        MakeBackgroundRetirementHandle(std::move(plan.workflow)));
+    plan.workflow = std::move(reconciled);
+    return result;
+}
+
 bool SampleWorkflowCoordinator::CanReusePreparedKnownSource(
     std::optional<std::string> source_key,
     const SourceCollectionIdentity& identity) const

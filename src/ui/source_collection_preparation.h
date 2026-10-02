@@ -118,6 +118,9 @@ struct PreparedSourceCollection {
     std::int64_t snapshot_prefetch_scheduled_ns = 0;
     SampleNavigationDirection snapshot_prefetch_direction =
         SampleNavigationDirection::Next;
+    // Retained through completion admission for the session's final membership
+    // check. A worker-validated listing may be invalidated before UI commit.
+    std::optional<std::filesystem::path> explicit_member_path;
 };
 
 }  // namespace spectiary

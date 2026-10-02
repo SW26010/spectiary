@@ -237,11 +237,13 @@ private:
         SourceLoadLatencyTraceHandle source_load_trace = {},
         std::optional<SampleNavigationDirection> prefetch_direction =
             std::nullopt,
-        std::uint64_t automation_sequence = 0,
-        std::optional<std::filesystem::path>
-            preferred_member_path = std::nullopt,
-        std::optional<SourceOpenRequest>
-            source_open_request = std::nullopt);
+        std::uint64_t automation_sequence = 0);
+    [[nodiscard]] std::uint64_t QueueSourceLoad(
+        SourceCollectionLoadRequest request, Purpose purpose,
+        NavigationLatencyTraceHandle navigation_trace = {},
+        SourceLoadLatencyTraceHandle source_load_trace = {},
+        std::optional<SampleNavigationDirection> prefetch_direction = std::nullopt,
+        std::uint64_t automation_sequence = 0);
     [[nodiscard]] SourceOpenOperation OpenSourceWithPolicy(
         const SourceOpenRequest& request,
         std::size_t spectrum_index,

@@ -595,6 +595,8 @@ private:
             snapshot_prefetch_scheduled_ns;
         prepared.snapshot_prefetch_direction =
             snapshot_prefetch_direction;
+        prepared.explicit_member_path = work.request.explicit_member_reuse
+            ? work.request.preferred_member_path : std::nullopt;
         return prepared;
     }
 
@@ -633,6 +635,8 @@ private:
                 std::move(reuse_proof);
             prepared.folder_listing_generation =
                 std::move(folder_listing_generation);
+            prepared.explicit_member_path = work.request.explicit_member_reuse
+                ? work.request.preferred_member_path : std::nullopt;
             return prepared;
         }
         if (work.request.latency_attempt) {
@@ -675,6 +679,8 @@ private:
             std::move(reuse_proof);
         prepared.folder_listing_generation =
             std::move(folder_listing_generation);
+        prepared.explicit_member_path = work.request.explicit_member_reuse
+            ? work.request.preferred_member_path : std::nullopt;
         return prepared;
     }
 

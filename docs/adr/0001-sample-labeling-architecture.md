@@ -44,6 +44,24 @@ and whether the session view must be invalidated. `SourceCollectionSession`
 consumes that outcome while retaining ownership of the source roster,
 activation, background follow-up, and presentation lifecycles.
 
+Explicit source opening crosses the session boundary through `PlanSourceOpen`
+and `CommitPreparedOpen`. Planning cancels pending sample navigation and captures
+the source candidate, explicit member, target row, annotation attachments, and
+reuse evidence together. It performs no filesystem probing; cancellable worker
+preparation resolves and validates the candidate. The activation transaction owns
+intent epochs, queueing, cancellation, and completion admission. After admission,
+the session checks the prepared member's listing generation and coordinates
+source adoption. The workflow coordinator validates known-source reuse and
+reconciles prepared workflow state against live navigation and labeling state;
+a newer live revision is reconciled rather than overwritten or blindly rejected.
+Rejected results retain the existing session and return resources for background
+retirement. Presentation of an admitted load failure follows the source-load
+failure contract separately from adoption.
+
+This is the source-opening slice of #47. Other session projections and deferred
+navigation transitions remain follow-up work; the coordinator and labeling
+controller ownership and independent persistence lifecycles are unchanged.
+
 We keep sample navigation, sample filtering, sample annotation inspection, and
 active manual labeling as separate UI surfaces. This avoids letting a labeling
 window own unrelated concerns like current index, sample-filter composition, loaded
