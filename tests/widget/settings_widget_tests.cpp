@@ -246,6 +246,49 @@ void TestScaleKeyboardCommitAndReset()
     Require(f.intents == 2, "Scale commit and Reset must each emit one intent");
 }
 
+void TestScaleResetFitsNarrowSettings()
+{
+    for (const int percentage : {100, 150}) {
+        SettingsFixture f;
+        const float scale = static_cast<float>(percentage) / 100.0f;
+        (void)f.settings.Apply(ApplicationSettingsIntent::SetLanguage(UiLanguage::English), {});
+        Require(f.settings.View().language == UiLanguage::English,
+            "English fixture must apply");
+        (void)f.settings.Apply(ApplicationSettingsIntent::SetUiScale(percentage), {});
+        Require(f.settings.View().ui_scale_percentage == percentage,
+            "Scale fixture must apply");
+        ImGui::GetStyle().ScaleAllSizes(scale);
+        ImGui::GetStyle().FontScaleMain = scale;
+        // Reproduce the reported 430-pixel width via a constrained work area;
+        // current Settings also supports a larger preferred opening size.
+        ImGui::GetIO().DisplaySize = ImVec2(430 * scale, 560 * scale);
+        f.panel.Open();
+        f.ui.Frames(3);
+        f.ui.Click("SettingsAppearance");
+        const auto require_visible = [&] {
+            const auto reset = f.ui.Find("UiScaleReset");
+            Require(reset.bounds.Contains(reset.raw_bounds),
+                "Reset must be fully visible in the Settings content pane");
+        };
+        require_visible();
+        ImGuiWindow* window = ImGui::FindWindowByName("###SettingsV1");
+        Require(window != nullptr, "Settings window must exist");
+        ImGui::GetIO().DisplaySize = ImVec2(1600 * scale, 1000 * scale);
+        ImGui::SetWindowSize(window, ImVec2(1000 * scale, 560 * scale));
+        f.ui.Frames(3);
+        require_visible();
+        f.panel.CloseForLayoutRecovery();
+        f.ui.Frames(2);
+        ImGui::GetIO().DisplaySize = ImVec2(430 * scale, 560 * scale);
+        f.panel.Open();
+        f.ui.Frames(3);
+        require_visible();
+        f.ui.Click("UiScaleReset");
+        Require(f.settings.View().ui_scale_percentage == 100 && f.intents == 1,
+            "Fully visible Reset must remain clickable after reopening");
+    }
+}
+
 void TestRecordingDisablesDirectoryReset()
 {
     SettingsFixture f;
@@ -373,7 +416,7 @@ int main(int argc, char** argv)
         if (name == "all" || name == "failures") { TestBoundedFailures(); TestClippedWidgetBounds(); }
         if (name == "all" || name == "input") { TestInputCheckbox(); TestGeneralAndLanguageControls(); TestExternalOpenInstanceCombo(); TestLayoutRecoveryControlAndSettingsPlacement(); TestLegalDocumentControls(); }
         if (name == "all" || name == "theme") TestThemeCombo();
-        if (name == "all" || name == "scale") TestScaleKeyboardCommitAndReset();
+        if (name == "all" || name == "scale") { TestScaleKeyboardCommitAndReset(); TestScaleResetFitsNarrowSettings(); }
         if (name == "all" || name == "recording") { TestRecordingDisablesDirectoryReset(); TestWarnedFallbackRepairThroughControls(); }
         std::cout << "Widget regression passed: " << name << '\n';
         return 0;
