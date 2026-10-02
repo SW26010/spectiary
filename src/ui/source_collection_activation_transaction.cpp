@@ -792,29 +792,6 @@ void SourceCollectionActivationTransaction::
     RetireResources(session_.TakeViewRetirement());
 }
 
-std::uint64_t
-SourceCollectionActivationTransaction::QueueSourceLoad(
-    const std::filesystem::path& path,
-    std::size_t spectrum_index,
-    std::vector<std::filesystem::path> annotation_paths,
-    Purpose purpose,
-    NavigationLatencyTraceHandle navigation_trace,
-    SourceLoadLatencyTraceHandle source_load_trace,
-    std::optional<SampleNavigationDirection>
-        prefetch_direction,
-    std::uint64_t automation_sequence)
-{
-    auto hint = session_.LoadHintForSource(path, spectrum_index);
-    SourceCollectionLoadRequest request{
-        .path = path,
-        .spectrum_index = spectrum_index,
-        .annotation_paths = std::move(annotation_paths),
-        .reuse = hint ? std::optional{std::move(hint->reuse)} : std::nullopt,
-    };
-    return QueueSourceLoad(std::move(request), purpose, std::move(navigation_trace),
-        std::move(source_load_trace), prefetch_direction, automation_sequence);
-}
-
 std::uint64_t SourceCollectionActivationTransaction::QueueSourceLoad(
     SourceCollectionLoadRequest request, Purpose purpose,
     NavigationLatencyTraceHandle navigation_trace,
@@ -885,16 +862,11 @@ void SourceCollectionActivationTransaction::
             prefetch_direction)
 {
     CancelSourceFollowUps(result);
-    if (!result.follow_up_spectrum_index || !result.follow_up_source_path) {
-        return;
-    }
-    const auto& source_path = *result.follow_up_source_path;
-    if (source_path.empty()) {
-        return;
-    }
+    if (!result.follow_up_load) return;
+    const auto& request = *result.follow_up_load;
     if (HasMatchingFollowUp(
-            source_path,
-            *result.follow_up_spectrum_index)) {
+            request.path,
+            request.spectrum_index)) {
         if (navigation_trace) {
             (void)navigation_trace->MarkTerminal(
                 NavigationLatencyOutcome::Coalesced);
@@ -902,10 +874,7 @@ void SourceCollectionActivationTransaction::
         return;
     }
     (void)QueueSourceLoad(
-        source_path,
-        *result.follow_up_spectrum_index,
-        session_.AnnotationPathsForSource(
-            source_path),
+        request,
         deferred_restore ? Purpose::DeferredRestore
                          : Purpose::SessionFollowUp,
         std::move(navigation_trace),
@@ -1112,11 +1081,11 @@ void SourceCollectionActivationTransaction::DrainCompletions(
 
         const bool completes_navigation_trace =
             result.loaded &&
-            !result.follow_up_spectrum_index &&
+            !result.follow_up_spectrum_index() &&
             ticket.navigation_trace;
         const bool completes_source_load_trace =
             result.loaded &&
-            !result.follow_up_spectrum_index &&
+            !result.follow_up_spectrum_index() &&
             ticket.source_load_trace;
         if (completes_navigation_trace) {
             if (presentable_navigation_trace_ &&
@@ -1194,7 +1163,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 (void)ticket.source_load_trace->MarkTerminal(
                     SourceLoadLatencyOutcome::Rejected);
             }
-        } else if (!result.follow_up_spectrum_index) {
+        } else if (!result.follow_up_spectrum_index()) {
             if (starts_activation_intent) {
                 BeginActivationIntent(true);
             }
@@ -1204,7 +1173,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
         }
 
         if (result.loaded &&
-            !result.follow_up_spectrum_index &&
+            !result.follow_up_spectrum_index() &&
             prepared.snapshot_cache_origin ==
                 SourceCollectionResidentSnapshotOrigin::
                     Prefetch &&
@@ -1222,20 +1191,17 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                         prepared
                             .snapshot_prefetch_scheduled_ns}});
         }
-        if (result.follow_up_spectrum_index) {
+        if (result.follow_up_spectrum_index()) {
             if (ticket.navigation_trace) {
                 ticket.navigation_trace->SetTargetIndex(
-                    *result.follow_up_spectrum_index);
+                    *result.follow_up_spectrum_index());
             }
             if (ticket.source_load_trace) {
                 ticket.source_load_trace->SetTargetIndex(
-                    *result.follow_up_spectrum_index);
+                    *result.follow_up_spectrum_index());
             }
             const auto follow_up_task = QueueSourceLoad(
-                ticket.path,
-                *result.follow_up_spectrum_index,
-                session_.AnnotationPathsForSource(
-                    ticket.path),
+                *result.follow_up_load,
                 ticket.purpose == Purpose::DeferredRestore
                     ? Purpose::DeferredRestore
                     : Purpose::SessionFollowUp,
@@ -1607,7 +1573,7 @@ SourceCollectionActivationTransaction::
 {
     if (!latency_tracing_enabled_ || !navigation ||
         !from_index ||
-        !result.follow_up_spectrum_index) {
+        !result.follow_up_spectrum_index()) {
         return {};
     }
     const bool keyboard_origin =
@@ -1626,7 +1592,7 @@ SourceCollectionActivationTransaction::
         std::make_shared<NavigationLatencyTrace>(
             navigation_id,
             *from_index,
-            *result.follow_up_spectrum_index,
+            *result.follow_up_spectrum_index(),
             navigation->kind,
             input_at,
             requested_at,

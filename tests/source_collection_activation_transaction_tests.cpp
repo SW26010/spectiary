@@ -451,7 +451,7 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
                     spectiary::
                         SampleNavigationRequest::Next())));
     Require(
-        first.follow_up_spectrum_index == 1,
+        first.follow_up_spectrum_index() == 1,
         "first navigation should target row one");
     Require(
         first_entered.wait_for(2s) ==
@@ -477,7 +477,7 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
 
     std::filesystem::remove(path);
     Require(
-        second.follow_up_spectrum_index == 2 && second.follow_up_source_path == path &&
+        second.follow_up_spectrum_index() == 2 && second.follow_up_source_path() == path &&
             second.canceled_source_follow_up_path == path,
         "second navigation should resolve from the pending row");
     Require(
@@ -1281,7 +1281,7 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
 
     std::filesystem::remove(path);
     Require(
-        navigation.follow_up_spectrum_index == 1 &&
+        navigation.follow_up_spectrum_index() == 1 &&
             activated,
         "traced navigation should activate row one");
     Require(

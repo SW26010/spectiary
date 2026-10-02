@@ -1764,7 +1764,7 @@ ShellUi::GotoSpectrumForAutomation(
     automation.changed =
         previous_index != target_index;
     automation.pending =
-        result.follow_up_spectrum_index.has_value();
+        result.follow_up_spectrum_index().has_value();
     return automation;
 }
 
@@ -1847,7 +1847,7 @@ ShellUi::AssignLabelForAutomation(int code)
     automation.output_retry_scheduled =
         write.operation.output_retry_scheduled;
     automation.navigation_pending =
-        result.follow_up_spectrum_index.has_value();
+        result.follow_up_spectrum_index().has_value();
     return automation;
 }
 

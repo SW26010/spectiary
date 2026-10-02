@@ -1667,7 +1667,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())),
         spectiary::NavigationLatencyInputKind::UiNext);
-    const bool first_queued = first.follow_up_spectrum_index == 1;
+    const bool first_queued = first.follow_up_spectrum_index() == 1;
     const bool row_one_started = row_one_entered.wait_for(2s) == std::future_status::ready;
     const spectiary::SourceCollectionSessionResult second = Access::SubmitNavigation(
         *shell,
@@ -1675,7 +1675,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())),
         spectiary::NavigationLatencyInputKind::UiNext);
-    const bool second_queued = second.follow_up_spectrum_index == 2;
+    const bool second_queued = second.follow_up_spectrum_index() == 2;
     const bool row_two_started = row_two_entered.wait_for(2s) == std::future_status::ready;
     release_decoders_promise.set_value();
 
@@ -1825,7 +1825,7 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
     shell.reset();
     std::filesystem::remove(path);
 
-    Require(result.follow_up_spectrum_index == 2, "row location should still queue its real source load");
+    Require(result.follow_up_spectrum_index() == 2, "row location should still queue its real source load");
     Require(
         reports.empty(),
         "LocateRow must not be classified as previous/next navigation latency");
@@ -1977,8 +1977,8 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
     shell.reset();
     std::filesystem::remove(path);
 
-    Require(assign_result.follow_up_spectrum_index == 1, "label assignment should request auto-advance");
-    Require(clear_result.follow_up_spectrum_index == 2, "label clearing should request auto-advance");
+    Require(assign_result.follow_up_spectrum_index() == 1, "label assignment should request auto-advance");
+    Require(clear_result.follow_up_spectrum_index() == 2, "label clearing should request auto-advance");
     Require(
         assign_report_complete,
         "label assignment auto-advance should emit an analyzer-compatible target-resolution report");
@@ -2052,7 +2052,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                           spectiary::NavigationLatencyTrace::Now()}
                     : std::nullopt);
             Require(
-                result.follow_up_spectrum_index == target_index,
+                result.follow_up_spectrum_index() == target_index,
                 "warm navigation repetition should enqueue the expected target");
 
             const auto deadline = std::chrono::steady_clock::now() + 2s;
@@ -2246,7 +2246,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
         return false;
     };
 
-    const bool first_requested = submit_next().follow_up_spectrum_index == 1;
+    const bool first_requested = submit_next().follow_up_spectrum_index() == 1;
     const bool first_activated = drain_to_index(1);
     const bool first_still_waiting_for_present =
         Access::CompleteFramePresentationWithoutSpectrumDraw(
@@ -2254,7 +2254,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
             presentation_frame,
             7)
             .empty();
-    const bool second_requested = submit_next().follow_up_spectrum_index == 2;
+    const bool second_requested = submit_next().follow_up_spectrum_index() == 2;
     const bool second_activated = drain_to_index(2);
     const std::vector<spectiary::NavigationLatencyReport> reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 7);
@@ -2372,7 +2372,7 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
     std::filesystem::remove(path_a);
     std::filesystem::remove(path_b);
 
-    Require(navigation.follow_up_spectrum_index == 1 && target_activated, "source A row 1 should activate");
+    Require(navigation.follow_up_spectrum_index() == 1 && target_activated, "source A row 1 should activate");
     Require(
         switched.action.snapshot_changed && active_snapshot == snapshot_b,
         "the cached source B snapshot should synchronously take over in the same frame");
@@ -2441,7 +2441,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
     shell.reset();
     std::filesystem::remove(path);
 
-    Require(navigation.follow_up_spectrum_index == 1 && target_activated, "the hidden Spectrum target should activate");
+    Require(navigation.follow_up_spectrum_index() == 1 && target_activated, "the hidden Spectrum target should activate");
     Require(
         reports.empty() && trace_retained,
         "a successful viewport Present without a submitted Spectrum draw must not complete navigation");
@@ -2547,12 +2547,12 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     shell.reset();
     std::filesystem::remove(path);
 
-    Require(first.follow_up_spectrum_index == 1, "row 1 should create the old Shell ticket");
+    Require(first.follow_up_spectrum_index() == 1, "row 1 should create the old Shell ticket");
     Require(
         stale_completion_published,
         "row 1 completion should be published before supersession");
     Require(
-        second.follow_up_spectrum_index == 2 && row_two_started,
+        second.follow_up_spectrum_index() == 2 && row_two_started,
         "new navigation should invalidate row 1 and start the row 2 worker");
     Require(
         snapshot_after_stale_drain == initial_snapshot &&
@@ -2606,7 +2606,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
         spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())));
-    const bool navigation_queued = navigation.follow_up_spectrum_index == 1;
+    const bool navigation_queued = navigation.follow_up_spectrum_index() == 1;
     const bool decoder_started = decoder_entered.wait_for(2s) == std::future_status::ready;
     const spectiary::SourceCollectionSessionResult labeling_started = Access::Submit(
         *shell,
@@ -2776,7 +2776,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())));
-    const bool navigation_queued = navigation.follow_up_spectrum_index == 1;
+    const bool navigation_queued = navigation.follow_up_spectrum_index() == 1;
     const bool first_decode_started =
         first_decode_entered.wait_for(2s) == std::future_status::ready;
     annotation_error.clear();
@@ -2921,7 +2921,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())));
     Require(
-        navigation.follow_up_spectrum_index == 1,
+        navigation.follow_up_spectrum_index() == 1,
         "source A should issue the async row 1 follow-up used by the Shell ticket");
 
     const bool completion_published =
@@ -2948,7 +2948,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
                     spectiary::SourceCollectionIntent::
                         SwitchActive(0)));
     const bool pending_intent_restored =
-        switched_back_to_a.follow_up_spectrum_index == 1 &&
+        switched_back_to_a.follow_up_spectrum_index() == 1 &&
         session.CurrentSampleSnapshot() ==
             initial_snapshot;
     const bool existing_ticket_reused =
@@ -3019,7 +3019,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())));
-    const bool deferred_follow_up_created = navigation.follow_up_spectrum_index == 1;
+    const bool deferred_follow_up_created = navigation.follow_up_spectrum_index() == 1;
 
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     bool failure_drained = false;
@@ -3039,7 +3039,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
             spectiary::SampleNavigationIntent::Move(
                 spectiary::SampleNavigationRequest::Next())));
-    const bool retry_created = retry.follow_up_spectrum_index == 1;
+    const bool retry_created = retry.follow_up_spectrum_index() == 1;
     const bool retry_canceled =
         Access::Session(*shell).CancelPendingSampleNavigation(path, 1);
     shell.reset();
@@ -3407,7 +3407,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
                             SampleNavigationRequest::Next())),
             spectiary::NavigationLatencyInputKind::UiNext);
     Require(
-        first.follow_up_spectrum_index == 1,
+        first.follow_up_spectrum_index() == 1,
         "first next should queue raw row 1");
     const auto first_deadline =
         std::chrono::steady_clock::now() + 2s;
@@ -3472,7 +3472,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
                             SampleNavigationRequest::Next())),
             spectiary::NavigationLatencyInputKind::UiNext);
     Require(
-        second.follow_up_spectrum_index == 2,
+        second.follow_up_spectrum_index() == 2,
         "second next should queue raw row 2");
     const auto second_deadline =
         std::chrono::steady_clock::now() + 2s;
@@ -6813,7 +6813,7 @@ void TestReloadDoesNotSchedulePersistedFormalRetry()
                     spectiary::SampleNavigationIntent::Move(
                         spectiary::SampleNavigationRequest::Next())));
     Require(
-        pending_navigation.follow_up_spectrum_index == 2 &&
+        pending_navigation.follow_up_spectrum_index() == 2 &&
             row_two_entered.wait_for(2s) ==
                 std::future_status::ready,
         "maintenance topology fixture should start the stale row-two follow-up");

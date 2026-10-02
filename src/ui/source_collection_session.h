@@ -278,9 +278,7 @@ private:
 struct SourceCollectionSessionResult {
     SourceCollectionSessionAction action;
     SampleNavigationResult navigation;
-    std::optional<std::size_t> follow_up_spectrum_index;
-    // Bound to the workflow that produced the row, which may precede roster adoption.
-    std::optional<std::filesystem::path> follow_up_source_path;
+    std::optional<SourceCollectionLoadRequest> follow_up_load;
     std::optional<std::filesystem::path> canceled_source_follow_up_path;
     std::vector<BackgroundRetirementHandle> background_retirement;
     bool changed = false;
@@ -292,6 +290,15 @@ struct SourceCollectionSessionResult {
         SampleLabelingOperationResult::Issue::None;
     SourceCollectionLoadError load_error;
     std::string message;
+
+    [[nodiscard]] std::optional<std::size_t> follow_up_spectrum_index() const
+    {
+        return follow_up_load ? std::optional{follow_up_load->spectrum_index} : std::nullopt;
+    }
+    [[nodiscard]] std::optional<std::filesystem::path> follow_up_source_path() const
+    {
+        return follow_up_load ? std::optional{follow_up_load->path} : std::nullopt;
+    }
 };
 
 class SourceCollectionSession {
@@ -427,6 +434,8 @@ private:
     void ApplyWorkflowTransitionOutcome(
         SourceCollectionSessionResult& result,
         SampleWorkflowTransitionOutcome outcome);
+    [[nodiscard]] SourceCollectionLoadRequest BuildSourceLoadRequest(
+        const std::filesystem::path& path, std::size_t spectrum_index);
     [[nodiscard]] std::optional<std::size_t>
     PresentedSampleIndex() const;
     void RecordSampleTransition(

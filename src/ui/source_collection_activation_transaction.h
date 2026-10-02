@@ -229,16 +229,6 @@ private:
     };
 
     [[nodiscard]] std::uint64_t QueueSourceLoad(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index,
-        std::vector<std::filesystem::path> annotation_paths,
-        Purpose purpose,
-        NavigationLatencyTraceHandle navigation_trace = {},
-        SourceLoadLatencyTraceHandle source_load_trace = {},
-        std::optional<SampleNavigationDirection> prefetch_direction =
-            std::nullopt,
-        std::uint64_t automation_sequence = 0);
-    [[nodiscard]] std::uint64_t QueueSourceLoad(
         SourceCollectionLoadRequest request, Purpose purpose,
         NavigationLatencyTraceHandle navigation_trace = {},
         SourceLoadLatencyTraceHandle source_load_trace = {},

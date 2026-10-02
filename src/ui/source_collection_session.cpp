@@ -814,21 +814,21 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         break;
     }
     MergeSampleWorkflowTransitionOutcome(combined_transition, std::move(transition));
-    ApplyWorkflowTransitionOutcome(result, std::move(combined_transition));
     if (const std::optional<SourceCollectionIdentity> active_identity =
             workflow_->ActiveSourceIdentity();
         active_identity && !active_identity->id.empty()) {
         ++live_workflow_revisions_[active_identity->id];
     }
+    ApplyWorkflowTransitionOutcome(result, std::move(combined_transition));
     const std::optional<std::size_t> effective_sample_after =
         EffectiveSampleNavigationIndex();
     if (current_sample_failure_ && requested_navigation_reason &&
         intent.kind == SourceCollectionSessionIntentKind::SampleNavigation && result.navigation.target_found) {
-        sample_recovery_pending_ = result.follow_up_spectrum_index.has_value();
+        sample_recovery_pending_ = result.follow_up_spectrum_index().has_value();
     }
     if (current_sample_failure_ && requested_navigation_reason &&
         intent.kind == SourceCollectionSessionIntentKind::SampleNavigation &&
-        result.navigation.target_found && !result.follow_up_spectrum_index &&
+        result.navigation.target_found && !result.follow_up_spectrum_index() &&
         roster_->snapshot() && workflow_->current_index() == roster_->snapshot()->collection.current_index) {
         current_sample_failure_.reset();
         result.action.snapshot_changed = true;
@@ -1242,20 +1242,31 @@ SampleWorkflowTransitionOutcome SourceCollectionSession::RemoveSource(
     return outcome;
 }
 
+SourceCollectionLoadRequest SourceCollectionSession::BuildSourceLoadRequest(
+    const std::filesystem::path& path, std::size_t spectrum_index)
+{
+    SourceCollectionLoadRequest request{
+        .path = path,
+        .spectrum_index = spectrum_index,
+        .annotation_paths = AnnotationPathsForSource(path),
+    };
+    if (auto hint = LoadHintForSource(path, spectrum_index)) {
+        request.reuse = std::move(hint->reuse);
+    }
+    return request;
+}
+
 SourceOpenPlan SourceCollectionSession::PlanSourceOpen(
     const SourceOpenRequest& request, std::size_t spectrum_index)
 {
     SourceOpenPlan plan;
     plan.session_changed = CancelActivePendingSampleNavigation();
     const auto member = ExistingSpectrumMember(request.source_path);
-    plan.load.path = member ? member->first : SourceOpenRequestCandidatePath(request);
-    plan.load.spectrum_index = member ? member->second : spectrum_index;
-    plan.load.annotation_paths = AnnotationPathsForSource(plan.load.path);
+    plan.load = BuildSourceLoadRequest(
+        member ? member->first : SourceOpenRequestCandidatePath(request),
+        member ? member->second : spectrum_index);
     plan.load.source_open_request = request;
     if (member) plan.load.preferred_member_path = request.source_path;
-    if (auto hint = LoadHintForSource(plan.load.path, plan.load.spectrum_index)) {
-        plan.load.reuse = std::move(hint->reuse);
-    }
     return plan;
 }
 
@@ -1324,8 +1335,7 @@ SourceCollectionSessionResult SourceCollectionSession::CommitPreparedOpen(
         result.load_error = std::move(transition.error);
         if (transition.disposition == PreparedSourceDisposition::FollowUp) {
             result.loaded = true;
-            result.follow_up_spectrum_index = transition.follow_up_spectrum_index;
-            result.follow_up_source_path = path;
+            result.follow_up_load = BuildSourceLoadRequest(path, *transition.follow_up_spectrum_index);
             if (activate) {
                 RecordSampleTransition(
                     SourceCollectionSampleTransitionReason::NavigationInputReconciliation,
@@ -1384,7 +1394,7 @@ SourceCollectionSessionResult SourceCollectionSession::CommitPreparedOpen(
         AppendPendingBackgroundRetirement(result.background_retirement);
         return result;
     }
-    if (current_sample_failure_ && !result.follow_up_spectrum_index &&
+    if (current_sample_failure_ && !result.follow_up_spectrum_index() &&
         (recover_failed_presentation || sample_recovery_pending_)) {
         current_sample_failure_.reset();
         sample_recovery_pending_ = false;
@@ -1867,8 +1877,8 @@ void SourceCollectionSession::ApplyWorkflowTransitionOutcome(
         result.message = std::move(outcome.message);
     }
     if (outcome.follow_up.load) {
-        result.follow_up_spectrum_index = outcome.follow_up.load->spectrum_index;
-        result.follow_up_source_path = std::move(outcome.follow_up.load->path);
+        result.follow_up_load = BuildSourceLoadRequest(
+            outcome.follow_up.load->path, outcome.follow_up.load->spectrum_index);
     }
     if (outcome.follow_up.cancel_source_path) {
         result.canceled_source_follow_up_path = std::move(outcome.follow_up.cancel_source_path);

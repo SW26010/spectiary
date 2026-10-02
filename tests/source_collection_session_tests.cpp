@@ -493,22 +493,14 @@ private:
     [[nodiscard]] spectiary::SourceCollectionSessionResult ServiceFollowUps(
         spectiary::SourceCollectionSessionResult result)
     {
-        for (std::size_t attempt = 0; result.follow_up_spectrum_index; ++attempt) {
+        for (std::size_t attempt = 0; result.follow_up_spectrum_index(); ++attempt) {
             Require(attempt < 8, "prepared session follow-up should converge");
-            const spectiary::SpectrumSnapshotHandle snapshot =
-                CurrentSourceSnapshot();
-            Require(
-                snapshot && !snapshot->source.path.empty(),
-                "prepared follow-up should retain a source path");
-            const std::filesystem::path path = snapshot->source.path;
-            const std::size_t spectrum_index =
-                *result.follow_up_spectrum_index;
-            result.follow_up_spectrum_index.reset();
-            spectiary::SourceCollectionSessionResult follow_up =
-                CommitPrepared(
-                    path,
-                    spectrum_index,
-                    AnnotationPathsForSource(path));
+            auto request = std::move(*result.follow_up_load);
+            result.follow_up_load.reset();
+            auto completion = spectiary::test_support::WaitForSourceCompletion(
+                queue_, queue_.Enqueue(std::move(request)));
+            Require(completion.prepared.has_value(), "prepared follow-up should complete");
+            auto follow_up = CommitPreparedOpen(std::move(*completion.prepared));
             spectiary::MergeSourceCollectionSessionAction(
                 result.action,
                 follow_up.action);
@@ -527,8 +519,7 @@ private:
                 result.background_retirement.end(),
                 std::make_move_iterator(follow_up.background_retirement.begin()),
                 std::make_move_iterator(follow_up.background_retirement.end()));
-            result.follow_up_spectrum_index =
-                follow_up.follow_up_spectrum_index;
+            result.follow_up_load = std::move(follow_up.follow_up_load);
         }
         return result;
     }
@@ -1687,7 +1678,7 @@ void TestResolvedSequencePositionTracksFinalNavigationSequence()
                 "0",
                 true));
     Require(
-        reconciled.follow_up_spectrum_index == 1 &&
+        reconciled.follow_up_spectrum_index() == 1 &&
             session.View().navigation.current_index == 0 &&
             !session.View().navigation.current_sample_in_filter,
         "filter reconciliation should keep presenting excluded row 0 while row 1 is pending");
@@ -6683,7 +6674,7 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "source A should request row 1 before it is cached");
     const spectiary::SpectrumSnapshotHandle source_a_row_one =
         MakeSnapshot(source_a, 2, 1);
@@ -6712,7 +6703,7 @@ void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
     Require(
         Submit(session, AssignActiveLabelToCurrentSample(1))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "source B should auto-advance from row 0 to row 1");
     const spectiary::SpectrumSnapshotHandle source_b_row_one =
         MakeSnapshot(source_b, 2, 1);
@@ -7592,7 +7583,7 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
-        pending.follow_up_spectrum_index == 1,
+        pending.follow_up_spectrum_index() == 1,
         "the direct navigation-base fixture should request row 1");
     Require(
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -7788,7 +7779,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
-        moved.follow_up_spectrum_index == 1,
+        moved.follow_up_spectrum_index() == 1,
         "the navigation repair should request its prepared row");
     Require(
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -8147,7 +8138,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     Require(
         restored.CurrentSampleSnapshot() == nullptr && view.current_sample_snapshot == nullptr,
         "plot must not receive the prepared row 2 snapshot while corrected row 0 is pending");
-    Require(result.follow_up_spectrum_index == 0, "prepared restore should request a background row 0 load");
+    Require(result.follow_up_spectrum_index() == 0, "prepared restore should request a background row 0 load");
     Require(result.loaded, "prepared source should still be accepted while the corrected row is pending");
 
     const spectiary::SpectrumSnapshotHandle corrected_snapshot = MakeSnapshot(source_path, 3, 0);
@@ -8165,7 +8156,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         .snapshot = corrected_snapshot,
         .payload = spectiary::PreparedSourceCollectionPlan{std::move(corrected_context), std::move(corrected_workflow)},
     });
-    Require(!corrected.follow_up_spectrum_index, "corrected row should complete prepared restoration");
+    Require(!corrected.follow_up_spectrum_index(), "corrected row should complete prepared restoration");
     Require(
         restored.CurrentSampleSnapshot() &&
             restored.CurrentSampleSnapshot()->collection.current_index == 0,
@@ -8213,7 +8204,7 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "next should queue row 1 while row 0 stays presented");
     Require(
         !session.View().sample_transition,
@@ -8225,7 +8216,7 @@ void TestReturningToPresentedSampleClearsTentativeTransition()
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Previous()));
     Require(
-        !returned.follow_up_spectrum_index &&
+        !returned.follow_up_spectrum_index() &&
             session.CurrentSampleSnapshot() == initial_snapshot,
         "previous from pending row 1 should return to the already presented row 0");
     Require(
@@ -8269,14 +8260,14 @@ void TestDeferredTransitionUsesPresentedSampleAsSource()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "first next should queue row 1");
     Require(
         Submit(
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 2,
+                .follow_up_spectrum_index() == 2,
         "second next should advance the pending cursor to row 2");
 
     const spectiary::SpectrumSnapshotHandle final_snapshot =
@@ -8339,7 +8330,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "next should queue the intermediate row");
 
     const spectiary::SpectrumSnapshotHandle intermediate_snapshot =
@@ -8376,7 +8367,7 @@ void TestEmptyPreparedReconciliationClearsTentativeTransition()
         reconciled.load_error.kind ==
                 spectiary::SourceCollectionLoadErrorKind::
                     PreparedNavigationUnavailable &&
-            !reconciled.follow_up_spectrum_index,
+            !reconciled.follow_up_spectrum_index(),
         "empty reconciliation should cancel the pending target");
     Require(
         session.CurrentSampleSnapshot() == initial_snapshot &&
@@ -8413,7 +8404,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     const spectiary::SourceCollectionSessionResult pending =
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
     const spectiary::SourceCollectionSessionView pending_view = session.View();
-    Require(pending.follow_up_spectrum_index == 1, "next should request row 1 in the background");
+    Require(pending.follow_up_spectrum_index() == 1, "next should request row 1 in the background");
     Require(
         pending_view.navigation.current_index == 0,
         "navigation should keep presenting row 0 while row 1 is pending");
@@ -8432,7 +8423,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Previous()));
     Require(
         reversed.canceled_source_follow_up_path == source_path &&
-            !reversed.follow_up_spectrum_index,
+            !reversed.follow_up_spectrum_index(),
         "returning to the presented row should cancel the obsolete background follow-up");
     Require(
         session.View().navigation.current_index == 0 &&
@@ -8441,11 +8432,11 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
 
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "navigation should be able to request row 1 again after cancellation");
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 2,
+                .follow_up_spectrum_index() == 2,
         "a repeated next should advance from the pending target instead of the presented row");
     const spectiary::SourceCollectionSessionView&
         row_two_pending_view = session.View();
@@ -8456,7 +8447,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     (void)session.TakeViewRetirement();
     Require(
         !Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-             .follow_up_spectrum_index,
+             .follow_up_spectrum_index(),
         "repeating next at the pending sequence boundary should retain the existing row 2 ticket");
     Require(
         session.View().navigation.current_index == 0 &&
@@ -8483,7 +8474,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         "pending cancellation should retire exactly one old projection");
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "navigation after a failed load should resume from the presented row");
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
@@ -8495,7 +8486,7 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     });
     const spectiary::SourceCollectionSessionView committed_view = session.View();
     Require(committed.loaded, "prepared row 1 should commit");
-    Require(!committed.follow_up_spectrum_index, "the committed row should need no corrective follow-up");
+    Require(!committed.follow_up_spectrum_index(), "the committed row should need no corrective follow-up");
     Require(
         committed_view.navigation.current_index == 1,
         "navigation should switch to row 1 when its snapshot commits");
@@ -8542,13 +8533,13 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "manual next should initially queue row 1");
 
     const spectiary::SourceCollectionSessionResult filtered =
         Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
     const spectiary::SourceCollectionSessionView pending_view = session.View();
-    Require(filtered.follow_up_spectrum_index == 2, "filter reconciliation should replace row 1 with row 2");
+    Require(filtered.follow_up_spectrum_index() == 2, "filter reconciliation should replace row 1 with row 2");
     Require(
         pending_view.navigation.current_index == 0 &&
             pending_view.current_sample_snapshot == initial_snapshot &&
@@ -8563,7 +8554,7 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
         .payload = spectiary::PreparedSourceCollectionReuse{identity},
     });
     const spectiary::SourceCollectionSessionView committed_view = session.View();
-    Require(committed.loaded && !committed.follow_up_spectrum_index, "filtered row 2 should commit once");
+    Require(committed.loaded && !committed.follow_up_spectrum_index(), "filtered row 2 should commit once");
     Require(
         committed_view.navigation.current_index == 2 &&
             committed_view.current_sample_snapshot == filtered_snapshot,
@@ -8613,7 +8604,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
             spectiary::SampleNavigationRequest::
                 LocateSequencePosition(1)));
     Require(
-        pending.follow_up_spectrum_index == 1 &&
+        pending.follow_up_spectrum_index() == 1 &&
             session.EffectiveSampleNavigationIndex() == 1,
         "explicit sequence position B should become the deferred target while A remains displayed");
     Require(
@@ -8627,7 +8618,7 @@ void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
             spectiary::SampleNavigationRequest::
                 LocateSequencePosition(0)));
     Require(
-        !canceled.follow_up_spectrum_index &&
+        !canceled.follow_up_spectrum_index() &&
             canceled.canceled_source_follow_up_path == source_path,
         "explicitly resubmitting committed A should cancel B's source-bound follow-up");
     Require(
@@ -8664,14 +8655,14 @@ void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
     (void)Submit(session, SetActiveLabelingAutoAdvance(true));
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "manual next should queue row 1 before labeling row 0");
 
     const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(
-        !labeled.follow_up_spectrum_index,
+        !labeled.follow_up_spectrum_index(),
         "auto-advance from visible row 0 should retain the existing row 1 ticket instead of jumping to row 2");
     Require(
         pending_view.current_sample_snapshot == initial_snapshot &&
@@ -8748,7 +8739,7 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
 
     Require(
         Submit(session, AssignActiveLabelToCurrentSample(1))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "labeling row 0 should queue auto-advance to row 1");
     Require(
         !session.View().sample_transition,
@@ -8759,7 +8750,7 @@ void TestManualNavigationTakesOverMatchingAutoAdvanceTarget()
         MoveSampleNavigation(
             spectiary::SampleNavigationRequest::LocateRow(1)));
     Require(
-        !located.follow_up_spectrum_index &&
+        !located.follow_up_spectrum_index() &&
             session.EffectiveSampleNavigationIndex() == 1,
         "explicitly locating the same pending row should retain its worker ticket");
 
@@ -8817,7 +8808,7 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
     Require(
         Submit(session, MoveSampleNavigation(
                             spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "path-bound cancellation fixture should queue row 1");
     const spectiary::SourceCollectionSessionView& path_pending_view =
         session.View();
@@ -8834,7 +8825,7 @@ void TestPendingNavigationCancellationClearsTentativeTransition()
     Require(
         Submit(session, MoveSampleNavigation(
                             spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "active cancellation fixture should queue row 1 again");
     const spectiary::SourceCollectionSessionView& active_pending_view =
         session.View();
@@ -8883,12 +8874,17 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     (void)Submit(session, AddSampleFilterSource(filter_source_id));
     const auto filtered = Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
     Require(
-        filtered.follow_up_spectrum_index == 1 && filtered.follow_up_source_path == source_path &&
+        filtered.follow_up_spectrum_index() == 1 && filtered.follow_up_source_path() == source_path &&
             !filtered.canceled_source_follow_up_path,
         "filter reconciliation should queue row 1 without labeling-position semantics");
+    Require(filtered.follow_up_load->annotation_paths == std::vector<std::filesystem::path>{annotation_path} &&
+            filtered.follow_up_load->reuse && filtered.follow_up_load->reuse->identity().id == identity.id &&
+            !filtered.follow_up_load->source_open_request && !filtered.follow_up_load->preferred_member_path &&
+            session.EffectiveSampleNavigationIndex() == 1,
+        "the follow-up must carry source attachments and reuse without explicit-open side effects");
     const auto maintenance = session.RunMaintenance(
         spectiary::LocalUserStateSaveScheduler::Clock::now() + std::chrono::hours(1));
-    Require(!maintenance.follow_up_spectrum_index && !maintenance.canceled_source_follow_up_path &&
+    Require(!maintenance.follow_up_spectrum_index() && !maintenance.canceled_source_follow_up_path &&
             session.EffectiveSampleNavigationIndex() == 1,
         "maintenance must retain the filter's pending worker before labeling upgrades its semantics");
 
@@ -8900,7 +8896,7 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
     const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
-        !labeled.follow_up_spectrum_index && !labeled.canceled_source_follow_up_path,
+        !labeled.follow_up_spectrum_index() && !labeled.canceled_source_follow_up_path,
         "auto-advance to the same pending row should retain the filter's existing worker ticket");
 
     const spectiary::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
@@ -8972,7 +8968,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
                     spectiary::kUnlabeledSampleLabelCode),
                 true));
     Require(
-        !filtered.follow_up_spectrum_index &&
+        !filtered.follow_up_spectrum_index() &&
             session.View().navigation.sequence_count == 3,
         "unlabeled filter should initially retain visible row 0");
 
@@ -8980,7 +8976,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     const spectiary::SourceCollectionSessionResult labeled =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(
-        labeled.follow_up_spectrum_index == 1 && labeled.follow_up_source_path == source_path &&
+        labeled.follow_up_spectrum_index() == 1 && labeled.follow_up_source_path() == source_path &&
             !labeled.canceled_source_follow_up_path,
         "label filtering should preserve the newly required row 1 follow-up when auto-advance reuses it");
     Require(
@@ -9053,7 +9049,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::LocateRow(1)))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "undo fixture should request row 1");
     Require(
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -9072,7 +9068,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::LocateRow(0)))
-                .follow_up_spectrum_index == 0,
+                .follow_up_spectrum_index() == 0,
         "undo fixture should request row 0");
     Require(
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -9098,14 +9094,14 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
                 "1",
                 true));
     Require(
-        !filtered.follow_up_spectrum_index &&
+        !filtered.follow_up_spectrum_index() &&
             session.View().navigation.sequence_count == 2,
         "label-one filter should initially retain visible row 0");
 
     const spectiary::SourceCollectionSessionResult undone =
         Submit(session, UndoLastLabelWrite());
     Require(
-        !undone.follow_up_spectrum_index && !undone.canceled_source_follow_up_path,
+        !undone.follow_up_spectrum_index() && !undone.canceled_source_follow_up_path,
         "undo restore to the visible row should clear the superseded filter follow-up");
     Require(
         session.View().current_sample_snapshot ==
@@ -9195,7 +9191,7 @@ void TestRetargetedPreparedRowsNeverEnterRosterResidency()
         .context_reuse_proof = proof,
     });
     const auto wrong_row_hint = session.LoadHintForSource(path, 1);
-    Require(retargeted.loaded && retargeted.follow_up_spectrum_index == 2 &&
+    Require(retargeted.loaded && retargeted.follow_up_spectrum_index() == 2 &&
             !retargeted.action.snapshot_changed && !retargeted.action.source_roster_changed &&
             session.CurrentSourceSnapshot() == initial && session.CurrentSampleSnapshot() == initial &&
             wrong_row_hint && !wrong_row_hint->reuse.resident_snapshot(),
@@ -9205,7 +9201,7 @@ void TestRetargetedPreparedRowsNeverEnterRosterResidency()
         .payload = PreparedSourceCollectionReuse{context.identity},
         .context_reuse_proof = proof,
     });
-    Require(reuse.follow_up_spectrum_index == 0 && !reuse.action.snapshot_changed &&
+    Require(reuse.follow_up_spectrum_index() == 0 && !reuse.action.snapshot_changed &&
             session.CurrentSourceSnapshot() == initial &&
             !session.LoadHintForSource(path, 1)->reuse.resident_snapshot(),
         "a reused prepared row must also wait for its authoritative current row before roster adoption");
@@ -9217,7 +9213,7 @@ void TestRetargetedPreparedRowsNeverEnterRosterResidency()
         .payload = PreparedSourceCollectionPlan{context, std::move(background_workflow)},
         .context_reuse_proof = proof,
     }, false);
-    Require(background.follow_up_spectrum_index == 2 &&
+    Require(background.follow_up_spectrum_index() == 2 &&
             !background.action.snapshot_changed && !background.action.source_roster_changed &&
             session.CurrentSampleSnapshot() == initial &&
             !session.LoadHintForSource(path, 1)->reuse.resident_snapshot(),
@@ -9255,7 +9251,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         session.View().labeling.remembered_position;
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "next should initially request row 1");
 
     const spectiary::SpectrumSnapshotHandle intermediate_snapshot = MakeSnapshot(source_path, 3, 1);
@@ -9282,7 +9278,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
     const spectiary::SourceCollectionSessionView pending_view = session.View();
     Require(reconciled.loaded, "the intermediate prepared plan should be accepted");
     Require(
-        reconciled.follow_up_spectrum_index == 2,
+        reconciled.follow_up_spectrum_index() == 2,
         "the reconciled plan should request only its final row");
     Require(
         session.CurrentSourceSnapshot() == initial_snapshot &&
@@ -9310,7 +9306,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
 
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "navigation should remain usable after the reconciled final row fails");
     const spectiary::SpectrumSnapshotHandle second_intermediate_snapshot =
         MakeSnapshot(source_path, 3, 1);
@@ -9334,7 +9330,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
             .snapshot = second_intermediate_snapshot,
             .payload = spectiary::PreparedSourceCollectionPlan{std::move(second_changed_context), std::move(second_reconciled_workflow)},
         })
-                .follow_up_spectrum_index == 2,
+                .follow_up_spectrum_index() == 2,
         "a retried intermediate plan should again request its reconciled final row");
 
     const spectiary::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
@@ -9356,7 +9352,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
         .payload = spectiary::PreparedSourceCollectionPlan{std::move(final_context), std::move(final_workflow)},
     });
     const spectiary::SourceCollectionSessionView final_view = session.View();
-    Require(final_result.loaded && !final_result.follow_up_spectrum_index, "the final row should commit once");
+    Require(final_result.loaded && !final_result.follow_up_spectrum_index(), "the final row should commit once");
     Require(
         final_view.snapshot == final_snapshot &&
             final_view.current_sample_snapshot == final_snapshot &&
@@ -9394,13 +9390,11 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         })
             .loaded,
         "stale prepared plan fixture should commit its initial source");
+    const auto queued = Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()));
     Require(
-        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+        queued.follow_up_spectrum_index() == 1 && queued.follow_up_load->reuse &&
+            queued.follow_up_load->reuse->live_workflow_revision() == 1,
         "stale prepared plan fixture should queue row 1");
-    const std::optional<spectiary::SourceCollectionLoadHint> load_hint =
-        session.LoadHintForSource(source_path);
-    Require(load_hint.has_value(), "known source navigation should expose its workflow revision");
 
     const spectiary::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 1);
     spectiary::SourceCollectionContext changed_context;
@@ -9419,7 +9413,7 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
     const spectiary::SourceCollectionSessionResult sorted =
         Submit(session, SetSampleSortSource("sample-name"));
     Require(
-        !sorted.follow_up_spectrum_index && session.View().sorting.active,
+        !sorted.follow_up_spectrum_index() && session.View().sorting.active,
         "new live sorting should retain the existing row 1 worker");
 
     const spectiary::SourceCollectionSessionResult committed = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -9429,10 +9423,10 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         .payload = spectiary::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
-            load_hint->reuse.live_workflow_revision()},
+            queued.follow_up_load->reuse->live_workflow_revision()},
     });
     const spectiary::SourceCollectionSessionView view = session.View();
-    Require(committed.loaded && !committed.follow_up_spectrum_index, "row 1 should commit once");
+    Require(committed.loaded && !committed.follow_up_spectrum_index(), "row 1 should commit once");
     Require(
         view.current_sample_snapshot == prepared_snapshot &&
             view.navigation.current_index == 1,
@@ -9487,7 +9481,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     (void)Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "the original context should queue row 1");
     const spectiary::SourceCollectionSessionView presentation_before_context_change =
         session.View();
@@ -9536,7 +9530,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
             load_hint->reuse.live_workflow_revision()},
     });
     Require(
-        reconciled.loaded && reconciled.follow_up_spectrum_index == 2,
+        reconciled.loaded && reconciled.follow_up_spectrum_index() == 2,
         "the live filter should retarget the changed context to row 2");
     const spectiary::SourceCollectionSessionView presentation_while_waiting = session.View();
     Require(
@@ -9617,7 +9611,7 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
     const std::optional<std::size_t> remembered_a = session.View().labeling.remembered_position;
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "source A should queue row 1");
 
     const spectiary::SourceCollectionSessionResult switched_to_b =
@@ -9629,7 +9623,7 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
         Submit(session, SwitchSourceCollection(0));
     const spectiary::SourceCollectionSessionView restored_a = session.View();
     Require(
-        !switched_back_to_a.follow_up_spectrum_index,
+        !switched_back_to_a.follow_up_spectrum_index(),
         "switching back to A must not resurrect its canceled row 1 navigation");
     Require(
         restored_a.snapshot == snapshot_a &&
@@ -9682,14 +9676,14 @@ void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
     (void)Submit(session, SwitchSourceCollection(0));
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "source A should queue row 1");
 
     const spectiary::SourceCollectionSessionResult removed_b =
         Submit(session, RemoveSourceCollection(1));
     Require(
         removed_b.canceled_source_follow_up_path == source_b &&
-            !removed_b.follow_up_spectrum_index,
+            !removed_b.follow_up_spectrum_index(),
         "removing inactive source B should cancel only B's tickets and retain source A's pending ticket");
     const spectiary::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
     Require(
@@ -9708,11 +9702,11 @@ void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
 
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 2,
+                .follow_up_spectrum_index() == 2,
         "source A should queue row 2 before explicit reselection");
     const auto reselected_a = Submit(session, SwitchSourceCollection(0));
     Require(reselected_a.canceled_source_follow_up_path == source_a &&
-            !reselected_a.follow_up_spectrum_index,
+            !reselected_a.follow_up_spectrum_index(),
         "explicitly reselecting current source A must cancel its older pending navigation");
     Require(session.CurrentSampleSnapshot() == row_one_snapshot &&
             session.EffectiveSampleNavigationIndex() == 1 &&
@@ -9766,7 +9760,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     (void)Submit(session, AddSampleFilterSource(annotation_source_id));
     const spectiary::SourceCollectionSessionResult filter_result =
         Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
-    Require(filter_result.follow_up_spectrum_index == 1, "live filter should move navigation to row 1");
+    Require(filter_result.follow_up_spectrum_index() == 1, "live filter should move navigation to row 1");
     Require(
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
             .path = source_path,
@@ -9819,7 +9813,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     Require(
         reload_result.background_retirement.size() >= 1,
         "same-identity non-active reload should hand replaced snapshots to the background reclaimer");
-    Require(!reload_result.follow_up_spectrum_index, "preserved row should already match the reloaded snapshot");
+    Require(!reload_result.follow_up_spectrum_index(), "preserved row should already match the reloaded snapshot");
     Require(view.navigation.current_index == 1, "same-identity reload should preserve the live row");
     Require(view.navigation.filter_active, "same-identity reload should preserve the live filter");
     Require(view.sorting.active, "same-identity reload should preserve the live sort");
@@ -10414,10 +10408,10 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
     const std::string annotation_source_id = AnnotationSourceId(annotation_path);
     (void)Submit(session, AddSampleFilterSource(annotation_source_id));
     Require(
-        Submit(session, SetFilterValueSelected(annotation_source_id, "2", true)).follow_up_spectrum_index == 1,
+        Submit(session, SetFilterValueSelected(annotation_source_id, "2", true)).follow_up_spectrum_index() == 1,
         "filter should request the unresolved row 1 follow-up");
     Require(
-        !Submit(session, SetSampleNameQuery("b")).follow_up_spectrum_index,
+        !Submit(session, SetSampleNameQuery("b")).follow_up_spectrum_index(),
         "a query that retains the pending target should keep the existing row 1 ticket");
     Require(
         session.CurrentSampleSnapshot() == snapshot_a,
@@ -10439,7 +10433,7 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
     const spectiary::SourceCollectionSessionResult reactivated =
         Submit(session, SwitchSourceCollection(0));
     Require(
-        reactivated.follow_up_spectrum_index == 1,
+        reactivated.follow_up_spectrum_index() == 1,
         "reactivating source A should create fresh row 1 work because its active filter excludes row 0");
     Require(
         session.CurrentSampleSnapshot() == snapshot_a,
@@ -10590,7 +10584,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
                 MoveSampleNavigation(
                     spectiary::SampleNavigationRequest::Next()));
         Require(
-            navigation.follow_up_spectrum_index == row,
+            navigation.follow_up_spectrum_index() == row,
             "resident history should request the next raw row");
         spectiary::SourceCollectionSessionResult loaded =
             session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -10650,7 +10644,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 9,
+                .follow_up_spectrum_index() == 9,
         "resident eviction should be driven by a committed row 9 navigation");
     spectiary::SourceCollectionSessionResult eviction =
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -10706,7 +10700,7 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 10,
+                .follow_up_spectrum_index() == 10,
         "context invalidation should be driven by row 10 navigation");
     spectiary::SourceCollectionSessionResult changed =
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -10807,7 +10801,7 @@ void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
             session,
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "prepared retirement fixture should prepare row 1");
     spectiary::SourceCollectionSessionResult second =
         session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -10956,7 +10950,7 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
                 session,
                 MoveSampleNavigation(
                     spectiary::SampleNavigationRequest::Next()))
-                    .follow_up_spectrum_index == row,
+                    .follow_up_spectrum_index() == row,
             "resident byte-cap fixture should request the next row");
         spectiary::SourceCollectionSessionResult loaded =
             session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -11175,7 +11169,7 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         "the roster should own the active listing generation");
     Require(
         Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
-                .follow_up_spectrum_index == 1,
+                .follow_up_spectrum_index() == 1,
         "the listing retirement fixture should prepare a row replacement");
 
     spectiary::SourceCollectionSessionResult replacement = session.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -11391,7 +11385,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
                 seed,
                 MoveSampleNavigation(
                     spectiary::SampleNavigationRequest::LocateRow(1)))
-                    .follow_up_spectrum_index == 1,
+                    .follow_up_spectrum_index() == 1,
             "labeling projection handoff fixture should request row 1");
         Require(
             seed.CommitPreparedOpen(spectiary::PreparedSourceCollection{
@@ -11903,7 +11897,7 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
             MoveSampleNavigation(
                 spectiary::SampleNavigationRequest::Next()));
     Require(
-        next.follow_up_spectrum_index == 2,
+        next.follow_up_spectrum_index() == 2,
         "prepared handoff navigation must follow the latest labeling sort order");
 }
 
@@ -11924,7 +11918,7 @@ void TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot()
         .path = fixture.source_path, .spectrum_index = 1, .snapshot = intermediate,
         .payload = PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
     });
-    Require(result.loaded && result.follow_up_spectrum_index == 0 &&
+    Require(result.loaded && result.follow_up_spectrum_index() == 0 &&
             !result.action.snapshot_changed && session.View().sources.empty() &&
             session.CurrentSourceSnapshot() == roster_before && !session.CurrentSampleSnapshot(),
         "a lease refresh retarget must return FollowUp before the old row reaches roster or presentation");
@@ -11933,7 +11927,7 @@ void TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot()
         .path = fixture.source_path, .spectrum_index = 0, .snapshot = final_snapshot,
         .payload = PreparedSourceCollectionReuse{fixture.context.identity},
     });
-    Require(final_result.loaded && !final_result.follow_up_spectrum_index &&
+    Require(final_result.loaded && !final_result.follow_up_spectrum_index() &&
             session.CurrentSampleSnapshot() == final_snapshot &&
             session.View().labeling.current_code == 2,
         "the lease-refreshed target must complete through the ordinary prepared transition");
@@ -11966,7 +11960,7 @@ void TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(std::size_t pr
         .path = fixture.source_path, .spectrum_index = 1, .snapshot = intermediate,
         .payload = PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
     });
-    Require(retarget.follow_up_spectrum_index == 0 &&
+    Require(retarget.follow_up_spectrum_index() == 0 &&
             session.CurrentSourceSnapshot() == old_snapshot && !session.CurrentSampleSnapshot(),
         "late B retarget must preserve A's roster without publishing B's intermediate row");
 
@@ -11985,8 +11979,12 @@ void TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(std::size_t pr
             MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
         const auto next = activation.Submit(SourceCollectionSessionIntent::UpdateSampleNavigation(
             SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
-        Require(next.follow_up_spectrum_index == 2,
+        Require(next.follow_up_spectrum_index() == 2,
             "Next before B completes must navigate B's refreshed sequence");
+        Require(next.follow_up_load->reuse &&
+                next.follow_up_load->reuse->identity().id == fixture.context.identity.id &&
+                next.follow_up_load->annotation_paths == std::vector<std::filesystem::path>{fixture.output_path},
+            "late-retarget navigation must bind B's reuse and annotations even while A owns the roster");
         Require(requested.wait_for(2s) == std::future_status::ready,
             "next navigation must reach the decoder");
         const auto [path, row] = requested.get();

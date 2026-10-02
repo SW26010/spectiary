@@ -87,6 +87,15 @@ target can upgrade remembered-position semantics without replacing its worker,
 and intermediate filter targets superseded by undo never escape. Session consumes
 these effects without comparing pending navigation state or retaining a staging row.
 
+The session resolves each follow-up into a complete source load request: path,
+row, annotation attachments, and the reuse candidate including the current live
+workflow revision and any resident snapshot or folder listing proof. It assembles
+ordinary requests after updating the transition's live revision. Explicit opens
+share this side-effect-free assembly, but their pending-navigation cancellation
+remains exclusive to the explicit-open plan. The transaction only adds scheduling
+purpose, intent epoch, ticket, and trace metadata; neither ordinary nor prepared
+follow-ups query the session again to reconstruct loading inputs.
+
 These are the source-opening, prepared-navigation, and ordinary follow-up slices
 of #47. Other stable session projections remain follow-up work. The
 coordinator and labeling controller ownership and independent persistence
