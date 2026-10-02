@@ -78,10 +78,16 @@ bands visible.
   nearest the bottom for wavelength text. A continuously visible label keeps
   priority over a later or returning label; unseen labels reserve no lane.
 - A label participates only while its physical anchor is inside the viewport: a
-  line uses its wavelength and a band uses its midpoint. An intersecting band is
-  still drawn when its midpoint is outside, but its label occupies no collision
-  space. Outside an active pan, leaving ends the label's visibility tenure, so
-  re-entry is a new appearance; during a pan it retains its gesture snapshot.
+  line uses its wavelength; a band name and its compressed wavelength label use
+  its midpoint. A band uses separate start/end wavelength candidates when its
+  full, unclipped projected width is at least half each formatted endpoint
+  text's width plus the font-relative horizontal gap. Each endpoint participates
+  independently only when its physical coordinate is inside the viewport;
+  clipping edges never substitute for physical endpoints. An intersecting band
+  remains drawn even when none of its label anchors are visible; absent labels
+  occupy no collision space. Outside an active pan, leaving ends the label's
+  visibility tenure, so re-entry is a new appearance; during a pan it retains
+  its gesture snapshot.
 - Comfortable-lane compaction is deferred while a direct pan gesture remains
   active, such as while the mouse button is held or a supported
   touch/direct-manipulation gesture is still active. Each pre-existing label

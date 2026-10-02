@@ -5,6 +5,18 @@
 #include <numeric>
 
 namespace spectiary {
+
+bool UseSpectralBandEndpointLabels(
+    double start_pixel_x,
+    double end_pixel_x,
+    float start_text_width,
+    float end_text_width,
+    float horizontal_gap) noexcept
+{
+    return std::abs(end_pixel_x - start_pixel_x) >=
+           0.5 * start_text_width + 0.5 * end_text_width + horizontal_gap;
+}
+
 namespace {
 
 bool MateriallyDifferent(double left, double right, double relative_tolerance)

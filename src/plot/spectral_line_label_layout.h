@@ -117,6 +117,14 @@ void UpdateSpectralLineLabelLayoutContext(
     double viewport_min_x,
     double viewport_max_x) noexcept;
 
+// Use full, unclipped projected endpoints so translation cannot select a mode.
+[[nodiscard]] bool UseSpectralBandEndpointLabels(
+    double start_pixel_x,
+    double end_pixel_x,
+    float start_text_width,
+    float end_text_width,
+    float horizontal_gap) noexcept;
+
 [[nodiscard]] SpectralLineVerticalLabelPlacement PlaceSpectralLineNameLabel(
     const SpectralLineVerticalLayoutContext& context,
     float text_height,

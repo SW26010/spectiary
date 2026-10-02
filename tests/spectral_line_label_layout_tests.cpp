@@ -1,5 +1,9 @@
 #include "plot/spectral_line_label_layout.h"
+#include "plot/spectrum_plot_renderer.h"
 
+#include <implot.h>
+
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -15,6 +19,200 @@ void Require(bool condition, std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         std::exit(1);
     }
+}
+
+void TestBandModeUsesFullProjectedWidthAndTextMetrics()
+{
+    using spectiary::UseSpectralBandEndpointLabels;
+    Require(!UseSpectralBandEndpointLabels(0, 33.9, 20, 40, 4),
+        "a compressed band must use its midpoint");
+    Require(UseSpectralBandEndpointLabels(0, 34, 20, 40, 4),
+        "the exact measured threshold must use endpoints");
+    Require(UseSpectralBandEndpointLabels(-30, 4, 20, 40, 4),
+        "translation and clipping must not change the mode");
+    Require(UseSpectralBandEndpointLabels(34, 0, 20, 40, 4),
+        "reversed screen coordinates must use absolute width");
+    Require(!UseSpectralBandEndpointLabels(0, 34, 40, 80, 8),
+        "larger font metrics must raise the threshold");
+}
+
+void TestRenderedBandLabelsFollowViewportAndScale()
+{
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = ImVec2(900, 700);
+    io.DeltaTime = 1.0f / 60.0f;
+    io.Fonts->AddFontDefault();
+    unsigned char* pixels = nullptr;
+    int width = 0, height = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+    auto snapshot = std::make_shared<spectiary::SpectrumSnapshot>();
+    snapshot->capabilities.can_plot_current_spectrum = true;
+    snapshot->capabilities.can_show_spectral_lines = true;
+    snapshot->current_spectrum.x_values =
+        std::make_shared<const std::vector<double>>(std::initializer_list<double>{0, 10000});
+    snapshot->current_spectrum.y_values =
+        std::make_shared<const std::vector<double>>(std::initializer_list<double>{0, 1});
+    snapshot->current_spectrum.point_count = 2;
+    spectiary::line_list::Marker band;
+    band.id = "opaque:s/end";
+    band.name = "Band";
+    band.kind = spectiary::line_list::MarkerKind::Band;
+    band.start = 100;
+    band.end = 200;
+    const ImVec4 color(0.73f, 0.19f, 0.41f, 1.0f);
+    spectiary::SpectralLinePlotMarker marker{
+        &band, spectiary::PlotSeriesColor::ExplicitColor({color.x, color.y, color.z, color.w})};
+    spectiary::SpectrumPlotOverlays overlays{&marker, 1, true, "band-test"};
+    spectiary::SpectrumPlotState state;
+    state.fit_next_frame = false;
+    state.show_raw_curve = false;
+    struct FrameGeometry {
+        std::array<int, 2> vertices{};
+        std::vector<ImVec2> bottom_vertices;
+    };
+    const auto frame = [&](double min, double max, bool labels, bool set_limits = true) {
+        if (set_limits) {
+            state.has_last_limits = true;
+            state.sync_last_limits_next_frame = true;
+            state.last_x_min = min;
+            state.last_x_max = max;
+            state.last_y_min = 0;
+            state.last_y_max = 1;
+        }
+        overlays.show_spectral_line_labels = labels;
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(900, 700));
+        ImGui::Begin("Band rendering", nullptr, ImGuiWindowFlags_NoDecoration);
+        const auto result = spectiary::RenderSpectrumPlot(
+            snapshot, state, spectiary::UiLanguage::English, {}, {}, overlays, {}, nullptr);
+        Require(result.plot_submitted, "the real plot must be submitted");
+        FrameGeometry geometry;
+        // Compare labels on/off using a unique explicit color. Band geometry is
+        // identical in both frames; each default-font glyph adds one quad.
+        const auto* draw = ImGui::GetWindowDrawList();
+        const ImU32 packed_color = ImGui::ColorConvertFloat4ToU32(color);
+        for (const auto& vertex : draw->VtxBuffer) {
+            if (vertex.col == packed_color) {
+                ++geometry.vertices[vertex.pos.y < 350 ? 0 : 1];
+                if (vertex.pos.y >= 350) {
+                    geometry.bottom_vertices.push_back(vertex.pos);
+                }
+            }
+        }
+        ImGui::End();
+        ImGui::Render();
+        return geometry;
+    };
+    const auto check = [&](double min, double max, int names, int wavelengths,
+                           bool check_endpoint_lanes = false) {
+        (void)frame(min, max, false);
+        const auto without = frame(min, max, false);
+        const auto with = frame(min, max, true);
+        Require(with.vertices[0] - without.vertices[0] == names * 4,
+            "band name must retain its midpoint visibility");
+        Require(with.vertices[1] - without.vertices[1] == wavelengths * 4,
+            "drawn wavelength glyphs must match eligible physical anchors");
+        if (check_endpoint_lanes) {
+            // Band geometry precedes text in the draw list. Verify that prefix
+            // before inspecting the six seven-glyph endpoint labels in this fixture.
+            Require(std::equal(
+                without.bottom_vertices.begin(), without.bottom_vertices.end(),
+                with.bottom_vertices.begin(), [](ImVec2 left, ImVec2 right) {
+                    return left.x == right.x && left.y == right.y;
+                }), "labels must not change the underlying band geometry");
+            constexpr std::size_t vertices_per_label = 7 * 4;
+            const auto text_begin = without.bottom_vertices.size();
+            Require(with.bottom_vertices.size() - text_begin == 6 * vertices_per_label,
+                "dense endpoint fixture must draw six complete labels");
+            std::array<std::vector<ImVec2>, 2> endpoint_y_ranges;
+            for (std::size_t begin = text_begin; begin < with.bottom_vertices.size();
+                 begin += vertices_per_label) {
+                ImVec2 minimum = with.bottom_vertices[begin];
+                ImVec2 maximum = minimum;
+                for (std::size_t offset = 1; offset < vertices_per_label; ++offset) {
+                    const auto point = with.bottom_vertices[begin + offset];
+                    minimum.x = std::min(minimum.x, point.x);
+                    minimum.y = std::min(minimum.y, point.y);
+                    maximum.x = std::max(maximum.x, point.x);
+                    maximum.y = std::max(maximum.y, point.y);
+                }
+                // In the 50..250 viewport, start/end labels lie on opposite
+                // sides of the window center. They may share lanes across sides.
+                endpoint_y_ranges[(minimum.x + maximum.x) * 0.5f < 450 ? 0 : 1]
+                    .push_back(ImVec2(minimum.y, maximum.y));
+            }
+            for (auto& ranges : endpoint_y_ranges) {
+                Require(ranges.size() == 3, "each endpoint must have three labels");
+                std::sort(ranges.begin(), ranges.end(), [](ImVec2 left, ImVec2 right) {
+                    return left.x < right.x;
+                });
+                for (std::size_t index = 1; index < ranges.size(); ++index) {
+                    Require(ranges[index - 1].y < ranges[index].x,
+                        "labels at the same endpoint must have disjoint vertical bounds");
+                }
+            }
+        }
+    };
+    check(0, 10000, 4, 7); // Compressed: 150.000.
+    check(50, 250, 4, 14); // Expanded: 100.000 and 200.000.
+    check(95, 105, 0, 7);  // Start visible, midpoint outside.
+    check(195, 205, 0, 7); // End visible, midpoint outside.
+    check(120, 130, 0, 0); // Both endpoints and midpoint outside.
+    check(140, 160, 4, 0); // Name visible, both endpoints outside.
+    check(50, 250, 4, 14); // Returning endpoints after empty frames.
+    check(0, 10000, 4, 7); // Zoom back to midpoint mode.
+    // Exercise actual ImPlot wheel/drag input through ImGui, retaining the
+    // production pan transaction and zoom epoch across consecutive frames.
+    (void)frame(50, 250, true);
+    io.AddMousePosEvent(450, 350);
+    (void)frame(0, 0, true, false);
+    const double span_before_zoom = state.last_x_max - state.last_x_min;
+    io.AddMouseWheelEvent(0, 1);
+    (void)frame(0, 0, true, false);
+    Require(state.last_x_max - state.last_x_min < span_before_zoom,
+        "real wheel input must zoom the production plot");
+    const double min_before_pan = state.last_x_min;
+    const double span_before_pan = state.last_x_max - state.last_x_min;
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    (void)frame(0, 0, true, false);
+    io.AddMousePosEvent(490, 350);
+    (void)frame(0, 0, true, false);
+    Require(state.pan_drag_active && state.last_x_min != min_before_pan,
+        "real drag input must enter the pan transaction and translate the plot");
+    Require(std::abs((state.last_x_max - state.last_x_min) - span_before_pan) < 1e-8,
+        "dragging must retain the x scale");
+    io.AddMousePosEvent(450, 350);
+    (void)frame(0, 0, true, false);
+    Require(std::abs(state.last_x_min - min_before_pan) < 1e-8,
+        "returning a drag must restore the original viewport");
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    (void)frame(0, 0, true, false);
+    Require(!state.pan_drag_active, "release must commit the pan transaction");
+
+    std::array<spectiary::line_list::Marker, 3> dense_bands{band, band, band};
+    std::array<spectiary::SpectralLinePlotMarker, 3> dense_markers{marker, marker, marker};
+    for (std::size_t index = 0; index < dense_bands.size(); ++index) {
+        dense_bands[index].id = std::string(index + 1, 's') + ":/end";
+        dense_markers[index].marker = &dense_bands[index];
+    }
+    overlays.spectral_lines = dense_markers.data();
+    overlays.spectral_line_count = dense_markers.size();
+    check(50, 250, 12, 42, true); // Coincident labels must occupy distinct lanes.
+    check(120, 130, 0, 0);
+    check(0, 10000, 12, 21);
+    check(50, 250, 12, 42, true); // Mode changes must not leave stale placements.
+    overlays.spectral_lines = &marker;
+    overlays.spectral_line_count = 1;
+    band.kind = spectiary::line_list::MarkerKind::Line;
+    band.coordinate = 150;
+    check(50, 250, 4, 7); // Ordinary line presentation stays unchanged.
+    ImPlot::DestroyContext();
+    ImGui::DestroyContext();
 }
 
 void TestSeparatedLabelsShareTheBottomLane()
@@ -657,6 +855,8 @@ void TestLabelMetricsScaleWithFontSize()
 
 int main()
 {
+    TestBandModeUsesFullProjectedWidthAndTextMetrics();
+    TestRenderedBandLabelsFollowViewportAndScale();
     TestSeparatedLabelsShareTheBottomLane();
     TestOverlappingLabelsMoveUpAndReuseAvailableLanes();
     TestEdgeClampingStillParticipatesInCollisionDetection();

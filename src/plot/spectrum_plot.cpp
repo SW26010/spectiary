@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace spectiary {
 
@@ -457,6 +458,35 @@ void RenderSpectralLineOverlays(
                 overlays.spectral_lines[index],
                 palette));
     }
+    struct PreparedName {
+        std::string stable_id;
+        const ScientificLabel* text;
+        ScientificLabelSize size;
+        float anchor_x;
+        ImU32 color;
+    };
+    struct PreparedWavelength {
+        std::string stable_id;
+        std::string text;
+        ImVec2 size;
+        float anchor_x;
+        ImU32 color;
+    };
+    std::vector<PreparedName> names;
+    std::vector<PreparedWavelength> wavelengths;
+    const auto prepare_wavelength = [&](const line_list::Marker& marker,
+                                        double coordinate, char role, ImU32 color) {
+        char text[96]{};
+        std::snprintf(text, sizeof(text), "%.3f", coordinate);
+        // A fixed one-byte role prefix is injective for arbitrary opaque IDs.
+        return PreparedWavelength{
+            std::string(1, role) + marker.id, text, ImGui::CalcTextSize(text),
+            ImPlot::PlotToPixels(coordinate, limits.Y.Min).x, color,
+        };
+    };
+    const auto anchor_visible = [&](double coordinate) {
+        return IsSpectralLineLabelAnchorInViewport(coordinate, limits.X.Min, limits.X.Max);
+    };
     ImPlot::PushPlotClipRect();
     for (std::size_t index = 0; index < marker_count; ++index) {
         const line_list::Marker* marker =
@@ -489,37 +519,49 @@ void RenderSpectralLineOverlays(
             draw_list->AddLine(bottom, top, ImGui::GetColorU32(color), 1.0f);
         }
 
+        if (!overlays.show_spectral_line_labels) {
+            continue;
+        }
         const double label_anchor = SpectralLineMarkerPosition(*marker);
-        if (overlays.show_spectral_line_labels &&
-            IsSpectralLineLabelAnchorInViewport(label_anchor, limits.X.Min, limits.X.Max)) {
-            const float label_anchor_x = ImPlot::PlotToPixels(label_anchor, limits.Y.Min).x;
+        const ImU32 text_color = ImGui::GetColorU32(color);
+        if (anchor_visible(label_anchor)) {
             const std::string& name = marker->name.empty() ? marker->id : marker->name;
-            char wavelength_text[96]{};
-            std::snprintf(wavelength_text, sizeof(wavelength_text), "%.3f", SpectralLineMarkerPosition(*marker));
-            const std::string wavelength = wavelength_text;
-            const ScientificLabel& scientific_name =
-                scientific_label_cache.Resolve(
-                    overlays.layout_scope_id,
-                    marker->id,
-                    name);
-            const ScientificLabelSize name_size =
-                MeasureScientificLabel(
-                    scientific_name,
-                    name_font,
-                    name_font_size);
-            name_layout.inputs.push_back({
-                marker->id,
-                label_anchor_x,
-                name_size.width,
+            const ScientificLabel& scientific_name = scientific_label_cache.Resolve(
+                overlays.layout_scope_id, marker->id, name);
+            names.push_back({
+                marker->id, &scientific_name,
+                MeasureScientificLabel(scientific_name, name_font, name_font_size),
+                ImPlot::PlotToPixels(label_anchor, limits.Y.Min).x, text_color,
             });
-            wavelength_layout.inputs.push_back({
-                marker->id,
-                label_anchor_x,
-                ImGui::CalcTextSize(wavelength.c_str()).x,
-            });
+        }
+        if (marker->kind == line_list::MarkerKind::Band) {
+            auto start = prepare_wavelength(*marker, *marker->start, 's', text_color);
+            auto end = prepare_wavelength(*marker, *marker->end, 'e', text_color);
+            if (UseSpectralBandEndpointLabels(
+                    start.anchor_x, end.anchor_x, start.size.x, end.size.x,
+                    metrics.horizontal_gap)) {
+                if (anchor_visible(*marker->start)) {
+                    wavelengths.push_back(std::move(start));
+                }
+                if (anchor_visible(*marker->end)) {
+                    wavelengths.push_back(std::move(end));
+                }
+                continue;
+            }
+        }
+        if (anchor_visible(label_anchor)) {
+            wavelengths.push_back(prepare_wavelength(*marker, label_anchor, 'm', text_color));
         }
     }
 
+    // Build views after the owning vectors stop growing (including SSO strings).
+    for (const auto& name : names) {
+        name_layout.inputs.push_back({name.stable_id, name.anchor_x, name.size.width});
+    }
+    for (const auto& wavelength : wavelengths) {
+        wavelength_layout.inputs.push_back({
+            wavelength.stable_id, wavelength.anchor_x, wavelength.size.x});
+    }
     const std::span<const SpectralLineLabelLayoutResult> name_placements = LayoutSpectralLineLabels(
         name_layout,
         plot_pos.x + metrics.edge_padding,
@@ -532,7 +574,7 @@ void RenderSpectralLineOverlays(
             plot_max.x - metrics.edge_padding,
             metrics.horizontal_gap);
 
-    if (!name_layout.inputs.empty()) {
+    if (!names.empty() || !wavelengths.empty()) {
         const float bottom_inset = metrics.bottom_gap + bottom_reserved_height;
         const float lane_height =
             std::max(
@@ -549,70 +591,32 @@ void RenderSpectralLineOverlays(
             .lane_height = lane_height,
         };
 
-        std::size_t label_index = 0;
-        for (std::size_t index = 0; index < marker_count; ++index) {
-            const line_list::Marker* marker =
-                overlays.spectral_lines[index].marker;
-            if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
-                continue;
-            }
-            if (!IsSpectralLineLabelAnchorInViewport(
-                    SpectralLineMarkerPosition(*marker),
-                    limits.X.Min,
-                    limits.X.Max)) {
-                continue;
-            }
-
-            const std::string& name = marker->name.empty() ? marker->id : marker->name;
-            char wavelength_text[96]{};
-            std::snprintf(wavelength_text, sizeof(wavelength_text), "%.3f", SpectralLineMarkerPosition(*marker));
-            const std::string wavelength = wavelength_text;
-            const ScientificLabel& scientific_name =
-                scientific_label_cache.Resolve(
-                    overlays.layout_scope_id,
-                    marker->id,
-                    name);
-            const ScientificLabelSize name_size =
-                MeasureScientificLabel(
-                    scientific_name,
-                    name_font,
-                    name_font_size);
-            const ImVec2 wavelength_size = ImGui::CalcTextSize(wavelength.c_str());
-            const SpectralLineLabelLayoutResult& name_placement = name_placements[label_index];
-            const SpectralLineLabelLayoutResult& wavelength_placement =
-                wavelength_placements[label_index];
-            ++label_index;
-
-            const ImU32 text_color = ImGui::GetColorU32(
-                resolved_colors[index].marker_and_label);
-            const SpectralLineVerticalLabelPlacement name_vertical =
-                PlaceSpectralLineNameLabel(
-                    vertical_context,
-                    name_size.height,
-                    name_placement.lane);
-            if (name_vertical.visible) {
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            const auto& name = names[index];
+            const auto& placement = name_placements[index];
+            const auto vertical = PlaceSpectralLineNameLabel(
+                vertical_context, name.size.height, placement.lane);
+            if (vertical.visible) {
                 DrawScientificLabel(
-                    *draw_list,
-                    scientific_name,
-                    name_font,
-                    name_font_size,
-                    ImVec2(name_placement.left, name_vertical.y),
-                    text_color);
+                    *draw_list, *name.text, name_font, name_font_size,
+                    ImVec2(placement.left, vertical.y), name.color);
             }
-
-            const SpectralLineVerticalLabelPlacement wavelength_vertical =
-                PlaceSpectralLineWavelengthLabel(
-                    vertical_context,
-                    wavelength_size.y,
-                    wavelength_placement.lane);
-            if (wavelength_vertical.visible) {
+        }
+        for (std::size_t index = 0; index < wavelengths.size(); ++index) {
+            const auto& wavelength = wavelengths[index];
+            const auto& placement = wavelength_placements[index];
+            const auto vertical = PlaceSpectralLineWavelengthLabel(
+                vertical_context, wavelength.size.y, placement.lane);
+            if (vertical.visible) {
                 draw_list->AddText(
-                    ImVec2(wavelength_placement.left, wavelength_vertical.y),
-                    text_color,
-                    wavelength.c_str());
+                    ImVec2(placement.left, vertical.y), wavelength.color,
+                    wavelength.text.c_str());
             }
         }
     }
+    // Do not retain string_views into this frame's prepared labels.
+    name_layout.inputs.clear();
+    wavelength_layout.inputs.clear();
     ImPlot::PopPlotClipRect();
 }
 
