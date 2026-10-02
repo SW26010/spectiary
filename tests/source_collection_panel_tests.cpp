@@ -1469,10 +1469,55 @@ void TestCoveredDockTabFinalizesSequenceDraft()
         "covering the Navigation dock tab should finalize the dirty sequence draft");
 }
 
+void TestNavigationSyncAfterHiddenWindowMemoryCompaction()
+{
+    for (const bool source_input : {false, true}) {
+        ScopedImGuiContext context;
+        NavigationFixture fixture;
+        if (source_input) {
+            ConfigureEditableSourceInput(fixture);
+        }
+        fixture.panel.SyncNavigationInputs(fixture.view.navigation);
+        fixture.RenderFrame();
+        fixture.RenderFrame();
+        ImGuiWindow* window = ImGui::FindWindowByName(
+            spectiary::SourceCollectionPanelUi::NavigationWindowName());
+        Require(window != nullptr && !window->IDStack.empty(),
+            "rendered navigation should have an ID stack");
+        for (int frame = 0; frame < 2; ++frame) {
+            ImGui::GetIO().DeltaTime =
+                ImGui::GetIO().ConfigMemoryCompactTimer + 1.0f;
+            ImGui::NewFrame();
+            ImGui::Begin("Immersive repro host");
+            ImGui::End();
+            ImGui::EndFrame();
+        }
+        Require(window->MemoryCompacted && window->IDStack.empty(),
+            "hidden navigation should have its transient ID stack reclaimed");
+        fixture.view.navigation.current_index = 7;
+        fixture.view.navigation.current_source_row = 7;
+        fixture.view.navigation.current_sequence_position = 7;
+        ++fixture.view.navigation.sequence_topology_revision;
+        fixture.panel.SyncNavigationInputs(fixture.view.navigation);
+        fixture.RenderFrame();
+        Require(!window->MemoryCompacted && !window->IDStack.empty(),
+            "navigation should recover its transient state when shown again");
+        ImGui::ActivateItemByID(source_input
+            ? fixture.SourceInputId() : fixture.SequenceInputId());
+        fixture.RenderFrame();
+        Require(GImGui->InputTextState.TextA.Data != nullptr &&
+                std::string_view(GImGui->InputTextState.TextA.Data) == "8",
+            "reopened navigation input should use the latest synchronized value");
+        Require(fixture.submission_count == 0,
+            "hidden synchronization must not submit a navigation edit");
+    }
+}
+
 }  // namespace
 
 int main()
 {
+    TestNavigationSyncAfterHiddenWindowMemoryCompaction();
     TestReopenableSourcePathEligibility();
     TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync();
     TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent();

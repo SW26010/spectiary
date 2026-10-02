@@ -900,7 +900,9 @@ void SourceCollectionPanelUi::ReloadNavigationNumberInputFromBuffer(
     }
     ImGuiWindow* window =
         ImGui::FindWindowByName(kNavigationWindow);
-    if (window == nullptr) {
+    // Hidden windows may have had their transient ID stack reclaimed by ImGui.
+    // Their inputs have no live edit to reload until the panel is rendered again.
+    if (window == nullptr || window->IDStack.empty()) {
         return;
     }
     const ImGuiID item_id = window->GetID(input_id);
