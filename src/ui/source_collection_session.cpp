@@ -682,6 +682,12 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     SourceCollectionSessionIntent intent,
     NavigationTargetResolutionReport* target_resolution)
 {
+    if (current_sample_failure_ &&
+        intent.kind == SourceCollectionSessionIntentKind::ActiveSampleWorkflow &&
+        (intent.active_sample_workflow.kind == ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample ||
+         intent.active_sample_workflow.kind == ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample)) {
+        return {};
+    }
     const std::optional<std::size_t> presented_sample_before =
         PresentedSampleIndex();
     const std::optional<std::size_t> effective_sample_before =
@@ -845,6 +851,18 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     }
     const std::optional<std::size_t> effective_sample_after =
         EffectiveSampleNavigationIndex();
+    if (current_sample_failure_ && requested_navigation_reason &&
+        intent.kind == SourceCollectionSessionIntentKind::SampleNavigation && result.navigation.target_found) {
+        sample_recovery_pending_ = result.follow_up_spectrum_index.has_value();
+    }
+    if (current_sample_failure_ && requested_navigation_reason &&
+        intent.kind == SourceCollectionSessionIntentKind::SampleNavigation &&
+        result.navigation.target_found && !result.follow_up_spectrum_index &&
+        roster_->snapshot() && workflow_->current_index() == roster_->snapshot()->collection.current_index) {
+        current_sample_failure_.reset();
+        result.action.snapshot_changed = true;
+        result.action.snapshot_change_reason = SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection;
+    }
     const std::optional<std::string> source_key_after =
         roster_->current_source_key();
     bool presentation_transition_recorded = false;
@@ -995,8 +1013,20 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
     const bool snapshot_matches_navigation =
         snapshot && view.navigation.current_index && snapshot->collection.spectrum_count > 0 &&
         snapshot->collection.current_index == *view.navigation.current_index;
-    view.current_sample_snapshot = snapshot_matches_navigation ? snapshot : nullptr;
+    view.current_sample_snapshot = snapshot_matches_navigation && !current_sample_failure_ ? snapshot : nullptr;
+    view.current_sample_failure = current_sample_failure_;
     view.labeling = workflow_->LabelingView(view.current_sample_snapshot);
+    if (current_sample_failure_) {
+        view.navigation.current_index.reset();
+        view.navigation.current_source_row.reset();
+        view.navigation.current_sequence_position.reset();
+        view.navigation.resolved_sequence_position.zero_based_position.reset();
+        view.navigation.current_sample_name.clear();
+        view.navigation.current_sample_display_name.clear();
+        view.navigation.current_annotations.clear();
+        view.labeling.current_index.reset();
+        view.labeling.current_code = kUnlabeledSampleLabelCode;
+    }
     view.filter = workflow_->BuildFilterView(snapshot);
     view.sorting = workflow_->BuildSortingView(snapshot);
     if (sample_transition_ &&
@@ -1024,6 +1054,7 @@ SourceCollectionSession::ResolveExactSampleName(
 
 SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
 {
+    if (current_sample_failure_) return nullptr;
     const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
     const std::optional<std::size_t> current_index = workflow_->current_index();
     if (!snapshot || snapshot->source.path.empty() || !current_index ||
@@ -1031,6 +1062,19 @@ SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
         return nullptr;
     }
     return snapshot;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::FailCurrentSample(SourceCollectionLoadFailure failure)
+{
+    current_sample_failure_ = std::move(failure);
+    sample_recovery_pending_ = false;
+    sample_transition_.reset();
+    InvalidateView();
+    SourceCollectionSessionAction action;
+    action.snapshot_changed = true;
+    action.snapshot_change_reason = SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection;
+    action.navigation_inputs_changed = true;
+    return action;
 }
 
 std::optional<std::size_t> SourceCollectionSession::EffectiveSampleNavigationIndex() const
@@ -1199,6 +1243,14 @@ SourceCollectionSession::ActivateSource(
 
     SampleWorkflowTransitionOutcome outcome;
     outcome.action = roster_->ActivateSource(source_index);
+    if (current_sample_failure_) {
+        current_sample_failure_.reset();
+        sample_recovery_pending_ = false;
+        outcome.action.snapshot_changed = true;
+        if (outcome.action.snapshot_change_reason == SourceCollectionSnapshotChangeReason::None) {
+            outcome.action.snapshot_change_reason = SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection;
+        }
+    }
     MergeSampleWorkflowTransitionOutcome(
         outcome,
         workflow_->SyncKnownActiveSource(
@@ -1261,9 +1313,15 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     PreparedSourceCollectionPayload payload,
     SourceCollectionFolderListingGenerationHandle folder_listing_generation,
     std::optional<SourceCollectionContextReuseProof> context_reuse_proof,
-    bool activate)
+    bool activate,
+    bool recover_failed_presentation)
 {
     SourceCollectionSessionResult result;
+    if (current_sample_failure_ && activate && recover_failed_presentation) {
+        // A successful explicit retry may reconcile to another row before its
+        // final completion. Keep the recovery intent across that follow-up.
+        sample_recovery_pending_ = true;
+    }
     const auto retire_folder_listing_generation = [&]() {
         if (folder_listing_generation) {
             result.background_retirement.push_back(
@@ -1498,6 +1556,15 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         result.follow_up_spectrum_index = *active_index;
         roster_->RememberActiveSourceIndex(*active_index);
     }
+    if (current_sample_failure_ && !result.follow_up_spectrum_index &&
+        (recover_failed_presentation || sample_recovery_pending_)) {
+        current_sample_failure_.reset();
+        sample_recovery_pending_ = false;
+        result.action.snapshot_changed = true;
+        if (result.action.snapshot_change_reason == SourceCollectionSnapshotChangeReason::None) {
+            result.action.snapshot_change_reason = SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection;
+        }
+    }
     if (!completes_pending_navigation) {
         const std::optional<std::size_t> activation_from_sample =
             prepared_for_presented_source
@@ -1635,6 +1702,7 @@ bool SourceCollectionSession::CancelPendingSampleNavigation(
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    sample_recovery_pending_ = false;
     sample_transition_.reset();
     InvalidateView();
     return true;
@@ -1649,6 +1717,7 @@ bool SourceCollectionSession::CancelActivePendingSampleNavigation()
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    sample_recovery_pending_ = false;
     sample_transition_.reset();
     InvalidateView();
     return true;

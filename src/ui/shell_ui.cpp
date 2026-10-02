@@ -3339,7 +3339,11 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
         UiTextId::Information);
     ImGui::Separator();
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
-    if (snapshot) {
+    if (const auto& failure = session_.CurrentSampleFailure()) {
+        RenderUiText(language, UiTextId::LoadFailed);
+        const auto diagnostic = FormatSourceCollectionLoadFailures(language, std::span(&*failure, 1));
+        ImGui::TextWrapped("%s", diagnostic.c_str());
+    } else if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
         ImGui::TextWrapped("%s: %s",
             UiText(language, UiTextId::DisplayedSource).data(),

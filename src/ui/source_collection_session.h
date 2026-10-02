@@ -346,6 +346,9 @@ public:
     // A deferred pending target is the origin for a subsequent navigation command.
     [[nodiscard]] std::optional<std::size_t> EffectiveSampleNavigationIndex() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
+    [[nodiscard]] const std::optional<SourceCollectionLoadFailure>& CurrentSampleFailure() const
+    { return current_sample_failure_; }
+    [[nodiscard]] SourceCollectionSessionAction FailCurrentSample(SourceCollectionLoadFailure failure);
     [[nodiscard]] SpectrumSnapshotHandle CurrentSourceSnapshot() const;
     [[nodiscard]] std::optional<std::string>
     CurrentSourceCollectionIdentity() const;
@@ -370,7 +373,8 @@ public:
         SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
             std::nullopt,
-        bool activate = true);
+        bool activate = true,
+        bool recover_failed_presentation = true);
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,
@@ -442,6 +446,8 @@ private:
         SourceCollectionRosterOpenResult result);
 
     std::unique_ptr<SourceCollectionRoster> roster_;
+    std::optional<SourceCollectionLoadFailure> current_sample_failure_;
+    bool sample_recovery_pending_ = false;
     std::unique_ptr<SampleWorkflowCoordinator> workflow_;
     std::unique_ptr<SourceCollectionSessionStatePersistence> source_session_state_;
     std::optional<SourceCollectionDeferredRestorePlan> deferred_restore_plan_;

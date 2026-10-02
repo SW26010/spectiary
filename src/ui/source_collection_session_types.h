@@ -40,6 +40,7 @@ struct SourceCollectionLoadError {
 struct SourceCollectionLoadFailure {
     std::filesystem::path source_path;
     SourceCollectionLoadError error;
+    std::optional<std::size_t> sample_index;
 };
 
 enum class SourceCollectionSnapshotChangeReason {
@@ -331,6 +332,8 @@ struct SourceCollectionStateFlushResult {
 struct SourceCollectionSessionView {
     SpectrumSnapshotHandle snapshot;
     SpectrumSnapshotHandle current_sample_snapshot;
+    // Transient failed presentation; the source/workflow can remain resident.
+    std::optional<SourceCollectionLoadFailure> current_sample_failure;
     std::vector<SourceCollectionSourceView> sources;
     std::optional<std::size_t> current_source_index;
     bool can_add_read_only_annotation = false;

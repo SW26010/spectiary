@@ -1130,6 +1130,12 @@ std::string FormatSourceCollectionLoadFailures(
         result += UiText(
             language,
             failure.error.kind);
+        if (failure.sample_index) {
+            result.push_back('\n');
+            result += UiText(language, UiTextId::SourceSample);
+            result.push_back(' ');
+            result += std::to_string(*failure.sample_index + 1);
+        }
         if (!failure.error
                  .diagnostic_detail.empty()) {
             result.push_back('\n');

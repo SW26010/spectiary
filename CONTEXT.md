@@ -112,6 +112,14 @@ source session or locked viewport; explicit source/viewport mutations persist no
 Application settings/layout keep their normal lifecycle. Explicit-source and
 automation startup retain their existing contracts.
 
+A failed current source open or sample load preserves the resident source and
+workflow but clears current-sample presentation and disables current-sample label
+writes. Information presents the failed target and diagnostic. Acknowledging a
+failure never reactivates a retained sample; explicit valid source/sample selection
+or a successful retry restores presentation. Background, canceled and stale
+requests cannot replace the current presentation failure or clear a successful
+current display. See the #138 behavior matrix in the product requirements.
+
 An explicit source startup restores the persisted Files roster and overrides
 the deferred activation target through the normal source-opening path, without
 presenting another restored source first. The Windows taskbar Jump List projects

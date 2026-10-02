@@ -691,11 +691,15 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
             }
             return MakeSnapshot(source, index);
         });
-    spectiary::SourceCollectionSession session({}, {}, {}, {});
+    auto session = MakePreparedSession(loaded_path);
     Activation activation(
         session,
         spectiary::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
+    bool successful_display_cleared = false;
+    ActivationAccess::ObserveSnapshotChanges(activation, [&](auto) {
+        successful_display_cleared |= !session.CurrentSampleSnapshot();
+    });
 
     (void)activation.OpenSource(failed_path, 0);
     (void)activation.OpenSource(loaded_path, 0);
@@ -716,6 +720,9 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
         error.find("source A failed") !=
             std::string::npos,
         "a successful source must not hide another source's failure");
+    Require(!successful_display_cleared && session.CurrentSampleSnapshot() &&
+            session.CurrentSampleSnapshot()->source.path == loaded_path && !session.CurrentSampleFailure(),
+        "a late background failure must not clear the current successful sample");
 }
 
 void TestConcurrentFailuresRemainVisible()
@@ -766,6 +773,64 @@ void TestConcurrentFailuresRemainVisible()
             error.find("second source failed") !=
                 std::string::npos,
         "all current source failures should remain visible");
+    Require(session.CurrentSampleFailure() && session.CurrentSampleFailure()->source_path == second_path,
+        "background failures must not replace the current request's Information diagnostic");
+}
+
+void TestFailedMemberClearsSampleButPreservesWorkflow()
+{
+    using namespace spectiary;
+    const auto path = UniqueTempPath("_member_failure.csv");
+    WriteFixture(path);
+    auto session = MakePreparedSession(path);
+    const auto retained = session.CurrentSourceSnapshot();
+    auto dependencies = MakeDependencies([](const auto& source, std::size_t index, const auto&) {
+        if (index == 1) throw std::runtime_error("member one cannot be decoded");
+        return MakeSnapshot(source, index);
+    });
+    Activation activation(session, MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    (void)activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
+    (void)activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::UpsertActiveLabel({1, "one", 'o'})));
+    (void)activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(false)));
+    const auto initial_write = activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(1)));
+    Require(initial_write.label_write && initial_write.label_write->write.changed,
+        "fixture must contain a real label on the previously displayed sample");
+    const auto task_id = session.View().labeling.task_id;
+    (void)activation.Submit(SourceCollectionSessionIntent::UpdateSampleNavigation(
+        SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
+    Require(DrainUntil(activation, [&] { return !activation.status().loading; }),
+        "member failure should finish");
+    const auto& failed = session.View();
+    Require(!session.CurrentSampleSnapshot() && !failed.current_sample_snapshot &&
+            session.CurrentSourceSnapshot() == retained && failed.navigation.sample_count == 3 &&
+            !failed.navigation.current_index && failed.navigation.current_annotations.empty() &&
+            !failed.labeling.current_index && failed.labeling.task_id == task_id &&
+            failed.labeling.labeled_count == 1 && failed.current_sample_failure &&
+            failed.current_sample_failure->sample_index == 1,
+        "member failure must preserve collection and task but expose no previous sample");
+    const auto write = activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(1)));
+    const auto clear = activation.Submit(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()));
+    Require(!write.label_write && !clear.label_write && session.View().labeling.labeled_count == 1,
+        "commands must not label the retained sample while its presentation is failed");
+    activation.AcknowledgeLoadFailures();
+    (void)activation.Drain(false);
+    Require(!session.CurrentSampleSnapshot(), "dismiss and maintenance must not restore the previous sample");
+    (void)activation.Submit(SourceCollectionSessionIntent::UpdateSampleNavigation(
+        SampleNavigationIntent::Move(SampleNavigationRequest::LocateRow(99))));
+    Require(!session.CurrentSampleSnapshot(), "an invalid selection must not restore the previous sample");
+    (void)activation.Submit(SourceCollectionSessionIntent::UpdateSampleNavigation(
+        SampleNavigationIntent::Move(SampleNavigationRequest::LocateRow(2))));
+    Require(DrainUntil(activation, [&] { return !activation.status().loading; }) &&
+            session.CurrentSampleSnapshot() && session.CurrentSampleSnapshot()->collection.current_index == 2 &&
+            session.View().labeling.task_id == task_id,
+        "explicit valid sample selection must restore presentation in the same workflow");
+    std::filesystem::remove(path);
 }
 
 void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
@@ -923,6 +988,9 @@ void TestSuccessfulRetryClearsPreviousFailures()
     Require(
         retry_drained,
         "a successful retry should leave no historical failure in the status bar");
+    Require(session.CurrentSampleSnapshot() && !session.CurrentSampleFailure() &&
+            session.CurrentSampleSnapshot()->source.path == retry_path,
+        "successful explicit retry must restore presentation and clear the Information failure");
 }
 
 void TestLaterSourceOpenReplacesHistoricalFailureStatus()
@@ -1056,6 +1124,12 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                     }
                     (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
                         spectiary::SourceCollectionIntent::Remove(bad_index)));
+                    if (active_fails && !failure_first) {
+                        Require(!session.CurrentSampleSnapshot(),
+                            "removing a failed source must not implicitly restore an old sample");
+                        (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                            spectiary::SourceCollectionIntent::SwitchActive(0)));
+                    }
                     Require(session.View().sources.size() == 1 && !session.HasUnresolvedSourceIntent(bad_path) &&
                             session.CurrentSampleSnapshot() &&
                             session.CurrentSampleSnapshot()->source.path == good_path &&
@@ -1077,7 +1151,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
     }
 }
 
-void TestCanceledGenerationDoesNotPublishFailure()
+void TestCanceledGenerationDoesNotPublishFailure(bool replacement_fails)
 {
     const std::filesystem::path path =
         UniqueTempPath("_canceled.csv");
@@ -1087,7 +1161,7 @@ void TestCanceledGenerationDoesNotPublishFailure()
         first_started_promise.get_future().share();
     std::atomic_uint32_t attempts = 0;
     auto dependencies = MakeDependencies(
-        [&attempts, &first_started_promise](
+        [&attempts, &first_started_promise, replacement_fails](
             const std::filesystem::path& source,
             std::size_t index,
             const auto& canceled) {
@@ -1099,6 +1173,7 @@ void TestCanceledGenerationDoesNotPublishFailure()
                 throw std::runtime_error(
                     "canceled source failure");
             }
+            if (replacement_fails) throw std::runtime_error("current request failed");
             return MakeSnapshot(source, index);
         });
     spectiary::SourceCollectionSession session({}, {}, {}, {});
@@ -1136,6 +1211,11 @@ void TestCanceledGenerationDoesNotPublishFailure()
         error.find("canceled source failure") ==
             std::string::npos,
         "a canceled source generation must not publish a user error");
+    Require(replacement_fails
+            ? (!session.CurrentSampleSnapshot() && session.CurrentSampleFailure() &&
+                session.CurrentSampleFailure()->error.diagnostic_detail == "current request failed")
+            : (session.CurrentSampleSnapshot() && !session.CurrentSampleFailure()),
+        "a canceled failure must change neither the replacement's presentation nor its error");
     Require(
         canceled_outcome.state ==
             Activation::SourceOpenOperationState::
@@ -1942,11 +2022,13 @@ int main()
         TestLastWorkerIsReapedByScheduledServiceAfterCompletionDrain();
         TestSuccessfulSourceDoesNotHideConcurrentFailure();
         TestConcurrentFailuresRemainVisible();
+        TestFailedMemberClearsSampleButPreservesWorkflow();
         TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();
         TestSuccessfulRetryClearsPreviousFailures();
         TestLaterSourceOpenReplacesHistoricalFailureStatus();
         TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable();
-        TestCanceledGenerationDoesNotPublishFailure();
+        TestCanceledGenerationDoesNotPublishFailure(false);
+        TestCanceledGenerationDoesNotPublishFailure(true);
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
         TestPublicInterfacePublishesPresentedOpenLifecycle();
         TestAutomationOpenCompletesAfterPresentationWithoutProfiling();

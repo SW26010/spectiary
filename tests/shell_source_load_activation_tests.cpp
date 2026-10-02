@@ -1540,9 +1540,10 @@ void TestFailedOpenPresentationKeepsSourceOwnershipAndOpensDetails()
     shell->OpenSource(failed);
     Require(DrainAllSourceLoads(*shell) && !Access::LoadError(*shell).empty(),
         "empty CSV should produce a real source load diagnostic");
-    Require(Access::Session(*shell).CurrentSampleSnapshot() == retained &&
+    Require(!Access::Session(*shell).CurrentSampleSnapshot() &&
+            Access::Session(*shell).CurrentSourceSnapshot() == retained &&
             Access::Session(*shell).View().sources.size() == 1,
-        "failed new candidate must preserve the adopted source without a new roster entry");
+        "failed new candidate must clear display while preserving the source session without a new roster entry");
     (void)shell->SetPanelVisibilityForAutomation(spectiary::ApplicationPanel::Files, false);
     std::string files_text;
     std::string information_text;
@@ -1585,16 +1586,26 @@ void TestFailedOpenPresentationKeepsSourceOwnershipAndOpensDetails()
         "clicking Load failed must open Files without acknowledging the failure");
     Require(files_text.find(failed.filename().string()) != std::string::npos &&
             files_text.find("Diagnostic details") != std::string::npos &&
-            files_text.find(previous.filename().string()) != std::string::npos,
-        "Files must expose the real failure and separately identify the retained source");
-    Require(information_text.find(previous.filename().string()) != std::string::npos &&
-            information_text.find(failed.filename().string()) == std::string::npos,
-        "Information must identify its adopted snapshot, never the failed candidate");
+            files_text.find("No spectrum is currently displayed.") != std::string::npos,
+        "Files must expose the real failure without claiming the retained source is displayed");
+    Require(information_text.find(previous.filename().string()) == std::string::npos &&
+            information_text.find(failed.filename().string()) != std::string::npos &&
+            information_text.find("Diagnostic details") != std::string::npos,
+        "Information must show the failed target and diagnostic without retained sample metadata");
     ui.Click("DismissSourceLoadFailures");
+    ui.Frames();
+    Require(information_text.find(failed.filename().string()) != std::string::npos &&
+            information_text.find(previous.filename().string()) == std::string::npos,
+        "acknowledgement must not replace the Information failure with old sample metadata");
     Require(Access::LoadError(*shell).empty() &&
-            Access::Session(*shell).CurrentSampleSnapshot() == retained &&
+            !Access::Session(*shell).CurrentSampleSnapshot() &&
+            Access::Session(*shell).CurrentSourceSnapshot() == retained &&
             Access::Session(*shell).View().sources.size() == 1,
-        "explicit dismiss must acknowledge failures without changing the source session");
+        "explicit dismiss must acknowledge failures without reactivating the retained sample");
+    (void)Access::Submit(*shell, spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+        spectiary::SourceCollectionIntent::SwitchActive(0)));
+    Require(Access::Session(*shell).CurrentSampleSnapshot() == retained,
+        "explicit selection of the retained valid source must restore sample presentation");
     shell.reset();
     std::filesystem::remove(previous);
     std::filesystem::remove(failed);
@@ -2827,8 +2838,9 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         failure_retained_while_requeued,
         "an intermediate loaded result must not clear the source failure before its follow-up succeeds");
     Require(
-        snapshot_while_requeued && snapshot_while_requeued->collection.current_index == 0,
-        "the reentrant row 2 load must keep the complete row 0 snapshot visible");
+        !snapshot_while_requeued && view_while_requeued.snapshot &&
+            view_while_requeued.snapshot->collection.current_index == 0,
+        "the reentrant retry must retain row 0 in the session without displaying it before success");
     Require(
         view_while_requeued.filter.evaluation.included_count == 2 &&
             view_while_requeued.navigation.sequence_count == 2 &&
@@ -3019,7 +3031,8 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         std::this_thread::sleep_for(2ms);
     }
     const spectiary::SpectrumSnapshotHandle retained_snapshot =
-        Access::Session(*shell).CurrentSampleSnapshot();
+        Access::Session(*shell).CurrentSourceSnapshot();
+    const bool failure_cleared_presentation = !Access::Session(*shell).CurrentSampleSnapshot();
     const spectiary::SourceCollectionSessionResult retry = Access::Session(*shell).Submit(
         spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
             spectiary::SampleNavigationIntent::Move(
@@ -3037,8 +3050,8 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         failure_drained,
         "production DrainSourceLoads should consume the failed DeferredRestore ticket");
     Require(
-        retained_snapshot && retained_snapshot->collection.current_index == 0,
-        "a failed restore follow-up should retain the complete committed row 0 snapshot");
+        failure_cleared_presentation && retained_snapshot && retained_snapshot->collection.current_index == 0,
+        "a failed restore follow-up should retain row 0 in the session without displaying it");
     Require(
         retry_created && retry_canceled,
         "retrying the failed row must create a new worker follow-up instead of being deduplicated");

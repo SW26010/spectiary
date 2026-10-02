@@ -1554,6 +1554,7 @@ void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
                 .diagnostic_detail =
                     "CreateFile: access denied",
             },
+            .sample_index = 1,
         },
     };
     const std::string chinese =
@@ -1566,6 +1567,7 @@ void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
         chinese ==
             "C:\\data\\sample.npy：已准备源的复用目标已不可用。\n\n"
             "C:\\data\\broken.csv：后台源加载失败。\n"
+            "源样本： 2\n"
             "诊断详情：CreateFile: access denied",
         "Chinese source-load failures should localize semantic messages while preserving paths and raw diagnostics");
     Require(

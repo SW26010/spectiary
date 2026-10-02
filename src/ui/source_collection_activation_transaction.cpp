@@ -116,6 +116,10 @@ SourceCollectionActivationTransaction::
     // observers. Failures from still-pending loads remain visible when drained.
     AcknowledgeLoadFailures();
     CancelSnapshotPrefetch();
+    for (auto& [task_id, ticket] : pending_loads_) {
+        (void)task_id;
+        if (ticket.purpose == Purpose::ExplicitOpen) ticket.current_presentation_request = false;
+    }
     SourceLoadLatencyTraceHandle source_load_trace =
         StartSourceLoadTrace(
             spectrum_index,
@@ -958,6 +962,17 @@ void SourceCollectionActivationTransaction::DrainCompletions(
 {
     const auto record_failure = [&](const Ticket& ticket, SourceCollectionLoadError error) {
         RecordTerminalOutcome(ticket, error);
+        const bool current_request = ticket.purpose == Purpose::DeferredRestore
+            ? deferred_restore_active_path_ &&
+                SourcePathIdentityKey(*deferred_restore_active_path_) == ticket.path_key
+            : ticket.current_presentation_request;
+        if (current_request) {
+            const auto& terminal = terminal_outcomes_.at(ticket.path_key);
+            const auto failure_action = session_.FailCurrentSample(
+                {ticket.path, error, terminal.failed_sample_index});
+            MergeSourceCollectionSessionAction(action, failure_action);
+            ApplyPresentationAction(failure_action);
+        }
         // An explicit open can replace the saved source's restore job. Keep
         // its removable failure row even though the replacement is explicit.
         if (ticket.purpose == Purpose::DeferredRestore ||
@@ -1094,9 +1109,10 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 retain_presentation_resources_();
         }
 
-        const bool activate = ticket.purpose != Purpose::DeferredRestore ||
+        const bool activate = (!session_.CurrentSampleFailure() || ticket.current_presentation_request) &&
+            (ticket.purpose != Purpose::DeferredRestore ||
             (deferred_restore_active_path_ &&
-                SourcePathIdentityKey(*deferred_restore_active_path_) == ticket.path_key);
+            SourcePathIdentityKey(*deferred_restore_active_path_) == ticket.path_key));
         SourceCollectionSessionResult result =
             session_.OpenPreparedSource(
                 prepared.path,
@@ -1106,7 +1122,8 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 std::move(
                     prepared.folder_listing_generation),
                 std::move(
-                    prepared.context_reuse_proof), activate);
+                    prepared.context_reuse_proof), activate,
+                ticket.current_presentation_request && ticket.purpose != Purpose::SessionFollowUp);
         MergeSourceCollectionSessionAction(
             action,
             result.action);
@@ -1235,7 +1252,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 ticket.source_load_trace->SetTargetIndex(
                     *result.follow_up_spectrum_index);
             }
-            (void)QueueSourceLoad(
+            const auto follow_up_task = QueueSourceLoad(
                 ticket.path,
                 *result.follow_up_spectrum_index,
                 session_.AnnotationPathsForSource(
@@ -1247,6 +1264,8 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 ticket.source_load_trace,
                 ticket.prefetch_direction,
                 ticket.automation_sequence);
+            pending_loads_.at(follow_up_task).current_presentation_request =
+                ticket.current_presentation_request;
         } else if (
             result.loaded &&
             ticket.prefetch_direction) {
@@ -1932,7 +1951,7 @@ void SourceCollectionActivationTransaction::
         return;
     }
     const SpectrumSnapshotHandle snapshot =
-        session_.CurrentSampleSnapshot();
+        error ? nullptr : session_.CurrentSampleSnapshot();
     terminal_outcomes_.insert_or_assign(
         ticket.path_key,
         TerminalOutcome{
@@ -1963,6 +1982,8 @@ void SourceCollectionActivationTransaction::
                 ticket.purpose == Purpose::DeferredRestore &&
                 (!deferred_restore_active_path_ ||
                  SourcePathIdentityKey(*deferred_restore_active_path_) != ticket.path_key),
+            .failed_sample_index = ticket.purpose == Purpose::SessionFollowUp
+                ? std::optional<std::size_t>{ticket.spectrum_index} : std::nullopt,
         });
     RebuildErrorMessage();
 }
@@ -1983,6 +2004,7 @@ void SourceCollectionActivationTransaction::
             SourceCollectionLoadFailure{
                 .source_path = outcome.path,
                 .error = *outcome.error,
+                .sample_index = outcome.failed_sample_index,
             });
         if (!error_message_.empty()) {
             error_message_ += '\n';

@@ -174,6 +174,8 @@ private:
         std::uint64_t activation_epoch = 0;
         std::uint64_t automation_sequence = 0;
         Purpose purpose = Purpose::ExplicitOpen;
+        // Earlier explicit opens can finish in the background after a newer request.
+        bool current_presentation_request = true;
         NavigationLatencyTraceHandle navigation_trace;
         SourceLoadLatencyTraceHandle source_load_trace;
         std::optional<SampleNavigationDirection>
@@ -201,6 +203,7 @@ private:
         std::size_t spectrum_index = 0;
         std::string spectrum_name;
         bool failure_acknowledged = false;
+        std::optional<std::size_t> failed_sample_index;
     };
 
     struct PendingSnapshotPrefetch {
