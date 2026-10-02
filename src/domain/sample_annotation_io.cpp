@@ -1002,6 +1002,16 @@ std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::LoadCancelable(
     }
 }
 
+bool SampleAnnotationIoAdapter::CanValidateSourceAssociation(
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source)
+{
+    return IsAsdfLabelingPath(path) ||
+        (IsCsvPath(path) && !source.sample_names.empty() &&
+         SourceCollectionSampleNamesFormCanonicalRoster(
+             source.sample_names, source.sample_count));
+}
+
 std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::LoadForSource(
     const std::filesystem::path& path,
     const SampleAnnotationSourceCompatibility& source,

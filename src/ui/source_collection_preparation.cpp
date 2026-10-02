@@ -39,6 +39,7 @@ void LoadRestoredAnnotations(
     SourceCollectionContext& context,
     const SpectrumSnapshot& snapshot,
     const std::vector<std::filesystem::path>& annotation_paths,
+    const std::optional<SourceCollectionAnnotationRestore>& restore,
     const SourceCollectionCancellationCheckpoint& checkpoint)
 {
     const SampleLabelingCanonicalSourceDescriptor source =
@@ -53,6 +54,18 @@ void LoadRestoredAnnotations(
     for (const std::filesystem::path& annotation_path :
          annotation_paths) {
         checkpoint();
+        if (restore && restore->source_identity != context.identity.id &&
+            !SampleAnnotationIoAdapter::CanValidateSourceAssociation(
+                annotation_path, compatibility)) {
+            context.manifest.diagnostics.push_back({
+                SourceCollectionManifestDiagnosticKind::AnnotationIgnored,
+                annotation_path,
+                restore->source_identity
+                    ? "Source identity changed; positional annotation was not automatically restored."
+                    : "Saved source identity is unavailable; positional annotation was not automatically restored.",
+            });
+            continue;
+        }
         if (SourceCollectionManifestContainsAnnotation(
                 context.manifest,
                 annotation_path)) {
@@ -454,6 +467,7 @@ private:
             context,
             snapshot,
             work.request.annotation_paths,
+            work.request.annotation_restore,
             work.checkpoint);
         FinalizeSourceCollectionAnnotationContextFingerprint(
             context,
@@ -1135,7 +1149,12 @@ private:
                     LoadSourceCollectionContextCancelable(
                         *snapshot,
                         initial_state,
-                        work.checkpoint));
+                        work.checkpoint,
+                        // Persisted companions pass through the same restore
+                        // guard as explicit attachments, without reading twice.
+                        work.request.annotation_restore
+                            ? SourceCollectionAnnotationDiscovery::Disabled
+                            : SourceCollectionAnnotationDiscovery::Enabled));
                 FinalizeContext(work, *snapshot, *context);
             }
             if (work.request.latency_attempt) {

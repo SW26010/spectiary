@@ -12,8 +12,7 @@ namespace spectiary {
 namespace {
 
 constexpr const char* kSourceSessionStateFormatKind = "spectiary.source_collection_session.cache";
-constexpr int kSourceSessionStateSchemaVersion = 2;
-constexpr std::size_t kMaxRestoredSources = 32;
+constexpr int kSourceSessionStateSchemaVersion = 3;
 
 }  // namespace
 
@@ -29,38 +28,49 @@ LoadSourceCollectionSessionStateCache(const RuntimePaths& runtime_paths, const s
     VersionedJsonCacheLoadResult result = LoadVersionedJsonCacheFile(
         path,
         kSourceSessionStateFormatKind,
-        {1, kSourceSessionStateSchemaVersion},
+        {1, 2, kSourceSessionStateSchemaVersion},
         "source session state cache");
     if (!result.document) {
         load.warning = std::move(result.warning);
         return load;
     }
 
-    load.cache.active_source_index =
+    const auto saved_active_source_index =
         ReadJsonSizeMember(result.document->root, "active_source_index");
     const nlohmann::json* sources = JsonObjectMember(result.document->root, "sources");
     if (sources == nullptr || sources->type() != nlohmann::json::value_t::array) {
+        load.warning = "Ignored source session state cache: sources must be an array.";
         return load;
     }
 
-    for (const nlohmann::json& source_object : (*sources)) {
-        if (source_object.type() != nlohmann::json::value_t::object ||
-            load.cache.sources.size() >= kMaxRestoredSources) {
+    bool skipped_source = false;
+    for (std::size_t index = 0; index < sources->size(); ++index) {
+        const nlohmann::json& source_object = (*sources)[index];
+        if (source_object.type() != nlohmann::json::value_t::object) {
+            skipped_source = true;
             continue;
         }
         const nlohmann::json* path_value = JsonObjectMember(source_object, "path");
         if (path_value == nullptr) {
+            skipped_source = true;
             continue;
         }
 
         std::optional<std::filesystem::path> path_reference = ReadPersistedPathReference(*path_value, runtime_paths);
         if (!path_reference || path_reference->empty()) {
+            skipped_source = true;
             continue;
         }
 
         SourceCollectionSavedSource source;
         source.path = std::move(*path_reference);
         source.last_spectrum_index = ReadJsonSizeMember(source_object, "last_index").value_or(0);
+        if (result.document->schema_version >= 3) {
+            source.source_identity = ReadJsonStringMember(source_object, "source_identity");
+            if (source.source_identity && source.source_identity->empty()) {
+                source.source_identity.reset();
+            }
+        }
         const nlohmann::json* annotation_paths = JsonObjectMember(source_object, "annotation_paths");
         if (annotation_paths != nullptr && annotation_paths->type() == nlohmann::json::value_t::array) {
             for (const nlohmann::json& annotation_path_value : (*annotation_paths)) {
@@ -72,7 +82,19 @@ LoadSourceCollectionSessionStateCache(const RuntimePaths& runtime_paths, const s
                 source.annotation_paths.push_back(std::move(*annotation_path));
             }
         }
+        if (saved_active_source_index == index) {
+            load.cache.active_source_index = load.cache.sources.size();
+        }
         load.cache.sources.push_back(std::move(source));
+    }
+    if (skipped_source) {
+        load.warning = "Ignored invalid source entries in source session state cache.";
+    }
+    if (saved_active_source_index && !load.cache.active_source_index) {
+        if (!load.warning.empty()) {
+            load.warning += " ";
+        }
+        load.warning += "Saved active source could not be restored from source session state cache.";
     }
     return load;
 }
@@ -108,6 +130,10 @@ bool SaveSourceCollectionSessionStateCache(
                 stream << "    { \"path\": ";
                 WritePersistedPathReference(stream, cache.sources[index].path, runtime_paths);
                 stream << ", \"last_index\": " << cache.sources[index].last_spectrum_index;
+                if (cache.sources[index].source_identity) {
+                    stream << ", \"source_identity\": ";
+                    WriteJsonString(stream, *cache.sources[index].source_identity);
+                }
                 if (!cache.sources[index].annotation_paths.empty()) {
                     stream << ", \"annotation_paths\": [";
                     for (std::size_t path_index = 0;

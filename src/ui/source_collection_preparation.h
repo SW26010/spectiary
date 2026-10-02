@@ -66,10 +66,17 @@ private:
         resident_snapshot_;
 };
 
+struct SourceCollectionAnnotationRestore {
+    std::optional<std::string> source_identity;
+};
+
 struct SourceCollectionLoadRequest {
     std::filesystem::path path;
     std::size_t spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
+    // Presence marks persisted attachments, including legacy caches without
+    // an identity. Explicit attachment requests do not use this contract.
+    std::optional<SourceCollectionAnnotationRestore> annotation_restore;
     // External, in-app, and automation opens carry their logical request here
     // so filesystem probing stays inside the cancellable load worker. Restore,
     // follow-up, and prefetch requests already carry a resolved source path.

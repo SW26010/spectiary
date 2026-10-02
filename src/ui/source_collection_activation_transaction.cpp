@@ -332,6 +332,8 @@ void SourceCollectionActivationTransaction::BeginDeferredRestore()
             .spectrum_index = source.last_spectrum_index,
             .annotation_paths =
                 std::move(source.annotation_paths),
+            .annotation_restore = SourceCollectionAnnotationRestore{
+                std::move(source.source_identity)},
         });
     }
     const std::vector<std::uint64_t> task_ids =

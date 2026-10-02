@@ -467,12 +467,14 @@ private:
     [[nodiscard]] spectiary::SourceCollectionSessionResult CommitPrepared(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
-        std::vector<std::filesystem::path> annotation_paths)
+        std::vector<std::filesystem::path> annotation_paths,
+        std::optional<spectiary::SourceCollectionAnnotationRestore> restore = std::nullopt)
     {
         spectiary::SourceCollectionLoadRequest request{
             .path = path,
             .spectrum_index = spectrum_index,
             .annotation_paths = std::move(annotation_paths),
+            .annotation_restore = std::move(restore),
         };
         if (std::optional<spectiary::SourceCollectionLoadHint> hint =
                 LoadHintForSource(path, spectrum_index)) {
@@ -552,10 +554,11 @@ private:
         for (const spectiary::SourceCollectionSavedSource& source :
              restore->sources) {
             try {
-                (void)Open(
+                (void)ServiceFollowUps(CommitPrepared(
                     source.path,
                     source.last_spectrum_index,
-                    source.annotation_paths);
+                    source.annotation_paths,
+                    spectiary::SourceCollectionAnnotationRestore{source.source_identity}));
             } catch (const std::exception&) {
                 // The production activation transaction records a
                 // failed preparation and continues the restore batch.
@@ -6959,6 +6962,7 @@ void TestSourceSessionStateCacheRoundTrip()
     spectiary::SourceCollectionSessionStateCache cache;
     spectiary::SourceCollectionSavedSource first_source{first_source_path, 2};
     first_source.annotation_paths.push_back(annotation_path);
+    first_source.source_identity = "sha256:source-generation";
     cache.sources = {first_source, spectiary::SourceCollectionSavedSource{second_source_path, 0}};
     cache.active_source_index = 1;
     Require(
@@ -6971,6 +6975,9 @@ void TestSourceSessionStateCacheRoundTrip()
     Require(loaded.sources.size() == 2, "source session cache should restore all sources");
     Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
     Require(loaded.sources[0].last_spectrum_index == 2, "first source index should round-trip");
+    Require(loaded.sources[0].source_identity == first_source.source_identity,
+        "source-only identity should round-trip independently of attachment paths");
+    Require(!loaded.sources[1].source_identity, "unknown source identity must remain unknown");
     Require(loaded.sources[0].annotation_paths.size() == 1, "first source annotation paths should round-trip");
     Require(
         loaded.sources[0].annotation_paths[0] == annotation_path,
@@ -6996,6 +7003,34 @@ void TestSourceSessionStateCacheIgnoresCorruptJson()
     Require(
         !loaded.warning.empty(),
         "corrupt source session cache should retain its non-blocking warning");
+}
+
+void TestSourceSessionCacheMapsActiveIndexAndMigratesLegacyIdentity()
+{
+    const auto path = UniqueTempPath("_source_cache_mapping.json");
+    for (int version : {1, 2, 3}) {
+        for (int active : {0, 1, 2, 3, 4}) {
+            WriteTextFile(path,
+                "{\"format_kind\":\"spectiary.source_collection_session.cache\","
+                "\"schema_version\":" + std::to_string(version) +
+                ",\"active_source_index\":" + std::to_string(active) +
+                ",\"sources\":[null,{\"path\":\"C:/source-a.npy\","
+                "\"source_identity\":\"generation-a\"},{\"path\":42},"
+                "{\"path\":\"C:/source-b.npy\"}]}");
+            const auto loaded = spectiary::LoadSourceCollectionSessionStateCache({}, path);
+            Require(loaded.cache.sources.size() == 2 && !loaded.warning.empty(),
+                "invalid entries should be skipped with a diagnostic");
+            const auto expected = active == 1 ? std::optional<std::size_t>{0}
+                : active == 3 ? std::optional<std::size_t>{1} : std::nullopt;
+            Require(loaded.cache.active_source_index == expected,
+                "active index must follow its original entry, never a shifted neighbor");
+            Require(loaded.cache.sources[0].source_identity ==
+                    (version == 3 ? std::optional<std::string>{"generation-a"} : std::nullopt),
+                "legacy schemas cannot establish a source association identity");
+            Require(!loaded.cache.sources[1].source_identity,
+                "absent source identities must remain unknown");
+        }
+    }
 }
 
 void TestMissingPersistenceCachesAreHealthyDefaults()
@@ -7825,20 +7860,20 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
     Require(restored_loads.size() == 1, "missing source should not be loaded");
 }
 
-void TestSourceSessionRestoresAtMostThirtyTwoSources()
+void TestSourceSessionRestoresAllSources()
 {
     const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
     const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
     std::vector<SourceFixture> fixtures;
     spectiary::SourceCollectionSessionStateCache saved_state;
-    for (std::size_t index = 0; index < 35; ++index) {
+    for (std::size_t index = 0; index < 36; ++index) {
         std::filesystem::path source_path = UniqueTempPath(std::string("_cap_") + std::to_string(index) + ".npy");
         TouchFile(source_path);
         fixtures.push_back(SourceFixture{source_path, 4});
         saved_state.sources.push_back(spectiary::SourceCollectionSavedSource{source_path, index % 4});
     }
-    saved_state.active_source_index = 34;
+    saved_state.active_source_index = 35;
     Require(
         spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, source_session_cache, saved_state),
         "source session cap fixture should save");
@@ -7852,11 +7887,11 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
         fixtures);
 
     const spectiary::SourceCollectionSessionView view = restored.View();
-    Require(view.sources.size() == 32, "restore should cap the source list at 32 entries");
-    Require(restored_loads.size() == 32, "restore should load only 32 source snapshots");
-    Require(view.sources.back().path == saved_state.sources[31].path, "last restored source should be the 32nd entry");
-    Require(view.current_source_index && *view.current_source_index == 31, "out-of-cap active source should not restore");
-    Require(view.snapshot->source.path == saved_state.sources[31].path, "last restored source should remain active");
+    Require(view.sources.size() == 36, "restore should retain every valid persisted source");
+    Require(restored_loads.size() == 36, "restore should load every source snapshot");
+    Require(view.sources.back().path == saved_state.sources[35].path, "last restored source should be the 36th entry");
+    Require(view.current_source_index == 35, "saved active source beyond entry 32 should restore");
+    Require(view.snapshot->source.path == saved_state.sources[35].path, "saved active source should be presented");
 }
 
 void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
@@ -11895,6 +11930,7 @@ void RunAllTests()
     TestRemovingActiveSourceActivatesNextSourceWorkflow();
     TestSourceSessionRestoresSourcesAndActiveIndex();
     TestSourceSessionStateCacheRoundTrip();
+    TestSourceSessionCacheMapsActiveIndexAndMigratesLegacyIdentity();
     TestSourceSessionStateCacheIgnoresCorruptJson();
     TestMissingPersistenceCachesAreHealthyDefaults();
     TestSourceSessionStateCacheIgnoresUnsupportedSchema();
@@ -11902,7 +11938,7 @@ void RunAllTests()
     TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase();
     TestStalePreparedCacheWarningsDoNotReappearAfterRepair();
     TestSourceSessionSkipsMissingSourcePathsOnRestore();
-    TestSourceSessionRestoresAtMostThirtyTwoSources();
+    TestSourceSessionRestoresAllSources();
     TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction();
     TestSupersededDeferredRestorePreservesPersistedSourceIntents();
     TestForgettingUnavailableDeferredSourcePersistsDuringRestore();

@@ -112,6 +112,11 @@ struct LoadedSampleLabelResult {
 
 class SampleAnnotationIoAdapter {
 public:
+    // Whether the reader can validate/reconstruct association without a saved
+    // source generation. This does not replace the reader's own validation.
+    [[nodiscard]] static bool CanValidateSourceAssociation(
+        const std::filesystem::path& path,
+        const SampleAnnotationSourceCompatibility& source);
     [[nodiscard]] std::optional<SampleAnnotationResult> Load(
         const std::filesystem::path& path,
         std::size_t expected_count,

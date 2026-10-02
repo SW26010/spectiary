@@ -1,4 +1,7 @@
 #include "helpers/source_load_test_support.h"
+#include "helpers/temporary_directory.h"
+#include "domain/sample_labeling_asdf_codec.h"
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/source_collection_load_queue_internal.h"
 
@@ -1431,6 +1434,127 @@ void TestUncooperativeRegistrationBoundsWaitButDelaysShutdown()
     Require(later_calls == 0, "timed-out queued work must not run during shutdown");
 }
 
+void TestDiscoveredCompanionsCannotBypassRestoreIdentity()
+{
+    spectiary::test_support::TemporaryDirectory temporary;
+    const auto source = temporary.path() / "source_X.npy";
+    WriteFixture(source);
+    const auto companion = spectiary::SourceCollectionCompanionAnnotationPath(source);
+    Require(companion.has_value(), "NPY source fixture needs a companion path");
+    Require(spectiary::ExportLabelValuesToNpy(*companion, std::vector<int>{1, 2, 3}),
+        "companion fixture should save");
+    LoadingHarness preparation(Adapters([](const auto& path, std::size_t index, const auto&) {
+        return MakeSnapshot(path, index);
+    }));
+    const auto explicit_open = preparation.Load({.path = source});
+    Require(std::get<spectiary::PreparedSourceCollectionPlan>(explicit_open.payload).context.manifest.annotations.size() == 1,
+        "explicit opens should retain companion discovery");
+    const auto identity = explicit_open.context_reuse_proof->identity.id;
+    const auto matching = preparation.Load({.path = source, .annotation_paths = {*companion},
+        .annotation_restore = spectiary::SourceCollectionAnnotationRestore{identity}});
+    Require(std::get<spectiary::PreparedSourceCollectionPlan>(matching.payload).context.manifest.annotations.size() == 1,
+        "a saved companion with matching identity should restore");
+    for (const bool has_saved_path : {true, false}) {
+        const auto rejected = preparation.Load({.path = source,
+            .annotation_paths = has_saved_path ? std::vector{*companion} : std::vector<std::filesystem::path>{},
+            .annotation_restore = spectiary::SourceCollectionAnnotationRestore{},
+        });
+        Require(std::get<spectiary::PreparedSourceCollectionPlan>(rejected.payload).context.manifest.annotations.empty(),
+            "companion discovery cannot resurrect an unproven or previously rejected attachment");
+    }
+}
+
+void TestRestoredCsvAnnotationsUseCanonicalNames()
+{
+    spectiary::test_support::TemporaryDirectory temporary;
+    const auto root = temporary.path();
+    const auto folder = root / "spectra";
+    std::filesystem::create_directory(folder);
+    constexpr auto spectrum = "wav,flux\n5000,1\n5001,2\n5002,3\n";
+    WriteFixture(folder / "a.csv", spectrum);
+    WriteFixture(folder / "b.csv", spectrum);
+    const auto named_csv = root / "named.csv";
+    WriteFixture(named_csv, "filename,label\nb.csv,second\na.csv,first\n");
+    spectiary::SourceCollectionLoadQueue queue(spectiary::test_support::EmptyWorkflowCachePaths());
+    const auto load = [&](const std::filesystem::path& source, const std::filesystem::path& annotation) {
+        auto completion = spectiary::test_support::WaitForSourceCompletion(queue, queue.Enqueue({
+            .path = source,
+            .annotation_paths = {annotation},
+            .annotation_restore = spectiary::SourceCollectionAnnotationRestore{},
+        }));
+        Require(completion.prepared.has_value(), completion.error_message);
+        return std::get<spectiary::PreparedSourceCollectionPlan>(std::move(completion.prepared->payload)).context;
+    };
+    const auto named = load(folder, named_csv);
+    Require(named.manifest.annotations.size() == 1 &&
+            std::get<std::string>(named.manifest.annotations[0].values[0].semantic) == "first" &&
+            std::get<std::string>(named.manifest.annotations[0].values[1].semantic) == "second",
+        "named CSV should align by canonical filename without a saved source identity");
+    std::filesystem::rename(folder / "b.csv", folder / "0_b.csv");
+    const auto renamed = load(folder, named_csv);
+    Require(renamed.manifest.annotations.empty() &&
+            !renamed.manifest.diagnostics.empty() &&
+            renamed.manifest.diagnostics[0].detail.find("unknown sample identity") != std::string::npos,
+        "CSV reader must reject renamed identities instead of guessing correspondence");
+    const auto positional_csv = root / "positional.csv";
+    WriteFixture(positional_csv, "sample,label\n0,first\n");
+    const auto positional = load(folder / "a.csv", positional_csv);
+    Require(positional.manifest.annotations.empty() &&
+            !positional.manifest.diagnostics.empty() &&
+            positional.manifest.diagnostics[0].detail.find("positional annotation") != std::string::npos,
+        "CSV with numeric row identities needs the same restore guard as NPY");
+}
+
+void TestRestoredAsdfRetainsItsOwnCompatibilityContract()
+{
+    spectiary::test_support::TemporaryDirectory temporary;
+    const auto source = temporary.path() / "source.csv";
+    const auto annotation = temporary.path() / "labels.asdf";
+    WriteFixture(source, "wav,flux\n5000,1\n5001,2\n");
+    spectiary::SourceCollectionLoadQueue queue(spectiary::test_support::EmptyWorkflowCachePaths());
+    const auto load = [&](spectiary::SourceCollectionLoadRequest request) {
+        auto completion = spectiary::test_support::WaitForSourceCompletion(queue, queue.Enqueue(std::move(request)));
+        Require(completion.prepared.has_value(), completion.error_message);
+        return std::move(*completion.prepared);
+    };
+    const auto initial = load({.path = source});
+    const auto& context = std::get<spectiary::PreparedSourceCollectionPlan>(initial.payload).context;
+    const auto descriptor = spectiary::BuildSampleLabelingCanonicalSourceDescriptor(*initial.snapshot, context);
+    spectiary::SampleLabelingDocument document;
+    document.source.base_identity = descriptor.base_identity;
+    document.source.kind = descriptor.source_kind;
+    document.source.name = descriptor.source_name;
+    document.source.fingerprint = descriptor.source_fingerprint;
+    document.source.sample_count = descriptor.sample_count;
+    document.annotation.values = {5};
+    document.labeling.id = "33333333-3333-4333-8333-333333333333";
+    document.labeling.name = "Quality";
+    const auto timestamp = spectiary::ParseCanonicalTimestamp("2026-01-02T03:04:05.006Z");
+    Require(timestamp.has_value(), "canonical timestamp fixture should parse");
+    document.labeling.canonical_metadata.created_at = *timestamp;
+    document.labeling.canonical_metadata.modified_at = *timestamp;
+    document.labeling.canonical_metadata.origin.kind = "manual";
+    document.labeling.labels = {{5, "accepted", "a"}};
+    {
+        std::ofstream stream(annotation, std::ios::binary);
+        const auto written = spectiary::WriteSampleLabelingAsdfDocument(stream, document);
+        Require(written.succeeded(), written.error.message);
+    }
+    for (const auto identity : {std::optional<std::string>{}, std::optional<std::string>{"old-generation"}}) {
+        const auto restored = load({.path = source, .annotation_paths = {annotation},
+            .annotation_restore = spectiary::SourceCollectionAnnotationRestore{identity}});
+        Require(std::get<spectiary::PreparedSourceCollectionPlan>(restored.payload).context.manifest.annotations.size() == 1,
+            "ASDF may prove its own association when session identity is missing or different");
+    }
+    WriteFixture(source, "wav,flux\n5000,100\n5001,200\n");
+    const auto changed = load({.path = source, .annotation_paths = {annotation},
+        .annotation_restore = spectiary::SourceCollectionAnnotationRestore{descriptor.base_identity}});
+    const auto& manifest = std::get<spectiary::PreparedSourceCollectionPlan>(changed.payload).context.manifest;
+    Require(manifest.annotations.empty() && std::ranges::any_of(manifest.diagnostics, [](const auto& diagnostic) {
+        return diagnostic.detail.find("ASDF labeling document source identity does not match") != std::string::npos;
+    }), "ASDF compatibility validation must still reject a changed source with the same sample count");
+}
+
 void TestProductionQueueLoadsRealSourcesAndReusesGenerations()
 {
     const auto folder = UniqueTempPath("_production_queue");
@@ -1505,6 +1629,9 @@ void TestProductionQueueLoadsRealSourcesAndReusesGenerations()
 int main()
 {
     try {
+        TestRestoredCsvAnnotationsUseCanonicalNames();
+        TestDiscoveredCompanionsCannotBypassRestoreIdentity();
+        TestRestoredAsdfRetainsItsOwnCompatibilityContract();
         TestProductionQueueLoadsRealSourcesAndReusesGenerations();
         TestPartialWorkflowCachePathsAreRejected();
         TestReservedStorageSourceAdmission();

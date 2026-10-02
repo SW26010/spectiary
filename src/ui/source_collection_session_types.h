@@ -305,6 +305,9 @@ struct SourceCollectionSavedSource {
     std::filesystem::path path;
     std::size_t last_spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
+    // Source-only identity of the generation that owns these attachments.
+    // Missing in legacy caches; never infer it from a newly opened source.
+    std::optional<std::string> source_identity;
 };
 
 struct SourceCollectionDeferredRestorePlan {

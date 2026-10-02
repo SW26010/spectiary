@@ -91,6 +91,10 @@ public:
         }
         SourceCollectionSessionStateCacheLoadResult result =
             LoadSourceCollectionSessionStateCache(runtime_paths_, cache_path_);
+        if (result.cache.active_source_index &&
+            *result.cache.active_source_index < result.cache.sources.size()) {
+            saved_active_source_path_ = result.cache.sources[*result.cache.active_source_index].path;
+        }
         persistence_.SetLoadWarning(std::move(result.warning));
         return std::move(result.cache);
     }
@@ -112,6 +116,7 @@ public:
     void MarkDirty()
     {
         if (!restoring_ && !cache_path_.empty()) {
+            preserve_saved_activation_ = false;
             persistence_.MarkDirty();
         }
     }
@@ -128,8 +133,11 @@ public:
             });
     }
 
-    void MarkDirtyAfterRestore()
+    void MarkDirtyAfterRestore(bool preserve_saved_activation = false)
     {
+        if (!preserve_saved_activation) {
+            preserve_saved_activation_ = false;
+        }
         if (cache_path_.empty()) {
             return;
         }
@@ -180,6 +188,20 @@ private:
         SourceCollectionSessionStateCache cache;
         cache.sources = sources;
         cache.active_source_index = active_source_index;
+        // Automatic attachment repair must not persist a peer startup's
+        // transient no-active-source presentation over the durable choice.
+        if (preserve_saved_activation_) {
+            cache.active_source_index.reset();
+            if (saved_active_source_path_) {
+                const auto key = SourcePathIdentityKey(*saved_active_source_path_);
+                for (std::size_t index = 0; index < sources.size(); ++index) {
+                    if (SourcePathIdentityKey(sources[index].path) == key) {
+                        cache.active_source_index = index;
+                        break;
+                    }
+                }
+            }
+        }
         if (SaveSourceCollectionSessionStateCache(runtime_paths_, cache_path_, cache)) {
             return {.saved = true};
         }
@@ -194,6 +216,8 @@ private:
     LocalUserStatePersistenceLifecycle persistence_;
     bool restoring_ = false;
     bool dirty_after_restore_ = false;
+    bool preserve_saved_activation_ = true;
+    std::optional<std::filesystem::path> saved_active_source_path_;
 };
 
 SourceCollectionIntent SourceCollectionIntent::SwitchActive(std::size_t source_index)
@@ -1443,8 +1467,18 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
                 transition.snapshot_index_to_load;
         }
     }
+    const auto unresolved = std::find_if(
+        unresolved_deferred_restore_sources_.begin(),
+        unresolved_deferred_restore_sources_.end(),
+        [&prepared_path_key](const SourceCollectionSavedSource& source) {
+            return SourcePathIdentityKey(source.path) == prepared_path_key;
+        });
+    if (unresolved != unresolved_deferred_restore_sources_.end() &&
+        unresolved->annotation_paths != workflow_->AnnotationPathsForSourceKey(prepared_path_key)) {
+        result.action.annotation_roster_changed = true;
+    }
     if (result.action.annotation_roster_changed) {
-        source_session_state_->MarkDirtyAfterRestore();
+        source_session_state_->MarkDirtyAfterRestore(true);
     }
     if (!activate) {
         result.loaded = true;
@@ -1755,6 +1789,9 @@ std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWi
 
     const std::size_t count = std::min(sources.size(), source_keys.size());
     for (std::size_t index = 0; index < count; ++index) {
+        if (const auto identity = workflow_->KnownSourceIdentity(source_keys[index])) {
+            sources[index].source_identity = identity->id;
+        }
         const auto paths = annotation_paths_by_source_key.find(source_keys[index]);
         if (paths != annotation_paths_by_source_key.end()) {
             sources[index].annotation_paths = paths->second;
@@ -1775,6 +1812,7 @@ std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWi
             for (auto& source : sources) {
                 if (SourcePathIdentityKey(source.path) == SourcePathIdentityKey(unresolved.path)) {
                     source.annotation_paths = unresolved.annotation_paths;
+                    source.source_identity = unresolved.source_identity;
                     break;
                 }
             }

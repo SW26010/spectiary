@@ -1,4 +1,5 @@
 #include "helpers/source_load_test_support.h"
+#include "helpers/temporary_directory.h"
 #include "domain/source_collection_manifest.h"
 #include "profile/navigation_latency_trace.h"
 #include "profile/profile_sink.h"
@@ -233,6 +234,127 @@ bool DrainUntil(
         std::this_thread::sleep_for(2ms);
     }
     return predicate();
+}
+
+void TestRestoredPositionalAnnotationsRequireSavedSourceIdentity()
+{
+    // Production parsing, cache codec, deferred activation, and save are all
+    // exercised together, including the restart after a rejected attachment.
+    for (const auto [legacy_identity, without_active] :
+         {std::pair{false, false}, std::pair{true, false}, std::pair{false, true}}) {
+        spectiary::test_support::TemporaryDirectory temporary;
+        const auto root = temporary.path();
+        const auto folder = root / "spectra";
+        std::filesystem::create_directory(folder);
+        for (const auto* name : {"0_a.csv", "1_c.csv", "2_d.csv", "3_e.csv", "4_b.csv", "5_f.csv"}) {
+            std::ofstream(folder / name) << "wav,flux\n5000,1\n5001,2\n5002,3\n";
+        }
+        const auto annotation = root / "oracle_y.npy";
+        const std::vector<int> values{-1, 0, 0, 1, 0, 1};
+        Require(spectiary::ExportLabelValuesToNpy(annotation, values), "annotation fixture should save");
+        const auto cache_path = root / "sources.json";
+        const auto navigation = root / "navigation.json";
+        const auto labeling = root / "labeling.json";
+        const auto workflow = root / "workflow.json";
+        const spectiary::SampleWorkflowPreparationPaths paths{labeling, workflow, navigation};
+        {
+            spectiary::SourceCollectionSession session(cache_path, navigation, labeling, workflow);
+            Activation activation(session, spectiary::SourceCollectionLoadQueue(paths));
+            (void)activation.OpenSource(folder, 3);
+            Require(DrainUntil(activation, [&] { return !activation.status().loading; }),
+                "initial folder open should complete");
+            (void)activation.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+                spectiary::SourceCollectionIntent::AddReadOnlyAnnotationResult(annotation)));
+            Require(session.View().navigation.current_annotations.size() == 1 &&
+                    session.View().navigation.current_annotations[0].display_text == "1",
+                "baseline sample should have its original annotation");
+            Require(session.FlushStateCaches(), "initial attachment should persist");
+        }
+        auto saved = spectiary::LoadSourceCollectionSessionStateCache({}, cache_path).cache;
+        Require(saved.sources.size() == 1 && saved.sources[0].source_identity,
+            "persisted attachments must carry source-only identity");
+        const auto original_identity = saved.sources[0].source_identity;
+        // Changing annotation bytes alone must not invalidate source identity.
+        Require(spectiary::ExportLabelValuesToNpy(annotation, std::vector<int>{0, 0, 0, 1, 0, 1}),
+            "annotation should be replaceable without changing the source generation");
+        {
+            spectiary::SourceCollectionSession session(cache_path, navigation, labeling, workflow);
+            Activation activation(session, spectiary::SourceCollectionLoadQueue(paths));
+            activation.BeginDeferredRestore();
+            Require(DrainUntil(activation, [&] { return !activation.status().loading; }),
+                "unchanged source restore should complete");
+            Require(session.View().navigation.current_annotations.size() == 1,
+                "matching source identity should restore positional annotations");
+            Require(session.FlushStateCaches(), "unchanged restore should save");
+        }
+        if (legacy_identity) {
+            saved.sources[0].source_identity.reset();
+            Require(spectiary::SaveSourceCollectionSessionStateCache({}, cache_path, saved),
+                "unknown identity fixture should save");
+        } else {
+            std::filesystem::rename(folder / "4_b.csv", folder / "0_b.csv");
+        }
+        for (int restart = 0; restart < 2; ++restart) {
+            spectiary::SourceCollectionSession session(cache_path, navigation, labeling, workflow,
+                spectiary::SampleLabelingStateCacheLoadPolicy::AllowPersistentOutputs, {},
+                without_active ? spectiary::SourceSessionStartupPolicy::RestoreRosterWithoutActive
+                               : spectiary::SourceSessionStartupPolicy::RestoreSavedActive);
+            Activation activation(session, spectiary::SourceCollectionLoadQueue(paths));
+            activation.BeginDeferredRestore();
+            Require(DrainUntil(activation, [&] { return !activation.status().loading; }),
+                "guarded restore should complete");
+            const auto view = session.View();
+            Require(view.sources.size() == 1 && view.navigation.has_active_source == !without_active &&
+                    view.navigation.current_annotations.empty(),
+                "unsafe attachment must not obscure the source or silently reattach on a later restart");
+            if (restart == 0 && !without_active) {
+                Require(std::ranges::any_of(view.navigation.annotation_diagnostics, [&](const auto& diagnostic) {
+                    return diagnostic.path == annotation && diagnostic.detail.find(
+                        legacy_identity ? "identity is unavailable" : "identity changed") != std::string::npos;
+                }), "rejected positional attachment must explain the identity failure");
+            }
+            Require(session.FlushStateCaches(), "guarded restore should persist");
+            const auto persisted = spectiary::LoadSourceCollectionSessionStateCache({}, cache_path).cache;
+            Require(persisted.sources.size() == 1 && persisted.sources[0].annotation_paths.empty(),
+                "rejected attachment must leave the automatic restore roster");
+            Require(persisted.active_source_index == 0,
+                "automatic attachment repair must preserve the durable active source, including peer startup");
+            if (!legacy_identity) {
+                Require(persisted.sources[0].source_identity != original_identity,
+                    "renaming a member should produce a new source identity");
+            }
+        }
+    }
+}
+
+void TestDeferredRestoreKeepsAllThirtySixSourcesAndSavedActivation()
+{
+    spectiary::test_support::TemporaryDirectory temporary;
+    const auto root = temporary.path();
+    const auto cache_path = root / "sources.json";
+    const auto navigation = root / "navigation.json";
+    const auto labeling = root / "labeling.json";
+    const auto workflow = root / "workflow.json";
+    spectiary::SourceCollectionSessionStateCache cache;
+    for (std::size_t index = 0; index < 36; ++index) {
+        const auto source = root / (std::to_string(index) + ".csv");
+        std::ofstream(source) << "wav,flux\n5000,1\n5001,2\n";
+        cache.sources.push_back({source, 0, {}});
+    }
+    cache.active_source_index = 35;
+    Require(spectiary::SaveSourceCollectionSessionStateCache({}, cache_path, cache),
+        "36-source fixture should save");
+    spectiary::SourceCollectionSession session(cache_path, navigation, labeling, workflow);
+    Activation activation(session, spectiary::SourceCollectionLoadQueue(
+        spectiary::SampleWorkflowPreparationPaths{labeling, workflow, navigation}));
+    activation.BeginDeferredRestore();
+    Require(DrainUntil(activation, [&] { return !activation.status().loading; }),
+        "all 36 sources should finish restoring");
+    const auto view = session.View();
+    Require(view.sources.size() == 36 && view.current_source_index == 35 &&
+            session.CurrentSampleSnapshot() &&
+            session.CurrentSampleSnapshot()->source.path == cache.sources[35].path,
+        "production deferred restore must preserve the complete roster and its last active source");
 }
 
 void TestStatusReportsCurrentLoadingSourcePath()
@@ -869,7 +991,7 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
             WriteFixture(bad_path);
             spectiary::SourceCollectionSessionStateCache saved;
             const spectiary::SourceCollectionSavedSource good{good_path, 0, {}};
-            const spectiary::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}};
+            const spectiary::SourceCollectionSavedSource bad{bad_path, 0, {annotation_path}, "offline-generation"};
             saved.sources = failure_first ? std::vector{bad, good} : std::vector{good, bad};
             saved.active_source_index = active_fails == failure_first ? 0 : 1;
             Require(spectiary::SaveSourceCollectionSessionStateCache(spectiary::RuntimePaths{}, saved_path, saved),
@@ -918,6 +1040,8 @@ void TestStartupFailuresFollowSavedActiveSourceAndRemainRemovable()
                     [&](const auto& source) { return source.path == bad_path; });
                 Require(saved_bad != persisted.sources.end() && saved_bad->annotation_paths == std::vector{annotation_path},
                     "failed rows must retain saved annotation associations");
+                Require(saved_bad->source_identity == bad.source_identity,
+                    "failed restores must retain the attachment's original source identity");
 
                 if (restart == 1) {
                     if (!active_fails || failure_first) {
@@ -1809,6 +1933,8 @@ void TestIdlePrefetchReportsLifecycleCompletion()
 int main()
 {
     try {
+        TestRestoredPositionalAnnotationsRequireSavedSourceIdentity();
+        TestDeferredRestoreKeepsAllThirtySixSourcesAndSavedActivation();
         TestStatusReportsCurrentLoadingSourcePath();
         TestRapidNavigationPublishesOnlyLatestIntent();
         TestFailedExplicitOpenProducesTerminalLifecycleResult();

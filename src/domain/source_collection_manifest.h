@@ -107,6 +107,8 @@ struct SourceCollectionContext {
 using SourceCollectionFolderScanProgress = std::function<void(std::size_t processed_entry_count)>;
 using SourceCollectionCancellationCheckpoint = std::function<void()>;
 
+enum class SourceCollectionAnnotationDiscovery { Enabled, Disabled };
+
 [[nodiscard]] SourceCollectionIdentity BuildSourceCollectionIdentity(const SpectrumSnapshot& snapshot);
 [[nodiscard]] SourceCollectionIdentity BuildSourceCollectionIdentity(
     const SpectrumSnapshot& snapshot,
@@ -114,7 +116,8 @@ using SourceCollectionCancellationCheckpoint = std::function<void()>;
 [[nodiscard]] SourceCollectionManifest LoadSourceCollectionManifest(const SpectrumSnapshot& snapshot);
 [[nodiscard]] SourceCollectionManifest LoadSourceCollectionManifestCancelable(
     const SpectrumSnapshot& snapshot,
-    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint);
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    SourceCollectionAnnotationDiscovery annotation_discovery = SourceCollectionAnnotationDiscovery::Enabled);
 [[nodiscard]] bool IngestReadOnlySampleAnnotation(
     SourceCollectionManifest& manifest,
     const std::filesystem::path& path,
@@ -147,7 +150,8 @@ using SourceCollectionCancellationCheckpoint = std::function<void()>;
 [[nodiscard]] SourceCollectionContext LoadSourceCollectionContextCancelable(
     const SpectrumSnapshot& snapshot,
     const SourceCollectionSingleFileState& file_state,
-    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint);
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    SourceCollectionAnnotationDiscovery annotation_discovery = SourceCollectionAnnotationDiscovery::Enabled);
 [[nodiscard]] SourceCollectionSingleFileState CaptureSourceCollectionSingleFileState(
     const std::filesystem::path& source_path,
     const std::vector<std::filesystem::path>& annotation_paths = {},

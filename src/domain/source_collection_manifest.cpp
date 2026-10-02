@@ -570,7 +570,8 @@ SourceCollectionManifest LoadSourceCollectionManifest(const SpectrumSnapshot& sn
 
 SourceCollectionManifest LoadSourceCollectionManifestCancelable(
     const SpectrumSnapshot& snapshot,
-    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    SourceCollectionAnnotationDiscovery annotation_discovery)
 {
     Checkpoint(cancellation_checkpoint);
     SourceCollectionManifest manifest;
@@ -593,11 +594,13 @@ SourceCollectionManifest LoadSourceCollectionManifestCancelable(
             snapshot.source.path,
             snapshot.collection.spectrum_count,
             cancellation_checkpoint);
-        LoadNpyAutoAnnotations(
-            manifest,
-            snapshot.source.path,
-            snapshot.collection.spectrum_count,
-            cancellation_checkpoint);
+        if (annotation_discovery == SourceCollectionAnnotationDiscovery::Enabled) {
+            LoadNpyAutoAnnotations(
+                manifest,
+                snapshot.source.path,
+                snapshot.collection.spectrum_count,
+                cancellation_checkpoint);
+        }
     }
     Checkpoint(cancellation_checkpoint);
     return manifest;
@@ -816,7 +819,8 @@ SourceCollectionContext LoadSourceCollectionContextCancelable(
 SourceCollectionContext LoadSourceCollectionContextCancelable(
     const SpectrumSnapshot& snapshot,
     const SourceCollectionSingleFileState& file_state,
-    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    SourceCollectionAnnotationDiscovery annotation_discovery)
 {
     Checkpoint(cancellation_checkpoint);
     if (snapshot.source.path.empty() || snapshot.collection.spectrum_count == 0) {
@@ -825,7 +829,7 @@ SourceCollectionContext LoadSourceCollectionContextCancelable(
     SourceCollectionIdentity identity = BuildSourceCollectionIdentity(snapshot, file_state);
     Checkpoint(cancellation_checkpoint);
     SourceCollectionManifest manifest =
-        LoadSourceCollectionManifestCancelable(snapshot, cancellation_checkpoint);
+        LoadSourceCollectionManifestCancelable(snapshot, cancellation_checkpoint, annotation_discovery);
     return SourceCollectionContext{std::move(identity), std::move(manifest)};
 }
 
