@@ -23,6 +23,7 @@ enum class SampleLabelingAsdfStoreErrorKind {
     DurableBaseUnavailable,
     AtomicWriteFailure,
     PublishedGenerationMismatch,
+    ExternalChangeConflict,
 };
 
 struct SampleLabelingAsdfStoreError {
@@ -75,11 +76,17 @@ public:
         return durable_base_;
     }
 
+    // A conflict permanently blocks this snapshot, including ordinary retry.
+    // Resolution must adopt the complete owner, never just refresh its digest.
+    [[nodiscard]] std::optional<SampleLabelingAsdfStoreError>
+        CheckCurrentness() const;
+
 private:
     SampleLabelingAsdfOpenSnapshot(
         std::filesystem::path path,
         SampleLabelingDocument document,
-        SampleLabelingAsdfDurableBase durable_base);
+        SampleLabelingAsdfDurableBase durable_base,
+        std::string generation_sha256);
 
     std::filesystem::path path_;
     // The open generation owns one stable document object. Value-only
@@ -88,6 +95,8 @@ private:
     // handles remain read-only and observe the advanced generation.
     std::shared_ptr<SampleLabelingDocument> document_;
     SampleLabelingAsdfDurableBase durable_base_;
+    std::string generation_sha256_;
+    mutable bool external_change_conflict_ = false;
 
     friend struct SampleLabelingAsdfStoreOpenResult;
     friend SampleLabelingAsdfStoreOpenResult

@@ -56,6 +56,37 @@ metadata, reconstruct missing documents, or override document contents.
 
 ## Coordination and partial writes
 
+Canonical ASDF snapshots use an owner-local SHA-256 content observation (#83).
+Opening brackets decoding and source validation with matching streaming digests;
+an observed change during that interval rejects the open. Before replacing an
+existing snapshot's path, both values-only and metadata saves hash the target
+after staging has completed. Missing, unreadable, or different bytes produce an
+`ExternalChangeConflict` without replacing or recreating the target. This detects
+content changes even when file length and timestamp are preserved; a byte-identical
+replacement is considered equivalent. It does not track file identity or history.
+
+The conflict is sticky for that snapshot, even if the old bytes later return.
+Dirty values, metadata, and save/retry diagnostics remain in memory. Pending
+tasks retain their original snapshot alongside their deferred leases across
+source/task switches; reactivation cannot adopt a newer disk baseline beneath
+old edits. Ordinary retry cannot resolve a conflict. Explicit resolution must
+accept/reload complete external content or preserve local work separately before
+reopening; there is no automatic merge or token-only refresh.
+
+Successful values publication advances the baseline using the closed sibling
+temporary file's digest, never an independent post-replacement path sample.
+Metadata publication establishes its next snapshot through the existing validated
+reopen. First-time owner creation retains its existing Save As behavior. The
+observation uses the shared 64 KiB streaming hash helper, O(file size) I/O and
+bounded hash memory, without parsing the document on the save check. A values
+save adds two hash passes: the target check and the staged generation baseline.
+
+This is optimistic detection of observable external changes. It does not make
+the final check and replacement atomic, detect change-and-restore between
+observations, or coordinate arbitrary external writers. Existing atomic
+replacement and Spectiary task/output leases retain their roles; no restrictive
+lifetime file handle, watcher, or second persistence owner is introduced.
+
 Both JSON owners use atomic replacement and the existing shared labeling commit
 lock. A commit reloads both owners and applies the existing task patch under that
 lock. Task/output leases and the source temporary-slot lease retain their roles.

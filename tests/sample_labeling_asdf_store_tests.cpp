@@ -1006,9 +1006,85 @@ void TestValueRewriteReplacementFailurePreservesWholeGeneration()
 
 }  // namespace
 
+void TestExternalGenerationConflicts()
+{
+    using namespace spectiary;
+    const auto directory = FreshTestDirectory("spectiary-asdf-external-change");
+    const auto path = directory / "labels.asdf";
+    const auto original = MakeDocument();
+    for (int mode = 0; mode < 4; ++mode) {
+        std::filesystem::remove(path);
+        Require(WriteSampleLabelingAsdfDocumentAtomically(path, original).succeeded(),
+            "conflict fixture should publish");
+        auto opened = OpenSampleLabelingAsdfDocumentStore(path, CompatibleSource(original));
+        Require(opened.succeeded(), "conflict fixture should open");
+        auto metadata_snapshot = *opened.snapshot;
+        const auto original_bytes = ReadAllBytes(path);
+        const auto timestamp = std::filesystem::last_write_time(path);
+        auto external_bytes = original_bytes;
+        ReplaceTextOnce(external_bytes, "Quality review", "Outside review");
+        if (mode == 0) {
+            WriteAllBytes(path, external_bytes);
+            std::filesystem::last_write_time(path, timestamp);
+        } else if (mode == 1) {
+            std::filesystem::rename(path, directory / "moved.asdf");
+            WriteAllBytes(path, external_bytes);
+        } else if (mode == 2) {
+            std::filesystem::remove(path);
+        } else {
+            std::filesystem::rename(path, directory / "missing.asdf");
+        }
+        auto replacement = original;
+        replacement.annotation.values[0] = 2;
+        const auto values = RewriteSampleLabelingAsdfValuesAtomically(*opened.snapshot, replacement);
+        Require(!values.succeeded() && values.error.kind ==
+                SampleLabelingAsdfStoreErrorKind::ExternalChangeConflict,
+            "external modification/replacement/removal must reject values save");
+        replacement.labeling.name = "Local edit";
+        const auto metadata = RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+            metadata_snapshot, replacement, CompatibleSource(original));
+        Require(!metadata.succeeded() && !metadata.document_replaced && metadata.error.kind ==
+                SampleLabelingAsdfStoreErrorKind::ExternalChangeConflict,
+            "metadata save must share the sticky conflict");
+        Require(mode < 2 ? ReadAllBytes(path) == external_bytes : !std::filesystem::exists(path),
+            "rejected save must preserve external bytes or absence");
+        Require(!HasTemporarySibling(path), "conflict must clean staged sibling");
+        WriteAllBytes(path, original_bytes);
+        Require(!RewriteSampleLabelingAsdfDocumentAtomically(*opened.snapshot, replacement).succeeded(),
+            "restoring original bytes must not clear the conflict on ordinary retry");
+    }
+
+    auto bytes = ReadAllBytes(path);
+    bool changed = false;
+    const auto raced_open = OpenSampleLabelingAsdfDocumentStore(
+        path, CompatibleSource(original), [&] {
+            if (!changed) {
+                changed = true;
+                ReplaceTextOnce(bytes, "Quality review", "Outside review");
+                WriteAllBytes(path, bytes);
+            }
+        });
+    Require(changed && !raced_open.succeeded(),
+        "open must not bind an independently changed generation to its snapshot");
+
+    WriteAllBytes(path, bytes);
+    auto opened = OpenSampleLabelingAsdfDocumentStore(path, CompatibleSource(original));
+    Require(opened.succeeded(), "external generation can be explicitly reopened");
+    auto replacement = opened.snapshot->document();
+    replacement.annotation.values[0] = 2;
+    const auto late = sample_labeling_asdf_store_test_seam::RewriteWithBeforeReplace(
+        *opened.snapshot, replacement, [&](const auto&, const auto& target) {
+            std::filesystem::remove(target);
+        });
+    Require(!late.succeeded() && late.error.kind == SampleLabelingAsdfStoreErrorKind::ExternalChangeConflict &&
+            !std::filesystem::exists(path),
+        "last pre-publication check must detect changes during staging");
+}
+
 int main()
 {
     try {
+        TestExternalGenerationConflicts();
         TestSourceKindMismatchIsRejected();
         TestAtomicFullWriteAndSourceAwareOpen();
         TestInitialCanonicalPublicationReopensExactGeneration();

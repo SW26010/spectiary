@@ -1,10 +1,12 @@
 #include "domain/sample_labeling_asdf_store.h"
 
 #include "platform/atomic_file.h"
+#include "platform/file_sha256.h"
 
 #include <exception>
 #include <ios>
 #include <new>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -46,6 +48,13 @@ SampleLabelingAsdfStoreError UnexpectedStoreError(
     return SampleLabelingAsdfStoreError{
         .kind = SampleLabelingAsdfStoreErrorKind::AtomicWriteFailure,
         .message = std::move(message)};
+}
+
+SampleLabelingAsdfStoreError ExternalChangeError()
+{
+    return {
+        .kind = SampleLabelingAsdfStoreErrorKind::ExternalChangeConflict,
+        .message = "External-change conflict: canonical ASDF is missing, changed, or cannot be verified. Local edits remain unsaved; resolve them explicitly and reopen the canonical owner before saving."};
 }
 
 std::optional<SampleLabelingAsdfStoreError> SourceCompatibilityError(
@@ -340,7 +349,16 @@ SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
         AtomicFileWriteOptions options;
         options.open_mode = std::ios::binary | std::ios::trunc;
         options.target_description = "ASDF labeling document";
-        options.before_replace = before_replace;
+        std::optional<SampleLabelingAsdfStoreError> currentness_error;
+        options.before_replace = [&](const auto& temporary, const auto& target) {
+            if (before_replace) {
+                before_replace(temporary, target);
+            }
+            currentness_error = snapshot.CheckCurrentness();
+            if (currentness_error) {
+                throw std::runtime_error(currentness_error->message);
+            }
+        };
         std::string atomic_error;
         const bool written = WriteFileAtomically(
             snapshot.path(),
@@ -372,6 +390,9 @@ SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
             },
             &atomic_error);
         if (!written) {
+            if (currentness_error) {
+                return {.error = std::move(*currentness_error)};
+            }
             return SampleLabelingAsdfStoreWriteResult{
                 .error = codec_error
                     ? CodecStoreError(*codec_error)
@@ -401,7 +422,8 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& replacement,
     const BeforeReplace& before_replace,
-    SampleLabelingAsdfDurableBase* refreshed_durable_base = nullptr) noexcept
+    SampleLabelingAsdfDurableBase* refreshed_durable_base,
+    std::string* published_sha256) noexcept
 {
     if (!snapshot.durable_base().valid()) {
         return SampleLabelingAsdfStoreWriteResult{
@@ -424,7 +446,21 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
         AtomicFileWriteOptions options;
         options.open_mode = std::ios::binary | std::ios::trunc;
         options.target_description = "ASDF labeling document";
-        options.before_replace = before_replace;
+        std::optional<SampleLabelingAsdfStoreError> currentness_error;
+        options.before_replace = [&](const auto& temporary, const auto& target) {
+            if (before_replace) {
+                before_replace(temporary, target);
+            }
+            const auto digest = ComputeFileSha256(temporary);
+            if (!digest) {
+                throw std::runtime_error("could not verify staged ASDF generation");
+            }
+            *published_sha256 = *digest;
+            currentness_error = snapshot.CheckCurrentness();
+            if (currentness_error) {
+                throw std::runtime_error(currentness_error->message);
+            }
+        };
         std::string atomic_error;
         const bool written = WriteFileAtomically(
             snapshot.path(),
@@ -452,6 +488,9 @@ SampleLabelingAsdfStoreWriteResult RewriteAtomically(
             },
             &atomic_error);
         if (!written) {
+            if (currentness_error) {
+                return {.error = std::move(*currentness_error)};
+            }
             return SampleLabelingAsdfStoreWriteResult{
                 .error = codec_error
                     ? CodecStoreError(*codec_error)
@@ -658,13 +697,27 @@ RewriteDocumentAndReopenAtomicallyWithCheckpoints(
 SampleLabelingAsdfOpenSnapshot::SampleLabelingAsdfOpenSnapshot(
     std::filesystem::path path,
     SampleLabelingDocument document,
-    SampleLabelingAsdfDurableBase durable_base)
+    SampleLabelingAsdfDurableBase durable_base,
+    std::string generation_sha256)
     : path_(std::move(path)),
       document_(
           std::make_shared<SampleLabelingDocument>(
               std::move(document))),
-      durable_base_(std::move(durable_base))
+      durable_base_(std::move(durable_base)),
+      generation_sha256_(std::move(generation_sha256))
 {
+}
+
+std::optional<SampleLabelingAsdfStoreError>
+SampleLabelingAsdfOpenSnapshot::CheckCurrentness() const
+{
+    if (!external_change_conflict_) {
+        const auto digest = ComputeFileSha256(path_);
+        external_change_conflict_ = !digest || *digest != generation_sha256_;
+    }
+    return external_change_conflict_
+        ? std::optional<SampleLabelingAsdfStoreError>(ExternalChangeError())
+        : std::nullopt;
 }
 
 SampleLabelingAsdfStoreOpenResult
@@ -674,6 +727,12 @@ OpenSampleLabelingAsdfDocumentStore(
     const SampleLabelingAsdfReadCheckpoint& checkpoint) noexcept
 {
     try {
+        // Bracket decoding/validation: a newer observation must not become
+        // the baseline for an older decoded generation.
+        const auto before = ComputeFileSha256(path);
+        if (!before) {
+            return {.error = ExternalChangeError()};
+        }
         SampleLabelingAsdfReadResult read =
             ReadSampleLabelingAsdfDocument(path, checkpoint);
         if (!read.succeeded()) {
@@ -696,11 +755,16 @@ OpenSampleLabelingAsdfDocumentStore(
                     .message =
                         "ASDF labeling document profile cannot provide a durable rewrite base"}};
         }
+        const auto after = ComputeFileSha256(path);
+        if (!after || *before != *after) {
+            return {.error = ExternalChangeError()};
+        }
         return SampleLabelingAsdfStoreOpenResult{
             .snapshot = SampleLabelingAsdfOpenSnapshot(
                 path,
                 std::move(*read.document),
-                std::move(*read.durable_base))};
+                std::move(*read.durable_base),
+                *before)};
     } catch (const std::bad_alloc&) {
         return SampleLabelingAsdfStoreOpenResult{
             .error = {
@@ -759,12 +823,14 @@ RewriteSampleLabelingAsdfValuesAtomically(
         const CanonicalTimestamp published_modified_at =
             replacement.labeling.canonical_metadata.modified_at;
         SampleLabelingAsdfDurableBase refreshed_durable_base;
+        std::string published_sha256;
         SampleLabelingAsdfStoreWriteResult result =
             RewriteAtomically(
                 snapshot,
                 replacement,
                 ValuesBeforeReplaceCheckpoint(),
-                &refreshed_durable_base);
+                &refreshed_durable_base,
+                &published_sha256);
         if (result.succeeded()) {
             snapshot.document_->build_source =
                 std::move(published_build_source);
@@ -773,6 +839,7 @@ RewriteSampleLabelingAsdfValuesAtomically(
             snapshot.document_->labeling.canonical_metadata.modified_at =
                 published_modified_at;
             snapshot.durable_base_ = std::move(refreshed_durable_base);
+            snapshot.generation_sha256_ = std::move(published_sha256);
         }
         return result;
     } catch (const std::bad_alloc&) {

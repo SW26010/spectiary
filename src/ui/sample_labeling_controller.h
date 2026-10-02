@@ -355,6 +355,9 @@ private:
         std::string task_identity_key;
         std::string temporary_slot_key;
         std::vector<std::string> output_artifact_keys;
+        // Dirty canonical content must keep its original generation across
+        // source/task switches; rehydration may not rebase it onto external bytes.
+        std::optional<SampleLabelingAsdfOpenSnapshot> pending_asdf_snapshot;
     };
 
     struct TaskEditLeaseAcquireResult {

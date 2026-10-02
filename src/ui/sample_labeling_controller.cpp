@@ -4262,11 +4262,30 @@ SampleLabelingController::HydrateCanonicalAsdfTask(
         return std::nullopt;
     }
 
-    SampleLabelingAsdfStoreOpenResult opened =
-        OpenSampleLabelingAsdfDocumentStore(
+    const auto deferred = std::find_if(
+        deferred_task_leases_.begin(), deferred_task_leases_.end(),
+        [&](const TaskEditLeaseSet& leases) {
+            return leases.task_identity_key == TaskIdentityEditLeaseKey(
+                *active_source_identity_, cached_task.task_id);
+        });
+    SampleLabelingAsdfStoreOpenResult opened;
+    if (HasPendingOutputSave(cached_task) &&
+        deferred != deferred_task_leases_.end() &&
+        deferred->pending_asdf_snapshot) {
+        opened.snapshot = deferred->pending_asdf_snapshot;
+        if (const auto mismatch = CheckSampleLabelingSourceCompatibility(
+                opened.snapshot->document(),
+                SampleLabelingCompatibilityView(*active_source_descriptor_))) {
+            if (error_message != nullptr) {
+                *error_message = mismatch->message;
+            }
+            return std::nullopt;
+        }
+    } else {
+        opened = OpenSampleLabelingAsdfDocumentStore(
             *cached_task.persistence.output_path,
-            SampleLabelingCompatibilityView(
-                *active_source_descriptor_));
+            SampleLabelingCompatibilityView(*active_source_descriptor_));
+    }
     if (!opened.succeeded()) {
         if (error_message != nullptr) {
             *error_message = opened.error.message.empty()
@@ -5361,6 +5380,9 @@ bool SampleLabelingController::LocalTaskProjectionProtected(
 void SampleLabelingController::AdoptActiveTaskLeases(
     TaskEditLeaseSet leases)
 {
+    // The prepared snapshot is handed back to active_asdf_snapshot_; do not
+    // retain a second, potentially older durable base on the active lease.
+    leases.pending_asdf_snapshot.reset();
     active_task_leases_ = std::move(leases);
 }
 
@@ -5486,6 +5508,10 @@ void SampleLabelingController::ReleaseUnneededActiveLeaseComponents()
 
 void SampleLabelingController::DeferActiveTaskLeases()
 {
+    if (const auto* task = ActiveTask();
+        task && HasPendingOutputSave(*task) && active_asdf_snapshot_) {
+        active_task_leases_.pending_asdf_snapshot = active_asdf_snapshot_;
+    }
     static_cast<void>(
         DowngradeActiveCanonicalTaskProjection());
     if (!active_task_leases_.task_identity_key.empty()) {

@@ -1857,6 +1857,63 @@ void TestMissingOwnerDeletionRevalidatesLatestDurablePath()
         "missing-owner deletion must fail closed when the leased durable record has regained an existing owner path");
 }
 
+void TestCanonicalExternalConflictRetainsDirtyGeneration()
+{
+    for (bool missing : {false, true}) {
+        const auto directory = FreshTestDirectory(missing
+            ? "spectiary_canonical_external_missing"
+            : "spectiary_canonical_external_changed");
+        const auto path = directory / "quality.asdf";
+        const auto cache = directory / "sample-labeling-tasks.json";
+        const auto original = CanonicalOwnerDocument();
+        Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, original).succeeded(),
+            "external conflict fixture should publish");
+        SaveCanonicalOwnerCache(cache, path);
+        spectiary::SampleLabelingController controller(cache);
+        controller.ActivateSource(CanonicalOwnerSourceIdentity(), CanonicalOwnerSourceDescriptor());
+        auto external = original;
+        external.labeling.name = "External task name";
+        external.annotation.values[1] = 7;
+        if (missing) {
+            std::filesystem::remove(path);
+        } else {
+            Require(spectiary::WriteSampleLabelingAsdfDocumentAtomically(path, external).succeeded(),
+                "external writer should replace the owner");
+        }
+        const auto failed = controller.AssignLabel(0, 2);
+        Require(failed.write.changed && !failed.operation.output_saved &&
+                ActiveTask(controller)->values.Complete() == std::vector<int>({2, 2, 7}) &&
+                ActiveTask(controller)->persistence.pending_sample_indices.contains(0) &&
+                ActiveTask(controller)->persistence.save_state.kind == spectiary::SampleLabelSaveStateKind::Failed,
+            "external conflict must retain the local edit and failed save state");
+        const auto rename = controller.RenameActiveTask(original.labeling.id, "Local task name");
+        Require(rename.changed && !rename.output_saved &&
+                ActiveTask(controller)->persistence.metadata_save_pending,
+            "metadata changes must stay dirty after external conflict");
+        // Reactivation must not put G1 dirty edits on a freshly opened G2 base.
+        controller.ClearActiveSource();
+        controller.ActivateSource(CanonicalOwnerSourceIdentity(), CanonicalOwnerSourceDescriptor());
+        for (int retry = 0; retry < 3; ++retry) {
+            if (const auto deadline = controller.NextMaintenanceDeadline()) {
+                static_cast<void>(controller.RunMaintenance(*deadline));
+            }
+        }
+        Require(ActiveTask(controller) &&
+                ActiveTask(controller)->values.Complete() == std::vector<int>({2, 2, 7}) &&
+                ActiveTask(controller)->persistence.metadata_save_pending &&
+                ActiveTask(controller)->persistence.pending_sample_indices.contains(0),
+            "source switches and retries must preserve dirty content on its original generation");
+        if (missing) {
+            Require(!std::filesystem::exists(path), "retry must not recreate the missing owner");
+        } else {
+            const auto read = spectiary::ReadSampleLabelingAsdfDocument(path);
+            Require(read.succeeded() && read.document->labeling.name == external.labeling.name &&
+                    read.document->annotation.values == external.annotation.values,
+                "retry must leave the external owner untouched");
+        }
+    }
+}
+
 void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
 {
     const std::filesystem::path directory =
@@ -12156,6 +12213,7 @@ int main(int argc, char* argv[])
         run("TestPendingCanonicalRelinkActivationRetainsBothOwnerLeases", TestPendingCanonicalRelinkActivationRetainsBothOwnerLeases);
         run("TestInactiveCanonicalRelinkIgnoresUnrelatedPendingActiveTask", TestInactiveCanonicalRelinkIgnoresUnrelatedPendingActiveTask);
         run("TestMissingOwnerDeletionRevalidatesLatestDurablePath", TestMissingOwnerDeletionRevalidatesLatestDurablePath);
+        run("TestCanonicalExternalConflictRetainsDirtyGeneration", TestCanonicalExternalConflictRetainsDirtyGeneration);
         run("TestCanonicalAsdfValueFailureRetainsOverlayAndRetries", TestCanonicalAsdfValueFailureRetainsOverlayAndRetries);
         run("TestCanonicalAsdfMetadataMutationsPublishFullGenerations", TestCanonicalAsdfMetadataMutationsPublishFullGenerations);
         run("TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration", TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration);
