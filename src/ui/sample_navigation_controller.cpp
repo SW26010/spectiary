@@ -496,17 +496,6 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::KnownSourceI
     };
 }
 
-std::optional<std::size_t> SampleNavigationController::KnownSourceCurrentIndex(
-    std::string_view source_key) const
-{
-    const auto mapped = source_key_to_session_key_.find(std::string(source_key));
-    if (mapped == source_key_to_session_key_.end()) {
-        return std::nullopt;
-    }
-    const auto session = sessions_.find(mapped->second);
-    return session == sessions_.end() ? std::nullopt : session->second.current_index;
-}
-
 std::optional<SourceCollectionIdentity> SampleNavigationController::active_source_identity() const
 {
     if (!active_source_key_) {
@@ -970,6 +959,11 @@ std::optional<std::size_t> SampleNavigationController::SetSampleFilter(
     }
     if (included_samples.size() != session->spectrum_count) {
         return ClearSampleFilter(defer_navigation);
+    }
+    // Re-evaluating unchanged membership (for example after a label write)
+    // must not relocate an explicitly displayed out-of-sequence sample.
+    if (session->filter_active && session->filter_included_samples == included_samples) {
+        return std::nullopt;
     }
 
     const std::optional<std::size_t> previous_index = session->current_index;

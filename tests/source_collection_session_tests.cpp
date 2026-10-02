@@ -2636,6 +2636,8 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {2, 2, 2});
+    const auto source_hint = session.LoadHintForSource(source_path);
+    Require(source_hint.has_value(), "loaded source should expose reuse knowledge");
 
     const spectiary::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "1", true));
@@ -2655,6 +2657,16 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
         session.View().current_sample_snapshot == nullptr,
         "empty sequence should suppress the stale snapshot for sample displays");
     Require(!session.View().labeling.current_index, "labeling should not receive a fallback current row");
+    Require(session.View().labeling.has_active_source,
+        "empty sample sequence should retain source-level labeling availability");
+    const auto empty_hint = session.LoadHintForSource(source_path);
+    const auto target_hint = session.LoadHintForSource(source_path, 0);
+    Require(empty_hint && target_hint &&
+        empty_hint->reuse.identity().id == source_hint->reuse.identity().id &&
+        empty_hint->reuse.live_workflow_revision() > source_hint->reuse.live_workflow_revision() &&
+        target_hint->reuse.live_workflow_revision() == empty_hint->reuse.live_workflow_revision() &&
+        !empty_hint->reuse.resident_snapshot(),
+        "empty sample sequence must retain current live source evidence without inventing a resident target");
     Require(!result.action.snapshot_changed, "empty sequence should not load a fallback sample snapshot");
     Require(loaded_indices == std::vector<std::size_t>({0}), "empty sequence should not call LoadActiveSourceAt");
 }
@@ -9623,7 +9635,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
 
     const std::optional<spectiary::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
-    Require(hint && hint->spectrum_index == 1, "non-active source reload should capture its live row");
+    Require(hint.has_value(), "non-active source reload should retain source reuse knowledge");
     Require(
         hint->reuse.identity().id == identity.id,
         "non-active source reload should expose its stable generation");

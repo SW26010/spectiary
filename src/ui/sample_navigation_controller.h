@@ -114,8 +114,6 @@ public:
         std::string_view source_key);
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;
-    [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
-        std::string_view source_key) const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> active_source_identity() const;
     [[nodiscard]] std::optional<SampleLabelingSourceCompatibility>
         active_source_compatibility() const;

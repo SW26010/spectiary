@@ -162,8 +162,6 @@ public:
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActiveSourceIdentity() const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;
-    [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
-        std::string_view source_key) const;
     [[nodiscard]] std::optional<SampleWorkflowSourceState> WorkflowStateForSourceIdentity(
         std::string_view source_identity);
     [[nodiscard]] std::optional<SampleLabelingSourceState> LabelingStateForSourceIdentity(

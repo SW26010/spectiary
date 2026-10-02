@@ -2588,12 +2588,36 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGui::End();
         return;
     }
+    // Task persistence remains visible even when sample filtering leaves no
+    // current sample.
+    const std::string save_status =
+        SampleWorkflowSaveStateText(
+            language,
+            labeling_view.save_state);
+    RenderText(save_status);
+    const std::string save_message =
+        SampleWorkflowSaveMessageText(
+            language,
+            labeling_view.save_state);
+    if (!save_message.empty()) {
+        RenderDisabledText(save_message);
+    }
+    const std::string_view save_state_reminder =
+        SaveStateReminder(
+            language,
+            labeling_view);
+    RenderDisabledText(save_state_reminder);
+    render_labeling_state_diagnostics();
+    if (labeling_view.output_path) {
+        const std::string path = UserPathDisplayText(*labeling_view.output_path, runtime_paths_);
+        ImGui::TextDisabled("%s", path.c_str());
+    }
+
     if (!current_index) {
-        // Only current-sample progress, labels, and assignment controls depend
-        // on a resolved position in the filtered sequence.
+        // Current-sample labels and assignment controls require a displayed
+        // sample, which may be outside the sample navigation sequence.
         editing_label_code_.reset();
         ResetLabelShortcutCapture();
-        render_labeling_state_diagnostics();
         route_latest_labeling_shortcuts(false);
         ImGui::End();
         return;
@@ -2660,29 +2684,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
         if (!resume_available) {
             ImGui::EndDisabled();
         }
-    }
-
-    const std::string save_status =
-        SampleWorkflowSaveStateText(
-            language,
-            labeling_view.save_state);
-    RenderText(save_status);
-    const std::string save_message =
-        SampleWorkflowSaveMessageText(
-            language,
-            labeling_view.save_state);
-    if (!save_message.empty()) {
-        RenderDisabledText(save_message);
-    }
-    const std::string_view save_state_reminder =
-        SaveStateReminder(
-            language,
-            labeling_view);
-    RenderDisabledText(save_state_reminder);
-    render_labeling_state_diagnostics();
-    if (labeling_view.output_path) {
-        const std::string path = UserPathDisplayText(*labeling_view.output_path, runtime_paths_);
-        ImGui::TextDisabled("%s", path.c_str());
     }
 
     ImGui::Spacing();

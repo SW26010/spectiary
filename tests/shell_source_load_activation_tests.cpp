@@ -4299,7 +4299,7 @@ void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStay
     std::filesystem::remove_all(csv_folder);
 }
 
-void TestExistingMemberDisplaysOutsideSampleFilter()
+void CheckExistingMemberDisplaysOutsideSampleFilter(bool empty_sequence)
 {
     using Access = spectiary::ShellUiTestAccess;
     const std::filesystem::path folder =
@@ -4396,27 +4396,83 @@ void TestExistingMemberDisplaysOutsideSampleFilter()
             ApplySampleFiltering(
                 spectiary::SampleFilteringIntent::
                     AddSource(filter_source_id)));
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel({7, "accepted", 'a'})));
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(false)));
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
+    Require(session.FlushStateCaches(), "sample task checkpoint should settle before sample filtering");
+    const auto original_labeling = session.View().labeling;
     (void)session.Submit(
         spectiary::SourceCollectionSessionIntent::
             ApplySampleFiltering(
                 spectiary::SampleFilteringIntent::
                     SetFilterValueSelected(
                         filter_source_id,
-                        "1",
+                        empty_sequence ? "2" : "1",
                         true)));
     const spectiary::SourceCollectionSessionView filtered_view =
         session.View();
     Require(
         filtered_view.filter.evaluation.active &&
-            filtered_view.filter.evaluation.included_count == 2 &&
-            filtered_view.navigation.sequence_count == 2 &&
-            filtered_view.navigation.current_index == 0,
+            filtered_view.filter.evaluation.included_count == (empty_sequence ? 0 : 2) &&
+            filtered_view.navigation.sequence_count == (empty_sequence ? 0 : 2) &&
+            filtered_view.navigation.current_index ==
+                (empty_sequence ? std::optional<std::size_t>{} : std::optional<std::size_t>{0}),
         "filtered external FITS fixture should exclude the preferred member");
     (void)Access::Submit(*shell, spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
         spectiary::SampleSortingIntent::SetSortSource("sample-name")));
     (void)Access::Submit(*shell, spectiary::SourceCollectionSessionIntent::ApplySampleSorting(
         spectiary::SampleSortingIntent::SetSortDirection(spectiary::SampleNavigationSortDirection::Descending)));
     Require(DrainAllSourceLoads(*shell), "active sorting should settle before explicit open");
+    if (empty_sequence) {
+        const auto select_empty = [&] {
+            (void)Access::Submit(*shell,
+                spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+                    spectiary::SampleFilteringIntent::AddSource(filter_source_id)));
+            (void)Access::Submit(*shell,
+                spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+                    spectiary::SampleFilteringIntent::SetFilterValueSelected(filter_source_id, "2", true)));
+        };
+        for (const bool reset : {true, false}) {
+            const auto& empty = session.View();
+            Require(empty.labeling.has_active_source && empty.labeling.has_active_task &&
+                empty.labeling.task_id == original_labeling.task_id &&
+                empty.labeling.task_name == original_labeling.task_name,
+                "empty sample sequence must retain the source and task header");
+            Require(empty.labeling.save_state.kind == spectiary::SampleLabelSaveStateKind::InternalDraftOnly,
+                "empty sample sequence must show the completed draft checkpoint status");
+            Require(
+                empty.labeling.current_code == spectiary::kUnlabeledSampleLabelCode &&
+                !empty.labeling.current_index && !empty.current_sample_snapshot,
+                "empty sample sequence must not expose a stale sample or label");
+            const auto write = Access::Submit(*shell,
+                spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+                    spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
+            Require((!write.label_write || !write.label_write->write.changed) &&
+                session.View().labeling.labeled_count == original_labeling.labeled_count,
+                "empty sample sequence must reject sample label writes");
+            Require(session.FlushStateCaches(), "empty sample workflow should persist before recovery");
+            (void)Access::Submit(*shell,
+                spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+                    reset ? spectiary::SampleFilteringIntent::Clear()
+                          : spectiary::SampleFilteringIntent::SetFilterValueSelected(filter_source_id, "2", false)));
+            Require(DrainAllSourceLoads(*shell) && Access::LoadError(*shell).empty(),
+                "reset and deselect must recover an empty sample sequence through the load queue");
+            Require(session.CurrentSampleSnapshot() && session.View().navigation.sequence_count == 3 &&
+                session.View().labeling.task_id == original_labeling.task_id &&
+                session.View().labeling.has_active_source && session.View().sorting.active,
+                "sample recovery must preserve the source task and sorting");
+            select_empty();
+        }
+    }
     Require(
         session.FlushStateCaches(),
         "filtered external FITS fixture should persist its workflow state");
@@ -4429,6 +4485,11 @@ void TestExistingMemberDisplaysOutsideSampleFilter()
                     SetOpenExternalSourceAsFolder(true))
             .applied(),
         "filtered external FITS folder setting should apply");
+    if (empty_sequence) {
+        Require(Access::ApplySettingsUiIntent(*shell,
+            spectiary::ApplicationSettingsIntent::SetOpenExternalSourceAsFolder(false)).applied(),
+            "empty sequence regression must not be masked by parent-folder open policy");
+    }
     shell->OpenExternalSource(preferred);
     Require(
         DrainAllSourceLoads(*shell),
@@ -4451,17 +4512,46 @@ void TestExistingMemberDisplaysOutsideSampleFilter()
             !session.View().navigation.can_move_previous && !session.View().navigation.can_move_next &&
             session.View().sorting.active &&
             session.View().sorting.direction == spectiary::SampleNavigationSortDirection::Descending &&
-            session.View().filter.evaluation.included_count == 2,
+            session.View().filter.evaluation.included_count == (empty_sequence ? 0 : 2) &&
+            session.View().labeling.has_active_source && session.View().labeling.has_active_task &&
+            session.View().labeling.task_id == original_labeling.task_id &&
+            session.View().labeling.current_index == 1,
         "explicit member must retain source identity without a sample-filter cursor or duplicate source");
+    (void)Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
+    const auto member_write = Access::Submit(*shell,
+        spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
+    Require(member_write.label_write && member_write.label_write->write.changed &&
+        member_write.label_write->write.sample_index == 1,
+        "explicit member must accept a label write at its actual source row");
+    Require(DrainAllSourceLoads(*shell), "explicit member label write should settle");
+    Require(session.View().labeling.current_index == 1 && session.View().labeling.current_code == 7 &&
+        !session.View().navigation.current_sequence_position,
+        "explicit member labels must target the displayed row without advancing outside the sequence");
     const auto blocked = shell->GotoSpectrumForAutomation(1, std::nullopt);
     Require(blocked.error == spectiary::ShellAutomationNavigationError::FilteredOut,
         "ordinary manual location must reject excluded member");
-    const auto relocated = shell->GotoSpectrumForAutomation(2, std::nullopt);
-    Require(relocated.error == spectiary::ShellAutomationNavigationError::None && DrainAllSourceLoads(*shell) &&
-        session.View().navigation.current_sequence_position == 0 && session.View().navigation.can_move_next,
-        "valid manual location must restore the sorted sample-filter cursor");
+    if (!empty_sequence) {
+        const auto relocated = shell->GotoSpectrumForAutomation(2, std::nullopt);
+        Require(relocated.error == spectiary::ShellAutomationNavigationError::None && DrainAllSourceLoads(*shell) &&
+            session.View().navigation.current_sequence_position == 0 && session.View().navigation.can_move_next,
+            "valid manual location must restore the sorted sample-filter cursor");
+    } else {
+        // Re-enter the ordinary empty state before exercising the in-app entry point.
+        (void)Access::Submit(*shell,
+            spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(spectiary::SampleFilteringIntent::Clear()));
+        (void)Access::Submit(*shell,
+            spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(spectiary::SampleFilteringIntent::AddSource(filter_source_id)));
+        (void)Access::Submit(*shell,
+            spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(
+                spectiary::SampleFilteringIntent::SetFilterValueSelected(filter_source_id, "2", true)));
+        Require(!session.CurrentSampleSnapshot(), "in-app member open should start without a current sample");
+    }
     shell->OpenSource(preferred);
-    Require(DrainAllSourceLoads(*shell) && !session.View().navigation.current_sequence_position,
+    Require(DrainAllSourceLoads(*shell) && !session.View().navigation.current_sequence_position &&
+        session.View().sources.size() == 1 && session.View().labeling.task_id == original_labeling.task_id,
         "in-app member reopening must use the same explicit display rule");
     (void)Access::Submit(*shell,
         spectiary::SourceCollectionSessionIntent::ApplySampleFiltering(spectiary::SampleFilteringIntent::Clear()));
@@ -4474,6 +4564,16 @@ void TestExistingMemberDisplaysOutsideSampleFilter()
     shell.reset();
     std::filesystem::remove_all(folder);
     std::filesystem::remove_all(state_root);
+}
+
+void TestExistingMemberDisplaysOutsideSampleFilter()
+{
+    CheckExistingMemberDisplaysOutsideSampleFilter(false);
+}
+
+void TestEmptySampleSequenceRecoveryAndMemberOpen()
+{
+    CheckExistingMemberDisplaysOutsideSampleFilter(true);
 }
 
 void TestExistingMemberPreservesLiveSampleFilter()
@@ -7408,6 +7508,7 @@ int main()
         RUN_SHELL_TEST(TestExplicitOpenTracesAcceptedPathThroughFirstPresent);
         RUN_SHELL_TEST(TestSupersededExternalPreferredTraceUsesResolvedMemberIndex);
         RUN_SHELL_TEST(TestExistingMemberDisplaysOutsideSampleFilter);
+        RUN_SHELL_TEST(TestEmptySampleSequenceRecoveryAndMemberOpen);
         RUN_SHELL_TEST(TestExistingMemberPreservesLiveSampleFilter);
         RUN_SHELL_TEST(TestSourceOpenResolutionRunsOnWorkerAndCancels);
         RUN_SHELL_TEST(TestExternalStartupPreservesDeferredRestoreAnnotationContext);

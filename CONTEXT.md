@@ -190,6 +190,9 @@ state. Ordinary sequence navigation provides no current sample to downstream
 sample workflow or plot surfaces in this state. Explicitly opening an existing
 filesystem member may still provide a displayed sample, even when the sequence
 is empty, without assigning a sequence position or Previous/Next cursor.
+An empty sequence retains the active source and its task header and save state.
+Source reuse identity, live workflow revision, and context/listing proofs do not
+depend on a current sample; only resident snapshot lookup needs a target row.
 _Avoid_: Source collection, narrowed-sequence index, labeling queue
 
 **Sample filtering**:

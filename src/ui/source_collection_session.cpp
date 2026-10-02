@@ -1067,8 +1067,9 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
 {
     const std::string source_key = SourcePathIdentityKey(path);
     const std::optional<SourceCollectionIdentity> identity = workflow_->KnownSourceIdentity(source_key);
-    const std::optional<std::size_t> current_index = workflow_->KnownSourceCurrentIndex(source_key);
-    if (!identity || !current_index) {
+    // Source knowledge survives an empty sample navigation sequence. The
+    // requested row only determines whether a resident snapshot can be reused.
+    if (!identity) {
         return std::nullopt;
     }
     const auto revision = live_workflow_revisions_.find(identity->id);
@@ -1096,7 +1097,6 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
               std::move(folder_generation));
     return SourceCollectionLoadHint{
         std::move(reuse),
-        *current_index,
     };
 }
 

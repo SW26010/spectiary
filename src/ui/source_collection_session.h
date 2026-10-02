@@ -35,7 +35,6 @@ class SourceCollectionSessionStatePersistence;
 
 struct SourceCollectionLoadHint {
     SourceCollectionReuseCandidate reuse;
-    std::size_t spectrum_index = 0;
 };
 
 struct SourceCollectionSnapshotPrefetchPlan {

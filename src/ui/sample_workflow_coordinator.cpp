@@ -1020,12 +1020,6 @@ std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::KnownSourceId
     return navigation_.KnownSourceIdentity(source_key);
 }
 
-std::optional<std::size_t> SampleWorkflowCoordinator::KnownSourceCurrentIndex(
-    std::string_view source_key) const
-{
-    return navigation_.KnownSourceCurrentIndex(source_key);
-}
-
 std::optional<SampleWorkflowSourceState> SampleWorkflowCoordinator::WorkflowStateForSourceIdentity(
     std::string_view source_identity)
 {
@@ -2493,7 +2487,7 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
     SourceCollectionLabelingView view;
     const SampleLabelingControllerView labeling_view = labeling_.View();
     const SampleLabelingRecoveryView recovery_view = labeling_.RecoveryView();
-    view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
+    view.has_active_source = navigation_.active_source_identity().has_value();
     view.source_identity = recovery_view.source_identity;
     if (const std::optional<SampleLabelingSourceCompatibility>
             source = navigation_.active_source_compatibility()) {

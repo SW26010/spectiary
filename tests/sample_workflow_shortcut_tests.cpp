@@ -648,6 +648,72 @@ LabelingTaskNameFrameObservation RenderLabelingTaskNameFrame(
     return observation;
 }
 
+#ifdef IMGUI_ENABLE_TEST_ENGINE
+void TestLabelingPanelKeepsSaveInformationWithoutCurrentSample()
+{
+    ScopedImGuiContext context;
+    spectiary::SampleWorkflowPanelUi panel;
+    auto view = MakeLabelingPanelView(8, 'g');
+    view.labeling.current_code = 8;
+    view.labeling.label_set.labels.front().name = "Sample-only label";
+    (void)RenderLabelingTaskNameFrame(panel, view);
+    const auto populated = RenderLabelingTaskNameFrame(panel, view, true);
+    Require(populated.logged_text.find("Sample-only label") != std::string::npos &&
+        WidgetBounds("ClearCurrentSampleLabel").has_value(),
+        "a displayed sample should render its label and assignment controls");
+
+    view.labeling.current_index.reset();
+    view.current_sample_snapshot.reset();
+    view.navigation.current_index.reset();
+    view.navigation.sequence_active = true;
+    view.navigation.sequence_empty = true;
+    view.navigation.sequence_count = 0;
+    for (const bool temporary : {true, false}) {
+        view.labeling.active_task_is_temporary = temporary;
+        view.labeling.output_path = temporary
+            ? std::optional<std::filesystem::path>{}
+            : std::optional<std::filesystem::path>{"quality-status.asdf"};
+        for (const auto kind : {
+                 spectiary::SampleLabelSaveStateKind::InternalDraftOnly,
+                 spectiary::SampleLabelSaveStateKind::AutosavedToOutput,
+                 spectiary::SampleLabelSaveStateKind::Pending,
+                 spectiary::SampleLabelSaveStateKind::Failed}) {
+            auto& state = view.labeling.save_state;
+            state = {};
+            state.kind = kind;
+            spectiary::UiTextId reminder = spectiary::UiTextId::LabelSaveStateInternalDraft;
+            if (kind == spectiary::SampleLabelSaveStateKind::AutosavedToOutput) {
+                reminder = spectiary::UiTextId::LabelSaveStateAutosaved;
+            } else if (kind == spectiary::SampleLabelSaveStateKind::Pending) {
+                state.pending_count = 2;
+                reminder = spectiary::UiTextId::LabelSaveStatePending;
+            } else if (kind == spectiary::SampleLabelSaveStateKind::Failed) {
+                state.pending_count = 2;
+                state.message_kind = spectiary::SampleLabelSaveMessageKind::SystemDetail;
+                state.message = "Task save failed: regression detail";
+                reminder = temporary ? spectiary::UiTextId::LabelSaveStateTemporaryFailed
+                                     : spectiary::UiTextId::LabelSaveStateOutputFailed;
+            }
+            const auto empty = RenderLabelingTaskNameFrame(panel, view, true);
+            const auto& text = empty.logged_text;
+            const auto status = spectiary::SampleWorkflowSaveStateText(spectiary::UiLanguage::English, state);
+            Require(text.find(status) != std::string::npos &&
+                text.find(status, text.find(status) + status.size()) == std::string::npos &&
+                text.find(spectiary::UiText(spectiary::UiLanguage::English, reminder)) != std::string::npos,
+                "zero-match sample filtering must render task save status once and its reminder");
+            Require(state.message.empty() || text.find(state.message) != std::string::npos,
+                "zero-match sample filtering must retain the task save failure detail");
+            Require(temporary || text.find("quality-status.asdf") != std::string::npos,
+                "zero-match sample filtering must retain the formal task output path");
+            Require(WidgetBounds("##labeling_task_selector").has_value() &&
+                !WidgetBounds("ClearCurrentSampleLabel") && !WidgetBounds("##label_row") &&
+                text.find("Sample-only label") == std::string::npos && empty.submission_count == 0,
+                "an empty sample sequence must retain the task header without stale labels or assignment controls");
+        }
+    }
+}
+#endif
+
 LabelingTaskNameFrameObservation FinalizeLabelingTaskNameEdit(
     spectiary::SampleWorkflowPanelUi& panel,
     const spectiary::SourceCollectionSessionView& view)
@@ -4811,6 +4877,7 @@ int main()
 #endif
 #ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelKeepsTaskNameEditAcrossZeroMatchFilter();
+    TestLabelingPanelKeepsSaveInformationWithoutCurrentSample();
 #endif
 #ifdef IMGUI_ENABLE_TEST_ENGINE
     TestLabelingPanelFinalizesTaskNameWhenRenderingStops();
