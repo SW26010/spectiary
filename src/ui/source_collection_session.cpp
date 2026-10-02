@@ -640,10 +640,9 @@ bool SourceCollectionSession::SupersedesPendingSourceActivation(
 
     switch (intent.source_collection.kind) {
     case SourceCollectionIntentKind::SwitchActive: {
-        const std::size_t target_index = intent.source_collection.source_index;
-        const std::optional<std::size_t> current_index = roster_->current_source_index();
-        return roster_->can_activate_source(target_index) &&
-               (!current_index || *current_index != target_index);
+        // Explicit selection replaces the activation intent even when the
+        // selected source is already current and its snapshot stays unchanged.
+        return roster_->can_activate_source(intent.source_collection.source_index);
     }
     case SourceCollectionIntentKind::Remove:
         return roster_->current_source_index() == intent.source_collection.source_index;

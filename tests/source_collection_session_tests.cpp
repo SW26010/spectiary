@@ -9464,7 +9464,7 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
         "canceled navigation metadata must not leak across source switches");
 }
 
-void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
+void TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt()
 {
     const std::filesystem::path source_a = UniqueTempPath("_preserve_pending_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_preserve_pending_b.npy");
@@ -9514,12 +9514,6 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
         removed_b.canceled_source_follow_up_path == source_b &&
             !removed_b.follow_up_spectrum_index,
         "removing inactive source B should cancel only B's tickets and retain source A's pending ticket");
-    const spectiary::SourceCollectionSessionResult reselected_a =
-        Submit(session, SwitchSourceCollection(0));
-    Require(
-        !reselected_a.canceled_source_follow_up_path && !reselected_a.follow_up_spectrum_index,
-        "reselecting active source A should retain its pending ticket");
-
     const spectiary::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
     Require(
         session.OpenPreparedSource(
@@ -9532,7 +9526,20 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
     Require(
         session.CurrentSampleSnapshot() == row_one_snapshot &&
             session.View().navigation.current_index == 1,
-        "non-active removal and current reselection must preserve source A navigation");
+        "inactive removal must preserve source A navigation");
+
+    Require(
+        Submit(session, MoveSampleNavigation(spectiary::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 2,
+        "source A should queue row 2 before explicit reselection");
+    const auto reselected_a = Submit(session, SwitchSourceCollection(0));
+    Require(reselected_a.canceled_source_follow_up_path == source_a &&
+            !reselected_a.follow_up_spectrum_index,
+        "explicitly reselecting current source A must cancel its older pending navigation");
+    Require(session.CurrentSampleSnapshot() == row_one_snapshot &&
+            session.EffectiveSampleNavigationIndex() == 1 &&
+            !reselected_a.action.snapshot_changed,
+        "reselection must keep A's committed row and discard the pending navigation target");
 }
 
 void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
@@ -10048,7 +10055,7 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
         "inactive-source removal should retire exactly one generation");
 }
 
-void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
+void TestSourceSelectionSupersessionRequiresAValidSelection()
 {
     spectiary::SourceCollectionSession session(
         {},
@@ -10067,6 +10074,19 @@ void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
                 spectiary::SampleNavigationIntent::Move(
                     spectiary::SampleNavigationRequest::Next()))),
         "navigation should retain its own replacement follow-up");
+
+    const auto source_a = UniqueTempPath("_supersession_a.npy");
+    const auto source_b = UniqueTempPath("_supersession_b.npy");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    auto loaded = MakeMultiSourceSession(loaded_snapshots, source_a, 3, source_b, 3);
+    (void)Submit(loaded, OpenSourceCollection(source_a));
+    (void)Submit(loaded, OpenSourceCollection(source_b));
+    Require(loaded.SupersedesPendingSourceActivation(SwitchSourceCollection(1)),
+        "explicitly reselecting the current source must supersede an older activation intent");
+    Require(loaded.SupersedesPendingSourceActivation(SwitchSourceCollection(0)),
+        "selecting another available source must supersede an older activation intent");
+    Require(!loaded.SupersedesPendingSourceActivation(SwitchSourceCollection(2)),
+        "an invalid selection must preserve pending activation even with a current source");
 }
 
 void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
@@ -11886,7 +11906,7 @@ void RunAllTests()
     TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp();
     TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresentation();
     TestExplicitCommittedSequencePositionCancelsPendingNavigation();
-    TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation();
+    TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt();
     TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits();
     TestSwitchingAwayCancelsSourceBoundDeferredNavigation();
     TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow();
@@ -11898,7 +11918,7 @@ void RunAllTests()
     TestPreparedProjectionsMoveIntoTheSessionView();
     TestSessionOwnsStableViewInvalidationAndRetirement();
     TestRemovingInactiveSourceInvalidatesTheSessionView();
-    TestSourceSelectionSupersessionRequiresAnActualActivationChange();
+    TestSourceSelectionSupersessionRequiresAValidSelection();
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();

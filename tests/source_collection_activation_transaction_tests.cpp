@@ -25,6 +25,13 @@
 namespace spectiary {
 
 struct SourceCollectionActivationTransactionTestAccess {
+    static void ObserveSnapshotChanges(
+        SourceCollectionActivationTransaction& activation,
+        std::function<void(SourceCollectionSnapshotChangeReason)> observer)
+    {
+        activation.BindPresentationLifecycle({}, std::move(observer));
+    }
+
     static std::vector<NavigationLatencyReport>
     CompleteNavigationFrame(
         SourceCollectionActivationTransaction& activation,
@@ -1473,6 +1480,79 @@ void TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation()
         "a GUI-superseded automation open must stay side-effect-free after its worker eventually returns");
 }
 
+void TestReselectingCurrentSourceSupersedesPendingOpen(bool completion_ready)
+{
+    const auto source_a = UniqueTempPath("_reselected_a.csv");
+    const auto source_b = UniqueTempPath("_superseded_b.csv");
+    WriteFixture(source_a);
+    WriteFixture(source_b);
+    std::promise<void> started_promise, release_promise;
+    auto started = started_promise.get_future();
+    auto release = release_promise.get_future().share();
+    auto dependencies = MakeDependencies(
+        [&](const auto& path, std::size_t index, const auto&) {
+            started_promise.set_value();
+            release.wait();
+            return MakeSnapshot(path, index);
+        });
+    auto session = MakePreparedSession(source_a);
+    const auto original_snapshot = session.CurrentSampleSnapshot();
+    std::size_t presentation_changes = 0;
+    Activation activation(session,
+        spectiary::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+    ActivationAccess::ObserveSnapshotChanges(activation,
+        [&](auto) { ++presentation_changes; });
+    activation.BeginFrame(true, 1, nullptr);
+    (void)activation.OpenSource(source_b, 0);
+    const bool worker_started = started.wait_for(2s) == std::future_status::ready;
+    const auto pending_generation = activation.activation_generation();
+    const bool original_still_current =
+        session.CurrentSampleSnapshot() == original_snapshot &&
+        activation.status().loading_source_path == source_b;
+
+    bool completion_published = false;
+    if (completion_ready) {
+        release_promise.set_value();
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (ActivationAccess::CompletedLoadCount(activation) == 0 &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(2ms);
+        }
+        completion_published = ActivationAccess::CompletedLoadCount(activation) == 1;
+    }
+    const auto reselected = activation.Submit(
+        spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+            spectiary::SourceCollectionIntent::SwitchActive(0)));
+    const bool intent_advanced = activation.activation_generation() > pending_generation;
+    if (!completion_ready) release_promise.set_value();
+
+    // Supersession clears UI loading before the worker exits. Wait for actual
+    // queue quiescence so a late completion cannot escape these assertions.
+    const bool drained = DrainUntil(activation, [&]() {
+        const auto activity = ActivationAccess::QueueActivity(activation);
+        return activity.active_task_count == 0 && activity.completed_count == 0 &&
+               activity.worker_count == 0;
+    });
+    const auto reports = ActivationAccess::CompleteSourceLoadFrame(activation, 1, {});
+    std::filesystem::remove(source_a);
+    std::filesystem::remove(source_b);
+
+    Require(worker_started && original_still_current &&
+            (!completion_ready || completion_published),
+        "source B must be pending while source A is still current before reselection");
+    Require(intent_advanced && drained && !activation.status().loading,
+        "reselecting current source A must supersede and drain the old B intent");
+    Require(session.View().current_source_index == 0 &&
+            session.View().sources.size() == 1 &&
+            session.CurrentSampleSnapshot() == original_snapshot,
+        "a late source B completion must not replace or enter the current A session");
+    Require(!reselected.action.snapshot_changed && presentation_changes == 0,
+        "current-source reselection and the superseded B completion must not change presentation");
+    Require(reports.size() == 1 &&
+            reports.front().outcome == spectiary::SourceLoadLatencyOutcome::Superseded,
+        "the old B load must finish as superseded rather than presentable");
+}
+
 void TestSameIdentityOpenRequiresLatestActivationPresent()
 {
     const std::filesystem::path path =
@@ -1746,6 +1826,8 @@ int main()
         TestAutomationOpenCompletesAfterPresentationWithoutProfiling();
         TestAutomationOpensSupersedeBeforeSingleCompletionDrain();
         TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation();
+        TestReselectingCurrentSourceSupersedesPendingOpen(false);
+        TestReselectingCurrentSourceSupersedesPendingOpen(true);
         TestSameIdentityOpenRequiresLatestActivationPresent();
         TestSamePathOpenTokenSurvivesProductionFollowUp();
         TestIdlePrefetchReportsLifecycleCompletion();
