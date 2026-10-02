@@ -3,6 +3,7 @@
 #include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
+#include "domain/source_path_identity.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session.h"
@@ -12,6 +13,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -767,8 +769,8 @@ SampleWorkflowCoordinator::CompleteTransition(
             : navigation_.current_index();
         if (target_index && snapshot &&
             snapshot->collection.spectrum_count > 0 &&
-            snapshot->collection.current_index !=
-                *target_index) {
+            (!SnapshotMatchesActiveSource(snapshot) ||
+             snapshot->collection.current_index != *target_index)) {
             outcome.snapshot_target_updated = true;
             outcome.snapshot_index_to_load =
                 target_index;
@@ -956,6 +958,10 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     }
     prepared_filter_view_.emplace(std::move(prepared_workflow.filter_view));
     prepared_sorting_view_.emplace(std::move(prepared_workflow.sorting_view));
+    if (!present_explicit_member && prepared_workflow.current_index &&
+        prepared_workflow.current_index != snapshot->collection.current_index) {
+        result.snapshot_index_to_load = prepared_workflow.current_index;
+    }
     if (BackgroundRetirementHandle retired_navigation = navigation_.ActivatePreparedSource(
             std::move(*source_key),
             snapshot,
@@ -970,6 +976,106 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     }
     action.workflow_changed = true;
     action.navigation_inputs_changed = true;
+    return result;
+}
+
+PreparedSourceTransition SampleWorkflowCoordinator::CommitPreparedSource(
+    std::string_view source_key, const SpectrumSnapshotHandle& snapshot,
+    std::size_t spectrum_index, std::uint64_t live_revision,
+    PreparedSourceCollectionPayload payload, bool activate)
+{
+    PreparedSourceTransition result;
+    result.current_index = navigation_.current_index();
+    auto* plan = std::get_if<PreparedSourceCollectionPlan>(&payload);
+    const auto pending = pending_sample_navigation();
+    const auto& identity = plan ? plan->context.identity
+        : std::get<PreparedSourceCollectionReuse>(payload).identity;
+    result.completes_pending_navigation = activate && pending &&
+        pending->source_identity.id == identity.id && pending->spectrum_index == spectrum_index;
+    const auto retire_payload = [&]() {
+        if (plan) result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(payload)));
+    };
+    auto reconciliation = ReconcilePreparedSource(
+        source_key, snapshot, spectrum_index, live_revision, payload);
+    result.background_retirement = std::move(reconciliation.background_retirement);
+    result.error = std::move(reconciliation.error);
+    if (result.error.kind != SourceCollectionLoadErrorKind::None) {
+        retire_payload();
+        return result;
+    }
+    if (plan && !plan->present_explicit_member && plan->preferred_member_path &&
+        plan->workflow.current_index != spectrum_index) {
+        const auto utf8 = plan->preferred_member_path->u8string();
+        result.error.kind = SourceCollectionLoadErrorKind::BackgroundLoadingFailed;
+        result.error.diagnostic_detail =
+            "The requested external source member is excluded by the active sample filter: " +
+            std::string(utf8.begin(), utf8.end());
+        retire_payload();
+        return result;
+    }
+    {
+        const bool explicit_member = plan ? plan->present_explicit_member
+            : std::get<PreparedSourceCollectionReuse>(payload).present_explicit_member;
+        const auto target = plan ? plan->workflow.current_index
+            : result.completes_pending_navigation ? std::optional{spectrum_index}
+            : navigation_.KnownSourceCurrentIndex(source_key);
+        if (!explicit_member && target != spectrum_index &&
+            (target || result.completes_pending_navigation)) {
+            if (target && (!result.completes_pending_navigation ||
+                           RetargetDeferredSampleNavigation(*target))) {
+                result.disposition = PreparedSourceDisposition::FollowUp;
+                result.follow_up_spectrum_index = target;
+            } else {
+                CancelDeferredSampleNavigation();
+                result.disposition = PreparedSourceDisposition::NavigationCanceled;
+                result.error.kind = SourceCollectionLoadErrorKind::PreparedNavigationUnavailable;
+            }
+            result.invalidate_view = true;
+            retire_payload();
+            return result;
+        }
+    }
+
+    if (plan) {
+        auto activation = SyncPreparedActiveSource(std::string{source_key}, snapshot,
+            std::move(plan->context), std::move(plan->workflow),
+            plan->present_explicit_member, activate);
+        result.action = activation.action;
+        result.follow_up_spectrum_index = activation.snapshot_index_to_load;
+        result.background_retirement.insert(result.background_retirement.end(),
+            std::make_move_iterator(activation.background_retirement.begin()),
+            std::make_move_iterator(activation.background_retirement.end()));
+        if (result.completes_pending_navigation && !result.follow_up_spectrum_index) {
+            CompletePreparedDeferredSampleNavigation(*pending);
+        }
+    } else if (activate) {
+        if (result.completes_pending_navigation) {
+            (void)CommitDeferredSampleNavigation(spectrum_index);
+        }
+        const auto& reuse = std::get<PreparedSourceCollectionReuse>(payload);
+        auto transition = SyncReusedPreparedKnownSource(std::string{source_key}, snapshot,
+            reuse.identity, reuse.present_explicit_member);
+        result.action = transition.action;
+        result.follow_up_spectrum_index = transition.snapshot_index_to_load;
+    }
+    result.current_index = navigation_.current_index();
+    result.invalidate_view = true;
+    // Canonical labeling activation can refresh projections after the initial
+    // reconciliation. This final decision still precedes every roster write.
+    if (result.completes_pending_navigation && !result.current_index &&
+        !result.follow_up_spectrum_index) {
+        CancelDeferredSampleNavigation();
+        result.disposition = PreparedSourceDisposition::NavigationCanceled;
+        result.error.kind = SourceCollectionLoadErrorKind::PreparedNavigationUnavailable;
+    } else if (activate && result.follow_up_spectrum_index) {
+        result.disposition = PreparedSourceDisposition::FollowUp;
+    } else if (activate && result.current_index && result.current_index != spectrum_index) {
+        result.disposition = PreparedSourceDisposition::FollowUp;
+        result.follow_up_spectrum_index = result.current_index;
+    } else {
+        result.disposition = PreparedSourceDisposition::Adopt;
+    }
     return result;
 }
 
@@ -1051,6 +1157,11 @@ std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::ActiveSourceI
     return navigation_.active_source_identity();
 }
 
+std::optional<std::filesystem::path> SampleWorkflowCoordinator::ActiveSourcePath() const
+{
+    return navigation_.active_source_path();
+}
+
 std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::KnownSourceIdentity(
     std::string_view source_key) const
 {
@@ -1093,7 +1204,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
     }
 
     const std::optional<SourceCollectionIdentity> identity =
-        navigation_.ActivateKnownSource(*source_key);
+        navigation_.ActivateKnownSource(*source_key, snapshot->source.path);
     if (!identity) {
         navigation_.ClearActiveSource();
         ClearSampleWorkflow(outcome.action);
@@ -1355,7 +1466,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::RequestSampleNavigati
     if (snapshot_target_after != snapshot_target_before) {
         result.snapshot_target_updated = true;
         if (snapshot_target_after &&
-            (!snapshot ||
+            (!SnapshotMatchesActiveSource(snapshot) ||
              snapshot->collection.current_index !=
                  *snapshot_target_after)) {
             result.snapshot_index_to_load =
@@ -2444,7 +2555,7 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
         navigation_.sequence_topology_revision();
     view.filtered_sample_count = view.sequence_count;
     view.row_location_available = sequence.row_location_available;
-    if (snapshot && view.current_index && snapshot->collection.current_index == *view.current_index) {
+    if (SnapshotMatchesActiveSource(snapshot) && view.current_index && snapshot->collection.current_index == *view.current_index) {
         view.current_sample_display_name = snapshot->current_spectrum.name;
     }
     if (const SourceCollectionManifest* context = navigation_.active_context()) {
@@ -2969,6 +3080,13 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ActiveSampleIndex(const Sp
         return snapshot->collection.current_index;
     }
     return std::nullopt;
+}
+
+bool SampleWorkflowCoordinator::SnapshotMatchesActiveSource(const SpectrumSnapshotHandle& snapshot) const
+{
+    const auto source_path = navigation_.active_source_path();
+    return snapshot && source_path &&
+        SourcePathIdentityKey(snapshot->source.path) == SourcePathIdentityKey(*source_path);
 }
 
 SampleWorkflowSourceContext SampleWorkflowCoordinator::SourcePolicyContext(

@@ -764,11 +764,9 @@ void TestPreparedSourceAttachesFolderCsvByCanonicalIdentity()
         cache_path,
         directory / "labeling-state.json",
         directory / "workflow-state.json");
-    (void)coordinator.SyncPreparedActiveSource(
-        "prepared-source",
-        snapshot,
-        std::move(context),
-        std::move(prepared));
+    (void)coordinator.CommitPreparedSource("prepared-source", snapshot,
+        snapshot->collection.current_index, 0,
+        spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)});
     const spectiary::SampleWorkflowTransitionOutcome outcome =
         coordinator.Apply(
             spectiary::SourceCollectionIntent::
@@ -1373,7 +1371,10 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
                 snapshot);
         Require(
             navigation.snapshot_index_to_load == 1 &&
-                coordinator.CommitDeferredSampleNavigation(1),
+                coordinator.CommitPreparedSource("source",
+                    MakeSnapshot(source_path, "navigation-coordinator", 3, 1), 1, 0,
+                    spectiary::PreparedSourceCollectionReuse{*coordinator.KnownSourceIdentity("source")})
+                    .disposition == spectiary::PreparedSourceDisposition::Adopt,
             "coordinator should commit the first deferred row");
         Require(
             !std::filesystem::exists(navigation_cache),
@@ -1401,7 +1402,10 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
             snapshot);
         Require(
             navigation.snapshot_index_to_load == 2 &&
-                coordinator.CommitDeferredSampleNavigation(2),
+                coordinator.CommitPreparedSource("source",
+                    MakeSnapshot(source_path, "navigation-coordinator", 3, 2), 2, 0,
+                    spectiary::PreparedSourceCollectionReuse{*coordinator.KnownSourceIdentity("source")})
+                    .disposition == spectiary::PreparedSourceDisposition::Adopt,
             "coordinator should commit the final deferred row");
         Require(
             spectiary::LoadSampleNavigationStateCache(navigation_cache)
@@ -1998,7 +2002,7 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
         },
         std::move(second_manifest));
     Require(
-        controller.ActivateKnownSource("source").has_value(),
+        controller.ActivateKnownSource("source", "C:/synthetic/sequence-invalidation.npy").has_value(),
         "source switch fixture should restore the first known source");
     report = {};
     result = controller.NavigateDeferred(

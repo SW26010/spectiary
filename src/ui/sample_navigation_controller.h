@@ -111,10 +111,13 @@ public:
     [[nodiscard]] BackgroundRetirementHandle
         ReleaseBackgroundResourcesForShutdown();
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActivateKnownSource(
-        std::string_view source_key);
+        std::string_view source_key, const std::filesystem::path& source_path);
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;
+    [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
+        std::string_view source_key) const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> active_source_identity() const;
+    [[nodiscard]] std::optional<std::filesystem::path> active_source_path() const;
     [[nodiscard]] std::optional<SampleLabelingSourceCompatibility>
         active_source_compatibility() const;
     [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
@@ -263,6 +266,8 @@ private:
     std::filesystem::path state_cache_path_;
     LocalUserStatePersistenceLifecycle state_cache_persistence_;
     std::optional<std::string> active_source_key_;
+    // Paths can alias one identity; retain the path selected by activation.
+    std::filesystem::path active_source_path_;
     std::uint64_t active_context_generation_ = 0;
     // Cursor movement does not change the ordered-row topology.
     std::uint64_t sequence_topology_revision_ = 0;

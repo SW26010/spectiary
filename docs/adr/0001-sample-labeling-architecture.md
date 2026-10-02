@@ -58,9 +58,31 @@ Rejected results retain the existing session and return resources for background
 retirement. Presentation of an admitted load failure follows the source-load
 failure contract separately from adoption.
 
-This is the source-opening slice of #47. Other session projections and deferred
-navigation transitions remain follow-up work; the coordinator and labeling
-controller ownership and independent persistence lifecycles are unchanged.
+The coordinator's `CommitPreparedSource` returns one complete disposition:
+`Adopt`, `FollowUp`, `NavigationCanceled`, or `Rejected`, together with the
+committed row, follow-up target, pending-navigation completion provenance,
+change flags, diagnostics, and resources for retirement. The session does not
+query pending or current navigation to interpret that result. Prepared workflow
+adoption, retargeting, cancellation, and remembering labeling positions remain
+inside the coordinator.
+
+Only `Adopt` permits a roster write. A prepared row reconciled to another row
+never enters the roster, resident snapshot history, or presentation, including
+non-activating loads and late canonical-labeling lease refreshes. Early retargets
+retain the previous complete workflow and presentation; a late labeling refresh
+keeps its final target deferred in the navigation owner until the matching
+snapshot arrives. Deferred navigation retains its source path in the navigation
+owner, and session follow-ups carry that path together with the target row.
+Queueing and cancellation never infer the navigation source from the retained
+roster snapshot. Snapshot reuse and presentation require both source and row to
+match. The final completion publishes the matching snapshot once.
+An empty navigation sequence and explicit display outside that sequence retain
+their existing contracts.
+
+These are the source-opening and prepared-navigation slices of #47. Other stable
+session projections and intent-submission plumbing remain follow-up work. The
+coordinator and labeling controller ownership and independent persistence
+lifecycles are unchanged.
 
 We keep sample navigation, sample filtering, sample annotation inspection, and
 active manual labeling as separate UI surfaces. This avoids letting a labeling

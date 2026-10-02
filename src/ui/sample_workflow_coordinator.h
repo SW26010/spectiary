@@ -57,6 +57,7 @@ void MergeSampleWorkflowTransitionOutcome(
 struct PreparedSampleWorkflowActivationResult {
     SourceCollectionSessionAction action;
     std::vector<BackgroundRetirementHandle> background_retirement;
+    std::optional<std::size_t> snapshot_index_to_load;
 };
 
 struct PendingSampleNavigation {
@@ -85,6 +86,29 @@ struct SampleWorkflowStateFlushResult {
 struct PreparedWorkflowReconciliation {
     SourceCollectionLoadError error;
     std::vector<BackgroundRetirementHandle> background_retirement;
+};
+
+enum class PreparedSourceDisposition {
+    Rejected,
+    // No roster adoption; follow_up_spectrum_index is the only load target.
+    FollowUp,
+    // No roster adoption; cancel this source's follow-up and clear provenance.
+    NavigationCanceled,
+    // Workflow is committed. The supplied snapshot may now enter the roster.
+    Adopt,
+};
+
+struct PreparedSourceTransition {
+    PreparedSourceDisposition disposition = PreparedSourceDisposition::Rejected;
+    SourceCollectionLoadError error;
+    SourceCollectionSessionAction action;
+    std::vector<BackgroundRetirementHandle> background_retirement;
+    // Complete presentation/navigation outcome; callers must not query current
+    // or pending navigation to interpret this transition.
+    std::optional<std::size_t> current_index;
+    std::optional<std::size_t> follow_up_spectrum_index;
+    bool completes_pending_navigation = false;
+    bool invalidate_view = false;
 };
 
 class SampleWorkflowCoordinator {
@@ -150,25 +174,14 @@ public:
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
-    // Reconcile against live navigation/labeling state before source adoption.
-    // A newer live revision is preserved, not overwritten by worker caches.
-    [[nodiscard]] PreparedWorkflowReconciliation ReconcilePreparedSource(
+    // Runs before roster adoption. Only Adopt permits installing the supplied
+    // snapshot; all other dispositions retain the resident roster snapshot.
+    [[nodiscard]] PreparedSourceTransition CommitPreparedSource(
         std::string_view source_key, const SpectrumSnapshotHandle& snapshot,
         std::size_t spectrum_index, std::uint64_t live_revision,
-        PreparedSourceCollectionPayload& payload);
-    [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
-        std::optional<std::string> source_key,
-        const SpectrumSnapshotHandle& snapshot,
-        SourceCollectionContext context,
-        PreparedSampleWorkflowState prepared_workflow,
-        bool present_explicit_member = false,
-        bool activate = true);
-    [[nodiscard]] SampleWorkflowTransitionOutcome SyncReusedPreparedKnownSource(
-        std::optional<std::string> source_key,
-        const SpectrumSnapshotHandle& snapshot,
-        const SourceCollectionIdentity& identity,
-        bool present_explicit_member = false);
+        PreparedSourceCollectionPayload payload, bool activate = true);
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActiveSourceIdentity() const;
+    [[nodiscard]] std::optional<std::filesystem::path> ActiveSourcePath() const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
         std::string_view source_key) const;
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncKnownActiveSource(
@@ -181,12 +194,8 @@ public:
     void DiscardPreparedViewCaches();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
     void SetDeferredSampleNavigation(bool enabled);
-    [[nodiscard]] bool RetargetDeferredSampleNavigation(std::size_t spectrum_index);
-    [[nodiscard]] bool CommitDeferredSampleNavigation(std::size_t spectrum_index);
-    void CompletePreparedDeferredSampleNavigation(const PendingSampleNavigation& pending);
     void CancelDeferredSampleNavigation();
     [[nodiscard]] std::optional<std::size_t> pending_sample_index() const;
-    [[nodiscard]] std::optional<PendingSampleNavigation> pending_sample_navigation() const;
 
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
@@ -219,6 +228,26 @@ public:
     [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;
 
 private:
+    [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        SourceCollectionContext context,
+        PreparedSampleWorkflowState prepared_workflow,
+        bool present_explicit_member = false,
+        bool activate = true);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SyncReusedPreparedKnownSource(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        const SourceCollectionIdentity& identity,
+        bool present_explicit_member = false);
+    [[nodiscard]] bool RetargetDeferredSampleNavigation(std::size_t spectrum_index);
+    [[nodiscard]] bool CommitDeferredSampleNavigation(std::size_t spectrum_index);
+    void CompletePreparedDeferredSampleNavigation(const PendingSampleNavigation& pending);
+    [[nodiscard]] std::optional<PendingSampleNavigation> pending_sample_navigation() const;
+    [[nodiscard]] PreparedWorkflowReconciliation ReconcilePreparedSource(
+        std::string_view source_key, const SpectrumSnapshotHandle& snapshot,
+        std::size_t spectrum_index, std::uint64_t live_revision,
+        PreparedSourceCollectionPayload& payload);
     [[nodiscard]] bool CanReusePreparedKnownSource(
         std::optional<std::string> source_key,
         const SourceCollectionIdentity& identity) const;
@@ -366,6 +395,7 @@ private:
     std::optional<std::size_t> ApplySampleSorting(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::size_t ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] std::optional<std::size_t> ActiveSampleIndex(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] bool SnapshotMatchesActiveSource(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SampleWorkflowSourceContext SourcePolicyContext(
         const SpectrumSnapshotHandle& snapshot) const;
     void EnsureWorkflowStateCacheLoaded();

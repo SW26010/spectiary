@@ -885,16 +885,15 @@ void SourceCollectionActivationTransaction::
             prefetch_direction)
 {
     CancelSourceFollowUps(result);
-    if (!result.follow_up_spectrum_index) {
+    if (!result.follow_up_spectrum_index || !result.follow_up_source_path) {
         return;
     }
-    const SpectrumSnapshotHandle snapshot =
-        session_.CurrentSourceSnapshot();
-    if (!snapshot || snapshot->source.path.empty()) {
+    const auto& source_path = *result.follow_up_source_path;
+    if (source_path.empty()) {
         return;
     }
     if (HasMatchingFollowUp(
-            snapshot->source.path,
+            source_path,
             *result.follow_up_spectrum_index)) {
         if (navigation_trace) {
             (void)navigation_trace->MarkTerminal(
@@ -903,10 +902,10 @@ void SourceCollectionActivationTransaction::
         return;
     }
     (void)QueueSourceLoad(
-        snapshot->source.path,
+        source_path,
         *result.follow_up_spectrum_index,
         session_.AnnotationPathsForSource(
-            snapshot->source.path),
+            source_path),
         deferred_restore ? Purpose::DeferredRestore
                          : Purpose::SessionFollowUp,
         std::move(navigation_trace),

@@ -362,6 +362,7 @@ void SampleNavigationController::ActivateSource(
 
     source_key_to_session_key_[source_key] = identity.id;
     active_source_key_ = identity.id;
+    active_source_path_ = snapshot->source.path;
     if (active_source_changed || context_changed) {
         ++active_context_generation_;
         RefreshSequenceTopologyRevision();
@@ -383,6 +384,9 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     }
 
     auto [session_entry, inserted] = sessions_.try_emplace(identity.id);
+    const bool retains_active_source = active_source_key_ && *active_source_key_ == identity.id;
+    const auto previous_index = session_entry->second.current_index;
+    const bool remember_labeling_position = session_entry->second.pending_navigation_remembers_labeling_position;
     BackgroundRetirementHandle retired_session;
     if (!inserted) {
         auto retired = std::make_shared<SourceSession>();
@@ -402,6 +406,14 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     session.context_fingerprint = identity.context_fingerprint;
     session.spectrum_count = identity.spectrum_count;
     session.current_index = prepared.current_index;
+    // A late labeling/annotation refresh can change the target after worker
+    // preparation. Keep it deferred until a matching snapshot is admitted.
+    if (activate && prepared.current_index &&
+        prepared.current_index != snapshot->collection.current_index) {
+        session.pending_index = prepared.current_index;
+        session.pending_navigation_remembers_labeling_position = remember_labeling_position;
+        session.current_index = retains_active_source ? previous_index : std::nullopt;
+    }
     session.manifest = std::move(manifest);
     // Sample-name search is transient UI state. A prepared load never performs
     // an implicit collection scan to preserve an old query.
@@ -420,6 +432,7 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     source_key_to_session_key_[source_key] = identity.id;
     if (activate) {
         active_source_key_ = identity.id;
+        active_source_path_ = snapshot->source.path;
         ++active_context_generation_;
         RefreshSequenceTopologyRevision();
     }
@@ -455,13 +468,14 @@ SampleNavigationController::ReleaseBackgroundResourcesForShutdown()
 }
 
 std::optional<SourceCollectionIdentity> SampleNavigationController::ActivateKnownSource(
-    std::string_view source_key)
+    std::string_view source_key, const std::filesystem::path& source_path)
 {
     const std::optional<SourceCollectionIdentity> identity = KnownSourceIdentity(source_key);
     if (!identity) {
         return std::nullopt;
     }
     const auto mapped = source_key_to_session_key_.find(std::string(source_key));
+    active_source_path_ = source_path;
     if (!active_source_key_ || *active_source_key_ != mapped->second) {
         ++active_context_generation_;
         active_source_key_ = mapped->second;
@@ -496,6 +510,15 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::KnownSourceI
     };
 }
 
+std::optional<std::size_t> SampleNavigationController::KnownSourceCurrentIndex(
+    std::string_view source_key) const
+{
+    const auto mapped = source_key_to_session_key_.find(std::string(source_key));
+    if (mapped == source_key_to_session_key_.end()) return std::nullopt;
+    const auto session = sessions_.find(mapped->second);
+    return session == sessions_.end() ? std::nullopt : session->second.current_index;
+}
+
 std::optional<SourceCollectionIdentity> SampleNavigationController::active_source_identity() const
 {
     if (!active_source_key_) {
@@ -512,6 +535,11 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::active_sourc
         .context_fingerprint = session->second.context_fingerprint,
         .spectrum_count = session->second.spectrum_count,
     };
+}
+
+std::optional<std::filesystem::path> SampleNavigationController::active_source_path() const
+{
+    return ActiveSession() ? std::optional{active_source_path_} : std::nullopt;
 }
 
 std::optional<SampleLabelingSourceCompatibility>

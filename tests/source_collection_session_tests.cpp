@@ -18,6 +18,7 @@
 #include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_roster.h"
 #include "ui/source_collection_session.h"
+#include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
@@ -8126,6 +8127,9 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     context.manifest.annotations.push_back(std::move(*annotation));
     spectiary::PreparedSampleWorkflowState prepared_workflow =
         PrepareWorkflow(prepared_snapshot, context, 2, labeling_cache, workflow_cache);
+    Require(prepared_workflow.current_index == 0,
+        "restore fixture must prepare row 2 with a reconciled target of row 0");
+    const auto roster_before = restored.CurrentSourceSnapshot();
 
     const spectiary::SourceCollectionSessionResult result = restored.CommitPreparedOpen(spectiary::PreparedSourceCollection{
         .path = source_path,
@@ -8134,10 +8138,15 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared_workflow)},
     });
     const spectiary::SourceCollectionSessionView view = restored.View();
-    Require(view.navigation.current_index == 0, "restored filter should reconcile navigation to row 0");
+    Require(!view.navigation.current_index,
+        "a retargeted restore must not publish a navigation row before its snapshot arrives");
+    Require(view.sources.empty() && restored.CurrentSourceSnapshot() == roster_before,
+        "a retargeted restore must not install the intermediate snapshot in the roster");
+    Require(!result.action.snapshot_changed,
+        "a retargeted restore must not emit a snapshot change");
     Require(
         restored.CurrentSampleSnapshot() == nullptr && view.current_sample_snapshot == nullptr,
-        "plot must not receive the prepared row 2 snapshot while labeling points at row 0");
+        "plot must not receive the prepared row 2 snapshot while corrected row 0 is pending");
     Require(result.follow_up_spectrum_index == 0, "prepared restore should request a background row 0 load");
     Require(result.loaded, "prepared source should still be accepted while the corrected row is pending");
 
@@ -9104,6 +9113,110 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
         "undo restore to the visible row should leave no pending navigation");
 }
 
+void TestPreparedTransitionDispositionsAreComplete()
+{
+    using namespace spectiary;
+    const auto path = UniqueTempPath("_transition_dispositions.npy");
+    const auto initial = MakeSnapshot(path, 4, 0);
+    SourceCollectionContext context;
+    context.identity = {"dispositions", "source", "source-v1", "context-v1", 4};
+    context.manifest.sample_names = {"a", "b", "c", "d"};
+    SampleWorkflowCoordinator coordinator({}, {}, {});
+    coordinator.SetDeferredSampleNavigation(true);
+    const auto prepared = [&](std::size_t row, std::optional<std::size_t> target) {
+        auto snapshot = MakeSnapshot(path, 4, row);
+        auto workflow = PrepareWorkflow(snapshot, context, row, {}, {});
+        workflow.current_index = target;
+        workflow.navigation_sequence.current_source_row = target;
+        return PreparedSourceCollectionPlan{context, std::move(workflow)};
+    };
+    auto result = coordinator.CommitPreparedSource("source", initial, 0, 0, prepared(0, 0));
+    Require(result.disposition == PreparedSourceDisposition::Adopt &&
+            result.current_index == 0 && !result.follow_up_spectrum_index,
+        "Adopt must carry the committed row without a navigation re-query");
+    (void)coordinator.Apply(SampleNavigationIntent::Move(SampleNavigationRequest::Next()), initial);
+    result = coordinator.CommitPreparedSource("source", MakeSnapshot(path, 4, 1), 1, 0, prepared(1, 2));
+    Require(result.disposition == PreparedSourceDisposition::FollowUp &&
+            result.current_index == 0 && result.follow_up_spectrum_index == 2 &&
+            result.completes_pending_navigation && result.invalidate_view &&
+            !result.action.snapshot_changed,
+        "FollowUp must carry the retained current row and the retargeted pending row");
+    result = coordinator.CommitPreparedSource("source", MakeSnapshot(path, 4, 2), 2, 0, prepared(2, 2));
+    Require(result.disposition == PreparedSourceDisposition::Adopt &&
+            result.current_index == 2 && result.completes_pending_navigation &&
+            !result.follow_up_spectrum_index,
+        "the final row must complete the retargeted navigation through the same transition");
+    (void)coordinator.Apply(SampleNavigationIntent::Move(SampleNavigationRequest::Next()),
+        MakeSnapshot(path, 4, 2));
+    result = coordinator.CommitPreparedSource("source", MakeSnapshot(path, 4, 3), 3, 0,
+        prepared(3, std::nullopt));
+    Require(result.disposition == PreparedSourceDisposition::NavigationCanceled &&
+            result.current_index == 2 && !result.follow_up_spectrum_index &&
+            result.error.kind == SourceCollectionLoadErrorKind::PreparedNavigationUnavailable,
+        "NavigationCanceled must identify an empty reconciled target without a pending-state query");
+    (void)coordinator.RemoveSource("source");
+    result = coordinator.CommitPreparedSource("source", initial, 0, 0,
+        PreparedSourceCollectionReuse{context.identity});
+    Require(result.disposition == PreparedSourceDisposition::Rejected &&
+            result.error.kind == SourceCollectionLoadErrorKind::PreparedReuseTargetUnavailable &&
+            !result.follow_up_spectrum_index && !result.action.snapshot_changed,
+        "Rejected must carry the source rejection without authorizing roster adoption");
+}
+
+void TestRetargetedPreparedRowsNeverEnterRosterResidency()
+{
+    using namespace spectiary;
+    const auto path = UniqueTempPath("_retarget_residency.npy");
+    const auto initial = MakeSnapshot(path, 3, 0);
+    SourceCollectionContext context;
+    context.identity = {"retarget-residency", "source", "source-v1", "context-v1", 3};
+    context.manifest.sample_names = {"a", "b", "c"};
+    const SourceCollectionContextReuseProof proof{context.identity, {}};
+    SourceCollectionSession session({}, {}, {}, {});
+    Require(session.CommitPreparedOpen({
+        .path = path, .spectrum_index = 0, .snapshot = initial,
+        .payload = PreparedSourceCollectionPlan{context, PrepareWorkflow(initial, context, 0, {}, {})},
+        .context_reuse_proof = proof,
+    }).loaded, "residency fixture must adopt its first row");
+    const auto intermediate = MakeSnapshot(path, 3, 1);
+    auto workflow = PrepareWorkflow(intermediate, context, 1, {}, {});
+    workflow.current_index = 2;
+    workflow.navigation_sequence.current_source_row = 2;
+    const auto retargeted = session.CommitPreparedOpen({
+        .path = path, .spectrum_index = 1, .snapshot = intermediate,
+        .payload = PreparedSourceCollectionPlan{context, std::move(workflow)},
+        .context_reuse_proof = proof,
+    });
+    const auto wrong_row_hint = session.LoadHintForSource(path, 1);
+    Require(retargeted.loaded && retargeted.follow_up_spectrum_index == 2 &&
+            !retargeted.action.snapshot_changed && !retargeted.action.source_roster_changed &&
+            session.CurrentSourceSnapshot() == initial && session.CurrentSampleSnapshot() == initial &&
+            wrong_row_hint && !wrong_row_hint->reuse.resident_snapshot(),
+        "even without pending navigation, a retargeted full plan must never enter roster or resident history");
+    const auto reuse = session.CommitPreparedOpen({
+        .path = path, .spectrum_index = 1, .snapshot = intermediate,
+        .payload = PreparedSourceCollectionReuse{context.identity},
+        .context_reuse_proof = proof,
+    });
+    Require(reuse.follow_up_spectrum_index == 0 && !reuse.action.snapshot_changed &&
+            session.CurrentSourceSnapshot() == initial &&
+            !session.LoadHintForSource(path, 1)->reuse.resident_snapshot(),
+        "a reused prepared row must also wait for its authoritative current row before roster adoption");
+    auto background_workflow = PrepareWorkflow(intermediate, context, 1, {}, {});
+    background_workflow.current_index = 2;
+    background_workflow.navigation_sequence.current_source_row = 2;
+    const auto background = session.CommitPreparedOpen({
+        .path = path, .spectrum_index = 1, .snapshot = intermediate,
+        .payload = PreparedSourceCollectionPlan{context, std::move(background_workflow)},
+        .context_reuse_proof = proof,
+    }, false);
+    Require(background.follow_up_spectrum_index == 2 &&
+            !background.action.snapshot_changed && !background.action.source_roster_changed &&
+            session.CurrentSampleSnapshot() == initial &&
+            !session.LoadHintForSource(path, 1)->reuse.resident_snapshot(),
+        "non-activating background preparation must not cache a row it reconciled away from");
+}
+
 void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_plan_reconcile.npy");
@@ -9745,29 +9858,31 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
     spectiary::PreparedSampleWorkflowState prepared_a =
         spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_a, context_a, 0, *cache);
     prepared_a.preparation_cache = cache;
-    spectiary::PreparedSampleWorkflowActivationResult activation_a =
-        coordinator.SyncPreparedActiveSource("prepared-cache-a-key", snapshot_a, context_a, std::move(prepared_a));
+    spectiary::PreparedSourceTransition activation_a =
+        coordinator.CommitPreparedSource("prepared-cache-a-key", snapshot_a,
+            snapshot_a->collection.current_index, 0,
+            spectiary::PreparedSourceCollectionPlan{context_a, std::move(prepared_a)});
 
     spectiary::PreparedSampleWorkflowState prepared_b =
         spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_b, context_b, 0, *cache);
     prepared_b.preparation_cache = cache;
-    spectiary::PreparedSampleWorkflowActivationResult activation_b =
-        coordinator.SyncPreparedActiveSource("prepared-cache-b-key", snapshot_b, context_b, std::move(prepared_b));
+    spectiary::PreparedSourceTransition activation_b =
+        coordinator.CommitPreparedSource("prepared-cache-b-key", snapshot_b,
+            snapshot_b->collection.current_index, 0,
+            spectiary::PreparedSourceCollectionPlan{context_b, std::move(prepared_b)});
     (void)activation_a;
     (void)activation_b;
 
     spectiary::PreparedSourceCollectionPayload candidate =
         spectiary::PreparedSourceCollectionPlan{context_a,
             spectiary::PrepareSampleWorkflowStateFromCache(*snapshot_a, context_a, 0, *cache), 0};
-    const auto reconciled = coordinator.ReconcilePreparedSource(
-        "prepared-cache-a-key", snapshot_a, 0, 0, candidate);
-    const auto& restored =
-        std::get<spectiary::PreparedSourceCollectionPlan>(candidate).workflow;
-    Require(reconciled.error.kind == spectiary::SourceCollectionLoadErrorKind::None &&
-            !restored.workflow_source_state.annotation_display_names.empty(),
-        "reconciliation must retain the in-memory workflow of a non-active source");
-    Require(restored.labeling_source_state && restored.labeling_source_state->sample_count == 3,
-        "reconciliation must retain the in-memory labeling state of a non-active source");
+    const auto reconciled = coordinator.CommitPreparedSource(
+        "prepared-cache-a-key", snapshot_a, 0, 0, std::move(candidate));
+    Require(reconciled.disposition == spectiary::PreparedSourceDisposition::Adopt &&
+            reconciled.current_index == 0 &&
+            coordinator.NavigationView(snapshot_a).sample_count == 3 &&
+            coordinator.LabelingView(snapshot_a).source_identity == context_a.identity.id,
+        "the complete transition must activate cached workflow and labeling without UI cache reads");
     Require(
         workflow_cache_loads == 0 && labeling_cache_loads == 0,
         "prepared commits and non-active state hints must not reopen either cache on the UI thread");
@@ -9792,11 +9907,9 @@ void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
         PrepareWorkflow(snapshot, context, 0, {}, {});
     Require(
         coordinator
-            .SyncPreparedActiveSource(
-                "known-source-key",
-                snapshot,
-                context,
-                std::move(prepared))
+            .CommitPreparedSource("known-source-key", snapshot,
+                snapshot->collection.current_index, 0,
+                spectiary::PreparedSourceCollectionPlan{context, std::move(prepared)})
             .action.workflow_changed,
         "known-source generation fixture should activate");
 
@@ -11359,7 +11472,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
 }
 
 void WriteLatestLabelingProjection(
-    const LabelingProjectionHandoffFixture& fixture)
+    const LabelingProjectionHandoffFixture& fixture, int last_row_label = 1)
 {
     spectiary::SampleLabelingController editor(
         fixture.labeling_cache);
@@ -11376,7 +11489,7 @@ void WriteLatestLabelingProjection(
     Require(
         editor.AssignLabel(0, 2).operation.output_saved &&
             editor.AssignLabel(1, 1).operation.output_saved &&
-            editor.AssignLabel(2, 1).operation.output_saved,
+            editor.AssignLabel(2, last_row_label).operation.output_saved,
         "projection handoff editor should persist the latest values");
     Require(
         editor.DeactivateActiveTask().state_saved,
@@ -11609,11 +11722,9 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
             fixture.workflow_cache);
     Require(
         coordinator
-                .SyncPreparedActiveSource(
-                    std::string{"source"},
-                    snapshot,
-                    fixture.context,
-                    std::move(prepared))
+                .CommitPreparedSource(std::string{"source"}, snapshot,
+                    snapshot->collection.current_index, 0,
+                    spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(prepared)})
                 .action.workflow_changed,
         "coordinator recovery fixture should open the paused-draft projection");
     const spectiary::SourceCollectionFilterView initial_filter =
@@ -11787,6 +11898,116 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
     Require(
         next.follow_up_spectrum_index == 2,
         "prepared handoff navigation must follow the latest labeling sort order");
+}
+
+void TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot()
+{
+    using namespace spectiary;
+    const auto fixture = SeedLabelingProjectionHandoffFixture("_late_prepared_retarget", false);
+    const auto intermediate = MakeSnapshot(fixture.source_path, 3, 1);
+    auto stale_workflow = PrepareWorkflow(intermediate, fixture.context, 1,
+        fixture.labeling_cache, fixture.workflow_cache);
+    Require(stale_workflow.current_index == 1,
+        "lease fixture must initially admit its prepared row");
+    WriteLatestLabelingProjection(fixture);
+    SourceCollectionSession session({}, fixture.navigation_cache,
+        fixture.labeling_cache, fixture.workflow_cache);
+    const auto roster_before = session.CurrentSourceSnapshot();
+    const auto result = session.CommitPreparedOpen({
+        .path = fixture.source_path, .spectrum_index = 1, .snapshot = intermediate,
+        .payload = PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
+    });
+    Require(result.loaded && result.follow_up_spectrum_index == 0 &&
+            !result.action.snapshot_changed && session.View().sources.empty() &&
+            session.CurrentSourceSnapshot() == roster_before && !session.CurrentSampleSnapshot(),
+        "a lease refresh retarget must return FollowUp before the old row reaches roster or presentation");
+    const auto final_snapshot = MakeSnapshot(fixture.source_path, 3, 0);
+    const auto final_result = session.CommitPreparedOpen({
+        .path = fixture.source_path, .spectrum_index = 0, .snapshot = final_snapshot,
+        .payload = PreparedSourceCollectionReuse{fixture.context.identity},
+    });
+    Require(final_result.loaded && !final_result.follow_up_spectrum_index &&
+            session.CurrentSampleSnapshot() == final_snapshot &&
+            session.View().labeling.current_code == 2,
+        "the lease-refreshed target must complete through the ordinary prepared transition");
+}
+
+void TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(std::size_t previous_row)
+{
+    using namespace spectiary;
+    using namespace std::chrono_literals;
+    const auto fixture = SeedLabelingProjectionHandoffFixture("_cross_source_late_retarget", false);
+    const auto intermediate = MakeSnapshot(fixture.source_path, 3, 1);
+    auto stale_workflow = PrepareWorkflow(intermediate, fixture.context, 1,
+        fixture.labeling_cache, fixture.workflow_cache);
+    Require(stale_workflow.current_index == 1, "B must initially admit row one");
+    WriteLatestLabelingProjection(fixture, 2);
+
+    SourceCollectionSession session({}, fixture.navigation_cache,
+        fixture.labeling_cache, fixture.workflow_cache);
+    const auto old_path = UniqueTempPath("_cross_source_previous.npy");
+    TouchFile(old_path);
+    const auto old_snapshot = MakeSnapshot(old_path, 3, previous_row);
+    SourceCollectionContext old_context;
+    old_context.identity = {"previous-source", "A", "a-source", "a-context", 3};
+    Require(session.CommitPreparedOpen({
+        .path = old_path, .spectrum_index = previous_row, .snapshot = old_snapshot,
+        .payload = PreparedSourceCollectionPlan{old_context,
+            PrepareWorkflow(old_snapshot, old_context, previous_row, {}, {})},
+    }).loaded, "A must be active before opening B");
+    const auto retarget = session.CommitPreparedOpen({
+        .path = fixture.source_path, .spectrum_index = 1, .snapshot = intermediate,
+        .payload = PreparedSourceCollectionPlan{fixture.context, std::move(stale_workflow)},
+    });
+    Require(retarget.follow_up_spectrum_index == 0 &&
+            session.CurrentSourceSnapshot() == old_snapshot && !session.CurrentSampleSnapshot(),
+        "late B retarget must preserve A's roster without publishing B's intermediate row");
+
+    std::promise<std::pair<std::filesystem::path, std::size_t>> request;
+    auto requested = request.get_future();
+    SourceCollectionLoadDependencies dependencies;
+    dependencies.workflow_cache_paths = test_support::EmptyWorkflowCachePaths();
+    dependencies.snapshot_loader = [&](const auto& path, std::size_t row, const auto& canceled)
+        -> SpectrumSnapshotHandle {
+        request.set_value({path, row});
+        while (!canceled()) std::this_thread::sleep_for(1ms);
+        throw SourceCollectionPreparationCanceled{};
+    };
+    {
+        SourceCollectionActivationTransaction activation(session,
+            MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
+        const auto next = activation.Submit(SourceCollectionSessionIntent::UpdateSampleNavigation(
+            SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
+        Require(next.follow_up_spectrum_index == 2,
+            "Next before B completes must navigate B's refreshed sequence");
+        Require(requested.wait_for(2s) == std::future_status::ready,
+            "next navigation must reach the decoder");
+        const auto [path, row] = requested.get();
+        Require(path == fixture.source_path && row == 2,
+            "next navigation after A to B late retarget must load B, never A");
+        Require(next.canceled_source_follow_up_path == fixture.source_path,
+            "superseded navigation must cancel B's prior target");
+        Require(!session.CancelPendingSampleNavigation(old_path, 2) &&
+                !session.CancelPendingSampleNavigation(fixture.source_path, 0),
+            "neither A's matching row nor B's stale row may cancel B's current target");
+        Require(session.CurrentSourceSnapshot() == old_snapshot && !session.CurrentSampleSnapshot(),
+            "queued B navigation must not publish either intermediate row");
+        if (previous_row == 2) {
+            Require(session.CancelPendingSampleNavigation(fixture.source_path, 2),
+                "B's pending navigation must remain cancelable while the roster still holds A");
+            return;
+        }
+    }
+    const auto final_snapshot = MakeSnapshot(fixture.source_path, 3, 2);
+    Require(session.CommitPreparedOpen({
+        .path = fixture.source_path, .spectrum_index = 2, .snapshot = final_snapshot,
+        .payload = PreparedSourceCollectionReuse{fixture.context.identity},
+    }).loaded && session.CurrentSampleSnapshot() == final_snapshot,
+        "only B's final navigation target may be adopted");
+    (void)Submit(session, SourceCollectionSessionIntent::UpdateSampleNavigation(
+        SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
+    Require(session.CancelPendingSampleNavigation(fixture.source_path, 0),
+        "cancellation must match the navigation source and row");
 }
 
 void TestRejectedStaleTaskActivationReconcilesNavigation()
@@ -12034,6 +12255,8 @@ void RunAllTests()
     TestInactiveRemovalPreservesNavigationButCurrentReselectionCancelsIt();
     TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits();
     TestSwitchingAwayCancelsSourceBoundDeferredNavigation();
+    TestPreparedTransitionDispositionsAreComplete();
+    TestRetargetedPreparedRowsNeverEnterRosterResidency();
     TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow();
     TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged();
     TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges();
@@ -12054,6 +12277,9 @@ void RunAllTests()
     TestExistingMemberResolutionUsesRosterIdentityAndOrder();
     TestSourceSessionFlushFailureKeepsDirtyState();
     TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
+    TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot();
+    TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(0);
+    TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(2);
     TestRejectedStaleTaskActivationReconcilesNavigation();
     TestReloadedFormalOwnerDoesNotReplayPendingValues();
     TestRecoveringFormalizedTemporaryDraftReconcilesNavigation();
