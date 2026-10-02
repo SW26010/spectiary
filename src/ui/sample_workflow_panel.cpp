@@ -2634,7 +2634,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 language,
                 UiTextId::RememberedRow)
                 .data(),
-            static_cast<unsigned long long>(*labeling_view.remembered_position));
+            static_cast<unsigned long long>(*labeling_view.remembered_position + 1));
         ImGui::SameLine();
         const bool resume_available = CanResumeRememberedRow(
             labeling_view,
