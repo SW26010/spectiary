@@ -23,7 +23,8 @@ using AtomicFileWriteCheckpoint = std::function<void(
 
 struct AtomicFileWriteOptions {
     std::ios::openmode open_mode = std::ios::trunc;
-    std::string_view target_description = "file";
+    // Options may outlive a caller's temporary description.
+    std::string target_description = "file";
     AtomicFileReplaceRetryPolicy replace_retry_policy;
     // Validation/interruption checkpoint after the temporary file is closed
     // and before the target is replaced. Throwing preserves the old target.

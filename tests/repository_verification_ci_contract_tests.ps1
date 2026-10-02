@@ -198,11 +198,39 @@ $jobIds = @(
 )
 Assert-True `
     -Condition (
-        $jobIds.Count -eq 2 -and
+        $jobIds.Count -eq 3 -and
+        $jobIds -ccontains 'hardening' -and
         $jobIds -ccontains 'debug-and-static-release' -and
         $jobIds -ccontains 'asdf-specialized'
     ) `
-    -Message 'Repository verification must have exactly core and ASDF owners.'
+    -Message 'Repository verification must have core, ASDF and isolated hardening owners.'
+
+$hardeningBody = Get-JobBody -Text $workflowText -JobId 'hardening'
+Assert-True -Condition (
+    $hardeningBody.Contains('mode: [Asan, Analyze]') -and
+    $hardeningBody.Contains('fail-fast: false') -and
+    $hardeningBody.Contains('scripts\run-hardening.ps1') -and
+    $hardeningBody.Contains('if ($LASTEXITCODE -ne 0)') -and
+    $hardeningBody.Contains('uses: actions/upload-artifact@v4') -and
+    $hardeningBody.Contains('if: ${{ always() }}')
+) -Message 'Both hardening modes must run independently, propagate failure and retain diagnostics.'
+foreach ($entry in @(
+        @{ Name = 'ninja-msvc-asan'; Option = 'SPECTIARY_ENABLE_ASAN' },
+        @{ Name = 'ninja-msvc-analyze'; Option = 'SPECTIARY_ENABLE_STATIC_ANALYSIS' })) {
+    $configuration = @($presets.configurePresets | Where-Object name -CEQ $entry.Name)
+    Assert-True -Condition ($configuration.Count -eq 1) -Message "Missing isolated preset $($entry.Name)."
+    Assert-True -Condition ($configuration[0].cacheVariables.($entry.Option) -ceq 'ON') `
+        -Message "Hardening preset $($entry.Name) must enable its instrumentation."
+    Assert-True -Condition (@($presets.buildPresets | Where-Object configurePreset -CEQ $entry.Name).Count -eq 1) `
+        -Message "Hardening preset $($entry.Name) must have a build entry."
+}
+$asanTestPreset = @($presets.testPresets | Where-Object name -CEQ 'asan')
+Assert-True -Condition ($asanTestPreset.Count -eq 1) -Message 'ASan must have a reproducible CTest preset.'
+Assert-True -Condition (
+    $asanTestPreset[0].configurePreset -ceq 'ninja-msvc-asan' -and
+    $asanTestPreset[0].filter.include.label -ceq '^asan$' -and
+    $asanTestPreset[0].execution.noTestsAction -ceq 'error'
+) -Message 'ASan must test its own instrumented directory and fail on an empty selection.'
 
 $coreBody = Get-JobBody `
     -Text $workflowText `

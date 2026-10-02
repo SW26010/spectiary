@@ -57,6 +57,53 @@ FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用
 解析；`zlib` 用于该 codec 的固定压缩 profile，以及受限 `.fits.gz`
 单光谱读取路径。
 
+## 内存安全与静态分析
+
+Issue #131 的 hardening 使用两个独立 MSVC/Ninja preset，默认构建和发布配置不启用它们。
+需要 Visual Studio Installer 中的 C++ AddressSanitizer 组件，以及 MSVC 原生代码分析工具。
+在仓库根目录运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-hardening.ps1 -Mode Asan
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-hardening.ps1 -Mode Analyze
+```
+
+入口始终调用 `build-ninja-msvc-debug.ps1`，保留其工具链发现、日志和超时回收机制；
+受限 agent 环境需要与普通 Ninja/MSVC 构建相同的 sandbox escalation。
+可用 `-VcvarsPath` 指定工具链，`-ArtifactsDirectory` 指定诊断目录。
+默认日志位于 `logs/hardening/Asan` 和 `logs/hardening/Analyze`。
+
+- `ninja-msvc-asan` 使用独立 Debug 目录，移除 `/RTC1`、禁用增量链接，
+  对仓库 C++ 编译单元启用 `/fsanitize=address`，保留完整调试符号。
+  `spectiary_asan_targets` 与 CTest `asan` 标签共用显式测试名单，覆盖 FITS/NPY 加载、
+  CSV sample annotation、ASDF codec/store/mutation/property、sample navigation、
+  后台加载队列及 native/headless automation。测试串行执行，每项最多 180 秒；空集合失败。
+  启动脚本从该配置的编译器路径定位 ASan runtime DLL，并固定失败退出选项。
+  检测探针先执行合法访问，再在独立子进程中故意越界；只有报告 heap-buffer-overflow
+  且非零退出才通过，普通崩溃、缺失 DLL 或未插桩都不能冒充检测成功。
+- `ninja-msvc-analyze` 对 core、sessions、automation、desktop UI、renderer 和
+  ImGui layout 等自有生产库启用 `/analyze`；`config/native-analysis.ruleset`
+  将 C6001（未初始化读取）、C6011（空指针解引用）、C6385/C6386（越界读写）设为错误。
+  对应 `/we` 参数确保命令行编译器返回失败，而不只输出诊断。
+  配置阶段故意解引用空指针，验证 C6011 确实使编译失败。
+  规则集有意限定为这四类缺陷，后续扩展需先检查实际诊断。
+
+`repository-verification.yml` 的独立 hardening matrix 在每次手动运行中执行两条通道，
+失败时保留构建日志及 ASan CTest/JUnit 报告；不会修改任何 workflow 触发器。
+分析针对自有生产代码，`/analyze:external-` 跳过外部头文件，但外部模板实例化仍可能报告诊断。
+预编译 vcpkg 库不重新插桩，因此不保证检测其内部全部内存访问；不使用全局第三方告警抑制。
+预编译 `imgui_stdlib` 的 STL annotation ABI 与 ASan 默认值不一致（LNK2038），
+因此仅 ASan 配置统一定义 `_DISABLE_VECTOR_ANNOTATION` / `_DISABLE_STRING_ANNOTATION`。
+这会失去 vector/string 的 size 与 capacity 之间的越界检测；普通堆、栈访问插桩仍然启用。
+该明确取舍避免为本通道维护一套第三方重编译 triplet。
+`alloc_dealloc_mismatch=0` 沿用 Windows 默认值：未插桩 yaml-cpp DLL 中正确的
+`operator delete` 会转调 `free`，额外开启该检查会将跨模块分配误报为 new/free 不匹配。
+这项检查暂不覆盖；use-after-free、普通越界和 double-free 检查继续启用。
+ASan 不替代线程竞争、Win32 handle、COM 或 GPU 资源生命周期验证，也不运行资源用量基准。
+
+参数限制见 [MSVC ASan 文档](https://learn.microsoft.com/en-us/cpp/sanitizers/asan-known-issues)
+和 [MSVC 静态分析文档](https://learn.microsoft.com/en-us/cpp/build/reference/analyze-code-analysis)。
+
 ## CMake Presets
 
 Jump List 的原生 shell 与真实 GUI 回归使用测试程序的隐式 shell identity／临时 Portable 目录，

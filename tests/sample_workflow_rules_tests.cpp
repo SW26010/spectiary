@@ -617,6 +617,26 @@ void TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting()
         "policy sort choice should use annotation values");
 }
 
+void TestLocalTaskDisplayNameWithoutLoadedAnnotation()
+{
+    const auto path = TempPath("_local_display_name.npy");
+    std::vector<spectiary::SampleLabelingTask> tasks{
+        MakeTask("local-owner", "Local task", 3, path)};
+    const spectiary::SampleWorkflowSourceContext context{
+        .collection = nullptr,
+        .labeling_tasks = &tasks,
+        .sample_count = 3};
+    spectiary::SampleWorkflowSourcePolicy policy;
+    Require(policy.RenameAnnotationDisplayName(context, path, "Custom name"),
+        "a local task without a loaded annotation should accept a display override");
+    Require(policy.RenameAnnotationDisplayName(context, path, "Local task"),
+        "the local task name should remove the display override");
+    Require(policy.StoreState().annotation_display_names.empty(),
+        "submitting the local task default must not retain an override");
+    Require(!policy.RenameAnnotationDisplayName({}, path, "Unknown owner"),
+        "renaming without either owner must be rejected");
+}
+
 void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
 {
     const std::filesystem::path annotation_path =
@@ -937,6 +957,7 @@ int main()
     TestTypedAnnotationSortingPreservesNumericPrecision();
     TestAnnotationSortingExclusions();
     TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
+    TestLocalTaskDisplayNameWithoutLoadedAnnotation();
     TestCanonicalOwnerFilterCanBeAddedAndEvaluated();
     TestWorkflowSourcePolicyTracksOwnerGenerations();
     TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys();

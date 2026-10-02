@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RuleSet Name="Spectiary memory safety" Description="Focused production-code safety gate; expand after reviewing diagnostics." ToolsVersion="17.0">
+  <IncludeAll Action="None" />
+  <Rules AnalyzerId="Microsoft.Analyzers.NativeCodeAnalysis" RuleNamespace="Microsoft.Rules.Native">
+    <Rule Id="C6001" Action="Error" />
+    <Rule Id="C6011" Action="Error" />
+    <Rule Id="C6385" Action="Error" />
+    <Rule Id="C6386" Action="Error" />
+  </Rules>
+</RuleSet>

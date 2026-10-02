@@ -66,6 +66,22 @@ void TestWriterExceptionCleansTemporaryFile()
         "a writer exception should remove the temporary file");
 }
 
+void TestOptionsOwnDescription()
+{
+    spectiary::AtomicFileWriteOptions options;
+    {
+        std::string description = "dynamically named sample annotation output";
+        options.target_description = description;
+        description.assign(description.size(), 'x');
+    }
+    std::string error;
+    const bool written = spectiary::WriteFileAtomically(
+        {}, options, [](std::ostream&, std::string&) { return true; }, &error);
+    Require(!written, "an empty target must fail before calling the writer");
+    Require(error == "dynamically named sample annotation output path is empty",
+        "write options must retain the original description after its source is changed and destroyed");
+}
+
 void TestTemporaryDirectoriesAreIsolatedAndCleaned()
 {
     const spectiary::test_support::TemporaryDirectory survivor;
@@ -111,6 +127,7 @@ int main()
     try {
         TestTemporaryDirectoriesAreIsolatedAndCleaned();
         TestWriterExceptionCleansTemporaryFile();
+        TestOptionsOwnDescription();
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
         return 1;

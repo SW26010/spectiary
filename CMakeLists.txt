@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(cmake/hardening.cmake)
+
 option(SPECTIARY_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
 option(
     SPECTIARY_BUILD_ASDF_LABELING_SPIKE
@@ -254,6 +256,7 @@ function(spectiary_configure_production_target target_name)
         WIN32_LEAN_AND_MEAN
     )
     spectiary_enable_warnings(${target_name})
+    spectiary_enable_static_analysis(${target_name})
 endfunction()
 
 add_library(spectiary_core STATIC
@@ -494,7 +497,7 @@ if(MSVC)
         PRIVATE
             /Brepro
             /INCREMENTAL:NO
-            "$<$<CONFIG:Debug>:/DEBUG:FASTLINK>"
+            "$<$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:${SPECTIARY_ENABLE_ASAN}>>>:/DEBUG:FASTLINK>"
     )
 endif()
 
@@ -1886,3 +1889,5 @@ if(SPECTIARY_BUILD_WIDGET_TESTS)
     set_property(TEST spectiary_sample_workflow_shortcut_tests spectiary_shell_source_load_activation_tests
         APPEND PROPERTY LABELS widget)
 endif()
+
+include(cmake/hardening_tests.cmake)

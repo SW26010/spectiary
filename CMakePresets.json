@@ -71,6 +71,29 @@
       }
     },
     {
+      "name": "ninja-msvc-asan",
+      "displayName": "Ninja MSVC AddressSanitizer",
+      "inherits": ["base", "dynamic-deps-base"],
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Ob0 /Od",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": "/debug /INCREMENTAL:NO",
+        "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "/debug /INCREMENTAL:NO",
+        "SPECTIARY_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "ninja-msvc-analyze",
+      "displayName": "Ninja MSVC static analysis",
+      "inherits": ["base", "dynamic-deps-base"],
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPECTIARY_ENABLE_STATIC_ANALYSIS": "ON"
+      }
+    },
+    {
       "name": "ninja-msvc-debug-asdf-labeling-spike",
       "displayName": "Ninja MSVC Debug with ASDF labeling spike",
       "inherits": [
@@ -124,6 +147,14 @@
   ],
   "buildPresets": [
     {
+      "name": "ninja-msvc-asan",
+      "configurePreset": "ninja-msvc-asan"
+    },
+    {
+      "name": "ninja-msvc-analyze",
+      "configurePreset": "ninja-msvc-analyze"
+    },
+    {
       "name": "vs2022-x64-debug",
       "configurePreset": "vs2022-x64-debug",
       "configuration": "Debug"
@@ -155,6 +186,13 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "asan",
+      "configurePreset": "ninja-msvc-asan",
+      "filter": { "include": { "label": "^asan$" } },
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "timeout": 180, "jobs": 1 }
+    },
     {
       "name": "fast",
       "displayName": "Fast developer tests",

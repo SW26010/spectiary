@@ -429,10 +429,11 @@ bool SampleWorkflowSourcePolicy::RenameAnnotationDisplayName(
         return false;
     }
     const std::string default_display_name =
-        local_task == nullptr ||
+        annotation != nullptr &&
+        (local_task == nullptr ||
             AttachedCanonicalDocumentIsAuthoritative(
                 annotation,
-                local_task)
+                local_task))
         ? annotation->name
         : local_task->task_name;
 

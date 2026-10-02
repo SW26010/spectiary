@@ -11,6 +11,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hardening:
+    name: MSVC ${{ matrix.mode }} hardening
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [Asan, Analyze]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Run isolated hardening configuration
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $env:VCPKG_ROOT -or
+              -not (Test-Path -LiteralPath (Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable.'
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-hardening.ps1 `
+            -Mode '${{ matrix.mode }}' `
+            -ArtifactsDirectory 'ci-artifacts/hardening/${{ matrix.mode }}'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Hardening gate failed.'
+          }
+
+      - name: Upload hardening diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 5
+        with:
+          name: spectiary-hardening-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ci-artifacts/hardening/${{ matrix.mode }}/**
+
   debug-and-static-release:
     name: Debug broader and static Release verification
     runs-on: windows-latest
