@@ -39,7 +39,7 @@ applies that navigation request.
 
 Workflow mutations cross the coordinator/session boundary as one complete
 transition outcome. The outcome carries domain change flags, navigation
-results, any snapshot index that must be loaded next, command-specific status,
+results, source-bound follow-up effects, command-specific status,
 and whether the session view must be invalidated. `SourceCollectionSession`
 consumes that outcome while retaining ownership of the source roster,
 activation, background follow-up, and presentation lifecycles.
@@ -96,10 +96,33 @@ remains exclusive to the explicit-open plan. The transaction only adds schedulin
 purpose, intent epoch, ticket, and trace metadata; neither ordinary nor prepared
 follow-ups query the session again to reconstruct loading inputs.
 
-These are the source-opening, prepared-navigation, and ordinary follow-up slices
-of #47. Other stable session projections remain follow-up work. The
-coordinator and labeling controller ownership and independent persistence
-lifecycles are unchanged.
+`SampleWorkflowCoordinator::BuildView` delivers navigation, labeling, filtering,
+sorting, and annotation capability together. Its component builders and prepared
+projection invalidation are private. Workflow policy mutations and navigation-input
+reconciliation invalidate prepared projections inside the coordinator; transition
+completion also detects labeling revision and source-context generation changes,
+including maintenance. A no-op or search-query-only change preserves prepared
+filter/sort storage until its first transfer into the stable session view.
+
+The session supplies its source and current-sample snapshots and retains ownership
+of the roster, failed-sample state, stable view lifetime, and presentation lifecycle.
+It applies the failed-sample field mask after receiving the workflow projection.
+The coordinator does not receive failure diagnostics or decide which sample fields
+the UI hides, and does not create a parallel copy of presentation state.
+
+The #47 boundary audit is:
+
+| Acceptance area | Resulting boundary and evidence |
+| --- | --- |
+| Complete workflow transitions | Coordinator resolves ordinary and prepared transitions; session consumes follow-up effects and assembles complete loading inputs. No pending-state comparison or staging row remains in normal submission or maintenance. |
+| Stable workflow projection | One aggregate projection; coordinator owns invalidation, while session owns failure masking and view retirement. Tests cover mutation before first presentation, no-op storage retention, and failure masking with retained workflow. |
+| Observable behavior and async support | Session intent/result/view tests cover filtering, sorting, labeling, auto-advance, undo, late retarget, source isolation, and cancellation; activation and shell tests retain queue and presentation coverage. |
+| Meaningful independent test surfaces | Cross-feature annotation and external-formalization/undo tests use session; prepared-cache adoption, navigation algorithms, source policy, labeling ownership, and persistence retain focused direct tests. |
+| Ownership and persistence | Coordinator and labeling controller retain their ADR roles. Source-session, navigation, labeling, and workflow caches remain independently validated, saved, retried, and flushed. No cross-file transaction, generic command framework, event bus, or parallel workflow-state model is introduced. |
+
+Remaining source queries serve source identity, residency, or session presentation;
+the goal is complete transitions and projections, not eliminating every query or
+redesigning the loading system.
 
 We keep sample navigation, sample filtering, sample annotation inspection, and
 active manual labeling as separate UI surfaces. This avoids letting a labeling

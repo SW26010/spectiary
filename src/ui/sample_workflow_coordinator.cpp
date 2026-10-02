@@ -767,7 +767,7 @@ std::optional<SampleWorkflowLoadTarget> SampleWorkflowCoordinator::PendingLoadTa
 SampleWorkflowCoordinator::TransitionState SampleWorkflowCoordinator::CaptureTransition(
     NavigationTargetResolutionReport* target_resolution) const
 {
-    TransitionState before{labeling_.View().revision, PendingLoadTarget()};
+    TransitionState before{labeling_.View().revision, PendingLoadTarget(), navigation_.active_context_generation()};
     if (target_resolution) target_resolution->pending_present = before.pending_load.has_value();
     return before;
 }
@@ -777,7 +777,7 @@ SampleWorkflowCoordinator::CompleteTransition(
     SampleWorkflowTransitionOutcome outcome,
     const SpectrumSnapshotHandle& snapshot,
     const TransitionState& before,
-    bool align_snapshot_target) const
+    bool align_snapshot_target)
 {
     if (align_snapshot_target &&
         !outcome.snapshot_target_updated) {
@@ -819,6 +819,10 @@ SampleWorkflowCoordinator::CompleteTransition(
             outcome.follow_up.load.reset();
         }
     }
+    const bool projection_inputs_changed =
+        labeling_.View().revision != before.presentation_revision ||
+        navigation_.active_context_generation() != before.context_generation;
+    if (projection_inputs_changed) DiscardPreparedViewCaches();
     outcome.invalidate_view =
         outcome.invalidate_view ||
         outcome.action.source_roster_changed ||
@@ -2567,6 +2571,19 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SetSampleSortDirectio
     return outcome;
 }
 
+SampleWorkflowView SampleWorkflowCoordinator::BuildView(
+    const SpectrumSnapshotHandle& source_snapshot,
+    const SpectrumSnapshotHandle& current_sample_snapshot)
+{
+    return {
+        .navigation = NavigationView(source_snapshot),
+        .labeling = LabelingView(current_sample_snapshot),
+        .filter = BuildFilterView(source_snapshot),
+        .sorting = BuildSortingView(source_snapshot),
+        .can_add_read_only_annotation = can_add_read_only_annotation(),
+    };
+}
+
 SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const SpectrumSnapshotHandle& snapshot) const
 {
     SourceCollectionNavigationView view;
@@ -3014,6 +3031,9 @@ SampleWorkflowCoordinator::ReconcileNavigationInputs(
     const SpectrumSnapshotHandle& snapshot,
     NavigationInputReconcileRequest request)
 {
+    if (request.filters_changed || request.sorting_changed || request.workflow_changed) {
+        DiscardPreparedViewCaches();
+    }
     NavigationInputReconcileEffects effects;
     effects.workflow_changed = request.workflow_changed;
     effects.navigation_inputs_changed = request.filters_changed || request.sorting_changed;
@@ -3240,6 +3260,7 @@ void SampleWorkflowCoordinator::StoreActiveWorkflowState()
 
 void SampleWorkflowCoordinator::MarkActiveWorkflowStateDirty()
 {
+    DiscardPreparedViewCaches();
     StoreActiveWorkflowState();
     if (!workflow_state_cache_path_.empty()) {
         workflow_state_persistence_.MarkDirty();

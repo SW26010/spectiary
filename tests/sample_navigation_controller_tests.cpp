@@ -760,32 +760,31 @@ void TestPreparedSourceAttachesFolderCsvByCanonicalIdentity()
     spectiary::SourceCollectionContext context;
     context.identity = identity;
     context.manifest = std::move(manifest);
-    spectiary::SampleWorkflowCoordinator coordinator(
-        cache_path,
+    spectiary::SourceCollectionSession session(
+        {}, cache_path,
         directory / "labeling-state.json",
         directory / "workflow-state.json");
-    (void)coordinator.CommitPreparedSource("prepared-source", snapshot,
-        snapshot->collection.current_index, 0,
-        spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)});
-    const spectiary::SampleWorkflowTransitionOutcome outcome =
-        coordinator.Apply(
-            spectiary::SourceCollectionIntent::
-                AddReadOnlyAnnotationResult(annotation_path),
-            snapshot);
+    (void)session.CommitPreparedOpen({
+        .path = directory, .spectrum_index = snapshot->collection.current_index, .snapshot = snapshot,
+        .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
+    });
+    const spectiary::SourceCollectionSessionResult outcome =
+        session.Submit(spectiary::SourceCollectionSessionIntent::EditSourceCollection(
+            spectiary::SourceCollectionIntent::AddReadOnlyAnnotationResult(annotation_path)));
     Require(
         outcome.loaded,
         outcome.message.empty()
             ? "prepared folder source should attach CSV"
             : outcome.message);
     const spectiary::SourceCollectionNavigationView view =
-        coordinator.NavigationView(snapshot);
+        session.View().navigation;
     const spectiary::SourceCollectionLabelingView labeling_view =
-        coordinator.LabelingView(snapshot);
+        session.View().labeling;
     Require(
         view.current_annotations.size() == 1 &&
             view.current_annotations.front().display_text == "Z" &&
             labeling_view.source_kind == "folder",
-        "coordinator prepared-source projection should expose the canonical folder kind and CSV roster");
+        "session prepared-source projection should expose the canonical folder kind and CSV roster");
 
     std::filesystem::remove_all(directory, cleanup_error);
 }

@@ -44,6 +44,14 @@ struct SampleWorkflowFollowUp {
     std::optional<std::filesystem::path> cancel_source_path;
 };
 
+struct SampleWorkflowView {
+    SourceCollectionNavigationView navigation;
+    SourceCollectionLabelingView labeling;
+    SourceCollectionFilterView filter;
+    SourceCollectionSampleSortingView sorting;
+    bool can_add_read_only_annotation = false;
+};
+
 struct SampleWorkflowTransitionOutcome {
     SampleWorkflowFollowUp follow_up;
     SourceCollectionSessionAction action;
@@ -203,7 +211,6 @@ public:
     void BeginRestoringSourceSession();
     void EndRestoringSourceSession();
     [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
-    void DiscardPreparedViewCaches();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
     void SetDeferredSampleNavigation(bool enabled);
     SampleWorkflowTransitionOutcome CancelDeferredSampleNavigation();
@@ -215,15 +222,8 @@ public:
         std::string_view source_key) const;
     [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
         AnnotationPathsBySourceKey() const;
-    [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] ExactSampleNameResolution
     ResolveExactSampleName(std::string_view name) const;
-    [[nodiscard]] SourceCollectionFilterView BuildFilterView(
-        const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
-        const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
     [[nodiscard]] std::vector<std::size_t> AdjacentNavigationRows(
         SampleNavigationDirection direction,
@@ -239,10 +239,25 @@ public:
         FlushStateCachesWithStatus();
     [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;
 
+    // Transfers prepared projection storage into the caller's stable view.
+    // Presentation policy (including failed samples) remains with the session.
+    [[nodiscard]] SampleWorkflowView BuildView(
+        const SpectrumSnapshotHandle& source_snapshot,
+        const SpectrumSnapshotHandle& current_sample_snapshot);
+
 private:
+    void DiscardPreparedViewCaches();
+    [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] SourceCollectionFilterView BuildFilterView(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] bool can_add_read_only_annotation() const;
     struct TransitionState {
         std::uint64_t presentation_revision = 0;
         std::optional<SampleWorkflowLoadTarget> pending_load;
+        std::uint64_t context_generation = 0;
     };
     [[nodiscard]] std::optional<SampleWorkflowLoadTarget> PendingLoadTarget() const;
     [[nodiscard]] TransitionState CaptureTransition(
@@ -278,7 +293,7 @@ private:
         SampleWorkflowTransitionOutcome outcome,
         const SpectrumSnapshotHandle& snapshot,
         const TransitionState& before,
-        bool align_snapshot_target = false) const;
+        bool align_snapshot_target = false);
     [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSourceWithContext(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,

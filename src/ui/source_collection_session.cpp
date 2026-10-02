@@ -744,9 +744,6 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
             ElapsedNavigationResolutionNanoseconds(
                 pending_activation_started_at);
     }
-    if (intent.kind != SourceCollectionSessionIntentKind::SampleNavigation) {
-        workflow_->DiscardPreparedViewCaches();
-    }
     SourceCollectionSessionResult result;
     SampleWorkflowTransitionOutcome transition;
     switch (intent.kind) {
@@ -945,11 +942,14 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
     view.snapshot = snapshot;
     view.current_source_index = roster_->current_source_index();
     view.sources = roster_->SourceViews();
-    view.can_add_read_only_annotation = workflow_->can_add_read_only_annotation();
-    view.navigation = workflow_->NavigationView(snapshot);
     view.current_sample_snapshot = CurrentSampleSnapshot();
     view.current_sample_failure = current_sample_failure_;
-    view.labeling = workflow_->LabelingView(view.current_sample_snapshot);
+    auto workflow_view = workflow_->BuildView(snapshot, view.current_sample_snapshot);
+    view.can_add_read_only_annotation = workflow_view.can_add_read_only_annotation;
+    view.navigation = std::move(workflow_view.navigation);
+    view.labeling = std::move(workflow_view.labeling);
+    view.filter = std::move(workflow_view.filter);
+    view.sorting = std::move(workflow_view.sorting);
     if (current_sample_failure_) {
         view.navigation.current_index.reset();
         view.navigation.current_source_row.reset();
@@ -961,8 +961,6 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
         view.labeling.current_index.reset();
         view.labeling.current_code = kUnlabeledSampleLabelCode;
     }
-    view.filter = workflow_->BuildFilterView(snapshot);
-    view.sorting = workflow_->BuildSortingView(snapshot);
     if (sample_transition_ &&
         (!sample_transition_->current_sample_index ||
          (view.current_sample_snapshot &&

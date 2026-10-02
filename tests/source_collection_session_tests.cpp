@@ -9881,8 +9881,8 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
         "prepared-cache-a-key", snapshot_a, 0, 0, std::move(candidate));
     Require(reconciled.disposition == spectiary::PreparedSourceDisposition::Adopt &&
             reconciled.current_index == 0 &&
-            coordinator.NavigationView(snapshot_a).sample_count == 3 &&
-            coordinator.LabelingView(snapshot_a).source_identity == context_a.identity.id,
+            coordinator.BuildView(snapshot_a, snapshot_a).navigation.sample_count == 3 &&
+            coordinator.BuildView(snapshot_a, snapshot_a).labeling.source_identity == context_a.identity.id,
         "the complete transition must activate cached workflow and labeling without UI cache reads");
     Require(
         workflow_cache_loads == 0 && labeling_cache_loads == 0,
@@ -9948,6 +9948,9 @@ void TestPreparedProjectionsMoveIntoTheSessionView()
         .payload = spectiary::PreparedSourceCollectionPlan{std::move(context), std::move(prepared)},
     });
     Require(result.loaded, "prepared projection fixture should load");
+    (void)Submit(session, RemoveSampleFilterSource("missing-source"));
+    (void)Submit(session, spectiary::SourceCollectionSessionIntent::UpdateSampleNavigation(
+        spectiary::SampleNavigationIntent::SetSampleNameQuery("b")));
     const spectiary::SourceCollectionSessionView& view = session.View();
     Require(
         view.filter.sources.data() == prepared_filter_storage,
@@ -9964,6 +9967,51 @@ void TestPreparedProjectionsMoveIntoTheSessionView()
             repeated_view.sorting.sources.data() ==
                 prepared_sorting_storage,
         "repeated reads should retain the stable prepared projection");
+    Require(view.navigation.sample_name_matches.size() == 1,
+        "query-only changes must update navigation without discarding prepared filter and sort storage");
+}
+
+void TestWorkflowInputChangesBeforeFirstViewInvalidatePreparedProjections()
+{
+    using namespace spectiary;
+    for (const bool sorting : {false, true}) {
+        SourceCollectionSession session({}, {}, {}, {});
+        const auto path = UniqueTempPath("_unpresented_workflow_change.npy");
+        const auto snapshot = MakeSnapshot(path, 3, 0);
+        SourceCollectionContext context;
+        context.identity = {"unpresented-workflow", "source", "source", "context", 3};
+        context.manifest.sample_names = {"a", "b", "c"};
+        const auto annotation_path = UniqueTempPath("_unpresented_filter.npy");
+        SaveLabelResultFixture(annotation_path, "unpresented-values", "Values", {0, 1, 0}, {}, false);
+        auto annotation = test_support::LegacyFixtureIo{}.Load(annotation_path, 3);
+        Require(annotation.has_value(), "projection filter fixture must load");
+        context.manifest.annotations.push_back(std::move(*annotation));
+        auto prepared = PrepareWorkflow(snapshot, context, 0, {}, {});
+        Require(session.CommitPreparedOpen({
+            .path = path, .spectrum_index = 0, .snapshot = snapshot,
+            .payload = PreparedSourceCollectionPlan{context, std::move(prepared)},
+        }).loaded, "unpresented workflow fixture should load");
+        // Do not consume the prepared projection before mutating its inputs.
+        if (sorting) {
+            (void)Submit(session, AddSampleSortSource("sample-name"));
+            (void)Submit(session, SetSampleSortSource("sample-name"));
+            (void)Submit(session, SetSampleSortDirection(SampleNavigationSortDirection::Descending));
+            const auto& view = session.View();
+            Require(view.sorting.active && view.sorting.active_source_id == "sample-name" &&
+                    view.sorting.direction == SampleNavigationSortDirection::Descending &&
+                    view.navigation.current_sequence_position == 2,
+                "first projection must agree with the live sorting sequence");
+        } else {
+            const auto source_id = AnnotationSourceId(annotation_path);
+            (void)Submit(session, AddSampleFilterSource(source_id));
+            const auto filtered = Submit(session, SetFilterValueSelected(source_id, "1", true));
+            const auto& view = session.View();
+            Require(filtered.follow_up_spectrum_index() == 1 && view.filter.evaluation.active &&
+                    view.filter.evaluation.included_count == 1 && view.navigation.sequence_count == 1 &&
+                    view.current_sample_snapshot == snapshot,
+                "first projection must agree with live filtering while keeping the committed presentation");
+        }
+    }
 }
 
 void TestSessionOwnsStableViewInvalidationAndRetirement()
@@ -11710,8 +11758,8 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
                 : "_coordinator_recover_formalized_draft");
     const spectiary::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 0);
-    spectiary::SampleWorkflowCoordinator coordinator(
-        fixture.navigation_cache,
+    spectiary::SourceCollectionSession session(
+        {}, fixture.navigation_cache,
         fixture.labeling_cache,
         fixture.workflow_cache);
     spectiary::PreparedSampleWorkflowState prepared =
@@ -11722,56 +11770,51 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
             fixture.labeling_cache,
             fixture.workflow_cache);
     Require(
-        coordinator
-                .CommitPreparedSource(std::string{"source"}, snapshot,
-                    snapshot->collection.current_index, 0,
-                    spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(prepared)})
-                .action.workflow_changed,
-        "coordinator recovery fixture should open the paused-draft projection");
+        session.CommitPreparedOpen({
+            .path = fixture.source_path, .spectrum_index = 0, .snapshot = snapshot,
+            .payload = spectiary::PreparedSourceCollectionPlan{fixture.context, std::move(prepared)},
+        }).loaded,
+        "session recovery fixture should open the paused-draft projection");
     const spectiary::SourceCollectionFilterView initial_filter =
-        coordinator.BuildFilterView(snapshot);
+        session.View().filter;
     const spectiary::SourceCollectionSampleSortingView initial_sorting =
-        coordinator.BuildSortingView(snapshot);
+        session.View().sorting;
     Require(
-        coordinator.LabelingView(snapshot).has_active_task &&
-            coordinator.LabelingView(snapshot).task_id ==
+        session.View().labeling.has_active_task &&
+            session.View().labeling.task_id ==
                 fixture.formal_task_id &&
-            !coordinator.LabelingView(snapshot).active_task_is_temporary,
+            !session.View().labeling.active_task_is_temporary,
         "the unrelated formal task should remain active");
     (void)initial_filter;
     (void)initial_sorting;
     Require(
-        coordinator.NavigationView(snapshot).current_index.has_value(),
+        session.View().navigation.current_index.has_value(),
         "the paused-draft projection should retain a current sample for active editing");
     const int active_code_before_edit =
-        coordinator.LabelingView(snapshot).current_code;
+        session.View().labeling.current_code;
     Require(
-        coordinator
-                .Apply(
+        Submit(session, spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
                     spectiary::ActiveSampleWorkflowIntent::UpsertActiveLabel(
-                        spectiary::SampleLabelDefinition{7, "seven", 's'}),
-                    snapshot)
+                        spectiary::SampleLabelDefinition{7, "seven", 's'})))
                 .changed,
         "the active formal task should accept the undo test label");
-    const spectiary::SampleWorkflowTransitionOutcome edit_result =
-        coordinator.Apply(
-            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7),
-            snapshot);
+    const spectiary::SourceCollectionSessionResult edit_result =
+        Submit(session, spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
     Require(
         edit_result.label_write && edit_result.label_write->write.changed,
         "the active formal task should have undoable local editing");
 
     FormalizeTemporaryDraftFromAnotherInstance(fixture);
-    const spectiary::SampleWorkflowTransitionOutcome result =
-        coordinator.Apply(
+    const spectiary::SourceCollectionSessionResult result =
+        Submit(session, spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
             delete_temporary_draft
                 ? spectiary::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
                       fixture.context.identity.id,
                       fixture.draft_task_id)
                 : spectiary::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
                       fixture.context.identity.id,
-                      fixture.draft_task_id),
-            snapshot);
+                      fixture.draft_task_id)));
     Require(
         result.labeling_issue ==
             spectiary::SampleLabelingOperationResult::Issue::EditTargetChanged,
@@ -11783,11 +11826,11 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         "task projection convergence should reconcile filter, sort, and navigation inputs");
 
     const spectiary::SourceCollectionFilterView refreshed_filter =
-        coordinator.BuildFilterView(snapshot);
+        session.View().filter;
     const spectiary::SourceCollectionSampleSortingView refreshed_sorting =
-        coordinator.BuildSortingView(snapshot);
+        session.View().sorting;
     const spectiary::SourceCollectionNavigationView refreshed_navigation =
-        coordinator.NavigationView(snapshot);
+        session.View().navigation;
     const auto restored_annotation = std::find_if(
         refreshed_navigation.current_annotations.begin(),
         refreshed_navigation.current_annotations.end(),
@@ -11826,15 +11869,14 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         refreshed_navigation.sequence_count == 1,
         "task projection convergence should publish the final sequence count");
     Require(
-        result.snapshot_index_to_load == 1,
+        result.follow_up_spectrum_index() == 1,
         "task projection convergence should request the filtered sample row");
-    const spectiary::SampleWorkflowTransitionOutcome undone =
-        coordinator.Apply(
-            spectiary::ActiveSampleWorkflowIntent::UndoLastLabelWrite(),
-            snapshot);
+    const spectiary::SourceCollectionSessionResult undone =
+        Submit(session, spectiary::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            spectiary::ActiveSampleWorkflowIntent::UndoLastLabelWrite()));
     Require(
         undone.label_write && undone.label_write->write.changed &&
-            coordinator.LabelingView(snapshot).current_code ==
+            session.View().labeling.current_code ==
                 active_code_before_edit,
         "recovering or deleting an unrelated draft must preserve active-task undo history");
 }
@@ -11899,6 +11941,44 @@ void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
     Require(
         next.follow_up_spectrum_index() == 2,
         "prepared handoff navigation must follow the latest labeling sort order");
+}
+
+void TestLabelingProjectionInvalidationAndSessionFailurePresentation()
+{
+    using namespace spectiary;
+    const auto fixture = SeedLabelingProjectionHandoffFixture("_projection_invalidation", false);
+    const auto snapshot = MakeSnapshot(fixture.source_path, 3, 1);
+    auto prepared = PrepareWorkflow(snapshot, fixture.context, 1,
+        fixture.labeling_cache, fixture.workflow_cache);
+    SourceCollectionSession session({}, fixture.navigation_cache, fixture.labeling_cache, fixture.workflow_cache);
+    Require(session.CommitPreparedOpen({
+        .path = fixture.source_path, .spectrum_index = 1, .snapshot = snapshot,
+        .payload = PreparedSourceCollectionPlan{fixture.context, std::move(prepared)},
+    }).loaded, "labeling projection fixture should load");
+    Require(Submit(session, UpsertActiveLabel({2, "updated second", 'u'})).changed,
+        "label metadata must change before the first session view");
+    const auto& updated = session.View();
+    const auto source = std::find_if(updated.filter.sources.begin(), updated.filter.sources.end(),
+        [&](const auto& item) { return item.id == "labeling:" + fixture.task_id; });
+    Require(source != updated.filter.sources.end() &&
+            std::any_of(source->options.begin(), source->options.end(), [](const auto& option) {
+                return option.key == "2" && option.display_text.find("updated second") != std::string::npos;
+            }) && updated.labeling.current_code == 2,
+        "label metadata changes must invalidate the prepared filter projection without changing its row");
+    (void)session.FailCurrentSample({
+        .source_path = fixture.source_path,
+        .error = {SourceCollectionLoadErrorKind::BackgroundLoadingFailed, "failed target"},
+        .sample_index = 2,
+    });
+    const auto& failed = session.View();
+    Require(!failed.current_sample_snapshot && failed.snapshot == snapshot && failed.current_sample_failure &&
+            !failed.navigation.current_index && failed.navigation.current_annotations.empty() &&
+            failed.navigation.current_sample_name.empty() && !failed.labeling.current_index &&
+            failed.labeling.current_code == kUnlabeledSampleLabelCode &&
+            failed.labeling.task_id == fixture.task_id && failed.filter.evaluation.included_count == 1 &&
+            failed.sorting.active && failed.can_add_read_only_annotation &&
+            session.EffectiveSampleNavigationIndex() == 1,
+        "session failure policy must mask sample presentation while preserving the workflow projection and source");
 }
 
 void TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot()
@@ -12269,6 +12349,7 @@ void RunAllTests()
     TestPreparedCacheSnapshotPreventsUiCacheReload();
     TestKnownSourceSyncReusesTheLabelingSourceGeneration();
     TestPreparedProjectionsMoveIntoTheSessionView();
+    TestWorkflowInputChangesBeforeFirstViewInvalidatePreparedProjections();
     TestSessionOwnsStableViewInvalidationAndRetirement();
     TestRemovingInactiveSourceInvalidatesTheSessionView();
     TestSourceSelectionSupersessionRequiresAValidSelection();
@@ -12283,6 +12364,7 @@ void RunAllTests()
     TestSourceSessionFlushFailureKeepsDirtyState();
     TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
     TestPreparedLeaseRetargetNeverAdoptsIntermediateSnapshot();
+    TestLabelingProjectionInvalidationAndSessionFailurePresentation();
     TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(0);
     TestNavigationAfterCrossSourceLeaseRetargetLoadsTargetSource(2);
     TestRejectedStaleTaskActivationReconcilesNavigation();
