@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cwctype>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 #include <streambuf>
 #include <string_view>
@@ -1493,10 +1494,14 @@ SpectiaryCommandLine
 ParseCurrentProcessSpectiaryCommandLine()
 {
     int argument_count = 0;
-    LPWSTR* raw_arguments =
+    const auto free_arguments = [](LPWSTR* value) noexcept {
+        LocalFree(value);
+    };
+    const std::unique_ptr<LPWSTR[], decltype(free_arguments)> raw_arguments(
         CommandLineToArgvW(
             GetCommandLineW(),
-            &argument_count);
+            &argument_count),
+        free_arguments);
     if (raw_arguments == nullptr) {
         return {
             .error_message =
@@ -1515,7 +1520,6 @@ ParseCurrentProcessSpectiaryCommandLine()
                 ? raw_arguments[index]
                 : L"");
     }
-    LocalFree(raw_arguments);
     return ParseSpectiaryCommandLine(arguments);
 }
 

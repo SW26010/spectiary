@@ -185,11 +185,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     spectiary::UiLanguage startup_error_language =
         spectiary::UiLanguage::English;
-    const spectiary::SpectiaryCommandLine command_line =
-        spectiary::ParseCurrentProcessSpectiaryCommandLine();
+    bool automation_requested = false;
     std::optional<std::filesystem::path>
         automation_diagnostic_root;
     try {
+        const spectiary::SpectiaryCommandLine command_line =
+            spectiary::ParseCurrentProcessSpectiaryCommandLine();
+        automation_requested = command_line.automation_requested;
         if (!command_line.error_message.empty()) {
             throw std::runtime_error(
                 command_line.error_message);
@@ -260,7 +262,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
         ReportStartupError(
             error.what(),
             startup_error_language,
-            command_line.automation_requested,
+            automation_requested,
             automation_diagnostic_root);
     } catch (...) {
         ReportStartupError(
@@ -269,7 +271,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
                 spectiary::UiTextId::
                     UnknownStartupError),
             startup_error_language,
-            command_line.automation_requested,
+            automation_requested,
             automation_diagnostic_root);
     }
 

@@ -118,6 +118,9 @@ std::optional<SampleSortingSource> BuildAnnotationSortingSource(
             cancellation_checkpoint();
         }
         const SampleAnnotationValue& value = annotation.values[index];
+        if (value.missing) {
+            return std::nullopt;
+        }
         switch (annotation.kind) {
         case SampleAnnotationKind::CategoricalInteger:
             if (const std::int64_t* signed_value =

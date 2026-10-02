@@ -1287,6 +1287,8 @@ void SettingsPanelUi::RenderAppearance(
         language,
         UiTextId::UiScale,
         "UiScale");
+    const float row_right = ImGui::GetCursorScreenPos().x +
+        ImGui::GetContentRegionAvail().x;
     const bool ui_scale_changed = ImGui::SliderInt(
         ui_scale_label.c_str(),
         &ui_scale,
@@ -1307,11 +1309,18 @@ void SettingsPanelUi::RenderAppearance(
     } else if (!ui_scale_active) {
         ui_scale_draft_percentage_.reset();
     }
-    ImGui::SameLine();
     const std::string reset_label = StableUiLabel(
         language,
         UiTextId::Reset,
         "UiScaleReset");
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float reset_width = VisibleLabelWidth(reset_label) +
+        style.FramePadding.x * 2.0f;
+    // Keep Reset reachable at the default width, including with localized
+    // labels and scaled fonts. A wider content pane can keep it on this row.
+    if (ImGui::GetItemRectMax().x + style.ItemSpacing.x + reset_width <= row_right) {
+        ImGui::SameLine();
+    }
     if (ImGui::Button(reset_label.c_str())) {
         ui_scale_draft_percentage_.reset();
         SetUiScalePercentage(kDefaultUiScalePercentage);
