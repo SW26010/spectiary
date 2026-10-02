@@ -987,6 +987,18 @@ void SetNextViewLimits(const PlotViewLimits& limits)
         ImPlotCond_Always);
 }
 
+double MinimumAxisSpan(double min, double max, float pixels)
+{
+    // ImPlot #709: the default tick locator can stop advancing when its step
+    // rounds away at the endpoints. Keep ample representable values per pixel,
+    // without imposing an absolute scale on small flux values. The normal-double
+    // floor also keeps the locator's decimal step calculation out of underflow.
+    const double magnitude = std::max(std::abs(min), std::abs(max));
+    const double precision = std::numeric_limits<double>::epsilon() * magnitude;
+    return std::max(std::numeric_limits<double>::min(), precision) *
+        std::max(64.0, static_cast<double>(pixels));
+}
+
 PlotTouchpadTarget MakeTouchpadTarget(
     std::uintptr_t native_window,
     const ImVec2& widget_pos,
@@ -1205,6 +1217,24 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         const char* y_label = snapshot->axis.y_label.empty() ? nullptr : snapshot->axis.y_label.c_str();
         ImPlot::SetupAxis(ImAxis_X1, x_label, x_axis_flags);
         ImPlot::SetupAxis(ImAxis_Y1, y_label, y_axis_flags);
+        // Use requested bounds for fit/restore/gestures, otherwise the last
+        // presented viewport. GetPlotLimits here would lock setup and generate
+        // ticks before the protection is installed.
+        PlotViewLimits constraint_limits = requested_limits;
+        if (!has_requested_limits) {
+            if (LastLimitsAreUsable(state)) {
+                constraint_limits = StoredViewLimits(state);
+            } else {
+                const Bounds bounds = ComputeBounds(*snapshot, state);
+                constraint_limits = {bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max};
+            }
+        }
+        ImPlot::SetupAxisZoomConstraints(ImAxis_X1,
+            MinimumAxisSpan(constraint_limits.x_min, constraint_limits.x_max, plot_widget_size.x),
+            std::numeric_limits<double>::infinity());
+        ImPlot::SetupAxisZoomConstraints(ImAxis_Y1,
+            MinimumAxisSpan(constraint_limits.y_min, constraint_limits.y_max, plot_widget_size.y),
+            std::numeric_limits<double>::infinity());
         ImPlot::SetupLegend(
             ImPlotLocation_NorthWest,
             ImPlotLegendFlags_NoButtons |

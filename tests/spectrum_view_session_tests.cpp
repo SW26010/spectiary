@@ -25,6 +25,7 @@
 #include <functional>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -215,11 +216,13 @@ public:
         spectiary::PlotTouchpadGestureSource* touchpad_gestures = nullptr,
         spectiary::SpectrumPlotDisplayOptions display = {},
         float mouse_wheel = 0.0f,
-        bool check_y_tick_labels = false)
+        bool check_y_tick_labels = false,
+        ImVec2 window_size = ImVec2(800.0f, 600.0f),
+        const std::function<void(ImPlotPlot&)>& inspect_plot = {})
     {
         ImGuiIO& io = ImGui::GetIO();
         io.DeltaTime = 1.0f / 60.0f;
-        io.DisplaySize = ImVec2(800.0f, 600.0f);
+        io.DisplaySize = window_size;
         io.AddMousePosEvent(mouse_position.x, mouse_position.y);
         io.AddMouseButtonEvent(ImGuiMouseButton_Left, left_button_down);
         if (mouse_wheel != 0.0f) {
@@ -231,7 +234,7 @@ public:
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(800.0f, 600.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(window_size, ImGuiCond_Always);
         Require(
             ImGui::Begin("Spectrum view session test", nullptr, kWindowFlags),
             "test plot window should be visible");
@@ -242,6 +245,11 @@ public:
             {},
             display,
             touchpad_gestures);
+        if (inspect_plot) {
+            ImPlotPlot* plot = ImPlot::GetPlot("###main_spectrum");
+            Require(plot != nullptr, "production plot must exist for inspection");
+            inspect_plot(*plot);
+        }
         if (check_y_tick_labels) {
             // Inspect generated labels only in tests; production uses public ImPlot APIs.
             ImPlotPlot* plot = ImPlot::GetPlot("###main_spectrum");
@@ -1095,6 +1103,101 @@ void TestNativeYTicksSurviveImmersiveModeTransitions()
     }
 }
 
+void TestNearlyCoincidentAxisEndpointsRemainResponsive()
+{
+    ScopedPlotUi ui;
+    const auto snapshot = MakeSnapshot({4000.0, 5000.0, 6000.0}, {1.0, 3.0, 2.0});
+    for (const double center : {2.6, -2.6, 5000.0, 1e-20, -1e-20, 1e-200, 1e200, 0.0}) {
+        for (const bool immersive : {false, true}) {
+            spectiary::SpectrumViewSession session;
+            // Exercise axes without out-of-range curve coordinates at extreme scales.
+            session.Submit(spectiary::SpectrumViewSessionCommand::SetShowRawCurve(false));
+            const double lo = std::nextafter(center, -std::numeric_limits<double>::infinity());
+            Require(session.RestoreLockedViewport({lo, center, lo, center}),
+                "distinct finite endpoints must be restorable");
+            spectiary::SpectrumPlotDisplayOptions display;
+            display.native_transparent_axes = immersive;
+            display.include_edge_pixels = immersive;
+            const auto check_ticks = [](ImPlotPlot& plot) {
+                for (const ImAxis index : {ImAxis_X1, ImAxis_Y1}) {
+                    const auto& axis = plot.Axes[index];
+                    Require(axis.Range.Min < axis.Range.Max &&
+                        std::isfinite(axis.Range.Min) && std::isfinite(axis.Range.Max),
+                        "protected range must be finite and ordered");
+                    Require(axis.Ticker.TickCount() > 1 && axis.Ticker.TickCount() < 1000,
+                        "nearly coincident limits must produce bounded useful ticks");
+                }
+            };
+            auto render = [&](const std::function<void(ImPlotPlot&)>& inspect) {
+                return ui.RenderFrame(session, snapshot, ImVec2(-100, -100), false,
+                    nullptr, display, 0, false, ImVec2(1800, 1400), inspect);
+            };
+            const auto restored = render(check_ticks);
+            Require(restored.visible_limits.has_value(), "narrow restored viewport must render");
+            Require(restored.visible_limits->x_max - restored.visible_limits->x_min > center - lo &&
+                restored.visible_limits->y_max - restored.visible_limits->y_min > center - lo,
+                "unrepresentable tick intervals must expand before rendering");
+            // Invoke precisely the setters used by ImPlot's axis menu, then render
+            // the following frame. Internal API access stays confined to tests.
+            render([&](ImPlotPlot& plot) {
+                check_ticks(plot);
+                for (const ImAxis index : {ImAxis_X1, ImAxis_Y1}) {
+                    auto& axis = plot.Axes[index];
+                    axis.SetMin(std::nextafter(axis.Range.Max, axis.Range.Min), true);
+                }
+            });
+            render(check_ticks);
+            render([&](ImPlotPlot& plot) {
+                for (const ImAxis index : {ImAxis_X1, ImAxis_Y1}) {
+                    auto& axis = plot.Axes[index];
+                    axis.SetMax(std::nextafter(axis.Range.Min, axis.Range.Max), true);
+                }
+            });
+            render(check_ticks);
+        }
+    }
+    // Small flux units must not inherit an absolute epsilon or stale large-scale
+    // constraint from the previous viewport.
+    spectiary::SpectrumViewSession session;
+    const spectiary::PlotViewLimits ordinary{4000, 6000, -2e-20, 3e-20};
+    Require(session.RestoreLockedViewport(ordinary), "small flux viewport must restore");
+    const auto normal = ui.RenderFrame(session, snapshot);
+    Require(normal.visible_limits && normal.visible_limits->x_min == ordinary.x_min &&
+        normal.visible_limits->x_max == ordinary.x_max &&
+        normal.visible_limits->y_min == ordinary.y_min && normal.visible_limits->y_max == ordinary.y_max,
+        "ordinary ranges including small flux units must remain unchanged");
+
+    for (const bool points : {false, true}) {
+        spectiary::SpectrumViewSession original;
+        original.Submit(spectiary::SpectrumViewSessionCommand::SetShowPoints(points));
+        auto render = [&](const std::function<void(ImPlotPlot&)>& inspect) {
+            return ui.RenderFrame(original, snapshot, ImVec2(-100, -100), false,
+                nullptr, {}, 0, false, ImVec2(1800, 1400), inspect);
+        };
+        render([](ImPlotPlot& plot) {
+            auto& y = plot.Axes[ImAxis_Y1];
+            y.SetMin(1.77, true);
+            y.SetMax(2.6, true);
+        });
+        render([](ImPlotPlot& plot) {
+            auto& y = plot.Axes[ImAxis_Y1];
+            y.SetMin(y.Range.Max - std::numeric_limits<double>::epsilon(), true);
+        });
+        const auto result = render([](ImPlotPlot& plot) {
+            Require(plot.Axes[ImAxis_Y1].Ticker.TickCount() < 1000,
+                "issue 132 menu sequence must not produce unbounded ticks");
+        });
+        Require(result.visible_limits && result.visible_limits->y_max == 2.6 &&
+            result.visible_limits->y_min < 2.6 && result.visible_limits->y_min > 2.59,
+            "menu must stop near the other endpoint without moving that endpoint");
+        original.Submit(spectiary::SpectrumViewSessionCommand::RequestFitView());
+        const auto fitted = render({});
+        Require(fitted.fit_applied && fitted.visible_limits &&
+            fitted.visible_limits->y_min < 1 && fitted.visible_limits->y_max > 3,
+            "fit must still recover the full spectrum after the boundary drag");
+    }
+}
+
 void TestFitAndStoredLimitReuseAreObservable()
 {
     ScopedPlotUi ui;
@@ -1619,6 +1722,7 @@ int main()
     TestSnapshotResetPreservesControlsAndFitsNewData();
     TestHiddenCurvesStillReportPresentedPlotFrame();
     TestNativeYTicksSurviveImmersiveModeTransitions();
+    TestNearlyCoincidentAxisEndpointsRemainResponsive();
     TestFitAndStoredLimitReuseAreObservable();
     TestViewportLockOverlayTogglesInAxisCorner();
     TestViewportLockConsumesImmersiveAxisAndTouchpadInput();
