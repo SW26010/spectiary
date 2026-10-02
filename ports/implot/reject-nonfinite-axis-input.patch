@@ -1,0 +1,59 @@
+diff --git a/implot.cpp b/implot.cpp
+index 19f7112..b5a67e2 100644
+--- a/implot.cpp
++++ b/implot.cpp
+@@ -1382,6 +1382,36 @@ inline void EndDisabledControls(bool cond) {
+     }
+ }
+ 
++// Keep invalid numeric edits out of the axis setters, which normalize NaN to 0.
++static bool DragAxisLimit(const char* label, double* value, float speed, double min, double max) {
++    ImGui::PushID(label);
++    const ImGuiID error_id = ImGui::GetID("##NonFiniteRange");
++    ImGui::PopID();
++    double candidate = *value;
++    const bool changed = DragFloat(label, &candidate, speed, min, max);
++    const bool valid = !ImNanOrInf(candidate);
++    // TempInputScalar returns false for a valid edit equal to the old value.
++    // Only clear on successfully parsed text, not activation or arbitrary edits.
++    ImGuiInputTextState* input = ImGui::GetInputTextState(ImGui::GetItemID());
++    bool valid_text_edit = false;
++    if (input != nullptr && input->EditedThisFrame) {
++        const char* text = input->GetText();
++        char* end = nullptr;
++        const double parsed = strtod(text, &end);
++        const bool parsed_number = end != text;
++        while (ImCharIsBlankA(*end))
++            ++end;
++        valid_text_edit = parsed_number && *end == 0 && !ImNanOrInf(parsed);
++    }
++    if (changed || valid_text_edit)
++        ImGui::GetStateStorage()->SetBool(error_id, !valid);
++    if (ImGui::GetStateStorage()->GetBool(error_id))
++        ImGui::TextUnformatted("Range limit must be finite; previous value kept.");
++    if (changed && valid)
++        *value = candidate;
++    return changed && valid;
++}
++
+ void ShowAxisContextMenu(ImPlotAxis& axis, ImPlotAxis* equal_axis, bool /*time_allowed*/) {
+ 
+     ImGui::PushItemWidth(75);
+@@ -1447,7 +1477,7 @@ void ShowAxisContextMenu(ImPlotAxis& axis, ImPlotAxis* equal_axis, bool /*time_a
+         ImGui::SameLine();
+         BeginDisabledControls(axis.IsLockedMin() || always_locked);
+         double temp_min = axis.Range.Min;
+-        if (DragFloat("Min", &temp_min, (float)drag_speed, -HUGE_VAL, axis.Range.Max - DBL_EPSILON)) {
++        if (DragAxisLimit("Min", &temp_min, (float)drag_speed, -HUGE_VAL, axis.Range.Max - DBL_EPSILON)) {
+             axis.SetMin(temp_min,true);
+             if (equal_axis != nullptr)
+                 equal_axis->SetAspect(axis.GetAspect());
+@@ -1460,7 +1490,7 @@ void ShowAxisContextMenu(ImPlotAxis& axis, ImPlotAxis* equal_axis, bool /*time_a
+         ImGui::SameLine();
+         BeginDisabledControls(axis.IsLockedMax() || always_locked);
+         double temp_max = axis.Range.Max;
+-        if (DragFloat("Max", &temp_max, (float)drag_speed, axis.Range.Min + DBL_EPSILON, HUGE_VAL)) {
++        if (DragAxisLimit("Max", &temp_max, (float)drag_speed, axis.Range.Min + DBL_EPSILON, HUGE_VAL)) {
+             axis.SetMax(temp_max,true);
+             if (equal_axis != nullptr)
+                 equal_axis->SetAspect(axis.GetAspect());

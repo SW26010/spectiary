@@ -46,6 +46,9 @@ $env:VCPKG_ROOT
 - `zlib`
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
+`vcpkg-configuration.json` 为所有 manifest 构建启用 `ports/implot` overlay，
+以阻止轴范围菜单把 NaN 转成 0（#140）。补丁范围、升级和移除条件见
+[`ports/implot/README.md`](../../ports/implot/README.md)。
 
 DirectX 11 来自 Windows SDK；`spectiary_renderer` 封装 DX11/DXGI presentation，`spectiary_native` 负责 Win32/DWM shell。
 FITS container 解析使用 vcpkg 提供的 CFITSIO。Debug preset 使用

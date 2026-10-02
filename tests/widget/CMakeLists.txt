@@ -33,6 +33,15 @@ function(spectiary_add_widget_suite target source)
 endfunction()
 
 spectiary_add_widget_suite(spectiary_widget_tests settings_widget_tests.cpp)
+spectiary_add_widget_suite(spectiary_plot_axis_range_widget_tests plot_axis_range_widget_tests.cpp)
+# ImPlot's quoted includes must resolve the same ImGui headers as this test.
+target_include_directories(spectiary_plot_axis_range_widget_tests BEFORE PRIVATE
+    $<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>)
+set_property(TARGET spectiary_plot_axis_range_widget_tests PROPERTY NO_SYSTEM_FROM_IMPORTED ON)
+add_test(NAME spectiary_plot_axis_range_widget_tests COMMAND spectiary_plot_axis_range_widget_tests)
+spectiary_set_test_tier(spectiary_plot_axis_range_widget_tests fast)
+set_tests_properties(spectiary_plot_axis_range_widget_tests PROPERTIES TIMEOUT 30)
+set_property(TEST spectiary_plot_axis_range_widget_tests APPEND PROPERTY LABELS widget)
 target_sources(spectiary_widget_tests PRIVATE ${SPECTIARY_WINDOWS_RESOURCES})
 spectiary_add_widget_suite(spectiary_annotation_activation_widget_tests annotation_activation_widget_tests.cpp)
 add_test(NAME spectiary_annotation_activation_widget_tests COMMAND spectiary_annotation_activation_widget_tests)
